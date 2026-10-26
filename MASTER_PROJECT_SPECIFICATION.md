@@ -1,7 +1,7 @@
 # Canadian–U.S. Physical Grain Trading Platform
 ## Master Project Specification & Technical Build Plan
 
-**Version:** 1.0 — proposed implementation baseline  
+**Version:** 1.0 — product/architecture baseline; AI delivery workflow clarified 2026-10-26  
 **Prepared:** 26 October 2026  
 **Audience:** Company owners, grain traders, software engineers, Claude Code, OpenAI Codex, Gemini CLI, external developers  
 **Status:** Design specification; not a claim that software, integrations, live market data, or production infrastructure have been implemented.
@@ -23,7 +23,7 @@
 | Authentication | Supabase Auth + MFA and server-side membership checks | Least privilege and explicit organization isolation |
 | Testing | Vitest, Playwright, PostgreSQL integration tests, RLS tests | Automated regression protection, especially for money and permissions |
 | Initial deployment | Cloudflare Workers for web/API; Supabase separately | Fits existing familiarity, minimizes operations burden |
-| AI-assisted development | AGENTS.md + Claude shim + Gemini configuration, separate Git branches/PRs | Shared rules without pretending agents share chat memory |
+| AI-assisted development | `AGENTS.md` + `docs/AI_CODING_SYSTEM.md` + Git worktrees/PRs | Prefer Cursor 3 as an initial agent hub, but keep model/vendor choice replaceable and enforce independent review |
 | Analytics | Python added only after MVP | Avoid two application runtimes until numerical analysis justifies it |
 
 ### Product success criterion
@@ -416,14 +416,15 @@ The platform does not replace customs brokers, CFIA, USDA/APHIS, or other compet
 
 ## 11.1 How AI models share knowledge
 
-Git is the source of code truth; specifications and decision records are the source of design intent. A chat transcript is not the source of truth. Use short `AGENTS.md` as central instructions and store the detailed documents in `docs/`. Keep `CLAUDE.md` importing `AGENTS.md`, and configure Gemini CLI's context filename to `AGENTS.md` or use `GEMINI.md` to import it. Confirm agent instructions are actually loaded in each environment before work starts.
+Git is the source of code truth; specifications and decision records are the source of design intent. A chat transcript is not the source of truth. Use short `AGENTS.md` as central instructions and store the detailed documents in `docs/`. Keep `CLAUDE.md` importing `AGENTS.md`, and configure Gemini CLI's context filename to `AGENTS.md` or use `GEMINI.md` to import it. Confirm agent instructions are actually loaded in each environment before work starts. **Read `docs/AI_CODING_SYSTEM.md` for the October 2026 primary-tool recommendation, agent-task division, parallelism constraints, practical prompts and objective cost/quality comparison.**
 
 ## 11.2 Suggested human/agent roles
 
 - **Owner/product lead:** Accepts economic assumptions, prioritizes backlog, owns commercial correctness and merges approved changes.
-- **Claude Code:** Typical feature implementer for UI, API, migrations or bug fixes on an isolated worktree/branch.
-- **Codex:** Independent technical reviewer; writes regression tests and critiques financial math, authorization, migrations and hidden coupling.
-- **Gemini CLI:** Second independent reviewer; can implement discrete tasks, assess data integrations and challenge UX alternatives.
+- **Primary implementer (often Claude via Cursor or native Claude Code):** Delivers a scoped UI, API, migration or bug-fix ticket in an isolated worktree.
+- **Independent reviewer (often Codex):** Challenges financial math, authorization, migrations and hidden coupling; writes or requests regression tests.
+- **Alternate implementer / second opinion (often Gemini):** Implements discrete tasks, assesses integrations and challenges UX alternatives.
+- **Integration owner:** Approves shared contracts, serializes dependent merges and updates the merged-state handoff.
 
 These are process assignments, not claims about permanent model superiority. Rotate roles when useful; the model implementing a high-risk change should not be its sole approver.
 
@@ -434,7 +435,7 @@ These are process assignments, not claims about permanent model superiority. Rot
 3. Work occurs on a separate branch/worktree. No concurrent agents write to the same worktree.
 4. Implementer supplies PR with change summary, migration notes, screenshots for UI work, test output, business-rule impacts and risk.
 5. Independent reviewer actively looks for errors and adds tests for disputed assumptions.
-6. CI passes; human owner approves; merge updates architectural decisions/docs and `docs/HANDOFF.md`.
+6. CI passes; human owner approves; merge updates architectural decisions/docs. **After merge**, the integration owner updates `docs/HANDOFF.md`; parallel feature branches do not modify it independently.
 7. Deploy staging; run the relevant acceptance flow; promote production only after the release gate is met.
 
 **AI must never:** invent quotes or market data, treat hypotheticals as live, auto-execute trades, skip tenant isolation, edit production records ad hoc, bypass CI, commit secrets, or conceal unverified assumptions.
@@ -449,7 +450,8 @@ These are process assignments, not claims about permanent model superiority. Rot
 - `docs/BUILD_PLAN.md`: ordered stages and issues.
 - `docs/ACCEPTANCE_TESTS.md`: cross-model golden fixtures, security gates.
 - `docs/DECISIONS.md`: unresolved decisions + dated architecture decisions.
-- `docs/HANDOFF.md`: current implemented state, last commit, open blockers, next exact task.
+- `docs/HANDOFF.md`: current merged implementation state, last commit, open blockers, next exact task.
+- `docs/AI_CODING_SYSTEM.md`: recommended coding tools, task allocation, comparison criteria and daily operating process (non-authoritative for domain logic).
 
 # 12. Repository structure and engineering standards
 
@@ -461,6 +463,8 @@ grain-trading-platform/
   README.md
   docs/
     PRODUCT.md
+    AI_CODING_SYSTEM.md
+    AI_WORKFLOW.md
     ARCHITECTURE.md
     DATA_MODEL.md
     TRADING_RULES.md
@@ -497,13 +501,13 @@ Keep one `pnpm` workspace, lockfiles in Git, strict TS config, lint/format hooks
 
 # 13. Execution plan, ordered backlog and acceptance gates
 
-These are **sequence gates**, not calendar promises. Each gate must be tested before it is considered complete. Synthetic test records are permitted until validated market data is onboarded.
+These are **release-readiness gates**, not calendar promises. Phase 0 and the minimum secure Phase 1 foundation must be completed first. Then the team may build a **thin cross-phase vertical slice** using the minimum map, revisioned quotes, deterministic calculation and saved-scenario features from Phases 2–4 before all polish/CSV imports are finished. All comprehensive phase gates still apply before any phase is declared complete. See `docs/BUILD_PLAN.md` and `docs/AI_CODING_SYSTEM.md` §8. Synthetic test records are permitted until validated market data is onboarded.
 
 ## Phase 0 — Repository and documentation baseline
 
 **Tickets:** GT-001 create private repo/permissions/protected main; GT-002 install monorepo tooling; GT-003 add AGENTS.md, Claude/Gemini adapters, documentation and PR templates; GT-004 establish CI typecheck/lint/test; GT-005 development/staging secret management.
 
-**Gate:** Fresh clone installs and runs tests; all three AI tools demonstrably read their instructions; a sample PR cannot merge with failed CI. No code secrets stored in repo.
+**Gate:** Fresh clone installs and runs tests; selected implementer and independent reviewer demonstrably read shared instructions, and other tools are checked if used; a sample PR cannot merge with failed CI. No code secrets stored in repo.
 
 ## Phase 1 — Infrastructure, auth and database foundation
 
@@ -595,9 +599,9 @@ These are **not implementation blockers for Phase 0–2**, but must be decided b
 
 # 17. Concrete first implementation task for the coding team
 
-**Issue GT-001 through GT-005 — Repository Bootstrap:** Create the private GitHub repo and scaffolding, copy this document pack, configure pnpm/TypeScript strict mode, initial React/Hono Cloudflare template, lint/test/typecheck CI, default branch protection, separate dev/staging secrets, and project instruction loading for all three agents. Add a read-only health endpoint and one Vitest passing test. Do not build the map, quote ingestion or live calculations until Phase 0 acceptance is verified.
+**Issue GT-001 through GT-005 — Repository Bootstrap:** Create the private GitHub repo and scaffolding, copy this document pack, configure pnpm/TypeScript strict mode, initial React/Hono Cloudflare template, lint/test/typecheck CI, default branch protection, separate dev/staging secrets, and project instruction loading for the chosen implementer and independent reviewer (plus optional additional agents actually in use). Add a read-only health endpoint and one Vitest passing test. Do not build the map, quote ingestion or live calculations until Phase 0 acceptance is verified.
 
-**Phase 4 target demonstration:** Using fictional quote IDs, create and save the 42-MT golden scenario, then revise the buyer quote and show that the prior saved scenario still displays CAD 1,932.00 with its original assumptions. From the map, click origin/destination, calculate again and explicitly indicate whether the revised quote changed the economics.
+**Phase 4 target demonstration (also the early thin vertical-slice milestone):** Using fictional quote IDs, create and save the 42-MT golden scenario, then revise the buyer quote and show that the prior saved scenario still displays CAD 1,932.00 with its original assumptions. From the map, click origin/destination, calculate again and explicitly indicate whether the revised quote changed the economics.
 
 # 18. Verification and reference documentation
 
@@ -611,6 +615,9 @@ Vendor capabilities were checked against public technical documentation availabl
 - MapLibre: https://maplibre.org/maplibre-gl-js/docs/
 - Codex repository instructions: https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex
 - Gemini CLI context configuration: https://geminicli.com/docs/reference/configuration/
+- Cursor 3 agent environment: https://cursor.com/changelog/3-0
+- Claude Code multi-worktree execution: https://support.claude.com/en/articles/14554000-claude-code-power-user-tips
+- Google Antigravity 2.0: https://www.antigravity.google/blog/introducing-google-antigravity-2-0
 - CFIA phytosanitary exports: https://inspection.canada.ca/en/exporting-food-plants-animals/plant-exports/phytosanitary-certificates
 
 ---

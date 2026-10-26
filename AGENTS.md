@@ -19,10 +19,10 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 4. Enforce organization isolation server-side; no browser service-role secrets; limit grants/RLS, secure private files; test cross-tenant denials.
 5. Do not alter an executed/saved historical calculation in place. Version changes and audit them.
 6. Use schema migrations for changes; add tests for every financial calculation, permission change and bug fix.
-7. Use independent Git branch/worktree per agent; no direct commits to protected main; open PR describing tests, migrations, risks, assumptions and docs touched.
+7. Use independent Git branch/worktree per agent; no direct commits to protected main; open PR describing tests, migrations, risks, assumptions and docs touched. Agree on shared schemas/API contracts before parallel implementation.
 8. No AI model can autonomously commit a real grain trade, approve a payment, execute a hedge, or send contract offers to third parties.
 9. Do not add microservices, runtime LLM agent frameworks, vector DBs or predicted pricing to v1 without an approved architecture decision.
-10. Always update `docs/HANDOFF.md` with actual work performed and tests run. Never claim an unbuilt feature works.
+10. On feature branches, include the proposed handoff details in the PR, **not a competing edit to `docs/HANDOFF.md`**. Only the integration owner updates that file after a verified merge. Never claim an unbuilt feature works.
 
 ## Read by task
 - UX: `docs/PRODUCT.md`.
@@ -30,7 +30,8 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - API: `docs/API.md`.
 - Financial logic: `docs/TRADING_RULES.md` + `docs/ACCEPTANCE_TESTS.md`.
 - Tickets: `docs/BUILD_PLAN.md`.
-- Agent collaboration: `docs/AI_WORKFLOW.md`.
+- Agent collaboration and governance: `docs/AI_WORKFLOW.md`.
+- October 2026 development environment, model assignments, worktree orchestration, sample prompts and early vertical slice: `docs/AI_CODING_SYSTEM.md`.
 - Open decisions: `docs/DECISIONS.md`.
 
 ## Commands

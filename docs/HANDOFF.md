@@ -1,29 +1,31 @@
 # Current implementation handoff
 
-**Status (2026-10-26):** Phase 0 in progress, not passed. The documentation pack, monorepo tooling, a CI workflow and a read-only `GET /api/v1/health` endpoint exist. No web app, database, migrations, authentication, quotes, trading engine, staging or production deployment exists.
+Maintained by the integration owner after each verified merge (`AGENTS.md` rule 10). Feature branches put proposed handoff details in their PR instead.
 
-**Last verified artifact:** MASTER_PROJECT_SPECIFICATION.md v1.0 — 2026-10-26.
+**Status (2026-10-26):** Phase 0 in progress, not passed. On `main`: the documentation pack, monorepo tooling, a CI workflow and a read-only `GET /api/v1/health` endpoint. No web app, database, migrations, authentication, quotes, trading engine, staging or production deployment exists.
 
-**Branch:** `claude/new-session-xw1566` (assigned by the Claude Code session, so it does not follow the `feat/GT-###` naming in §12). Commits: `docs: add specification and AI collaboration pack (GT-003)` (the pack as delivered), then `build: bootstrap pnpm monorepo, CI and API health endpoint (GT-002, GT-004)`. `main` was created from the docs commit; the bootstrap commit reaches `main` by PR from this branch.
+**Last verified merge:** `2b7dd07`, ivanmueller/gss#1 (Phase 0 bootstrap). Documentation-only updates after it are listed in `docs/CHANGELOG.md`.
+
+**Last verified artifact:** MASTER_PROJECT_SPECIFICATION.md v1.0, AI delivery workflow clarified 2026-10-26.
 
 ## Phase 0 tickets
 
 | Ticket | State | Notes |
 |---|---|---|
-| GT-001 private repo, permissions, protected main | **Not done** | `ivanmueller/gss` is **public**, by the owner's choice on 2026-10-26; the spec requires private. `main` exists but has no branch protection. Owner action. |
+| GT-001 private repo, permissions, protected main | **Not done** | `ivanmueller/gss` is **public**, by the owner's choice on 2026-10-26; the spec requires private. `main` has no branch protection. Owner action. |
 | GT-002 monorepo tooling | Done | pnpm 10.28.0 workspace (`apps/*`, `packages/*`), strict TypeScript 6.0, ESLint 10 with typescript-eslint strict type-checked rules, Prettier, Vitest 5. |
-| GT-003 AGENTS.md, adapters, docs, templates | Done in repo | Instruction loading verified for Claude Code only (its session loaded `CLAUDE.md` and the `@AGENTS.md` import). Codex and Gemini CLI not yet verified. |
-| GT-004 CI typecheck/lint/test | Written, not yet run on GitHub | `.github/workflows/ci.yml`, workflow `CI`, job `check`. Blocking merges needs it set as a required check under branch protection (GT-001). Dependabot config added for npm and GitHub Actions (§10.1). |
+| GT-003 AGENTS.md, adapters, docs, templates | Done in repo | Updated with the AI workflow pack (`docs/AI_CODING_SYSTEM.md`). The revised gate needs the chosen implementer and independent reviewer to load `AGENTS.md`: verified for Claude Code only (it loaded `CLAUDE.md` and the `@AGENTS.md` import). Codex, the proposed reviewer, is not yet verified; Gemini only if it is used. |
+| GT-004 CI typecheck/lint/test | Running, not yet enforced | Workflow `CI`, job `check`, passed on ivanmueller/gss#1 (head `bc4afe1`). Blocking merges needs it as a required check under branch protection (GT-001). Dependabot configured for npm and GitHub Actions. |
 | GT-005 dev/staging secret management | Not done | Only `.gitignore` rules (`.env*`, `.dev.vars`) and a key-names-only `.env.example`. No Cloudflare or Supabase secret stores exist. |
 
-## Tests run (2026-10-26, local, Node 22.22.0, pnpm 10.28.0)
+## Tests run on the merged bootstrap
 
-- `pnpm check`: Prettier check, ESLint and `tsc --noEmit` clean; Vitest 3 of 3 pass (`apps/api/src/index.test.ts`).
-- Gates bite: a deliberate type error failed typecheck and lint, and a deliberately wrong expectation failed the tests; both reverted.
+- Local (Node 22.22.0, pnpm 10.28.0): `pnpm check` clean; Vitest 3 of 3 pass (`apps/api/src/index.test.ts`). A deliberate type error failed typecheck and lint, and a wrong expectation failed the tests. A fresh clone with `pnpm install --frozen-lockfile` passes `pnpm check`.
 - `pnpm --filter @grain/api dev` (wrangler 4.153, workerd 1.20261023.1): `GET /api/v1/health` → 200 `{"status":"ok","service":"api"}` with `Cache-Control: no-store`; `POST` → 404.
-- Not run: CI on GitHub, Workers-runtime unit tests, any deployment, any security or RLS test (nothing to test yet).
+- GitHub Actions: `check` passed on ivanmueller/gss#1.
+- Not run: Workers-runtime unit tests, any deployment, any security or RLS test (nothing to test yet), a failing sample PR against branch protection.
 
-## Dependencies added
+## Dependencies on `main`
 
 | Package | Why |
 |---|---|
@@ -35,13 +37,16 @@
 | `eslint`, `@eslint/js`, `typescript-eslint` | Lint (§12). |
 | `prettier` | Formatting (§12). |
 
-## Blockers
+## Blockers and open choices
 
 1. Repository visibility: public (owner accepted for now), while the spec requires a private repository. Keep it to the specification and synthetic data until it is private.
 2. No branch protection on `main`, so a failing PR can still be merged.
+3. Primary coding hub and reviewer not chosen. `docs/AI_CODING_SYSTEM.md` recommends Cursor 3 with Claude implementing and Codex reviewing, decided by a one-time comparison (§10) before standardizing paid tools.
 
 ## Next exact task
 
-Owner: make the repository private, protect `main` with the `check` job of workflow `CI` as a required status check and at least one reviewer, then merge this branch by PR. Prove the Phase 0 gate with a sample PR that fails CI and cannot merge, and confirm Codex and Gemini CLI load `AGENTS.md`. Then GT-005 (secrets), then Phase 1 starting with GT-010 (`apps/web` React/Vite scaffold).
+Owner: protect `main` with the `check` job of workflow `CI` as a required status check and at least one reviewer, then prove the Phase 0 gate with a sample PR that fails CI and cannot merge. Choose the implementer and independent reviewer, and verify the reviewer loads `AGENTS.md`; do not buy subscriptions only to prove an unused agent works. Optionally run the tool comparison in `docs/AI_CODING_SYSTEM.md` §10 first. Then GT-005 (secrets) and making the repository private (GT-001).
 
-**Instruction for next agent:** Read `AGENTS.md` first; do not claim any feature is implemented merely because it appears in the specification. After any real development session, record the latest commit, tests run/results, changed files, operational blockers, and the next exact task in this file.
+After Phase 0: Phase 1 from GT-010 (`apps/web` React/Vite scaffold). The thin trade vertical slice in `docs/BUILD_PLAN.md` starts once GT-013–GT-015 are merged and the quote/API/engine contracts are agreed.
+
+**Instruction for next agent:** Read `AGENTS.md` first; do not claim any feature is implemented merely because it appears in the specification. Include handoff details in your PR. **Only the integration owner updates this file after an actual merge** with its latest commit, verified tests/results, changed files, blockers, and next task.

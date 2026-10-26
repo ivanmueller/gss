@@ -1,6 +1,6 @@
 # AI-assisted development standards
 
-Controlled model collaboration and source-control protocol.
+Controlled model collaboration and source-control protocol. For the **current practical development setup, role rotation, tool comparison, and ready-to-use prompts**, see `docs/AI_CODING_SYSTEM.md`. This document governs Git/PR process independent of the chosen vendor.
 
 # 11. Multi-model development governance
 
@@ -11,9 +11,10 @@ Git is the source of code truth; specifications and decision records are the sou
 ## 11.2 Suggested human/agent roles
 
 - **Owner/product lead:** Accepts economic assumptions, prioritizes backlog, owns commercial correctness and merges approved changes.
-- **Claude Code:** Typical feature implementer for UI, API, migrations or bug fixes on an isolated worktree/branch.
-- **Codex:** Independent technical reviewer; writes regression tests and critiques financial math, authorization, migrations and hidden coupling.
-- **Gemini CLI:** Second independent reviewer; can implement discrete tasks, assess data integrations and challenge UX alternatives.
+- **Primary implementer (often Claude via Cursor or native Claude Code):** Delivers scoped UI, API, migrations or bug fixes in an isolated worktree/branch.
+- **Independent reviewer (often Codex):** Tests financial math, authorization, migrations, hidden coupling and regression risk; should not be the sole approver of its own changes.
+- **Alternate implementer / second opinion (often Gemini):** Can implement discrete tasks, assess data integrations and challenge UX alternatives.
+- **Integration owner:** Human/coordinator approves shared contracts, serializes dependent merges and updates the canonical handoff after merge.
 
 These are process assignments, not claims about permanent model superiority. Rotate roles when useful; the model implementing a high-risk change should not be its sole approver.
 
@@ -24,7 +25,7 @@ These are process assignments, not claims about permanent model superiority. Rot
 3. Work occurs on a separate branch/worktree. No concurrent agents write to the same worktree.
 4. Implementer supplies PR with change summary, migration notes, screenshots for UI work, test output, business-rule impacts and risk.
 5. Independent reviewer actively looks for errors and adds tests for disputed assumptions.
-6. CI passes; human owner approves; merge updates architectural decisions/docs and `docs/HANDOFF.md`.
+6. CI passes; human owner approves; merge updates architectural decisions/docs. **After** merge, the integration owner updates `docs/HANDOFF.md`; agents do not edit it concurrently on independent feature branches.
 7. Deploy staging; run the relevant acceptance flow; promote production only after the release gate is met.
 
 **AI must never:** invent quotes or market data, treat hypotheticals as live, auto-execute trades, skip tenant isolation, edit production records ad hoc, bypass CI, commit secrets, or conceal unverified assumptions.
@@ -39,7 +40,8 @@ These are process assignments, not claims about permanent model superiority. Rot
 - `docs/BUILD_PLAN.md`: ordered stages and issues.
 - `docs/ACCEPTANCE_TESTS.md`: cross-model golden fixtures, security gates.
 - `docs/DECISIONS.md`: unresolved decisions + dated architecture decisions.
-- `docs/HANDOFF.md`: current implemented state, last commit, open blockers, next exact task.
+- `docs/HANDOFF.md`: current merged implementation state, last verified commit, open blockers, next exact task; maintained by integration owner after merge.
+- `docs/AI_CODING_SYSTEM.md`: recommended tools and operational multi-model coding process; no competing domain rules.
 
 # 12. Repository structure and engineering standards
 
@@ -51,6 +53,8 @@ grain-trading-platform/
   README.md
   docs/
     PRODUCT.md
+    AI_CODING_SYSTEM.md
+    AI_WORKFLOW.md
     ARCHITECTURE.md
     DATA_MODEL.md
     TRADING_RULES.md

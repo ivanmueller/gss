@@ -15,6 +15,12 @@ labels: enhancement
 
 ## Dependencies and risks
 
+## Shared contracts / inputs / outputs
+
+## Agent-owned files / allowed edit scope
+
+## Review level (normal or high-risk) and independent model
+
 ## Example data (explicitly synthetic)
 
 ## Testable acceptance criteria
@@ -22,3 +28,5 @@ labels: enhancement
 ## Tests to add and review evidence
 
 ## AI implementer and independent reviewer
+
+## Example of finished user workflow / UI evidence if relevant
