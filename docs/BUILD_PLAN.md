@@ -1,0 +1,56 @@
+# Ordered build plan
+
+Issues are proposed identifiers. File them in the private GitHub repository when available.
+
+# 13. Execution plan, ordered backlog and acceptance gates
+
+These are **sequence gates**, not calendar promises. Each gate must be tested before it is considered complete. Synthetic test records are permitted until validated market data is onboarded.
+
+## Phase 0 — Repository and documentation baseline
+
+**Tickets:** GT-001 create private repo/permissions/protected main; GT-002 install monorepo tooling; GT-003 add AGENTS.md, Claude/Gemini adapters, documentation and PR templates; GT-004 establish CI typecheck/lint/test; GT-005 development/staging secret management.
+
+**Gate:** Fresh clone installs and runs tests; all three AI tools demonstrably read their instructions; a sample PR cannot merge with failed CI. No code secrets stored in repo.
+
+## Phase 1 — Infrastructure, auth and database foundation
+
+**Tickets:** GT-010 scaffold React/Vite/Cloudflare Worker/Hono; GT-011 create separate Supabase projects; GT-012 implement auth/session and MFA; GT-013 organizations, memberships and role capabilities; GT-014 migration chain and least-privilege database access; GT-015 PostGIS, facility/commodity/counterparty schema; GT-016 audit infrastructure; GT-017 seeded fictional data, backups and restore runbook.
+
+**Gate:** Users can sign in and switch among only authorized organizations; unauthorized direct API requests fail; tenancy tests pass; migration setup works on a fresh database.
+
+## Phase 2 — Counterparties, facilities, map and table
+
+**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 MapLibre map with licensed tile source; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures.
+
+**Gate:** Verified/approximate geolocations display distinctly; map selection updates detail panel and table; tenant isolation holds for geographic queries; mobile/narrow screens remain usable.
+
+## Phase 3 — Versioned quotes and source provenance
+
+**Tickets:** GT-030 quote+quote_revisions migrations; GT-031 bid/offer CRUD, expiry/withdraw/revision; GT-032 quote input validation (grade, price, unit, basis, quantity, dates); GT-033 current quote discovery + facility quote pane; GT-034 provenance and audit; GT-035 CSV quote import staging/rejections.
+
+**Gate:** Quote history is preserved across updates; expired/withdrawn quotes cannot appear active without an explicit historical filter; unsuitable quotes cannot be mislabeled firm or actionable.
+
+## Phase 4 — Trading engine and saved scenarios: FIRST USEFUL RELEASE
+
+**Tickets:** GT-040 decimal-based money/quantity normalization; GT-041 grade/date/quantity/basis compatibility validator; GT-042 pure scenario economics and warnings; GT-043 golden test fixture plus exhaustive boundary tests; GT-044 scenario builder UI; GT-045 server calculation endpoint, immutable saved versions and CSV export; GT-046 human acceptance walkthrough with two fictitious locations.
+
+**Gate:** The synthetic 42 MT example returns exactly CAD 46.00/MT and CAD 1,932.00, and a stale/missing FX, missing freight, unmatched basis or unit yields a visible block/warning as specified. Reloading an old scenario never recalculates it silently against changed market data. An internal tester completes the entire journey without developer intervention.
+
+## Phase 5 — Commercially useful freight and discovery
+
+**Tickets:** GT-050 freight quote/lane data model; GT-051 licensed road routing integration; GT-052 source/time-aware FX connector; GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
+
+**Gate:** Ranked opportunities differentiate confirmed, estimated and insufficient-data scenarios; shipping cost inclusion is auditable; no inaccurate route or estimated cost is presented as firm carrier freight.
+
+## Phase 6 — Trade management and intelligence (separate release decision)
+
+**Tickets:** GT-060 trade lifecycle and approval authority; GT-061 contract/document storage and access; GT-062 shipment and invoice event tracking; GT-063 expected-vs-realized economics; GT-064 external price-feed adapters where licensed; GT-065 document extraction with human validation; GT-066 scenario and route analytics; GT-067 Python optimization only when justified.
+
+**Gate:** Approved lifecycle definitions, commercial controls, auditability, and operational sign-off. AI cannot execute/approve transactions independently.
+
+# 17. Concrete first implementation task for the coding team
+
+**Issue GT-001 through GT-005 — Repository Bootstrap:** Create the private GitHub repo and scaffolding, copy this document pack, configure pnpm/TypeScript strict mode, initial React/Hono Cloudflare template, lint/test/typecheck CI, default branch protection, separate dev/staging secrets, and project instruction loading for all three agents. Add a read-only health endpoint and one Vitest passing test. Do not build the map, quote ingestion or live calculations until Phase 0 acceptance is verified.
+
+**Phase 4 target demonstration:** Using fictional quote IDs, create and save the 42-MT golden scenario, then revise the buyer quote and show that the prior saved scenario still displays CAD 1,932.00 with its original assumptions. From the map, click origin/destination, calculate again and explicitly indicate whether the revised quote changed the economics.
+
