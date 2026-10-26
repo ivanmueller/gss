@@ -4,19 +4,23 @@ Issues are proposed identifiers. File them in the private GitHub repository when
 
 # 13. Execution plan, ordered backlog and acceptance gates
 
-These are **sequence gates**, not calendar promises. Each gate must be tested before it is considered complete. Synthetic test records are permitted until validated market data is onboarded.
+These are **release-readiness gates**, not calendar promises. Phase 0 and the minimum secure Phase 1 foundation are mandatory prerequisites. Thereafter, a thin end-to-end slice may implement the necessary **minimum** Phase 2–4 capabilities before all polish/import tasks finish. The complete phase acceptance gates must still pass before that phase is declared complete. See `docs/AI_CODING_SYSTEM.md` §8. Synthetic test records are permitted until validated market data is onboarded.
 
 ## Phase 0 — Repository and documentation baseline
 
 **Tickets:** GT-001 create private repo/permissions/protected main; GT-002 install monorepo tooling; GT-003 add AGENTS.md, Claude/Gemini adapters, documentation and PR templates; GT-004 establish CI typecheck/lint/test; GT-005 development/staging secret management.
 
-**Gate:** Fresh clone installs and runs tests; all three AI tools demonstrably read their instructions; a sample PR cannot merge with failed CI. No code secrets stored in repo.
+**Gate:** Fresh clone installs and runs tests; chosen implementer and independent reviewer demonstrably read common instructions (verify Gemini or other optional tools if used); a sample PR cannot merge with failed CI. No code secrets stored in repo. Do not buy subscriptions solely to prove an unused agent works.
 
 ## Phase 1 — Infrastructure, auth and database foundation
 
 **Tickets:** GT-010 scaffold React/Vite/Cloudflare Worker/Hono; GT-011 create separate Supabase projects; GT-012 implement auth/session and MFA; GT-013 organizations, memberships and role capabilities; GT-014 migration chain and least-privilege database access; GT-015 PostGIS, facility/commodity/counterparty schema; GT-016 audit infrastructure; GT-017 seeded fictional data, backups and restore runbook.
 
 **Gate:** Users can sign in and switch among only authorized organizations; unauthorized direct API requests fail; tenancy tests pass; migration setup works on a fresh database.
+
+### Early cross-phase milestone — thin trade vertical slice (not a production release)
+
+After GT-013–GT-015 establish secure organization-bound schema and minimal data, agree on the quote/API/engine contracts, then take **minimal** scope from GT-020–GT-025, GT-030–GT-034, and GT-040–GT-046 to demonstrate a fictional seller → buyer scenario through a basic map/table, server-side deterministic economics, saved snapshot and reload. Include quote revisioning and cross-tenant denial tests. **Defer** richer filters, polish and CSV imports until this path works; do not skip their later acceptance gates. This is an ordering optimization, not permission to bypass Phase 0, security, required input validation or migrations.
 
 ## Phase 2 — Counterparties, facilities, map and table
 
@@ -50,7 +54,7 @@ These are **sequence gates**, not calendar promises. Each gate must be tested be
 
 # 17. Concrete first implementation task for the coding team
 
-**Issue GT-001 through GT-005 — Repository Bootstrap:** Create the private GitHub repo and scaffolding, copy this document pack, configure pnpm/TypeScript strict mode, initial React/Hono Cloudflare template, lint/test/typecheck CI, default branch protection, separate dev/staging secrets, and project instruction loading for all three agents. Add a read-only health endpoint and one Vitest passing test. Do not build the map, quote ingestion or live calculations until Phase 0 acceptance is verified.
+**Issue GT-001 through GT-005 — Repository Bootstrap:** Create the private GitHub repo and scaffolding, copy this document pack, configure pnpm/TypeScript strict mode, initial React/Hono Cloudflare template, lint/test/typecheck CI, default branch protection, separate dev/staging secrets, and project instruction loading for the chosen implementer and independent reviewer (plus optional additional agents actually in use). Add a read-only health endpoint and one Vitest passing test. Do not build the map, quote ingestion or live calculations until Phase 0 acceptance is verified.
 
-**Phase 4 target demonstration:** Using fictional quote IDs, create and save the 42-MT golden scenario, then revise the buyer quote and show that the prior saved scenario still displays CAD 1,932.00 with its original assumptions. From the map, click origin/destination, calculate again and explicitly indicate whether the revised quote changed the economics.
+**Phase 4 target demonstration (also the thin cross-phase milestone):** Using fictional quote IDs, create and save the 42-MT golden scenario, then revise the buyer quote and show that the prior saved scenario still displays CAD 1,932.00 with its original assumptions. From the map, click origin/destination, calculate again and explicitly indicate whether the revised quote changed the economics.
 

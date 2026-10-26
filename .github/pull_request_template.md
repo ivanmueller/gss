@@ -2,6 +2,8 @@
 
 ## Business intent and acceptance criteria
 
+## Implementing agent / worktree / independent reviewer
+
 ## Files changed / architecture decisions
 
 ## Quote, trade math, FX, freight or security implications
@@ -17,9 +19,14 @@
 
 ## Data provenance, permissions and user-impact warnings
 
+## Handoff for integration owner (after merge only)
+- Merged commit (integration owner records after merge):
+- Verified commands/results:
+- Remaining blockers / next exact issue:
+
 ## Reviewer checklist
 - [ ] No synthetic data represented as live
 - [ ] No cross-tenant data exposure
 - [ ] No quote history overwritten
 - [ ] Assumptions and calculation engine version documented
-- [ ] `docs/HANDOFF.md` updated with actual current state
+- [ ] Handoff summary provided here for integration owner; `docs/HANDOFF.md` is updated **after merge**

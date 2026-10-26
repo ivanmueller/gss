@@ -12,6 +12,10 @@ Vendor capabilities were checked against public technical documentation availabl
 - MapLibre: https://maplibre.org/maplibre-gl-js/docs/
 - Codex repository instructions: https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex
 - Gemini CLI context configuration: https://geminicli.com/docs/reference/configuration/
+- Cursor 3 agent environment: https://cursor.com/changelog/3-0
+- Claude Code parallel worktrees: https://support.claude.com/en/articles/14554000-claude-code-power-user-tips
+- Google Antigravity 2.0: https://www.antigravity.google/blog/introducing-google-antigravity-2-0
+- Full agent-operating playbook and further references: `AI_CODING_SYSTEM.md`
 - CFIA phytosanitary exports: https://inspection.canada.ca/en/exporting-food-plants-animals/plant-exports/phytosanitary-certificates
 
 ---
