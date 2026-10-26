@@ -45,3 +45,5 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 **2026-10-26 — Prettier does not format Markdown.** Reformatting would rewrite the tables in the specification pack. Code, JSON, YAML and config files are formatted and checked in CI.
 
 **2026-10-26 — API unit tests run in Node through Hono `app.request`.** No code uses Worker bindings yet, so Workers-runtime tests (`@cloudflare/vitest-pool-workers`) are deferred until it does; `wrangler dev` serves as the runtime smoke check. Worker globals are typed with `@cloudflare/workers-types` until bindings exist, then with `wrangler types` output, which Cloudflare now recommends.
+
+**2026-10-26 — Staging deploys from GitHub Actions on each merge to `main`.** The workflow repeats the CI checks, runs `wrangler deploy --env staging` and smoke-tests `/api/v1/health`. The Cloudflare token and account ID are GitHub repository secrets read only by this push-triggered workflow, never by `pull_request` jobs, so pull requests from forks cannot reach them. Production gets a separate, approval-gated workflow when it is needed.

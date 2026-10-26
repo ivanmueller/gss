@@ -3,4 +3,10 @@
   "name": "grain-trading-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  // CI runs `wrangler deploy --env staging`, which publishes grain-trading-api-staging
+  // on workers.dev. The top-level config is for local `wrangler dev`; production gets
+  // its own environment and an approval-gated workflow later.
+  "env": {
+    "staging": {},
+  },
 }
