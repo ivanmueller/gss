@@ -27,6 +27,10 @@ pnpm --filter @grain/api dev    # local Worker: http://localhost:8787/api/v1/hea
 
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
 
+## Staging deploy
+
+Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev`, and checks that `/api/v1/health` answers. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds synthetic data only.
+
 ## Layout
 
 ```
