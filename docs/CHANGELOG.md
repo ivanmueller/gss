@@ -1,5 +1,14 @@
 # Documentation pack changelog
 
+## 2026-10-26 — AI coding workflow pack integrated into the repository
+
+The pack update below arrived after the Phase 0 bootstrap (ivanmueller/gss#1) had merged, so three of its files were merged by hand rather than copied:
+
+- `README.md` and `AGENTS.md`: the pack text is adopted; the repository's Phase 0 status line, quick start, layout and Commands section are kept.
+- `docs/HANDOFF.md`: the pack's "documentation pack only" status is not adopted because it no longer matches `main`. The file records the merged bootstrap, the revised Phase 0 gate and the pack's new next step (choose the implementer and reviewer, optionally after the tool comparison).
+
+Every other pack file is copied unchanged. The note below that no application tests were executed describes the pack itself; the repository's test and CI results are in `docs/HANDOFF.md`.
+
 ## 2026-10-26 — AI coding workflow refinement
 
 **Scope:** Documentation-only update to the initial repository starter. No application, credentials, CI system, migrations or live data were added, and **no application tests have been executed**.
