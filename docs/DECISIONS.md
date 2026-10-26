@@ -34,3 +34,14 @@ These are **not implementation blockers for Phase 0–2**, but must be decided b
 | Inability to restore critical trading records | Separate environments, backup verification and restore drills |
 | Vendor lock-in | Standard Postgres, domain package isolated from Workers, MapLibre, provider adapters |
 
+# Dated architecture decisions
+
+Proposed by the implementing agent; the owner accepts or reverses each one.
+
+**2026-10-26 — TypeScript pinned to 6.0.x.** TypeScript 7.0 (the native compiler) is the current npm release, but typescript-eslint 8.72.1, the latest, declares `typescript >=4.8.4 <6.1.0`. Type-checked linting matters more than the newer compiler. Revisit when typescript-eslint supports 7.x.
+
+**2026-10-26 — pnpm pinned to 10.28.0.** It is the version available and verified in the bootstrap environment; pnpm 12 is current. Upgrading is a separate, tested change.
+
+**2026-10-26 — Prettier does not format Markdown.** Reformatting would rewrite the tables in the specification pack. Code, JSON, YAML and config files are formatted and checked in CI.
+
+**2026-10-26 — API unit tests run in Node through Hono `app.request`.** No code uses Worker bindings yet, so Workers-runtime tests (`@cloudflare/vitest-pool-workers`) are deferred until it does; `wrangler dev` serves as the runtime smoke check. Worker globals are typed with `@cloudflare/workers-types` until bindings exist, then with `wrangler types` output, which Cloudflare now recommends.
