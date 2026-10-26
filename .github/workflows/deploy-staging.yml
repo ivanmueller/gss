@@ -48,6 +48,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm build
       - name: Deploy Worker
         id: deploy
         env:
@@ -66,6 +67,18 @@ jobs:
             echo "::error::No workers.dev URL found in the wrangler output."
             exit 1
           fi
-          body=$(curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$URL/api/v1/health")
-          echo "$body"
-          test "$body" = '{"status":"ok","service":"api"}'
+          fetch() { curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$@"; }
+
+          health=$(fetch "$URL/api/v1/health")
+          echo "/api/v1/health -> $health"
+          test "$health" = '{"status":"ok","service":"api"}'
+
+          page=$(fetch "$URL/")
+          [[ "$page" == *'<div id="root"></div>'* ]] || { echo "::error::/ did not return the web app."; exit 1; }
+          echo "/ -> web app"
+
+          # Unknown API paths must reach the Worker (404), not fall back to the web app.
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate' "$URL/api/v1/does-not-exist")
+          echo "/api/v1/does-not-exist -> $status"
+          test "$status" = 404

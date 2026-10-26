@@ -47,3 +47,14 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 **2026-10-26 — API unit tests run in Node through Hono `app.request`.** No code uses Worker bindings yet, so Workers-runtime tests (`@cloudflare/vitest-pool-workers`) are deferred until it does; `wrangler dev` serves as the runtime smoke check. Worker globals are typed with `@cloudflare/workers-types` until bindings exist, then with `wrangler types` output, which Cloudflare now recommends.
 
 **2026-10-26 — Staging deploys from GitHub Actions on each merge to `main`.** The workflow repeats the CI checks, runs `wrangler deploy --env staging` and smoke-tests `/api/v1/health`. The Cloudflare token and account ID are GitHub repository secrets read only by this push-triggered workflow, never by `pull_request` jobs, so pull requests from forks cannot reach them. Production gets a separate, approval-gated workflow when it is needed.
+
+**2026-10-27 — One Worker serves the web app and the API.** On staging, `apps/api` serves the built `apps/web/dist` as static assets, with `/api/*` always routed to the Worker and other unknown paths falling back to `index.html`. One origin means no CORS and simpler session cookies when auth arrives. The top-level Worker config stays API-only for local development.
+
+**2026-10-27 — shadcn/ui conventions set up by hand.** The shadcn registry was unreachable from the build session, so the `cn` helper, CSS-variable theme tokens and the two components in use (`Badge`, `Tabs` on Radix) were written in shadcn's style. `components.json`, the CLI and the `@/` import alias are added when the registry is first used.
+
+**2026-10-27 — Narrow screens get a facility list, not the table.** Below Tailwind's `lg` breakpoint (1024 px) the workspace shows List and Map tabs and a stacked facility list, per the spec's "accessible list alternative", so prices never scroll off-screen.
+
+**2026-10-27 — Timestamps display in UTC.** Every quoted and valid-until time shows as `YYYY-MM-DD HH:MM UTC` until a display time-zone policy is decided.
+
+**2026-10-27 — Web view types are provisional.** `apps/web/src/data/types.ts` serves the GT-010 shell only. The shared quote/facility contract is agreed and moved to `packages/domain` before quote work (GT-030) or the thin slice begins.
+
