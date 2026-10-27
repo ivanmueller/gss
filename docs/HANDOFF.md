@@ -2,11 +2,13 @@
 
 Maintained by the integration owner after each verified merge (`AGENTS.md` rule 10). Feature branches put proposed handoff details in their PR instead. This update was written by Claude Code at the owner's request and records merged state only.
 
-**Status (2026-10-28):** Phase 1 foundation working on staging with real data; first Phase 2 slice (counterparty directory) live. On `main`: monorepo tooling and required CI (unit, database and browser tests); staging deploy on every merge; sign-in with email, password and required authenticator code; the API reading Postgres as `app_api` through Cloudflare Hyperdrive; a counterparty directory (buyers, contacts, locations, PNG logos, spreadsheet import) with row level security and an audit trail; the header showing the user's first name and last initial. The trading workspace still runs on synthetic data. No quotes, trading engine, editing of counterparties, member management or production deployment exists.
+**Status (2026-10-27, evening):** Phase 1 foundation working on staging with real data; Phase 2 under way. On `main`: monorepo tooling and required CI (unit, database and browser tests); staging deploy on every merge; sign-in with email, password and required authenticator code; the API reading Postgres as `app_api` through Cloudflare Hyperdrive; a counterparty directory (buyers, contacts, locations, PNG logos, spreadsheet import) with row level security and an audit trail; the header showing the user's first name and last initial; the map search API (`GET /api/v1/facilities?bbox=`, PostGIS). The trading workspace still runs on synthetic data. No map page, geocoding, quotes, trading engine, editing of counterparties, member management or production deployment exists on `main`. The owner's buyers have no coordinates yet.
 
-**Last verified merge:** `e0db90b`, ivanmueller/gss#16 (Hyperdrive uses Supabase's session pooler; reads retried once on a lost connection). Deploy staging run #12 succeeded; the owner then reran "Set up Hyperdrive (staging)" and confirmed staging works (signed in, name shown, no error).
+**Last verified merge:** `89a78f7`, ivanmueller/gss#19 (map search by visible area, GT-022; owner's choice of Mapbox recorded). CI `check` was green on its head `df77234` and on `main`; Deploy staging run #15 succeeded and applied migration `20261027040000_facility_map_search.sql` to `gss-staging`. Nothing visible changed on staging. Merged before Codex's review: Codex should still review the migration and the API query (database change).
 
-**Open pull request:** ivanmueller/gss#17 — fixes Codex's review of `e0db90b`: only reads are retried (a retried logo upload could overwrite a later one), and logos are fully validated as PNG with a cleaned copy stored. Not merged when this was written.
+Earlier: ivanmueller/gss#17 (Codex's review of `e0db90b`: only reads retried; logos fully validated as PNG) and ivanmueller/gss#18 (this file and `AGENTS.md`'s "Working with the owner") are merged.
+
+**In review:** the map page on Mapbox GL JS (GT-023), branch `claude/loving-gates-1qm346`, with the project guide switched from MapLibre to Mapbox GL JS (owner's decision, `docs/DECISIONS.md`). It needs the GitHub secret `MAPBOX_PUBLIC_TOKEN` (README, "Map").
 
 **Last verified artifact:** MASTER_PROJECT_SPECIFICATION.md v1.0, amended 2026-10-27 for one organization only (`docs/DECISIONS.md`).
 
@@ -46,23 +48,27 @@ Maintained by the integration owner after each verified merge (`AGENTS.md` rule 
 | GT-015 PostGIS and counterparty/facility schema | Partly done | PostGIS in `extensions`; counterparties, contacts, facilities (lat/long, precision, generated `geography`), logos, import batches. Commodity and grade tables not started. |
 | GT-016 audit infrastructure | Minimal | `app.audit_events` written by trigger for directory tables (actor, action, entity, changed column names, request id); no API access. Audit view (`GET /api/v1/audit`) not started. |
 | GT-020 counterparty CRUD | Partly done | Create via CSV import (column mapping, server-side review, duplicates skipped) and logo upload/replace. Editing, single create, archive not started. |
-| GT-021 facility details/geocoding | Partly done | Address, region, postal code, optional coordinates with exact/approximate precision. No geocoding. |
-| GT-022–GT-025 | Not started | bbox API, MapLibre map (tile provider choice), synchronized table, synthetic fixtures. |
+| GT-021 facility details/geocoding | Partly done | Address, region, postal code, optional coordinates with exact/approximate precision. No geocoding; the owner's buyers have no coordinates, so geocoding from addresses is needed before the map shows them. |
+| GT-022 viewport/bbox API | Done | `GET /api/v1/facilities?bbox=` through `app.location_in_bbox()` (PostGIS `ST_Intersects`, edges included); `app_api` still has no access to the `extensions` schema. |
+| GT-023 map | In review | Mapbox GL JS with Mapbox tiles (owner's decision); not on `main` yet. |
+| GT-024–GT-025 | Not started | Synchronized table, synthetic fixtures. |
 
 ## Tests run on the merged state
 
-- CI `check` green on ivanmueller/gss#16: domain 24, API 73, web 59 unit tests; 108 pgTAP assertions; 17 API database tests as `app_api`; Playwright 14 (sign-in with TOTP, import, logo upload, another organization's records hidden by list, id, logo, upload and import, phone layout).
-- Independent review: Codex reviewed ivanmueller/gss#9, the merged ivanmueller/gss#11 (three findings, fixed in ivanmueller/gss#12) and `main` at `e0db90b` (two findings, fixed in open ivanmueller/gss#17).
-- Mutation checks run locally on RLS policies, grants, tenant-matching keys, audit triggers, session context and retries (and, in ivanmueller/gss#17, the PNG rules); each was caught by a test.
+- CI `check` green on ivanmueller/gss#19: domain 51, API 86, web 59 unit tests; 120 pgTAP assertions; 21 API database tests as `app_api`; Playwright 14 (sign-in with TOTP, import, logo upload, another organization's records hidden by list, id, logo, upload and import, phone layout).
+- Independent review: Codex reviewed ivanmueller/gss#9, the merged ivanmueller/gss#11 (three findings, fixed in ivanmueller/gss#12) and `main` at `e0db90b` (two findings, fixed in ivanmueller/gss#17). ivanmueller/gss#19 has no Codex review yet.
+- Mutation checks run locally on RLS policies, grants, tenant-matching keys, audit triggers, session context, retries, the PNG rules and (ivanmueller/gss#19) the map search: a leaking policy, a public grant, the imprecise `&&` box test, swapped coordinates and an unfiltered count were each caught by a test.
 
 ## Blockers and open choices
 
 1. Repository is public; real data must never be committed (it lives only in `gss-staging`).
 2. Real data on the free Supabase plan: no self-service backups, pauses after about a week idle. Keep the source spreadsheet as the backup until a paid plan and restore drill exist.
 3. Codex's explicit `AGENTS.md` loading check not yet recorded.
+4. Geocoding provider and cost not decided: Mapbox's default (temporary) geocoding results may not be stored; storing them needs its paid permanent geocoding (card on file). The owner's buyers need it before the map is useful.
+5. Farm-location visibility (specification §6) deferred by the owner until farms are added.
 
 ## Next exact task
 
-Merge ivanmueller/gss#17. Then, with the owner's choice of order: counterparty editing (edit fields, add one by hand, add contacts and locations, archive; all audited), member management (invite staff, roles), or bids and offers with revisions leading to the thin trade slice (`docs/BUILD_PLAN.md`).
+Codex reviews ivanmueller/gss#19 and the map page pull request; the owner adds `MAPBOX_PUBLIC_TOKEN` and merges the map page. Then geocoding the buyers' addresses into coordinates (with a review step and precision; provider decision first). Then, with the owner's choice of order: counterparty editing (edit fields, add one by hand, add contacts and locations, archive; all audited), member management (invite staff, roles), or bids and offers with revisions leading to the thin trade slice (`docs/BUILD_PLAN.md`).
 
 **Instruction for next agent:** Read `AGENTS.md` first, including "Working with the owner"; do not claim any feature is implemented merely because it appears in the specification. Include handoff details in your PR. **Only the integration owner updates this file after an actual merge** with its latest commit, verified tests/results, changed files, blockers, and next task.
