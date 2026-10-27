@@ -4,9 +4,18 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   // CI runs `wrangler deploy --env staging`, which publishes grain-trading-api-staging
-  // on workers.dev. The top-level config is for local `wrangler dev`; production gets
-  // its own environment and an approval-gated workflow later.
+  // on workers.dev. The top-level config is for local `wrangler dev` of the API alone;
+  // production gets its own environment and an approval-gated workflow later.
   "env": {
-    "staging": {},
+    "staging": {
+      // The same Worker serves the web app built by `pnpm build`, so the browser and
+      // API share one origin. /api/* always reaches the Worker; any other unknown
+      // path returns the app's index.html.
+      "assets": {
+        "directory": "../web/dist",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"],
+      },
+    },
   },
 }

@@ -1,6 +1,6 @@
 # Agent instructions — Canadian–U.S. Physical Grain Trading Platform
 
-This is a **Phase 0 project**: documentation, monorepo tooling, CI and a read-only API health endpoint. No working application or live data exists. Before coding, read the *relevant sections* of `MASTER_PROJECT_SPECIFICATION.md` and current status in `docs/HANDOFF.md`.
+This project is at **Phase 0 / early Phase 1**: documentation, monorepo tooling, CI, a staging deploy, a read-only API health endpoint and a web app shell on synthetic data. No working application or live data exists. Before coding, read the *relevant sections* of `MASTER_PROJECT_SPECIFICATION.md` and current status in `docs/HANDOFF.md`.
 
 ## Mission
 Build a secure, auditable Canadian-to-U.S. physical grain trading operations platform. The map is for discovery; executable economics comes from validated bid/offer records, quote delivery terms, source FX and freight inputs, and a deterministic saved scenario snapshot.
@@ -38,7 +38,10 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - `pnpm install`
 - `pnpm check`: format check, lint, typecheck and tests, the same steps CI runs.
 - `pnpm format`: apply Prettier (Markdown is excluded).
-- `pnpm --filter @grain/api dev`: local Worker at `http://localhost:8787/api/v1/health`.
+- `pnpm build`: build the web app (CI runs it after `pnpm check`).
+- `pnpm --filter @grain/api dev`: local API Worker at `http://localhost:8787/api/v1/health`.
+- `pnpm --filter @grain/web dev`: web app with hot reload at `http://localhost:5173`; `/api` is proxied to port 8787.
+- `pnpm preview:staging`: build, then serve web and API together as on staging.
 
 ## Completion definition
 Run and report lint, TypeScript typecheck, relevant unit/integration tests, security/RLS tests where needed and a staged end-to-end smoke test for user-visible changes. If test infrastructure does not exist yet, explicitly state that and create it in the current approved phase.

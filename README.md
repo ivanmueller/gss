@@ -1,6 +1,6 @@
 # Grain Trading Platform
 
-Canadian–U.S. physical grain trading operations platform. The repository is at the **Phase 0 bootstrap** stage: the specification pack, monorepo tooling, CI and a read-only API health endpoint. No web app, database, authentication, quotes, trading engine or deployment exists yet; `docs/HANDOFF.md` records the last merged state.
+Canadian–U.S. physical grain trading operations platform. The repository has the Phase 0 tooling, CI and a staging deploy, plus the GT-010 web app shell: the workspace layout with **synthetic** facilities and quotes, served by the same Cloudflare Worker as the API. No database, authentication, real quotes, trading engine or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
 
 1. Read `MASTER_PROJECT_SPECIFICATION.md` for product and technical requirements.
 2. Read `docs/BUILD_PLAN.md` for staged work and its early end-to-end demonstration path.
@@ -21,20 +21,23 @@ Requires Node.js 22.13 or later and pnpm 10.28 (`corepack enable` picks up the v
 
 ```sh
 pnpm install
-pnpm check                      # format check, lint, typecheck, tests (same as CI)
-pnpm --filter @grain/api dev    # local Worker: http://localhost:8787/api/v1/health
+pnpm check                      # format check, lint, typecheck, tests (CI also runs pnpm build)
+pnpm --filter @grain/api dev    # API Worker: http://localhost:8787/api/v1/health
+pnpm --filter @grain/web dev    # web app with hot reload: http://localhost:5173 (proxies /api to :8787)
+pnpm preview:staging            # build, then serve web + API together as on staging: http://localhost:8787
 ```
 
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
 
 ## Staging deploy
 
-Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev`, and checks that `/api/v1/health` answers. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds synthetic data only.
+Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, builds the web app, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev` (the Worker serves `apps/web/dist` alongside the API), and checks `/api/v1/health`, the web page at `/`, and that unknown `/api/*` paths return 404. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds synthetic data only.
 
 ## Layout
 
 ```
-apps/api/            Hono API on Cloudflare Workers (health endpoint only)
+apps/api/            Hono API on Cloudflare Workers (health endpoint only); serves apps/web on staging
+apps/web/            React + Vite + Tailwind web app shell (synthetic data only)
 packages/            shared packages (domain, trading-engine, database) — none yet
 docs/                specification sections, AI coding system, decisions, handoff, changelog
 .github/             CI workflow, Dependabot, issue and PR templates

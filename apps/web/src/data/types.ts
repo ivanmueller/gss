@@ -1,0 +1,44 @@
+// Provisional view types for the GT-010 shell. They are not the shared domain
+// contract; that is agreed and moved to packages/domain before quote work starts.
+
+export type FacilityRole = 'seller' | 'buyer';
+export type QuoteSide = 'OFFER' | 'BID';
+export type QuoteStatus = 'indicative' | 'firm' | 'withdrawn' | 'expired' | 'superseded';
+export type Currency = 'CAD' | 'USD';
+export type PriceUnit = 'MT';
+
+export interface Price {
+  /** Decimal string, e.g. "725.00". Never a JavaScript number. */
+  amount: string;
+  currency: Currency;
+  unit: PriceUnit;
+}
+
+export interface Quote {
+  id: string;
+  side: QuoteSide;
+  commodity: string;
+  grade: string;
+  price: Price;
+  deliveryBasis: string;
+  status: QuoteStatus;
+  sourceType: 'manual';
+  revision: number;
+  /** UTC ISO 8601 timestamps. */
+  quotedAt: string;
+  validUntil: string;
+  /** ISO dates. */
+  deliveryWindow: { start: string; end: string };
+  /** Decimal strings in metric tonnes. */
+  quantityMt: { min: string; max: string };
+}
+
+export interface Facility {
+  id: string;
+  name: string;
+  roles: readonly FacilityRole[];
+  region: string;
+  country: 'CA' | 'US';
+  locationPrecision: 'approximate' | 'exact';
+  quotes: readonly Quote[];
+}
