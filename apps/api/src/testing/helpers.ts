@@ -50,6 +50,10 @@ export function fakeDatabase(): Mocked<Database> {
     facilitiesInBbox: vi.fn<Database['facilitiesInBbox']>(() =>
       Promise.resolve({ facilities: [], withoutCoordinates: 0 }),
     ),
+    facilitiesWithoutCoordinates: vi.fn<Database['facilitiesWithoutCoordinates']>(() =>
+      Promise.resolve([]),
+    ),
+    saveCoordinates: vi.fn<Database['saveCoordinates']>(() => Promise.resolve([])),
     getLogo: vi.fn<Database['getLogo']>(() => Promise.resolve(null)),
     putLogo: vi.fn<Database['putLogo']>(() =>
       Promise.resolve({ status: 'saved', sha256: 'f'.repeat(64) }),

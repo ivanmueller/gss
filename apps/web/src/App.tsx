@@ -5,6 +5,7 @@ import { AppHeader } from './components/AppHeader';
 import { Link, matchRoute, usePath } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { useMe } from './lib/useMe';
+import { CoordinatesPage } from './pages/CoordinatesPage';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { ImportPage } from './pages/ImportPage';
@@ -45,6 +46,9 @@ export function App({ account }: { account?: Account }) {
     case 'map':
       page = directory((session) => <MapPage session={session} />);
       break;
+    case 'coordinates':
+      page = directory((session) => <CoordinatesPage session={session} />);
+      break;
     case 'counterparties':
       page = directory((session) => <CounterpartiesPage session={session} />);
       break;
@@ -76,9 +80,11 @@ export function App({ account }: { account?: Account }) {
         current={
           route.page === 'workspace' || route.page === 'map'
             ? route.page
-            : route.page === 'not-found'
-              ? null
-              : 'counterparties'
+            : route.page === 'coordinates'
+              ? 'map'
+              : route.page === 'not-found'
+                ? null
+                : 'counterparties'
         }
         {...(account && {
           user: {

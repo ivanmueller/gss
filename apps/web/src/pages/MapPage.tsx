@@ -3,7 +3,7 @@ import { lazy, Suspense, useState } from 'react';
 
 import { RealDataNote } from '../components/RealDataNote';
 import type { MapFacilities, MapFacility } from '../lib/api';
-import { countryName, facilityTypeLabel } from '../lib/directory';
+import { canEditDirectory, countryName, facilityTypeLabel } from '../lib/directory';
 import { BASEMAPS, mapboxToken, type Basemap, type MapboxToken } from '../lib/mapbox';
 import { Link } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
@@ -190,6 +190,14 @@ export function MapPage({
           </>
         )}
       </p>
+      {data && data.withoutCoordinates > 0 && canEditDirectory(organization.role) && (
+        <Link
+          href="/map/coordinates"
+          className="w-fit rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          Find coordinates from addresses
+        </Link>
+      )}
 
       {facilities.length > 0 && (
         <ul

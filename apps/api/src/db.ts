@@ -1,12 +1,15 @@
 import type {
   Bbox,
   ContactInput,
+  SignedMatch,
   CounterpartyInput,
   FacilityInput,
   FacilityType,
   LocationPrecision,
 } from '@grain/domain';
 import postgres from 'postgres';
+
+import type { FacilityAddress } from './geocoding';
 
 export interface Membership {
   organizationId: string;
@@ -129,6 +132,21 @@ export interface Database {
     organizationId: string | null,
     bbox: Bbox,
   ) => Promise<MapFacilities>;
+  /** The organization's facilities without coordinates, up to `limit` + 1, by counterparty. */
+  facilitiesWithoutCoordinates: (
+    ctx: RequestContext,
+    organizationId: string,
+    limit: number,
+  ) => Promise<FacilityAddress[]>;
+  /**
+   * Saves geocoded coordinates for facilities of the organization that still have none;
+   * returns the ids of the facilities saved.
+   */
+  saveCoordinates: (
+    ctx: RequestContext,
+    organizationId: string,
+    matches: SignedMatch[],
+  ) => Promise<string[]>;
   getLogo: (ctx: RequestContext, counterpartyId: string) => Promise<Logo | null>;
   putLogo: (
     ctx: RequestContext,
@@ -346,6 +364,51 @@ export function createDatabase(sql: postgres.Sql): Database {
           select count(*)::int as count from app.facilities f
           where f.location is null and ${inOrganization()}`;
         return { facilities: [...facilities], withoutCoordinates: missing?.count ?? 0 };
+      });
+    },
+
+    facilitiesWithoutCoordinates(ctx, organizationId, limit) {
+      return asUser(ctx, async (tx) => {
+        const rows = await tx<FacilityAddress[]>`
+          select f.id as "facilityId", f.counterparty_id as "counterpartyId",
+                 c.legal_name as "legalName", f.name as "facilityName",
+                 f.address_line as "addressLine", f.city, f.region,
+                 f.postal_code as "postalCode", f.country
+          from app.facilities f
+          join app.counterparties c on c.id = f.counterparty_id
+          where f.organization_id = ${organizationId} and f.latitude is null
+          order by lower(c.legal_name), c.id, lower(f.name), f.id
+          limit ${limit + 1}
+        `;
+        return [...rows];
+      });
+    },
+
+    saveCoordinates(ctx, organizationId, matches) {
+      return asUser(ctx, async (tx) => {
+        const values = matches.map((match) => ({
+          id: match.facilityId,
+          latitude: match.latitude,
+          longitude: match.longitude,
+          precision: match.precision,
+          accuracy_type: match.accuracyType,
+          confidence: match.confidence,
+        }));
+        // One statement for the whole batch. Row level security also refuses facilities
+        // that already have coordinates, so a saved location is never overwritten.
+        const rows = await tx<{ id: string }[]>`
+          update app.facilities f
+          set latitude = v.latitude, longitude = v.longitude, location_precision = v.precision,
+              geocoding_source = 'geocodio', geocoding_accuracy = v.accuracy_type,
+              geocoding_confidence = v.confidence
+          from jsonb_to_recordset(${tx.json(values)}::jsonb) as v(
+            id uuid, latitude numeric, longitude numeric, precision app.location_precision,
+            accuracy_type text, confidence numeric
+          )
+          where f.id = v.id and f.organization_id = ${organizationId} and f.latitude is null
+          returning f.id
+        `;
+        return rows.map((row) => row.id);
       });
     },
 

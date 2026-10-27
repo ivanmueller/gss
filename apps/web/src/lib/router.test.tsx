@@ -12,6 +12,7 @@ describe('matchRoute', () => {
   it('knows the app pages', () => {
     expect(matchRoute('/')).toEqual({ page: 'workspace' });
     expect(matchRoute('/map')).toEqual({ page: 'map' });
+    expect(matchRoute('/map/coordinates')).toEqual({ page: 'coordinates' });
     expect(matchRoute('/counterparties/')).toEqual({ page: 'counterparties' });
     expect(matchRoute('/counterparties/import')).toEqual({ page: 'import' });
     expect(matchRoute('/counterparties/00000000-0000-4000-8000-00000000c001')).toEqual({

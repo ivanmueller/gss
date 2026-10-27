@@ -217,3 +217,27 @@ describe('MapPage without a usable Mapbox token', () => {
     expect(screen.getByText(/is not a public token/)).toBeInTheDocument();
   });
 });
+
+describe('MapPage and locations without coordinates', () => {
+  it('offers operations and admin members to find coordinates', async () => {
+    mockApi({ [WORLD]: answer() });
+    render(<MapPage session={SESSION} mapbox={{ status: 'missing' }} />);
+    expect(
+      await screen.findByRole('link', { name: 'Find coordinates from addresses' }),
+    ).toHaveAttribute('href', '/map/coordinates');
+  });
+
+  it('does not offer it to other members, or when every location has coordinates', async () => {
+    mockApi({ [WORLD]: answer() });
+    const viewer = { ...SESSION, organization: { ...ORG, role: 'viewer' } };
+    const { unmount } = render(<MapPage session={viewer} mapbox={{ status: 'missing' }} />);
+    await screen.findByText(/2 locations have coordinates/);
+    expect(screen.queryByRole('link', { name: /Find coordinates/ })).not.toBeInTheDocument();
+    unmount();
+
+    mockApi({ [WORLD]: answer({ withoutCoordinates: 0 }) });
+    render(<MapPage session={SESSION} mapbox={{ status: 'missing' }} />);
+    await screen.findByText('2 locations have coordinates.');
+    expect(screen.queryByRole('link', { name: /Find coordinates/ })).not.toBeInTheDocument();
+  });
+});

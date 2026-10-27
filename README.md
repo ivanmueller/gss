@@ -61,6 +61,17 @@ The map needs a Mapbox **public** token, built into the web app when staging dep
 
 Without the token, the page lists the locations and explains what is missing. To replace the token, update the secret and deploy again.
 
+### Finding coordinates
+
+Operations and admin members can turn addresses into map points: **Map → Find coordinates from addresses → Look up addresses**. The app sends only the addresses of locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio, shows what it found as exact or approximate, and saves only the results you leave ticked. Results in another province or state, or with low confidence, start unticked. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
+
+The lookup needs a Geocodio API key, kept as a secret of the staging Worker in Cloudflare (the server does the lookups, so the key never reaches a browser):
+
+1. In Geocodio (dash.geocod.io → **API Keys**), create a key for this app and copy it.
+2. In Cloudflare (**Workers & Pages → grain-trading-api-staging → Settings → Variables and Secrets → Add**): type **Secret**, name `GEOCODIO_API_KEY`, paste the key, **Deploy**.
+
+Secrets stay in place when staging deploys. Replacing the key voids looked-up results not yet saved; look the addresses up again.
+
 ## Staging database connection
 
 The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifies Supabase's certificate (`docs/DECISIONS.md`). To create or update it: give the Cloudflare API token Hyperdrive and SSL and Certificates edit permissions, add the GitHub secret `SUPABASE_HYPERDRIVE_URL` (`postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres`, Supabase's session pooler), then run **Actions → Set up Hyperdrive (staging)**. Its summary shows the configuration ID that `apps/api/wrangler.jsonc` binds as `HYPERDRIVE`. Locally, `wrangler dev --env staging` connects that binding to the database in `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (CI sets it to the throwaway database).
