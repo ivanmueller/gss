@@ -1,17 +1,10 @@
-import { ChevronDown, TriangleAlert } from 'lucide-react';
+import { ChevronDown, CircleDashed, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { formatQuantityShort, formatSignedPrice } from '../lib/format';
-import {
-  displayStatus,
-  largestQuantity,
-  type BookQuote,
-  type CommodityBook,
-} from '../lib/orderBook';
+import { formatAmount, formatPrice, formatQuantityShort, formatSignedAmount } from '../lib/format';
+import { displayStatus, type BookQuote, type CommodityBook } from '../lib/orderBook';
 import { cn } from '../lib/utils';
-import { CadPrice } from './CadPrice';
-import { QuoteStatusBadge } from './QuoteStatusBadge';
-import { Badge } from './ui/badge';
+import { conversionText } from './CadPrice';
 import { Card } from './ui/card';
 
 interface Selection {
@@ -22,120 +15,129 @@ interface Selection {
 
 // Asks (what sellers offer, what we buy at) on the left, bids (what buyers pay, what we sell
 // at) on the right: the owner's reading order, from the seller to the new buyer.
-const LADDER_COLUMNS = 'grid grid-cols-2 gap-2';
+const COLUMNS = 'grid grid-cols-2';
 
-/** Quantity against the largest in the book, as a strip along the bottom of the cell. */
-function DepthStrip({
-  side,
-  max,
-  largest,
-}: {
-  side: 'OFFER' | 'BID';
-  max: string;
-  largest: string | null;
-}) {
-  // A display width only; no money is calculated here.
-  const share = largest ? Math.min(100, (Number(max) / Number(largest)) * 100) : 0;
+const SPREAD_CAVEAT = 'Best bid minus best ask, before freight and basis: not a margin.';
+
+/** The mark for an indicative price; firm prices carry none. The book's footer explains it. */
+function IndicativeMark({ label = false }: { label?: boolean }) {
   return (
-    <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-1 bg-muted">
-      <span
-        className={cn(
-          'absolute inset-y-0 left-0',
-          side === 'OFFER' ? 'bg-offer-solid' : 'bg-bid-solid',
-        )}
-        style={{ width: `${String(share)}%` }}
-      />
+    <>
+      <CircleDashed aria-hidden="true" className="size-3 shrink-0 text-caution" />
+      {label && <span className="sr-only">indicative</span>}
+    </>
+  );
+}
+
+/** "FX": a price converted from USD; the original price and rate are in its tooltip. */
+function FxMark({ text }: { text: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      title={`Converted from ${text}`}
+      className="rounded-xs border px-0.5 font-sans text-2xs leading-none font-medium text-muted-foreground"
+    >
+      FX
     </span>
   );
 }
 
-/** One ask or bid in the ladder: who, where, the price in CAD, status and size. */
-function QuoteCell({
-  entry,
-  largest,
-  selectedId,
-  onSelect,
-  now,
-}: { entry: BookQuote; largest: string | null } & Selection) {
-  const { facility, quote } = entry;
+/**
+ * One ask or bid: who, where, then the price and quantity. The price alone is coloured (red
+ * asks, green bids); the panel's heading gives its currency and unit.
+ */
+function QuoteCell({ entry, selectedId, onSelect, now }: { entry: BookQuote } & Selection) {
+  const { facility, quote, fx } = entry;
   const ask = quote.side === 'OFFER';
+  const status = displayStatus(quote, now);
+  const converted = fx && conversionText(quote, fx);
+  const quantity = formatQuantityShort(quote.quantityMt);
+  // Screen readers hear the whole entry, with the currency, unit and status in words.
+  const label = [
+    `${ask ? 'Ask' : 'Bid'}: ${facility.name}`,
+    formatPrice({ amount: entry.cadDisplay, currency: 'CAD', unit: quote.price.unit }),
+    converted && `converted from ${converted}`,
+    status,
+    `${facility.region}, ${quote.deliveryBasis}`,
+    quantity,
+  ]
+    .filter(Boolean)
+    .join(', ');
   return (
     <button
       type="button"
       aria-pressed={selectedId === facility.id}
+      aria-label={label}
       onClick={() => {
         onSelect(facility.id);
       }}
-      className={cn(
-        'relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-control border px-2 pt-2 pb-3 text-left text-xs transition-colors aria-pressed:ring-2 aria-pressed:ring-ring',
-        ask
-          ? 'border-offer-border bg-offer-subtle hover:border-offer'
-          : 'border-bid-border bg-bid-subtle hover:border-bid',
-      )}
+      className="flex min-w-0 flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-muted/60 aria-pressed:bg-accent"
     >
-      <span className="text-sm font-medium text-foreground">
-        <span className="sr-only">{ask ? 'Ask: ' : 'Bid: '}</span>
+      <span className="truncate text-sm font-medium" title={facility.name}>
         {facility.name}
       </span>
-      <span className="text-muted-foreground">
+      <span
+        className="truncate text-xs text-muted-foreground"
+        title={`${facility.region} · ${quote.deliveryBasis}`}
+      >
         {facility.region} · {quote.deliveryBasis}
       </span>
-      <CadPrice quote={quote} fx={entry.fx} className="text-sm font-semibold text-foreground" />
-      <span className="flex flex-wrap items-center justify-between gap-1">
-        <QuoteStatusBadge status={displayStatus(quote, now)} />
-        <span className="text-muted-foreground tabular-nums">
-          {formatQuantityShort(quote.quantityMt)}
+      <span className="mt-1 flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            'flex items-center gap-1 font-mono text-sm font-semibold tabular-nums',
+            ask ? 'text-offer' : 'text-bid',
+          )}
+        >
+          {formatAmount(entry.cadDisplay)}
+          {converted && <FxMark text={converted} />}
+          {status === 'indicative' && <IndicativeMark />}
+        </span>
+        <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+          {quantity}
         </span>
       </span>
-      <DepthStrip side={quote.side} max={quote.quantityMt.max} largest={largest} />
     </button>
   );
 }
 
-function SpreadLine({ book }: { book: CommodityBook }) {
+/** The gross spread in the section's heading, or which side is missing. */
+function Spread({ book }: { book: CommodityBook }) {
   const { spread } = book;
-  if (spread.status === 'ok') {
+  if (spread.status !== 'ok') {
     return (
-      <p
-        // The caveat stays one hover away (owner's decision to drop the note under the heading).
-        title="Best bid minus best ask, before freight and basis: not a margin."
-        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
-      >
-        Gross spread{' '}
-        <span className="font-mono font-semibold text-foreground tabular-nums">
-          {formatSignedPrice(spread)}
-        </span>
-        {book.indicative && <Badge variant="caution">Indicative</Badge>}
-      </p>
+      <span className="text-xs text-muted-foreground">
+        {spread.status === 'missing'
+          ? `No ${spread.side} yet`
+          : spread.reason === 'UNIT_MISMATCH'
+            ? 'No spread: units differ'
+            : 'No spread'}
+      </span>
     );
   }
   return (
-    <p className="text-xs text-muted-foreground">
-      {spread.status === 'missing'
-        ? `No spread: no ${spread.side}`
-        : spread.reason === 'UNIT_MISMATCH'
-          ? 'No spread: the units differ'
-          : 'No spread'}
-    </p>
+    <span title={SPREAD_CAVEAT} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      Spread
+      <span className="font-mono text-sm font-semibold text-foreground tabular-nums">
+        {formatSignedAmount(spread.amount)}
+      </span>
+      {book.indicative && <IndicativeMark label />}
+    </span>
   );
 }
 
 /** Asks on the left and bids on the right, best first, level by level. */
-function Ladder({
-  book,
-  largest,
-  ...selection
-}: { book: CommodityBook; largest: string | null } & Selection) {
+function Ladder({ book, ...selection }: { book: CommodityBook } & Selection) {
   const levels = Math.max(book.asks.length, book.bids.length);
   return (
-    <ol aria-label="Asks and bids" className="flex flex-col gap-2">
+    <ol aria-label="Asks and bids" className="divide-y">
       {Array.from({ length: levels }, (_, level) => {
         const ask = book.asks[level];
         const bid = book.bids[level];
         return (
-          <li key={level} className={LADDER_COLUMNS}>
-            {ask ? <QuoteCell entry={ask} largest={largest} {...selection} /> : <span />}
-            {bid ? <QuoteCell entry={bid} largest={largest} {...selection} /> : <span />}
+          <li key={level} className={cn(COLUMNS, 'divide-x')}>
+            {ask ? <QuoteCell entry={ask} {...selection} /> : <span />}
+            {bid ? <QuoteCell entry={bid} {...selection} /> : <span />}
           </li>
         );
       })}
@@ -144,50 +146,44 @@ function Ladder({
 }
 
 function CommoditySection({ book, ...selection }: { book: CommodityBook } & Selection) {
-  const largest = largestQuantity([book]);
   const live = book.asks.length + book.bids.length;
-  const title = book.grade ? `${book.commodity} · ${book.grade}` : book.commodity;
   const noRate = book.outOfBook.some((entry) => entry.reason === 'FX_MISSING');
   return (
     <details open className="group border-b last:border-b-0">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
-        <span className="text-sm font-semibold">{title}</span>
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          {live} live {live === 1 ? 'quote' : 'quotes'}
-          <ChevronDown
-            aria-hidden="true"
-            className="size-4 transition-transform group-open:rotate-180"
-          />
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {book.commodity}
+          {book.grade && <span className="font-normal text-muted-foreground"> · {book.grade}</span>}
         </span>
+        {live > 0 && <Spread book={book} />}
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+        />
       </summary>
-      <div className="flex flex-col gap-3 px-4 pb-4">
-        {live === 0 ? (
-          <p className="text-xs text-muted-foreground">No live asks or bids.</p>
-        ) : (
-          <>
-            <div role="group" aria-label="Spread" className="rounded-control bg-muted/60 p-2">
-              <SpreadLine book={book} />
-            </div>
-            <div
-              aria-hidden="true"
-              className={cn(
-                LADDER_COLUMNS,
-                'text-2xs font-medium tracking-wider text-muted-foreground uppercase',
-              )}
-            >
-              <span>Asks · sellers</span>
-              <span>Bids · buyers</span>
-            </div>
-            <Ladder book={book} largest={largest} {...selection} />
-          </>
-        )}
-        {noRate && (
-          <p className="flex items-start gap-1.5 text-xs text-caution">
-            <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-            USD quotes are left out of the book: there is no CAD/USD rate to convert them.
-          </p>
-        )}
-      </div>
+      {live === 0 ? (
+        <p className="px-4 pb-3 text-xs text-muted-foreground">No live asks or bids.</p>
+      ) : (
+        <div className="mx-4 mb-3 overflow-hidden rounded-control border">
+          <div
+            aria-hidden="true"
+            className={cn(
+              COLUMNS,
+              'divide-x border-b bg-muted/50 text-2xs font-medium tracking-wider text-muted-foreground uppercase',
+            )}
+          >
+            <span className="px-3 py-1.5">Asks · sellers</span>
+            <span className="px-3 py-1.5">Bids · buyers</span>
+          </div>
+          <Ladder book={book} {...selection} />
+        </div>
+      )}
+      {noRate && (
+        <p className="flex items-start gap-1.5 px-4 pb-3 text-xs text-caution">
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+          USD quotes are left out of the book: there is no CAD/USD rate to convert them.
+        </p>
+      )}
     </details>
   );
 }
@@ -216,6 +212,9 @@ export function OrderBook({
   inert?: boolean;
   className?: string;
 } & Selection) {
+  const entries = books.flatMap((book) => [...book.asks, ...book.bids]);
+  const anyIndicative = entries.some((entry) => entry.quote.status === 'indicative');
+  const anyConverted = entries.some((entry) => entry.fx !== null);
   return (
     <Card asChild>
       <aside
@@ -224,10 +223,11 @@ export function OrderBook({
         aria-labelledby="order-book-heading"
         className={cn('flex flex-col overflow-hidden', className)}
       >
-        <div className="border-b px-4 py-3">
+        <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
           <h2 id="order-book-heading" className="text-base font-semibold">
             Order book
           </h2>
+          <span className="text-xs text-muted-foreground">CAD/MT</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {selected}
@@ -245,6 +245,22 @@ export function OrderBook({
             ))
           )}
         </div>
+        {(anyIndicative || anyConverted) && (
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t px-4 py-2 text-2xs text-muted-foreground">
+            {anyIndicative && (
+              <span className="flex items-center gap-1">
+                <IndicativeMark />
+                Indicative, not firm
+              </span>
+            )}
+            {anyConverted && (
+              <span className="flex items-center gap-1">
+                <span className="rounded-xs border px-0.5 leading-none font-medium">FX</span>
+                Converted from USD
+              </span>
+            )}
+          </p>
+        )}
       </aside>
     </Card>
   );

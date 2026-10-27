@@ -11,14 +11,19 @@ function withMinus(amount: string): string {
 }
 
 /**
- * "USD 725.00/MT", or "CAD −17.00/MT" for a negative (basis) price. Built from the decimal
- * string; no floating-point conversion.
+ * "805.00", "−17.00": an amount alone, for a column or panel whose heading gives the currency
+ * and unit. Built from the decimal string; no floating-point conversion.
  */
-export function formatPrice(price: Price): string {
-  if (!SIGNED.test(price.amount)) {
-    throw new Error(`Price amount is not a decimal string: "${price.amount}"`);
+export function formatAmount(amount: string): string {
+  if (!SIGNED.test(amount)) {
+    throw new Error(`Price amount is not a decimal string: "${amount}"`);
   }
-  return `${price.currency} ${withMinus(price.amount)}/${price.unit}`;
+  return withMinus(amount);
+}
+
+/** "USD 725.00/MT", or "CAD −17.00/MT" for a negative (basis) price. */
+export function formatPrice(price: Price): string {
+  return `${price.currency} ${formatAmount(price.amount)}/${price.unit}`;
 }
 
 /** "2026-10-26 15:00 UTC". Shown in UTC so every viewer reads the same time. */
@@ -31,17 +36,19 @@ export function formatUtc(iso: string): string {
   return `${text.slice(0, 10)} ${text.slice(11, 16)} UTC`;
 }
 
-/**
- * "CAD +22.00/MT", "CAD −15.00/MT" (a true minus sign), "CAD 0.00/MT": a spread from its
- * decimal string, signed so a negative one is plain to see.
- */
-export function formatSignedPrice(price: { amount: string; currency: string; unit: string }) {
-  if (!SIGNED.test(price.amount)) {
-    throw new Error(`Amount is not a decimal string: "${price.amount}"`);
+/** "+22.00", "−15.00" (a true minus sign), "0.00": a spread, signed so a negative one is plain. */
+export function formatSignedAmount(amount: string): string {
+  if (!SIGNED.test(amount)) {
+    throw new Error(`Amount is not a decimal string: "${amount}"`);
   }
-  const shown = withMinus(price.amount);
+  const shown = withMinus(amount);
   const plus = !shown.startsWith('\u2212') && !/^0+(\.0+)?$/.test(shown);
-  return `${price.currency} ${plus ? '+' : ''}${shown}/${price.unit}`;
+  return `${plus ? '+' : ''}${shown}`;
+}
+
+/** "CAD +22.00/MT", "CAD −15.00/MT", "CAD 0.00/MT". */
+export function formatSignedPrice(price: { amount: string; currency: string; unit: string }) {
+  return `${price.currency} ${formatSignedAmount(price.amount)}/${price.unit}`;
 }
 
 export function formatQuantityRange(range: { min: string; max: string }): string {

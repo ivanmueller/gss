@@ -160,3 +160,11 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
   - USD quotes without a rate are still left out with a visible warning, never priced at zero.
 - Expired, withdrawn and past-due quotes are simply not shown in the book; they stay in the selection details and the facility table with their status.
 - The real pages (counterparties, map, import) are unchanged and keep their "Your organization's records" note.
+
+**2026-10-27 — A cleaner order book (owner's request).** The owner found the order book cluttered: the Firm and Indicative tags, the tinted boxes and the volume bars. Choices:
+- **Rows, not cards.** Each commodity has a small table: "Asks · sellers" on the left and "Bids · buyers" on the right, best first. Thin lines separate the levels; there are no tinted boxes or borders around each quote. Each entry shows the name, the region and delivery basis, the price and the quantity.
+- **Colour only on the price:** red for asks, green for bids.
+- **No status tags.** A firm price carries no mark. An indicative price carries a small dashed circle, and a converted price carries "FX". The book's footer explains both, and screen readers hear the status and any conversion in words.
+- **No volume bars.** The quantity range is shown as text.
+- **Units once.** "CAD/MT" is stated once at the top of the book, and the amounts appear alone. This is an exception to `docs/PRODUCT.md`'s "currency and unit on every figure". The selection details and the facility table still show "CAD 986.00/MT".
+- **Spread in the heading.** The gross spread moves into each commodity's heading ("Spread +181.00"), with the dashed circle when either best quote is indicative. Its "not a margin" caveat stays as hover text. The live-quote count is dropped.

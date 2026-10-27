@@ -5,7 +5,6 @@ import type { Facility, FxRate, Quote } from '../data/types';
 import {
   buildOrderBooks,
   isLive,
-  largestQuantity,
   type BookQuote,
   type CommodityBook,
   type OutOfBook,
@@ -211,10 +210,5 @@ describe('order book', () => {
     expect(isLive({ ...offer, status: 'withdrawn' }, NOW)).toBe(false);
     expect(isLive({ ...offer, status: 'superseded' }, NOW)).toBe(false);
     expect(isLive(offer, new Date(offer.validUntil))).toBe(false);
-  });
-
-  it('finds the largest quantity for the bars', () => {
-    expect(largestQuantity([book('Flaxseed')])).toBe('84.000');
-    expect(largestQuantity([])).toBeNull();
   });
 });

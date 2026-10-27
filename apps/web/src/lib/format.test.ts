@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatAmount,
   formatPrice,
   formatQuantityRange,
   formatQuantityShort,
+  formatSignedAmount,
   formatSignedPrice,
   formatUtc,
 } from './format';
@@ -82,5 +84,24 @@ describe('formatSignedPrice', () => {
 
   it('refuses anything but a decimal string', () => {
     expect(() => formatSignedPrice({ amount: '1e3', currency: 'CAD', unit: 'MT' })).toThrow();
+  });
+});
+
+describe('formatAmount and formatSignedAmount', () => {
+  it.each([
+    ['805.00', '805.00', '+805.00'],
+    ['-17.00', '\u221217.00', '\u221217.00'],
+    ['-0.00', '0.00', '0.00'],
+    ['0', '0', '0'],
+  ])('shows %s as %s, and signed as %s', (amount, plain, signed) => {
+    expect(formatAmount(amount)).toBe(plain);
+    expect(formatSignedAmount(amount)).toBe(signed);
+  });
+
+  it('refuses amounts that are not decimal strings', () => {
+    for (const amount of ['', '7.25e2', '+1.00', '1,000.00']) {
+      expect(() => formatAmount(amount)).toThrow(/decimal/);
+      expect(() => formatSignedAmount(amount)).toThrow(/decimal/);
+    }
   });
 });
