@@ -293,7 +293,7 @@ describe('Workspace', () => {
     expect(within(flax).queryByRole('list', { name: 'USD bids and offers' })).toBeNull();
   });
 
-  it('re-checks quotes every minute while the page stays open', async () => {
+  it('re-checks quotes every minute while the page stays open', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(new Date('2026-11-09T23:58:30Z'));
     render(<Workspace mapbox={{ status: 'missing' }} />);
