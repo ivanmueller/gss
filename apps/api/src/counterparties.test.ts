@@ -1,3 +1,4 @@
+import { crc32 } from '@grain/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LIST_LIMIT, type CounterpartySummary, type Database } from './db';
@@ -213,6 +214,49 @@ describe('PUT /api/v1/counterparties/:id/logo', () => {
     expect(openDatabase).not.toHaveBeenCalled();
   });
 
+  it('stores the cleaned copy, without text chunks hidden in the upload', async () => {
+    // The 1x1 PNG with a tEXt chunk carrying HTML inserted after IHDR (at byte 33).
+    const data = Uint8Array.from('Comment\u0000<b>hi</b>', (char) => char.charCodeAt(0));
+    const text = new Uint8Array(12 + data.byteLength);
+    const view = new DataView(text.buffer);
+    view.setUint32(0, data.byteLength);
+    text.set([0x74, 0x45, 0x58, 0x74], 4); // "tEXt"
+    text.set(data, 8);
+    view.setUint32(8 + data.byteLength, crc32(text.subarray(4, 8 + data.byteLength)));
+    const withText = new Uint8Array([...PNG.subarray(0, 33), ...text, ...PNG.subarray(33)]);
+
+    const res = await put(withText);
+    expect(res.status).toBe(200);
+    expect(db.putLogo.mock.calls[0]?.[2]).toEqual(PNG);
+  });
+
+  it('refuses a PNG with no image data or with bytes slipped between its chunks', async () => {
+    const headerOnly = new Uint8Array([...PNG.subarray(0, 33), ...PNG.subarray(PNG.length - 12)]);
+    expect((await put(headerOnly)).status).toBe(422);
+    const html = Uint8Array.from('<html>x</html>', (char) => char.charCodeAt(0));
+    const slipped = new Uint8Array([
+      ...PNG.subarray(0, 33),
+      ...html,
+      ...PNG.subarray(PNG.length - 12),
+    ]);
+    expect((await put(slipped)).status).toBe(422);
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('does not retry an upload when the connection is lost', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    db.putLogo.mockRejectedValueOnce(
+      Object.assign(new Error('write CONNECTION_CLOSED db.example.test:5432'), {
+        code: 'CONNECTION_CLOSED',
+      }),
+    );
+    const res = await put(PNG);
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(503);
+    expect(db.putLogo).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 404 for a counterparty the user cannot see and 403 for one they cannot edit', async () => {
     db.putLogo.mockResolvedValueOnce({ status: 'not_found' });
     expect((await put(PNG)).status).toBe(404);
@@ -370,6 +414,20 @@ describe('POST /api/v1/counterparties/import', () => {
     expect(res.status).toBe(403);
     expect(db.counterpartyKeys).not.toHaveBeenCalled();
     expect(db.importCounterparties).not.toHaveBeenCalled();
+  });
+
+  it('does not retry an import when the connection is lost', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    db.importCounterparties.mockRejectedValueOnce(
+      Object.assign(new Error('write CONNECTION_CLOSED db.example.test:5432'), {
+        code: 'CONNECTION_CLOSED',
+      }),
+    );
+    const res = await postImport({ ...body, commit: true });
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(503);
+    expect(db.importCounterparties).toHaveBeenCalledTimes(1);
   });
 
   it('maps a row level security refusal to 403', async () => {

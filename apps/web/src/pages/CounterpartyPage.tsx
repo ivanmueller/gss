@@ -45,7 +45,7 @@ function LogoUpload({
     event.target.value = '';
     if (!file) return;
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const check = inspectPng(bytes);
+    const check = await inspectPng(bytes);
     if (!check.ok) {
       setState({ kind: 'error', message: PNG_PROBLEMS[check.reason] });
       return;

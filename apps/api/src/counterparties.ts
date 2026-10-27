@@ -212,7 +212,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       return apiError(c, 413, 'PAYLOAD_TOO_LARGE', 'Logos must be 512 KB or smaller.');
     }
     const data = new Uint8Array(await c.req.arrayBuffer());
-    const check = inspectPng(data);
+    const check = await inspectPng(data);
     if (!check.ok) {
       return check.reason === 'TOO_LARGE'
         ? apiError(c, 413, 'PAYLOAD_TOO_LARGE', 'Logos must be 512 KB or smaller.')
@@ -226,7 +226,8 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           );
     }
     return withDatabase(c, openDatabase, async (db, ctx) => {
-      const saved = await db.putLogo(ctx, id, data);
+      // Store the rebuilt copy: validated chunks only, no hidden text or trailing data.
+      const saved = await db.putLogo(ctx, id, check.png);
       if (saved.status === 'not_found')
         return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
       if (saved.status === 'forbidden') {
@@ -241,7 +242,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         sha256: saved.sha256,
         width: check.width,
         height: check.height,
-        bytes: data.byteLength,
+        bytes: check.png.byteLength,
       });
     });
   });
