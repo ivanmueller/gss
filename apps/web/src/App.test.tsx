@@ -141,6 +141,49 @@ describe('API status', () => {
   });
 });
 
+describe('signed-in user', () => {
+  it('shows the email confirmed by the API and signs out', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url === '/api/v1/me'
+          ? Response.json({ id: 'user-1', email: 'alice@example.test' })
+          : Response.json({ status: 'ok', service: 'api' }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const signOut = vi.fn();
+    const user = userEvent.setup();
+    render(<App account={{ email: 'session@example.test', accessToken: 'token-1', signOut }} />);
+
+    expect(await screen.findByText('alice@example.test')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', {
+      headers: { Authorization: 'Bearer token-1' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns when the API rejects the session', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url === '/api/v1/me'
+            ? Response.json({ error: { code: 'MFA_REQUIRED' } }, { status: 403 })
+            : Response.json({ status: 'ok', service: 'api' }),
+        ),
+      ),
+    );
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    expect(await screen.findByText(/server could not confirm your session/)).toBeInTheDocument();
+  });
+});
+
 describe('narrow screens', () => {
   it('shows a facility list instead of the table', async () => {
     setViewport(false);

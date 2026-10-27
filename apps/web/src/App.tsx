@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import type { Account } from './auth/AuthGate';
 import { AppHeader } from './components/AppHeader';
 import { FacilityList } from './components/FacilityList';
 import { FacilityTable } from './components/FacilityTable';
@@ -10,13 +11,15 @@ import { SyntheticBanner } from './components/SyntheticBanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { SYNTHETIC_FACILITIES } from './data/synthetic';
 import { useApiHealth } from './lib/useApiHealth';
+import { useMe } from './lib/useMe';
 import { useMediaQuery } from './lib/useMediaQuery';
 
 // Tailwind's `lg` breakpoint.
 const DESKTOP_QUERY = '(min-width: 1024px)';
 
-export function App() {
+export function App({ account }: { account?: Account }) {
   const health = useApiHealth();
+  const me = useMe(account?.accessToken ?? null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY, true);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [selectedId, setSelectedId] = useState(SYNTHETIC_FACILITIES[0]?.id ?? '');
@@ -32,7 +35,16 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <AppHeader health={health} />
+      <AppHeader
+        health={health}
+        {...(account && {
+          user: {
+            email: me.status === 'ok' ? me.email : account.email,
+            check: me.status,
+            onSignOut: account.signOut,
+          },
+        })}
+      />
       <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4">
         <SyntheticBanner />
         <FilterBar value={roleFilter} onChange={setRoleFilter} />
