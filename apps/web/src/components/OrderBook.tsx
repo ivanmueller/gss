@@ -15,7 +15,7 @@ interface Selection {
 
 // Asks (what sellers offer, what we buy at) on the left, bids (what buyers pay, what we sell
 // at) on the right: the owner's reading order, from the seller to the new buyer.
-const COLUMNS = 'grid grid-cols-2';
+const COLUMNS = 'grid grid-cols-2 gap-2';
 
 const SPREAD_CAVEAT = 'Best bid minus best ask, before freight and basis: not a margin.';
 
@@ -43,8 +43,8 @@ function FxMark({ text }: { text: string }) {
 }
 
 /**
- * One ask or bid: who, where, then the price and quantity. The price alone is coloured (red
- * asks, green bids); the panel's heading gives its currency and unit.
+ * One ask or bid, in a box tinted red (ask) or green (bid): who, where, then the price per
+ * tonne and the quantity. The panel's heading gives the currency.
  */
 function QuoteCell({ entry, selectedId, onSelect, now }: { entry: BookQuote } & Selection) {
   const { facility, quote, fx } = entry;
@@ -71,10 +71,18 @@ function QuoteCell({ entry, selectedId, onSelect, now }: { entry: BookQuote } & 
       onClick={() => {
         onSelect(facility.id);
       }}
-      className="flex min-w-0 flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-muted/60 aria-pressed:bg-accent"
+      className={cn(
+        'flex min-w-0 flex-col gap-0.5 rounded-control border px-2.5 py-2 text-left transition-colors aria-pressed:ring-2 aria-pressed:ring-ring',
+        ask
+          ? 'border-offer-border bg-offer-subtle hover:border-offer'
+          : 'border-bid-border bg-bid-subtle hover:border-bid',
+      )}
     >
-      <span className="truncate text-sm font-medium" title={facility.name}>
-        {facility.name}
+      <span className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm font-medium" title={facility.name}>
+          {facility.name}
+        </span>
+        {status === 'indicative' && <IndicativeMark />}
       </span>
       <span
         className="truncate text-xs text-muted-foreground"
@@ -82,18 +90,12 @@ function QuoteCell({ entry, selectedId, onSelect, now }: { entry: BookQuote } & 
       >
         {facility.region} · {quote.deliveryBasis}
       </span>
-      <span className="mt-1 flex items-center justify-between gap-2">
-        <span
-          className={cn(
-            'flex items-center gap-1 font-mono text-sm font-semibold tabular-nums',
-            ask ? 'text-offer' : 'text-bid',
-          )}
-        >
-          {formatAmount(entry.cadDisplay)}
+      <span className="mt-1 flex flex-wrap items-center justify-between gap-x-2">
+        <span className="flex items-center gap-1 font-mono text-sm font-semibold tabular-nums">
+          {formatAmount(entry.cadDisplay)}/{quote.price.unit}
           {converted && <FxMark text={converted} />}
-          {status === 'indicative' && <IndicativeMark />}
         </span>
-        <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+        <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground tabular-nums">
           {quantity}
         </span>
       </span>
@@ -130,12 +132,12 @@ function Spread({ book }: { book: CommodityBook }) {
 function Ladder({ book, ...selection }: { book: CommodityBook } & Selection) {
   const levels = Math.max(book.asks.length, book.bids.length);
   return (
-    <ol aria-label="Asks and bids" className="divide-y">
+    <ol aria-label="Asks and bids" className="flex flex-col gap-2">
       {Array.from({ length: levels }, (_, level) => {
         const ask = book.asks[level];
         const bid = book.bids[level];
         return (
-          <li key={level} className={cn(COLUMNS, 'divide-x')}>
+          <li key={level} className={COLUMNS}>
             {ask ? <QuoteCell entry={ask} {...selection} /> : <span />}
             {bid ? <QuoteCell entry={bid} {...selection} /> : <span />}
           </li>
@@ -164,16 +166,16 @@ function CommoditySection({ book, ...selection }: { book: CommodityBook } & Sele
       {live === 0 ? (
         <p className="px-4 pb-3 text-xs text-muted-foreground">No live asks or bids.</p>
       ) : (
-        <div className="mx-4 mb-3 overflow-hidden rounded-control border">
+        <div className="flex flex-col gap-2 px-4 pb-4">
           <div
             aria-hidden="true"
             className={cn(
               COLUMNS,
-              'divide-x border-b bg-muted/50 text-2xs font-medium tracking-wider text-muted-foreground uppercase',
+              'text-2xs font-medium tracking-wider text-muted-foreground uppercase',
             )}
           >
-            <span className="px-3 py-1.5">Asks · sellers</span>
-            <span className="px-3 py-1.5">Bids · buyers</span>
+            <span>Asks · sellers</span>
+            <span>Bids · buyers</span>
           </div>
           <Ladder book={book} {...selection} />
         </div>
@@ -227,7 +229,7 @@ export function OrderBook({
           <h2 id="order-book-heading" className="text-base font-semibold">
             Order book
           </h2>
-          <span className="text-xs text-muted-foreground">CAD/MT</span>
+          <span className="text-xs text-muted-foreground">CAD</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {selected}

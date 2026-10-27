@@ -63,7 +63,7 @@ Mapbox draws the base map; the app repaints it with the theme's map roles. The "
 
 `Button` (primary, secondary, outline, ghost, danger; `asChild` styles a link as a button), `Input` and `Select`, `FileButton`, `Card` with `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `Badge` (one variant per role), `Callout` (boxed notes and alerts), `Table` parts, `Tabs`, `SegmentedControl` (toggle buttons), `DropdownMenu` and `Sheet` (slide-over panel), both on Radix for keyboard and screen-reader support.
 
-App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), `Brand` (logo slot and the GSS name), `ConnectionStatus` (the dot), `ProfileMenu`, `PageHeader`, `BackLink`, `CommodityPicker` (choose one, several or all commodities), `OrderBook` (asks and bids by commodity, in CAD: rows rather than cards, colour only on the price, an indicative mark and an FX mark explained in its footer), `CadPrice` (a price in CAD, marked "FX" with the original price on hover when converted), `SelectedFacility`, `FacilityMap` (the only Mapbox code).
+App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), `Brand` (logo slot and the GSS name), `ConnectionStatus` (the dot), `ProfileMenu`, `PageHeader`, `BackLink`, `CommodityPicker` (choose one, several or all commodities), `OrderBook` (asks and bids by commodity, in CAD: simple boxes tinted with the `offer` and `bid` roles, an indicative mark and an FX mark explained in its footer), `CadPrice` (a price in CAD, marked "FX" with the original price on hover when converted), `SelectedFacility`, `FacilityMap` (the only Mapbox code).
 
 ## Layout
 

@@ -168,3 +168,10 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **No volume bars.** The quantity range is shown as text.
 - **Units once.** "CAD/MT" is stated once at the top of the book, and the amounts appear alone. This is an exception to `docs/PRODUCT.md`'s "currency and unit on every figure". The selection details and the facility table still show "CAD 986.00/MT".
 - **Spread in the heading.** The gross spread moves into each commodity's heading ("Spread +181.00"), with the dashed circle when either best quote is indicative. Its "not a margin" caveat stays as hover text. The live-quote count is dropped.
+
+**2026-10-27 — Order book: coloured boxes again, simpler (owner's request).** After seeing the row layout on staging, the owner preferred the earlier coloured boxes, made simpler, with "/MT" on each price. This replaces the row and colour choices of the entry above.
+- **Boxes are back:** each ask is a box tinted red and each bid a box tinted green, with the price in the normal text colour.
+- **Each box** shows the name (a dashed circle at its top right when the price is indicative), the region and delivery basis, the price per tonne ("805.00/MT", with "FX" when converted) and the quantity.
+- **Still gone:** the status tags and the volume bars.
+- **Unchanged from the entry above:** the spread in each commodity's heading, the footer that explains the marks, and screen readers hearing each entry in full.
+- **Units:** the heading now says "CAD" alone, since each price carries "/MT".
