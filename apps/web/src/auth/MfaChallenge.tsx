@@ -1,3 +1,4 @@
+import { Button } from '../components/ui/button';
 import type { AuthClient } from '../lib/supabase';
 import { AuthCard } from './AuthCard';
 import { CodeForm, WRONG_CODE } from './CodeForm';
@@ -20,9 +21,14 @@ export function MfaChallenge({
     <AuthCard title="Enter your authenticator code">
       <div className="flex flex-col gap-4 text-sm">
         <CodeForm submitLabel="Verify" onSubmit={verify} />
-        <button type="button" className="text-xs underline" onClick={onSignOut}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-center text-muted-foreground"
+          onClick={onSignOut}
+        >
           Sign out
-        </button>
+        </Button>
       </div>
     </AuthCard>
   );

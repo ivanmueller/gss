@@ -2,7 +2,21 @@ import { FileUp, Search } from 'lucide-react';
 import { useState } from 'react';
 
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import { PageHeader } from '../components/PageHeader';
 import { RealDataNote } from '../components/RealDataNote';
+import { Button } from '../components/ui/button';
+import { Card } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { VerificationBadge } from '../components/VerificationBadge';
 import type { CounterpartyList, CounterpartySummary } from '../lib/api';
@@ -35,37 +49,27 @@ function place(counterparty: CounterpartySummary): string {
     : countryName(counterparty.primaryCountry);
 }
 
+const nameLink = 'rounded-xs underline-offset-4 hover:underline';
+
 function CounterpartyTable({ items, token }: { items: CounterpartySummary[]; token: string }) {
   return (
-    <div className="overflow-x-auto rounded-xl border bg-card">
-      <table className="w-full min-w-[44rem] text-sm">
-        <caption className="sr-only">Counterparties</caption>
-        <thead className="text-left text-xs text-muted-foreground">
+    <Card className="overflow-hidden">
+      <Table className="min-w-[44rem]">
+        <TableCaption>Counterparties</TableCaption>
+        <TableHeader>
           <tr>
-            <th scope="col" className="px-4 py-2 font-medium">
-              Counterparty
-            </th>
-            <th scope="col" className="px-4 py-2 font-medium">
-              Type
-            </th>
-            <th scope="col" className="px-4 py-2 font-medium">
-              Where
-            </th>
-            <th scope="col" className="px-4 py-2 font-medium">
-              Contacts
-            </th>
-            <th scope="col" className="px-4 py-2 font-medium">
-              Locations
-            </th>
-            <th scope="col" className="px-4 py-2 font-medium">
-              Verification
-            </th>
+            <TableHead>Counterparty</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Where</TableHead>
+            <TableHead>Contacts</TableHead>
+            <TableHead>Locations</TableHead>
+            <TableHead>Verification</TableHead>
           </tr>
-        </thead>
-        <tbody>
+        </TableHeader>
+        <TableBody>
           {items.map((counterparty) => (
-            <tr key={counterparty.id} className="border-t align-middle">
-              <th scope="row" className="px-4 py-2 text-left font-medium">
+            <TableRow key={counterparty.id}>
+              <TableRowHeader>
                 <span className="flex items-center gap-3">
                   <CounterpartyLogo
                     counterpartyId={counterparty.id}
@@ -74,10 +78,7 @@ function CounterpartyTable({ items, token }: { items: CounterpartySummary[]; tok
                     token={token}
                   />
                   <span>
-                    <Link
-                      href={`/counterparties/${counterparty.id}`}
-                      className="rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                    >
+                    <Link href={`/counterparties/${counterparty.id}`} className={nameLink}>
                       {counterparty.legalName}
                     </Link>
                     {counterparty.tradingName && (
@@ -87,52 +88,54 @@ function CounterpartyTable({ items, token }: { items: CounterpartySummary[]; tok
                     )}
                   </span>
                 </span>
-              </th>
-              <td className="px-4 py-2">{counterparty.types.map(typeLabel).join(', ')}</td>
-              <td className="px-4 py-2">{place(counterparty)}</td>
-              <td className="px-4 py-2 tabular-nums">{counterparty.contactCount}</td>
-              <td className="px-4 py-2 tabular-nums">{counterparty.facilityCount}</td>
-              <td className="px-4 py-2">
+              </TableRowHeader>
+              <TableCell>{counterparty.types.map(typeLabel).join(', ')}</TableCell>
+              <TableCell>{place(counterparty)}</TableCell>
+              <TableCell>{counterparty.contactCount}</TableCell>
+              <TableCell>{counterparty.facilityCount}</TableCell>
+              <TableCell>
                 <VerificationBadge status={counterparty.verificationStatus} />
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </Card>
   );
 }
 
 /** Narrow-screen alternative to the table: one stacked entry per counterparty. */
 function CounterpartyStack({ items, token }: { items: CounterpartySummary[]; token: string }) {
   return (
-    <ul className="divide-y rounded-xl border bg-card" aria-label="Counterparties">
-      {items.map((counterparty) => (
-        <li key={counterparty.id} className="flex items-start gap-3 px-4 py-3 text-sm">
-          <CounterpartyLogo
-            counterpartyId={counterparty.id}
-            name={counterparty.legalName}
-            sha256={counterparty.logoSha256}
-            token={token}
-          />
-          <span className="flex min-w-0 flex-col gap-1">
-            <Link
-              href={`/counterparties/${counterparty.id}`}
-              className="font-medium underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              {counterparty.legalName}
-            </Link>
-            <span className="text-xs text-muted-foreground">
-              {counterparty.types.map(typeLabel).join(', ')} · {place(counterparty)}
+    <Card asChild>
+      <ul className="divide-y" aria-label="Counterparties">
+        {items.map((counterparty) => (
+          <li key={counterparty.id} className="flex items-start gap-3 px-4 py-3 text-sm">
+            <CounterpartyLogo
+              counterpartyId={counterparty.id}
+              name={counterparty.legalName}
+              sha256={counterparty.logoSha256}
+              token={token}
+            />
+            <span className="flex min-w-0 flex-col gap-1">
+              <Link
+                href={`/counterparties/${counterparty.id}`}
+                className={`${nameLink} font-medium`}
+              >
+                {counterparty.legalName}
+              </Link>
+              <span className="text-xs text-muted-foreground">
+                {counterparty.types.map(typeLabel).join(', ')} · {place(counterparty)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {counterparty.contactCount} contacts · {counterparty.facilityCount} locations
+              </span>
+              <VerificationBadge status={counterparty.verificationStatus} />
             </span>
-            <span className="text-xs text-muted-foreground">
-              {counterparty.contactCount} contacts · {counterparty.facilityCount} locations
-            </span>
-            <VerificationBadge status={counterparty.verificationStatus} />
-          </span>
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -146,7 +149,7 @@ function LogoGrid({ items, token }: { items: CounterpartySummary[]; token: strin
         <li key={counterparty.id}>
           <Link
             href={`/counterparties/${counterparty.id}`}
-            className="flex h-full flex-col items-center gap-2 rounded-xl border bg-card p-3 text-center text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="flex h-full flex-col items-center gap-2 rounded-card border bg-card p-3 text-center text-sm shadow-xs transition-shadow hover:shadow-sm"
           >
             <CounterpartyLogo
               counterpartyId={counterparty.id}
@@ -180,58 +183,57 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
 
   return (
     <section aria-labelledby="counterparties-heading" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 id="counterparties-heading" className="text-lg font-semibold">
-            Counterparties
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Buyers, sellers, brokers and carriers of {organization.name}.
-          </p>
-        </div>
-        {editor && (
-          <Link
-            href="/counterparties/import"
-            className="inline-flex items-center gap-2 rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <FileUp aria-hidden="true" className="size-4" />
-            Import spreadsheet
-          </Link>
-        )}
-      </div>
+      <PageHeader
+        id="counterparties-heading"
+        title="Counterparties"
+        description={`Buyers, sellers, brokers and carriers of ${organization.name}.`}
+        actions={
+          editor && (
+            <Button asChild>
+              <Link href="/counterparties/import">
+                <FileUp aria-hidden="true" />
+                Import spreadsheet
+              </Link>
+            </Button>
+          )
+        }
+      />
       <RealDataNote organization={organization.name} />
 
       {list.status === 'loading' && (
         <p className="text-sm text-muted-foreground">Loading counterparties…</p>
       )}
       {list.status === 'error' && (
-        <p role="alert" className="text-sm text-red-700">
+        <p role="alert" className="text-sm text-danger">
           Could not load counterparties: {list.error.message}
         </p>
       )}
       {list.status === 'ok' && all.length === 0 && (
-        <div className="rounded-xl border bg-card px-4 py-8 text-center text-sm">
+        <Card className="px-4 py-10 text-center text-sm">
           <p className="font-medium">No counterparties yet.</p>
           <p className="text-muted-foreground">
             {editor
               ? 'Import your spreadsheet to add them.'
               : 'An operations or admin member of your organization can import them.'}
           </p>
-        </div>
+        </Card>
       )}
       {list.status === 'ok' && all.length > 0 && (
         <>
-          <label className="flex max-w-sm items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm">
-            <Search aria-hidden="true" className="size-4 text-muted-foreground" />
+          <label className="relative block w-full max-w-sm">
             <span className="sr-only">Search counterparties</span>
-            <input
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
               type="search"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
               }}
               placeholder="Search by name, province or state"
-              className="w-full bg-transparent outline-none"
+              className="pl-9"
             />
           </label>
           <p className="text-xs text-muted-foreground" aria-live="polite">

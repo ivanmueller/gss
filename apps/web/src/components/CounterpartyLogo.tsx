@@ -89,7 +89,9 @@ export function CounterpartyLogo({
     <span
       ref={box}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md border bg-white font-semibold text-muted-foreground',
+        'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-control border font-semibold',
+        // Logos are drawn for a white background, in either theme.
+        url ? 'bg-white' : 'bg-muted text-muted-foreground',
         SIZES[size],
       )}
     >

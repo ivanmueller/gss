@@ -1,9 +1,12 @@
 import { inspectPng, MAX_LOGO_DIMENSION } from '@grain/domain';
-import { ArrowLeft, ImageUp } from 'lucide-react';
-import { useId, useState, type ChangeEvent, type ReactNode } from 'react';
+import { ImageUp } from 'lucide-react';
+import { useState, type ChangeEvent, type ReactNode } from 'react';
 
+import { BackLink } from '../components/BackLink';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { RealDataNote } from '../components/RealDataNote';
+import { Card, CardHeader, CardTitle } from '../components/ui/card';
+import { FileButton } from '../components/ui/file-button';
 import { VerificationBadge } from '../components/VerificationBadge';
 import { apiFetch, ApiError, type CounterpartyDetail, type Facility } from '../lib/api';
 import {
@@ -14,7 +17,6 @@ import {
   typeLabel,
 } from '../lib/directory';
 import { formatUtc } from '../lib/format';
-import { Link } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
 
@@ -33,7 +35,6 @@ function LogoUpload({
   token: string;
   onUploaded: () => void;
 }) {
-  const inputId = useId();
   const [state, setState] = useState<
     { kind: 'idle' | 'saving' | 'saved' } | { kind: 'error'; message: string }
   >({
@@ -69,29 +70,23 @@ function LogoUpload({
 
   return (
     <div className="flex flex-col gap-1 text-sm">
-      <label
-        htmlFor={inputId}
-        className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 font-medium hover:bg-muted focus-within:ring-2 focus-within:ring-ring"
+      <FileButton
+        accept="image/png"
+        size="sm"
+        disabled={state.kind === 'saving'}
+        onChange={(event) => void upload(event)}
       >
-        <ImageUp aria-hidden="true" className="size-4" />
+        <ImageUp aria-hidden="true" />
         {state.kind === 'saving' ? 'Uploading…' : 'Upload PNG logo'}
-        <input
-          id={inputId}
-          type="file"
-          accept="image/png"
-          className="sr-only"
-          disabled={state.kind === 'saving'}
-          onChange={(event) => void upload(event)}
-        />
-      </label>
+      </FileButton>
       <p className="text-xs text-muted-foreground">PNG only, up to 512 KB.</p>
       {state.kind === 'saved' && (
-        <p role="status" className="text-xs text-emerald-800">
+        <p role="status" className="text-xs text-success">
           Logo saved.
         </p>
       )}
       {state.kind === 'error' && (
-        <p role="alert" className="text-xs text-red-700">
+        <p role="alert" className="text-xs text-danger">
           {state.message}
         </p>
       )}
@@ -113,7 +108,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd>{children}</dd>
+      <dd className="mt-0.5">{children}</dd>
     </div>
   );
 }
@@ -126,18 +121,12 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
 
   return (
     <section aria-labelledby="counterparty-heading" className="flex flex-col gap-4">
-      <Link
-        href="/counterparties"
-        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
-      >
-        <ArrowLeft aria-hidden="true" className="size-4" />
-        All counterparties
-      </Link>
+      <BackLink href="/counterparties">All counterparties</BackLink>
       <RealDataNote organization={organization.name} />
 
       {resource.status === 'loading' && <p className="text-sm text-muted-foreground">Loading…</p>}
       {resource.status === 'error' && (
-        <p role="alert" className="text-sm text-red-700">
+        <p role="alert" className="text-sm text-danger">
           {resource.error.status === 404
             ? 'This counterparty does not exist or is not in your organization.'
             : `Could not load the counterparty: ${resource.error.message}`}
@@ -145,7 +134,7 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
       )}
       {resource.status === 'ok' && (
         <>
-          <div className="flex flex-wrap items-start gap-4 rounded-xl border bg-card p-4">
+          <Card className="flex flex-wrap items-start gap-4 p-4">
             <CounterpartyLogo
               counterpartyId={resource.data.id}
               name={resource.data.legalName}
@@ -154,9 +143,9 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
               size="lg"
             />
             <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <h2 id="counterparty-heading" className="text-lg font-semibold">
+              <h1 id="counterparty-heading" className="text-2xl font-semibold tracking-tight">
                 {resource.data.legalName}
-              </h2>
+              </h1>
               {resource.data.tradingName && (
                 <p className="text-sm text-muted-foreground">
                   Trading as {resource.data.tradingName}
@@ -167,87 +156,99 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                 <LogoUpload counterpartyId={resource.data.id} token={token} onUploaded={reload} />
               )}
             </div>
-          </div>
+          </Card>
 
-          <dl className="grid grid-cols-1 gap-3 rounded-xl border bg-card p-4 text-sm sm:grid-cols-2">
-            <Field label="Type">{resource.data.types.map(typeLabel).join(', ')}</Field>
-            <Field label="Country">{countryName(resource.data.primaryCountry)}</Field>
-            <Field label="Source">{sourceLabel(resource.data.source)}</Field>
-            <Field label="Added">{formatUtc(resource.data.createdAt)}</Field>
-            {resource.data.notes && (
-              <div className="sm:col-span-2">
-                <Field label="Notes">{resource.data.notes}</Field>
-              </div>
-            )}
-          </dl>
+          <Card asChild>
+            <dl className="grid grid-cols-1 gap-4 p-4 text-sm sm:grid-cols-2">
+              <Field label="Type">{resource.data.types.map(typeLabel).join(', ')}</Field>
+              <Field label="Country">{countryName(resource.data.primaryCountry)}</Field>
+              <Field label="Source">{sourceLabel(resource.data.source)}</Field>
+              <Field label="Added">{formatUtc(resource.data.createdAt)}</Field>
+              {resource.data.notes && (
+                <div className="sm:col-span-2">
+                  <Field label="Notes">{resource.data.notes}</Field>
+                </div>
+              )}
+            </dl>
+          </Card>
 
-          <section aria-labelledby="contacts-heading" className="rounded-xl border bg-card">
-            <h3 id="contacts-heading" className="border-b px-4 py-3 text-sm font-semibold">
-              Contacts ({resource.data.contacts.length})
-            </h3>
-            {resource.data.contacts.length === 0 ? (
-              <p className="px-4 py-4 text-sm text-muted-foreground">No contacts recorded.</p>
-            ) : (
-              <ul className="divide-y text-sm">
-                {resource.data.contacts.map((contact) => (
-                  <li key={contact.id} className="flex flex-col gap-0.5 px-4 py-3">
-                    <span className="font-medium">{contact.name}</span>
-                    {contact.role && <span className="text-muted-foreground">{contact.role}</span>}
-                    {contact.email && (
-                      <a
-                        href={`mailto:${contact.email}`}
-                        className="w-fit underline underline-offset-4"
-                      >
-                        {contact.email}
-                      </a>
-                    )}
-                    {contact.phone && (
-                      <a
-                        href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
-                        className="w-fit underline underline-offset-4"
-                      >
-                        {contact.phone}
-                      </a>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <Card asChild>
+            <section aria-labelledby="contacts-heading">
+              <CardHeader>
+                <CardTitle id="contacts-heading">
+                  Contacts ({resource.data.contacts.length})
+                </CardTitle>
+              </CardHeader>
+              {resource.data.contacts.length === 0 ? (
+                <p className="px-4 py-4 text-sm text-muted-foreground">No contacts recorded.</p>
+              ) : (
+                <ul className="divide-y text-sm">
+                  {resource.data.contacts.map((contact) => (
+                    <li key={contact.id} className="flex flex-col gap-0.5 px-4 py-3">
+                      <span className="font-medium">{contact.name}</span>
+                      {contact.role && (
+                        <span className="text-muted-foreground">{contact.role}</span>
+                      )}
+                      {contact.email && (
+                        <a
+                          href={`mailto:${contact.email}`}
+                          className="w-fit underline underline-offset-4"
+                        >
+                          {contact.email}
+                        </a>
+                      )}
+                      {contact.phone && (
+                        <a
+                          href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
+                          className="w-fit underline underline-offset-4"
+                        >
+                          {contact.phone}
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </Card>
 
-          <section aria-labelledby="locations-heading" className="rounded-xl border bg-card">
-            <h3 id="locations-heading" className="border-b px-4 py-3 text-sm font-semibold">
-              Locations ({resource.data.facilities.length})
-            </h3>
-            {resource.data.facilities.length === 0 ? (
-              <p className="px-4 py-4 text-sm text-muted-foreground">No locations recorded.</p>
-            ) : (
-              <ul className="divide-y text-sm">
-                {resource.data.facilities.map((facility) => (
-                  <li key={facility.id} className="flex flex-col gap-0.5 px-4 py-3">
-                    <span className="font-medium">
-                      {facility.name ?? facilityTypeLabel(facility.facilityType) ?? 'Location'}
-                      {facility.name && facility.facilityType && (
-                        <span className="font-normal text-muted-foreground">
-                          {' '}
-                          · {facilityTypeLabel(facility.facilityType)}
+          <Card asChild>
+            <section aria-labelledby="locations-heading">
+              <CardHeader>
+                <CardTitle id="locations-heading">
+                  Locations ({resource.data.facilities.length})
+                </CardTitle>
+              </CardHeader>
+              {resource.data.facilities.length === 0 ? (
+                <p className="px-4 py-4 text-sm text-muted-foreground">No locations recorded.</p>
+              ) : (
+                <ul className="divide-y text-sm">
+                  {resource.data.facilities.map((facility) => (
+                    <li key={facility.id} className="flex flex-col gap-0.5 px-4 py-3">
+                      <span className="font-medium">
+                        {facility.name ?? facilityTypeLabel(facility.facilityType) ?? 'Location'}
+                        {facility.name && facility.facilityType && (
+                          <span className="font-normal text-muted-foreground">
+                            {' '}
+                            · {facilityTypeLabel(facility.facilityType)}
+                          </span>
+                        )}
+                      </span>
+                      <span>{address(facility)}</span>
+                      {facility.latitude && facility.longitude && (
+                        <span className="text-xs text-muted-foreground">
+                          {facility.latitude}, {facility.longitude} ·{' '}
+                          {facility.locationPrecision === 'exact'
+                            ? 'exact location'
+                            : 'approximate location'}
                         </span>
                       )}
-                    </span>
-                    <span>{address(facility)}</span>
-                    {facility.latitude && facility.longitude && (
-                      <span className="text-xs text-muted-foreground">
-                        {facility.latitude}, {facility.longitude} ·{' '}
-                        {facility.locationPrecision === 'exact'
-                          ? 'exact location'
-                          : 'approximate location'}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </Card>
         </>
       )}
     </section>

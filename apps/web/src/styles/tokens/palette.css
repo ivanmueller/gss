@@ -1,0 +1,140 @@
+/*
+ * Layer 1 — palette: every raw colour the app may use, as ramps from light (50) to dark (950).
+ *
+ * Components never use these directly. They use the colour roles in themes.css (background,
+ * muted-foreground, danger, bid, ...), which pick a step from these ramps for the light theme
+ * and another for the dark theme. Changing a ramp here changes every role built on it.
+ *
+ * Values are OKLCH (lightness 0–1, chroma, hue): equal steps look equally far apart, which keeps
+ * the ramps even and the contrast predictable. Apart from slate, they match Tailwind CSS v4's
+ * palette (MIT), so they are well tested. tokens.test.ts checks text contrast against WCAG AA
+ * for every role.
+ *
+ * There is no brand colour yet. When one is chosen, add its ramp here and point roles at it in
+ * themes.css; the neutral and status ramps stay as they are.
+ */
+:root {
+  --white: oklch(1 0 0);
+  --black: oklch(0 0 0);
+
+  /* Neutral grey, with no tint: the light theme is built from it. */
+  --gray-50: oklch(0.985 0 0);
+  --gray-100: oklch(0.97 0 0);
+  --gray-200: oklch(0.922 0 0);
+  --gray-300: oklch(0.87 0 0);
+  --gray-400: oklch(0.708 0 0);
+  --gray-500: oklch(0.556 0 0);
+  --gray-600: oklch(0.439 0 0);
+  --gray-700: oklch(0.371 0 0);
+  --gray-800: oklch(0.269 0 0);
+  --gray-900: oklch(0.205 0 0);
+  --gray-950: oklch(0.145 0 0);
+
+  /*
+   * Slate: a cool blue-grey, the night theme's surfaces. Built for this app from the owner's
+   * reference (a dark map dashboard): 900 is its panel colour (#252c36), 800 its raised card
+   * (#313842), 700 its map land (#3c4652). Same hue throughout, so the steps stay even.
+   */
+  --slate-50: oklch(0.984 0.003 257.3);
+  --slate-100: oklch(0.967 0.006 257.3);
+  --slate-200: oklch(0.925 0.01 257.3);
+  --slate-300: oklch(0.865 0.014 257.3);
+  --slate-400: oklch(0.775 0.018 257.3);
+  --slate-500: oklch(0.62 0.021 257.3);
+  --slate-600: oklch(0.5 0.022 257.3);
+  --slate-700: oklch(0.39 0.024 257.3);
+  --slate-800: oklch(0.338 0.021 257.3);
+  --slate-900: oklch(0.291 0.021 257.3);
+  --slate-950: oklch(0.245 0.019 257.3);
+
+  /* Blue: information, links, focus. */
+  --blue-50: oklch(0.97 0.014 254.604);
+  --blue-100: oklch(0.932 0.032 255.585);
+  --blue-200: oklch(0.882 0.059 254.128);
+  --blue-300: oklch(0.809 0.105 251.813);
+  --blue-400: oklch(0.707 0.165 254.624);
+  --blue-500: oklch(0.623 0.214 259.815);
+  --blue-600: oklch(0.546 0.245 262.881);
+  --blue-700: oklch(0.488 0.243 264.376);
+  --blue-800: oklch(0.424 0.199 265.638);
+  --blue-900: oklch(0.379 0.146 265.522);
+  --blue-950: oklch(0.282 0.091 267.935);
+
+  /* Green: success, firm, verified, connected. */
+  --green-50: oklch(0.982 0.018 155.826);
+  --green-100: oklch(0.962 0.044 156.743);
+  --green-200: oklch(0.925 0.084 155.995);
+  --green-300: oklch(0.871 0.15 154.449);
+  --green-400: oklch(0.792 0.209 151.711);
+  --green-500: oklch(0.723 0.219 149.579);
+  --green-600: oklch(0.627 0.194 149.214);
+  --green-700: oklch(0.527 0.154 150.069);
+  --green-800: oklch(0.448 0.119 151.328);
+  --green-900: oklch(0.393 0.095 152.535);
+  --green-950: oklch(0.266 0.065 152.934);
+
+  /* Yellow: caution (indicative, pending, synthetic data). */
+  --yellow-50: oklch(0.987 0.026 102.212);
+  --yellow-100: oklch(0.973 0.071 103.193);
+  --yellow-200: oklch(0.945 0.129 101.54);
+  --yellow-300: oklch(0.905 0.182 98.111);
+  --yellow-400: oklch(0.852 0.199 91.936);
+  --yellow-500: oklch(0.795 0.184 86.047);
+  --yellow-600: oklch(0.681 0.162 75.834);
+  --yellow-700: oklch(0.554 0.135 66.442);
+  --yellow-800: oklch(0.476 0.114 61.907);
+  --yellow-900: oklch(0.421 0.095 57.708);
+  --yellow-950: oklch(0.286 0.066 53.813);
+
+  /* Orange: warning (check this before acting). */
+  --orange-50: oklch(0.98 0.016 73.684);
+  --orange-100: oklch(0.954 0.038 75.164);
+  --orange-200: oklch(0.901 0.076 70.697);
+  --orange-300: oklch(0.837 0.128 66.29);
+  --orange-400: oklch(0.75 0.183 55.934);
+  --orange-500: oklch(0.705 0.213 47.604);
+  --orange-600: oklch(0.646 0.222 41.116);
+  --orange-700: oklch(0.553 0.195 38.402);
+  --orange-800: oklch(0.47 0.157 37.304);
+  --orange-900: oklch(0.408 0.123 38.172);
+  --orange-950: oklch(0.266 0.079 36.259);
+
+  /* Red: danger (errors, offline, destructive actions). */
+  --red-50: oklch(0.971 0.013 17.38);
+  --red-100: oklch(0.936 0.032 17.717);
+  --red-200: oklch(0.885 0.062 18.334);
+  --red-300: oklch(0.808 0.114 19.571);
+  --red-400: oklch(0.704 0.191 22.216);
+  --red-500: oklch(0.637 0.237 25.331);
+  --red-600: oklch(0.577 0.245 27.325);
+  --red-700: oklch(0.505 0.213 27.518);
+  --red-800: oklch(0.444 0.177 26.899);
+  --red-900: oklch(0.396 0.141 25.723);
+  --red-950: oklch(0.258 0.092 26.042);
+
+  /* Teal: seller offers. */
+  --teal-50: oklch(0.984 0.014 180.72);
+  --teal-100: oklch(0.953 0.051 180.801);
+  --teal-200: oklch(0.91 0.096 180.426);
+  --teal-300: oklch(0.855 0.138 181.071);
+  --teal-400: oklch(0.777 0.152 181.912);
+  --teal-500: oklch(0.704 0.14 182.503);
+  --teal-600: oklch(0.6 0.118 184.704);
+  --teal-700: oklch(0.511 0.096 186.391);
+  --teal-800: oklch(0.437 0.078 188.216);
+  --teal-900: oklch(0.386 0.063 188.416);
+  --teal-950: oklch(0.277 0.046 192.524);
+
+  /* Indigo: buyer bids. */
+  --indigo-50: oklch(0.962 0.018 272.314);
+  --indigo-100: oklch(0.93 0.034 272.788);
+  --indigo-200: oklch(0.87 0.065 274.039);
+  --indigo-300: oklch(0.785 0.115 274.713);
+  --indigo-400: oklch(0.673 0.182 276.935);
+  --indigo-500: oklch(0.585 0.233 277.117);
+  --indigo-600: oklch(0.511 0.262 276.966);
+  --indigo-700: oklch(0.457 0.24 277.023);
+  --indigo-800: oklch(0.398 0.195 277.366);
+  --indigo-900: oklch(0.359 0.144 278.697);
+  --indigo-950: oklch(0.257 0.09 281.288);
+}

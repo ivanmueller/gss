@@ -3,16 +3,20 @@ import { latestQuote, noQuoteText } from '../lib/facility';
 import { formatPrice, formatQuantityRange, formatUtc } from '../lib/format';
 import { QuoteStatusBadge } from './QuoteStatusBadge';
 import { RoleLabel } from './RoleLabel';
+import { Card } from './ui/card';
 
 function QuoteDetails({ quote }: { quote: Quote }) {
   const isOffer = quote.side === 'OFFER';
   return (
-    <section aria-label={isOffer ? 'Seller offer' : 'Buyer bid'} className="rounded-lg border p-3">
+    <section
+      aria-label={isOffer ? 'Seller offer' : 'Buyer bid'}
+      className="rounded-control border p-3"
+    >
       <div className="flex items-center justify-between gap-2">
         <RoleLabel role={isOffer ? 'seller' : 'buyer'} suffix={isOffer ? 'offer' : 'bid'} />
         <QuoteStatusBadge status={quote.status} />
       </div>
-      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">
+      <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
         {formatPrice(quote.price)}
       </p>
       <p className="text-xs text-muted-foreground">
@@ -46,48 +50,49 @@ function QuoteDetails({ quote }: { quote: Quote }) {
 export function QuoteInspector({ facility }: { facility: Facility | undefined }) {
   if (!facility) {
     return (
-      <aside className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-        Select a facility to see its quotes.
-      </aside>
+      <Card asChild>
+        <aside className="p-4 text-sm text-muted-foreground">
+          Select a facility to see its quotes.
+        </aside>
+      </Card>
     );
   }
   const quote = latestQuote(facility);
   return (
-    <aside
-      aria-labelledby="inspector-heading"
-      className="flex flex-col gap-4 rounded-xl border bg-card p-4"
-    >
-      <div>
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Quote inspector
-        </p>
-        <h2 id="inspector-heading" className="text-lg font-semibold">
-          {facility.name}
-        </h2>
-        <p className="flex flex-wrap items-center gap-x-3 text-sm">
-          {facility.roles.map((role) => (
-            <RoleLabel key={role} role={role} />
-          ))}
-          <span>
-            {facility.region}, {facility.country}
-          </span>
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {facility.locationPrecision === 'approximate'
-            ? 'Approximate location (municipality level)'
-            : 'Exact location'}
-        </p>
-      </div>
-      {quote ? (
-        <QuoteDetails quote={quote} />
-      ) : (
-        <div className="rounded-lg border border-dashed p-3 text-sm">
-          <p className="font-medium">{noQuoteText(facility)}</p>
-          <p className="text-muted-foreground">
-            Known facility with no recorded price, so it cannot be paired in a scenario.
+    <Card asChild>
+      <aside aria-labelledby="inspector-heading" className="flex flex-col gap-4 p-4">
+        <div>
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            Quote inspector
+          </p>
+          <h2 id="inspector-heading" className="text-lg font-semibold">
+            {facility.name}
+          </h2>
+          <p className="flex flex-wrap items-center gap-x-3 text-sm">
+            {facility.roles.map((role) => (
+              <RoleLabel key={role} role={role} />
+            ))}
+            <span>
+              {facility.region}, {facility.country}
+            </span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {facility.locationPrecision === 'approximate'
+              ? 'Approximate location (municipality level)'
+              : 'Exact location'}
           </p>
         </div>
-      )}
-    </aside>
+        {quote ? (
+          <QuoteDetails quote={quote} />
+        ) : (
+          <div className="rounded-control border border-dashed p-3 text-sm">
+            <p className="font-medium">{noQuoteText(facility)}</p>
+            <p className="text-muted-foreground">
+              Known facility with no recorded price, so it cannot be paired in a scenario.
+            </p>
+          </div>
+        )}
+      </aside>
+    </Card>
   );
 }

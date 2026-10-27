@@ -1,5 +1,5 @@
 import type { FacilityRole } from '../data/types';
-import { cn } from '../lib/utils';
+import { SegmentedControl } from './ui/segmented-control';
 
 export type RoleFilter = 'all' | FacilityRole;
 
@@ -22,30 +22,12 @@ export function FilterBar({
         <span className="text-muted-foreground">Commodity </span>
         <span className="font-medium">Flaxseed</span>
       </p>
-      <div
-        role="group"
-        aria-label="Show facilities"
-        className="inline-flex rounded-lg border bg-card p-0.5"
-      >
-        {OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={value === option.value}
-            onClick={() => {
-              onChange(option.value);
-            }}
-            className={cn(
-              'rounded-md px-3 py-1 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-              value === option.value
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        label="Show facilities"
+        options={OPTIONS}
+        value={value}
+        onChange={onChange}
+      />
     </div>
   );
 }

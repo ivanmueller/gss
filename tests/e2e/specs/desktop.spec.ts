@@ -9,11 +9,73 @@ test('loads the workspace with synthetic data and no console errors', async ({ p
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
   await expect(page.getByRole('note')).toContainText('Synthetic demo data');
-  await expect(page.getByRole('status')).toHaveText('API reachable');
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(5);
   expect(errors).toEqual([]);
+});
+
+test('keeps the menu on the left and only a status dot and profile icon on top', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  const nav = page.getByRole('navigation', { name: 'Main' });
+  await expect(nav).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Workspace' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  const navBox = await nav.boundingBox();
+  expect(navBox?.x).toBeLessThan(40);
+  await expect(page.getByRole('link', { name: 'GSS' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open menu' })).toBeHidden();
+
+  // The connection dot speaks to screen readers only while all is well.
+  const status = page.getByRole('banner').getByRole('status');
+  await expect(status).toHaveText('Connected to the server');
+  await expect(status.getByText('Server unreachable')).toHaveCount(0);
+  await expect(page.getByText('API reachable')).toHaveCount(0);
+  await expect(page.getByText(/Signed in/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
+});
+
+test('switches to the night theme with one switch and keeps it after a reload', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const html = page.locator('html');
+  await expect(html).not.toHaveClass(/\bdark\b/);
+  const lightBackground = await page.evaluate(
+    () => getComputedStyle(document.body).backgroundColor,
+  );
+
+  await page.getByRole('button', { name: 'Account' }).click();
+  const toggle = page.getByRole('menuitemcheckbox', { name: 'Dark mode' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(html).toHaveClass(/\bdark\b/);
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  const darkBackground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  expect(darkBackground).not.toBe(lightBackground);
+
+  await page.reload();
+  await expect(html).toHaveClass(/\bdark\b/);
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Account' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Dark mode' }).click();
+  await expect(html).not.toHaveClass(/\bdark\b/);
+});
+
+test('uses the IBM Plex Sans typeface served with the app', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
+  const loaded = await page.evaluate(async () => {
+    await document.fonts.ready;
+    return document.fonts.check('16px "IBM Plex Sans Variable"');
+  });
+  expect(loaded).toBe(true);
 });
 
 test('shows the selected buyer bid with its validity', async ({ page }) => {

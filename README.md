@@ -34,7 +34,7 @@ pnpm e2e                        # build, then run the Playwright browser tests (
 
 Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up: an administrator adds each user in the Supabase dashboard. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
 
-The header shows the user's first name and last initial, never the email. Set a user's name in the Supabase SQL editor:
+The profile menu (the icon at the top right) shows the user's first name and last initial, never the email. Set a user's name in the Supabase SQL editor:
 
 ```sql
 update auth.users
@@ -94,7 +94,7 @@ Application tables live in the private `app` schema, which the Supabase Data API
 
 ```
 apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search, geocoding); serves apps/web on staging
-apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory and map)
+apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory and map); design tokens in src/styles, shared components in src/components/ui (docs/DESIGN_SYSTEM.md)
 tests/e2e/           Playwright browser tests against the staging Worker config
 packages/domain/     shared validation used by web and API (counterparty import rows, PNG check, regions)
 supabase/            database migrations, pgTAP tests and local CLI config

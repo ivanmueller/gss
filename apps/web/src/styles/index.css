@@ -1,0 +1,6 @@
+/* The design system's entry point, imported once by main.tsx. docs/DESIGN_SYSTEM.md explains it. */
+@import 'tailwindcss';
+@import './tokens/palette.css';
+@import './tokens/themes.css';
+@import './tokens/scales.css';
+@import './base.css';

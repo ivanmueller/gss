@@ -7,11 +7,27 @@ import {
   type ImportFieldId,
   type ImportIssue,
 } from '@grain/domain';
-import { ArrowLeft, FileSpreadsheet } from 'lucide-react';
+import { FileSpreadsheet } from 'lucide-react';
 import Papa from 'papaparse';
 import { useId, useMemo, useState, type ChangeEvent } from 'react';
 
+import { BackLink } from '../components/BackLink';
+import { PageHeader } from '../components/PageHeader';
 import { RealDataNote } from '../components/RealDataNote';
+import { Button } from '../components/ui/button';
+import { Card, CardHeader, CardTitle } from '../components/ui/card';
+import { FileButton } from '../components/ui/file-button';
+import { Select } from '../components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableRowHeader,
+} from '../components/ui/table';
 import { apiJson, ApiError, type ImportResult } from '../lib/api';
 import { canEditDirectory, countryName } from '../lib/directory';
 import { Link } from '../lib/router';
@@ -90,10 +106,12 @@ function mappedRows(sheet: Sheet, mapping: Mapping) {
 function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) {
   if (issues.length === 0) return null;
   return (
-    <div className="rounded-xl border bg-card">
-      <h3 className="border-b px-4 py-2 text-sm font-semibold">
-        {title} ({issues.length})
-      </h3>
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <CardTitle>
+          {title} ({issues.length})
+        </CardTitle>
+      </CardHeader>
       <ul className="max-h-72 divide-y overflow-y-auto text-sm">
         {issues.slice(0, SHOWN_ISSUES).map((issue, index) => (
           <li
@@ -110,7 +128,7 @@ function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) 
           Showing the first {SHOWN_ISSUES}. Fix these and choose the file again.
         </p>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -126,58 +144,60 @@ function ColumnMapping({
   const baseId = useId();
   const sample = sheet.records[0] ?? {};
   return (
-    <fieldset className="rounded-xl border bg-card">
-      <legend className="sr-only">Match your columns to fields</legend>
-      <div className="grid grid-cols-1 divide-y text-sm">
-        {IMPORT_FIELDS.map((field) => {
-          const id = `${baseId}-${field.id}`;
-          const header = mapping[field.id];
-          return (
-            <div
-              key={field.id}
-              className="grid grid-cols-1 gap-1 px-4 py-2 sm:grid-cols-[12rem_1fr_1fr] sm:items-center"
-            >
-              <label htmlFor={id} className="font-medium">
-                {field.label}
-                {field.required && <span className="text-red-700"> (required)</span>}
-              </label>
-              <select
-                id={id}
-                value={header ?? ''}
-                onChange={(event) => {
-                  const rest = Object.fromEntries(
-                    Object.entries(mapping).filter(([key]) => key !== field.id),
-                  ) as Mapping;
-                  onChange(
-                    event.target.value === '' ? rest : { ...rest, [field.id]: event.target.value },
-                  );
-                }}
-                className="rounded-md border bg-background px-2 py-1"
+    <Card asChild>
+      <fieldset>
+        <legend className="sr-only">Match your columns to fields</legend>
+        <div className="grid grid-cols-1 divide-y text-sm">
+          {IMPORT_FIELDS.map((field) => {
+            const id = `${baseId}-${field.id}`;
+            const header = mapping[field.id];
+            return (
+              <div
+                key={field.id}
+                className="grid grid-cols-1 gap-1.5 px-4 py-2.5 sm:grid-cols-[12rem_1fr_1fr] sm:items-center sm:gap-3"
               >
-                <option value="">— not in my file —</option>
-                {sheet.headers.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <span className="truncate text-xs text-muted-foreground">
-                {header !== undefined && (sample[header] ?? '') !== ''
-                  ? `e.g. ${sample[header] ?? ''}`
-                  : ''}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </fieldset>
+                <label htmlFor={id} className="font-medium">
+                  {field.label}
+                  {field.required && <span className="text-danger"> (required)</span>}
+                </label>
+                <Select
+                  id={id}
+                  value={header ?? ''}
+                  onChange={(event) => {
+                    const rest = Object.fromEntries(
+                      Object.entries(mapping).filter(([key]) => key !== field.id),
+                    ) as Mapping;
+                    onChange(
+                      event.target.value === ''
+                        ? rest
+                        : { ...rest, [field.id]: event.target.value },
+                    );
+                  }}
+                >
+                  <option value="">— not in my file —</option>
+                  {sheet.headers.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </Select>
+                <span className="truncate text-xs text-muted-foreground">
+                  {header !== undefined && (sample[header] ?? '') !== ''
+                    ? `e.g. ${sample[header] ?? ''}`
+                    : ''}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </fieldset>
+    </Card>
   );
 }
 
 /** /counterparties/import: CSV → column mapping → server review → import. */
 export function ImportPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
-  const inputId = useId();
   const [step, setStep] = useState<Step>({ kind: 'choose', error: null });
 
   const local = useMemo(() => {
@@ -262,43 +282,32 @@ export function ImportPage({ session }: { session: DirectorySession }) {
 
   return (
     <section aria-labelledby="import-heading" className="flex flex-col gap-4">
-      <Link
-        href="/counterparties"
-        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
-      >
-        <ArrowLeft aria-hidden="true" className="size-4" />
-        All counterparties
-      </Link>
-      <div>
-        <h2 id="import-heading" className="text-lg font-semibold">
-          Import counterparties from a spreadsheet
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Into {organization.name}. In Excel, use File → Save As → “CSV UTF-8 (Comma delimited)”.
-          One row per company or per location; rows with the same legal name and country become one
-          counterparty. Companies already in the list are skipped, not changed.
-        </p>
-      </div>
+      <PageHeader
+        id="import-heading"
+        back={<BackLink href="/counterparties">All counterparties</BackLink>}
+        title="Import counterparties from a spreadsheet"
+        description={
+          <>
+            Into {organization.name}. In Excel, use File → Save As → “CSV UTF-8 (Comma delimited)”.
+            One row per company or per location; rows with the same legal name and country become
+            one counterparty. Companies already in the list are skipped, not changed.
+          </>
+        }
+      />
       <RealDataNote organization={organization.name} />
 
       {step.kind === 'choose' && (
         <div className="flex flex-col gap-2">
-          <label
-            htmlFor={inputId}
-            className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground focus-within:ring-2 focus-within:ring-ring"
+          <FileButton
+            variant="primary"
+            accept=".csv,text/csv"
+            onChange={(event) => void choose(event)}
           >
-            <FileSpreadsheet aria-hidden="true" className="size-4" />
+            <FileSpreadsheet aria-hidden="true" />
             Choose CSV file
-            <input
-              id={inputId}
-              type="file"
-              accept=".csv,text/csv"
-              className="sr-only"
-              onChange={(event) => void choose(event)}
-            />
-          </label>
+          </FileButton>
           {step.error && (
-            <p role="alert" className="text-sm text-red-700">
+            <p role="alert" className="text-sm text-danger">
               {step.error}
             </p>
           )}
@@ -319,7 +328,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
             }}
           />
           {missingRequired.length > 0 ? (
-            <p role="status" className="text-sm text-red-700">
+            <p role="status" className="text-sm text-danger">
               Choose a column for {missingRequired.map((field) => field.label).join(' and ')}.
             </p>
           ) : (
@@ -334,28 +343,25 @@ export function ImportPage({ session }: { session: DirectorySession }) {
             <IssueList title="Problems to fix" issues={local.issues} />
           )}
           {step.error && (
-            <p role="alert" className="text-sm text-red-700">
+            <p role="alert" className="text-sm text-danger">
               {step.error}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
+            <Button
               disabled={missingRequired.length > 0 || step.busy}
               onClick={() => void review(step.sheet, step.mapping)}
-              className="rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               {step.busy ? 'Checking…' : 'Review import'}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => {
                 setStep({ kind: 'choose', error: null });
               }}
-              className="rounded-md border px-3 py-1.5 text-sm"
             >
               Choose another file
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -366,27 +372,25 @@ export function ImportPage({ session }: { session: DirectorySession }) {
           <IssueList title="Problems to fix" issues={step.result.issues} />
           <IssueList title="Warnings" issues={step.result.warnings} />
           {step.error && (
-            <p role="alert" className="text-sm text-red-700">
+            <p role="alert" className="text-sm text-danger">
               {step.error}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
+            <Button
               disabled={
                 step.busy ||
                 step.result.issues.length > 0 ||
                 step.result.summary.newCounterparties === 0
               }
               onClick={() => void commit(step.sheet, step.mapping, step.result)}
-              className="rounded-md border bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               {step.busy
                 ? 'Importing…'
                 : `Import ${String(step.result.summary.newCounterparties)} new counterparties`}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="outline"
               disabled={step.busy}
               onClick={() => {
                 setStep({
@@ -397,16 +401,15 @@ export function ImportPage({ session }: { session: DirectorySession }) {
                   busy: false,
                 });
               }}
-              className="rounded-md border px-3 py-1.5 text-sm"
             >
               Back to columns
-            </button>
+            </Button>
           </div>
         </>
       )}
 
       {step.kind === 'done' && (
-        <div role="status" className="flex flex-col gap-2 rounded-xl border bg-card p-4 text-sm">
+        <Card role="status" className="flex flex-col gap-2 p-4 text-sm">
           <p className="font-medium">
             Imported {step.result.summary.newCounterparties} counterparties with{' '}
             {step.result.summary.contacts} contacts and {step.result.summary.facilities} locations.
@@ -417,10 +420,10 @@ export function ImportPage({ session }: { session: DirectorySession }) {
               unchanged.
             </p>
           )}
-          <Link href="/counterparties" className="w-fit underline underline-offset-4">
-            See the counterparties
-          </Link>
-        </div>
+          <Button asChild variant="outline" className="mt-1 w-fit">
+            <Link href="/counterparties">See the counterparties</Link>
+          </Button>
+        </Card>
       )}
     </section>
   );
@@ -442,48 +445,38 @@ function ReviewSummary({ result }: { result: ImportResult }) {
           ` · ${String(summary.existingCounterparties)} already in the list`}
         {summary.emptyRows > 0 && ` · ${String(summary.emptyRows)} empty rows skipped`}.
       </p>
-      <div className="max-h-96 overflow-auto rounded-xl border bg-card">
-        <table className="w-full text-sm">
-          <caption className="sr-only">Counterparties in this import</caption>
-          <thead className="text-left text-xs text-muted-foreground">
+      <Card className="overflow-hidden">
+        <Table containerClassName="max-h-96 overflow-y-auto">
+          <TableCaption>Counterparties in this import</TableCaption>
+          <TableHeader className="sticky top-0 bg-card">
             <tr>
-              <th scope="col" className="px-4 py-2 font-medium">
-                Counterparty
-              </th>
-              <th scope="col" className="px-4 py-2 font-medium">
-                Rows
-              </th>
-              <th scope="col" className="px-4 py-2 font-medium">
-                Contacts
-              </th>
-              <th scope="col" className="px-4 py-2 font-medium">
-                Locations
-              </th>
-              <th scope="col" className="px-4 py-2 font-medium">
-                Result
-              </th>
+              <TableHead>Counterparty</TableHead>
+              <TableHead>Rows</TableHead>
+              <TableHead>Contacts</TableHead>
+              <TableHead>Locations</TableHead>
+              <TableHead>Result</TableHead>
             </tr>
-          </thead>
-          <tbody>
+          </TableHeader>
+          <TableBody>
             {result.counterparties.map((item) => (
-              <tr key={`${item.country}:${item.legalName}`} className="border-t">
-                <th scope="row" className="px-4 py-1.5 text-left font-medium">
+              <TableRow key={`${item.country}:${item.legalName}`}>
+                <TableRowHeader className="py-1.5">
                   {item.legalName}
                   <span className="block text-xs font-normal text-muted-foreground">
                     {countryName(item.country)}
                   </span>
-                </th>
-                <td className="px-4 py-1.5">{item.lines.join(', ')}</td>
-                <td className="px-4 py-1.5 tabular-nums">{item.contacts}</td>
-                <td className="px-4 py-1.5 tabular-nums">{item.facilities}</td>
-                <td className="px-4 py-1.5">
+                </TableRowHeader>
+                <TableCell className="py-1.5">{item.lines.join(', ')}</TableCell>
+                <TableCell className="py-1.5">{item.contacts}</TableCell>
+                <TableCell className="py-1.5">{item.facilities}</TableCell>
+                <TableCell className="py-1.5">
                   {item.status === 'new' ? 'Will be added' : 'Already in the list; skipped'}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }

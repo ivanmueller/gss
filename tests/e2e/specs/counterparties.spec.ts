@@ -92,7 +92,8 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
 /** The signed-in user's access token, from the Supabase session in local storage. */
 async function accessToken(page: Page): Promise<string> {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
+  // The profile button appears once the app has the signed-in session.
+  await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
   return page.evaluate(() => {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('sb-') && key.endsWith('-auth-token')) {

@@ -1,14 +1,21 @@
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import './styles/index.css';
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './App';
 import { AuthCard } from './auth/AuthCard';
 import { AuthGate } from './auth/AuthGate';
-import './index.css';
 import { supabase } from './lib/supabase';
+import { startThemeSync } from './lib/theme';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root element');
+
+startThemeSync();
 
 createRoot(root).render(
   <StrictMode>

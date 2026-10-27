@@ -4,7 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
-    <title>Grain Trading Workspace</title>
+    <title>GSS</title>
+    <script>
+      // Applies the saved light or night theme before the first paint, so the page never
+      // flashes the wrong one. Keep in step with src/lib/theme.ts (same key and rules).
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem('gss.theme');
+        } catch (e) {
+          // Storage blocked: follow the device, as lib/theme.ts does.
+        }
+        try {
+          var dark =
+            saved === 'dark' ||
+            (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

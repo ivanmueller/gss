@@ -7,10 +7,15 @@ import {
   type SaveCoordinatesResult,
   type SignedMatch,
 } from '@grain/domain';
-import { ArrowLeft } from 'lucide-react';
+import { Lock, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 
+import { BackLink } from '../components/BackLink';
+import { PageHeader } from '../components/PageHeader';
 import { RealDataNote } from '../components/RealDataNote';
+import { Button } from '../components/ui/button';
+import { Callout } from '../components/ui/callout';
+import { Card } from '../components/ui/card';
 import { apiJson, ApiError } from '../lib/api';
 import { canEditDirectory, countryName } from '../lib/directory';
 import { Link } from '../lib/router';
@@ -22,11 +27,6 @@ const MISSES: Record<GeocodeMiss, string> = {
   TOO_VAGUE: 'Only the province or state was found',
   OTHER_COUNTRY: 'Found only in another country',
 };
-
-const BUTTON =
-  'rounded-md border px-3 py-1.5 text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-50';
-const PRIMARY = `${BUTTON} bg-primary text-primary-foreground hover:opacity-90`;
-const SECONDARY = `${BUTTON} hover:bg-muted`;
 
 type Step =
   | { kind: 'start'; busy: boolean; error: string | null }
@@ -73,6 +73,16 @@ function signedMatch(proposal: GeocodeProposal): SignedMatch[] {
   return proposal.match ? [signedMatchOf(proposal.facilityId, proposal.match)] : [];
 }
 
+/** A warning on one result: worth a look before saving, not an error. */
+function CheckThis({ children }: { children: string }) {
+  return (
+    <span className="flex items-start gap-1.5 font-medium text-warning">
+      <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>{children}</span>
+    </span>
+  );
+}
+
 function Found({
   proposals,
   chosen,
@@ -85,45 +95,49 @@ function Found({
   onToggle: (facilityId: string) => void;
 }) {
   return (
-    <ul aria-label="Locations found" className="divide-y rounded-xl border bg-card">
-      {proposals.map((proposal) => {
-        const match = proposal.match;
-        if (!match) return null;
-        const confidence = Math.round(Number(match.confidence) * 100);
-        return (
-          <li key={proposal.facilityId} className="px-4 py-3 text-sm">
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-1 size-4"
-                checked={chosen.has(proposal.facilityId)}
-                disabled={disabled}
-                onChange={() => {
-                  onToggle(proposal.facilityId);
-                }}
-              />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="font-medium">{locationName(proposal)}</span>
-                <span className="text-muted-foreground">Your address: {addressText(proposal)}</span>
-                <span>
-                  Found: {match.formattedAddress} ·{' '}
-                  {match.precision === 'exact' ? 'Exact' : 'Approximate (e.g. the town)'} ·{' '}
-                  {confidence}% confidence
-                </span>
-                {!match.regionMatches && (
-                  <span className="text-red-700">
-                    Check this one: it is in another province or state than your address.
+    <Card asChild>
+      <ul aria-label="Locations found" className="divide-y">
+        {proposals.map((proposal) => {
+          const match = proposal.match;
+          if (!match) return null;
+          const confidence = Math.round(Number(match.confidence) * 100);
+          return (
+            <li key={proposal.facilityId} className="px-4 py-3 text-sm">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                  checked={chosen.has(proposal.facilityId)}
+                  disabled={disabled}
+                  onChange={() => {
+                    onToggle(proposal.facilityId);
+                  }}
+                />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="font-medium">{locationName(proposal)}</span>
+                  <span className="text-muted-foreground">
+                    Your address: {addressText(proposal)}
                   </span>
-                )}
-                {Number(match.confidence) < LOW_CONFIDENCE && (
-                  <span className="text-red-700">Check this one: low confidence.</span>
-                )}
-              </span>
-            </label>
-          </li>
-        );
-      })}
-    </ul>
+                  <span>
+                    Found: {match.formattedAddress} ·{' '}
+                    {match.precision === 'exact' ? 'Exact' : 'Approximate (e.g. the town)'} ·{' '}
+                    {confidence}% confidence
+                  </span>
+                  {!match.regionMatches && (
+                    <CheckThis>
+                      Check this one: it is in another province or state than your address.
+                    </CheckThis>
+                  )}
+                  {Number(match.confidence) < LOW_CONFIDENCE && (
+                    <CheckThis>Check this one: low confidence.</CheckThis>
+                  )}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }
 
@@ -133,32 +147,27 @@ export function CoordinatesPage({ session }: { session: DirectorySession }) {
   const [step, setStep] = useState<Step>({ kind: 'start', busy: false, error: null });
 
   const header = (
-    <div className="flex flex-col gap-1">
-      <Link
-        href="/map"
-        className="flex w-fit items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
-      >
-        <ArrowLeft aria-hidden="true" className="size-4" />
-        Map
-      </Link>
-      <h2 id="coordinates-heading" className="text-lg font-semibold">
-        Find coordinates
-      </h2>
-      <p className="max-w-3xl text-sm text-muted-foreground">
-        Looks up the addresses of {organization.name}’s locations that have no coordinates, using
-        Geocodio. Only the addresses are sent, never names or contacts. You choose what to save;
-        locations that already have coordinates are never changed.
-      </p>
-    </div>
+    <PageHeader
+      id="coordinates-heading"
+      back={<BackLink href="/map">Map</BackLink>}
+      title="Find coordinates"
+      description={
+        <>
+          Looks up the addresses of {organization.name}’s locations that have no coordinates, using
+          Geocodio. Only the addresses are sent, never names or contacts. You choose what to save;
+          locations that already have coordinates are never changed.
+        </>
+      }
+    />
   );
 
   if (!canEditDirectory(organization.role)) {
     return (
       <section aria-labelledby="coordinates-heading" className="flex flex-col gap-4">
         {header}
-        <p role="note" className="rounded-lg border bg-card px-3 py-2 text-sm">
-          Only operations and admin members can find and save coordinates.
-        </p>
+        <Callout icon={Lock}>
+          <p>Only operations and admin members can find and save coordinates.</p>
+        </Callout>
       </section>
     );
   }
@@ -201,19 +210,14 @@ export function CoordinatesPage({ session }: { session: DirectorySession }) {
   if (step.kind === 'start') {
     body = (
       <div className="flex flex-col items-start gap-2">
-        <button
-          type="button"
-          className={PRIMARY}
-          disabled={step.busy}
-          onClick={() => void lookUp()}
-        >
+        <Button disabled={step.busy} onClick={() => void lookUp()}>
           {step.busy ? 'Looking up addresses…' : 'Look up addresses'}
-        </button>
+        </Button>
         <p className="text-xs text-muted-foreground">
           Each address counts toward Geocodio’s free allowance of 2,500 lookups a day.
         </p>
         {step.error && (
-          <p role="alert" className="text-sm text-red-700">
+          <p role="alert" className="text-sm text-danger">
             {step.error}
           </p>
         )}
@@ -243,45 +247,40 @@ export function CoordinatesPage({ session }: { session: DirectorySession }) {
           <>
             <Found proposals={found} chosen={chosen} disabled={busy} onToggle={toggle} />
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className={PRIMARY}
+              <Button
                 disabled={busy || chosen.size === 0}
                 onClick={() => void save(lookup, chosen)}
               >
                 {busy ? 'Saving…' : `Save ${count(chosen.size, 'location', 'locations')}`}
-              </button>
-              <button
-                type="button"
-                className={SECONDARY}
-                disabled={busy}
-                onClick={() => void lookUp()}
-              >
+              </Button>
+              <Button variant="outline" disabled={busy} onClick={() => void lookUp()}>
                 Look up again
-              </button>
+              </Button>
             </div>
           </>
         )}
         {step.error && (
-          <p role="alert" className="text-sm text-red-700">
+          <p role="alert" className="text-sm text-danger">
             {step.error}
           </p>
         )}
         {missed.length > 0 && (
           <section aria-labelledby="missed-heading" className="flex flex-col gap-2">
-            <h3 id="missed-heading" className="text-sm font-semibold">
+            <h2 id="missed-heading" className="text-sm font-semibold">
               Not found ({missed.length})
-            </h3>
-            <ul aria-label="Locations not found" className="divide-y rounded-xl border bg-card">
-              {missed.map((proposal) => (
-                <li key={proposal.facilityId} className="flex flex-col px-4 py-2 text-sm">
-                  <span className="font-medium">{locationName(proposal)}</span>
-                  <span className="text-muted-foreground">
-                    {addressText(proposal)} · {proposal.miss ? MISSES[proposal.miss] : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            </h2>
+            <Card asChild>
+              <ul aria-label="Locations not found" className="divide-y">
+                {missed.map((proposal) => (
+                  <li key={proposal.facilityId} className="flex flex-col px-4 py-2 text-sm">
+                    <span className="font-medium">{locationName(proposal)}</span>
+                    <span className="text-muted-foreground">
+                      {addressText(proposal)} · {proposal.miss ? MISSES[proposal.miss] : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
           </section>
         )}
       </>
@@ -289,23 +288,23 @@ export function CoordinatesPage({ session }: { session: DirectorySession }) {
   } else {
     const { result, truncated } = step;
     body = (
-      <div role="status" className="flex flex-col gap-2 rounded-xl border bg-card p-4 text-sm">
+      <Card role="status" className="flex flex-col gap-3 p-4 text-sm">
         <p>
           Saved coordinates for {count(result.saved, 'location', 'locations')}.
           {result.skipped > 0 &&
             ` ${count(result.skipped, 'was', 'were')} not saved because ${result.skipped === 1 ? 'it has' : 'they have'} coordinates by now.`}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Link href="/map" className={PRIMARY}>
-            See them on the map
-          </Link>
+          <Button asChild>
+            <Link href="/map">See them on the map</Link>
+          </Button>
           {truncated && (
-            <button type="button" className={SECONDARY} onClick={() => void lookUp()}>
+            <Button variant="outline" onClick={() => void lookUp()}>
               Look up the rest
-            </button>
+            </Button>
           )}
         </div>
-      </div>
+      </Card>
     );
   }
 

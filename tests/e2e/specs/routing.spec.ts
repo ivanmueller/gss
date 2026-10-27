@@ -21,5 +21,6 @@ test('other unknown paths load the web app', async ({ page }) => {
   const response = await page.goto('/some/deep/link');
 
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
+  await expect(page.getByText('This page does not exist.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'GSS' })).toBeVisible();
 });

@@ -20,8 +20,11 @@ const START: [number, number, number, number] = [-120, 42, -88, 57];
 const SOURCE = 'facilities';
 const PINS = 'facilities';
 const SELECTED = 'facilities-selected';
-// The app's buyer colour (--bid in index.css).
-const PIN_COLOUR = '#3b3bb0';
+// Mapbox paints with plain colours, not CSS variables, so these copy design tokens
+// (styles/tokens/palette.css): the buyer colour --bid-solid (indigo-600), --gray-900, --white.
+const PIN_COLOUR = '#4f39f6';
+const SELECTED_COLOUR = '#171717';
+const HOLLOW_COLOUR = '#ffffff';
 
 export interface FacilityMapProps {
   token: string;
@@ -54,7 +57,7 @@ function addFacilityLayers(
     paint: {
       'circle-radius': 11,
       'circle-color': 'rgba(0, 0, 0, 0)',
-      'circle-stroke-color': '#111111',
+      'circle-stroke-color': SELECTED_COLOUR,
       'circle-stroke-width': 3,
     },
   });
@@ -65,7 +68,7 @@ function addFacilityLayers(
     paint: {
       'circle-radius': 6,
       // Exact locations are filled, approximate ones hollow (specification section 6).
-      'circle-color': ['match', ['get', 'precision'], 'exact', PIN_COLOUR, '#ffffff'],
+      'circle-color': ['match', ['get', 'precision'], 'exact', PIN_COLOUR, HOLLOW_COLOUR],
       'circle-stroke-color': PIN_COLOUR,
       'circle-stroke-width': 2,
     },

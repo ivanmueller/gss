@@ -4,6 +4,7 @@ import { FacilityList } from '../components/FacilityList';
 import { FacilityTable } from '../components/FacilityTable';
 import { FilterBar, type RoleFilter } from '../components/FilterBar';
 import { MapPanel } from '../components/MapPanel';
+import { PageHeader } from '../components/PageHeader';
 import { QuoteInspector } from '../components/QuoteInspector';
 import { SyntheticBanner } from '../components/SyntheticBanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -29,7 +30,12 @@ export function Workspace() {
   const inspector = <QuoteInspector facility={selected} />;
 
   return (
-    <>
+    <section aria-labelledby="workspace-heading" className="flex flex-col gap-4">
+      <PageHeader
+        id="workspace-heading"
+        title="Workspace"
+        description="Pick a facility to see its latest quote. A demo on synthetic data until bids and offers are built."
+      />
       <SyntheticBanner />
       <FilterBar value={roleFilter} onChange={setRoleFilter} />
       {isDesktop ? (
@@ -57,6 +63,6 @@ export function Workspace() {
           {inspector}
         </>
       )}
-    </>
+    </section>
   );
 }
