@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - tests/e2e
 
 # pnpm 10 skips dependency install scripts unless listed here.
 # esbuild and workerd ship the binaries wrangler needs for local dev.

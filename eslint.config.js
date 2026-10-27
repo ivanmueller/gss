@@ -4,7 +4,16 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['**/node_modules/', '**/dist/', '**/.wrangler/', '**/coverage/'] },
+  {
+    ignores: [
+      '**/node_modules/',
+      '**/dist/',
+      '**/.wrangler/',
+      '**/coverage/',
+      '**/playwright-report/',
+      '**/test-results/',
+    ],
+  },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,

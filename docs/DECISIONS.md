@@ -58,3 +58,7 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 
 **2026-10-27 — Web view types are provisional.** `apps/web/src/data/types.ts` serves the GT-010 shell only. The shared quote/facility contract is agreed and moved to `packages/domain` before quote work (GT-030) or the thin slice begins.
 
+**2026-10-27 — Browser tests run in the required CI job.** Playwright tests in `tests/e2e` (desktop and phone) run against the built app served by `wrangler dev --env staging`, inside the existing `check` job, so branch protection covers them without a settings change. `@playwright/test` is pinned to 1.63.0 to match the Chromium preinstalled in the agent environment; CI installs the matching Chromium.
+
+**2026-10-27 — Dependabot skips TypeScript 6.1 and later.** Its first npm run failed with `update_not_possible` because TypeScript 7 conflicts with typescript-eslint's supported range (see the 2026-10-26 TypeScript decision). Minor and patch npm updates are grouped into one weekly pull request.
+

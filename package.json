@@ -14,6 +14,7 @@
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "preview:staging": "pnpm build && pnpm --filter @grain/api exec wrangler dev --env staging",
+    "e2e": "pnpm build && pnpm --filter @grain/e2e e2e",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
