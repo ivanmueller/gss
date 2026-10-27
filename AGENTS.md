@@ -24,6 +24,14 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 9. Do not add microservices, runtime LLM agent frameworks, vector DBs or predicted pricing to v1 without an approved architecture decision.
 10. On feature branches, include the proposed handoff details in the PR, **not a competing edit to `docs/HANDOFF.md`**. Only the integration owner updates that file after a verified merge. Never claim an unbuilt feature works.
 
+## Working with the owner
+- The owner runs a grain trading shop and is not a developer. Explain in plain language, give exact click paths (e.g. "Cloudflare → Workers & Pages → grain-trading-api-staging → Logs"), and keep owner steps few and numbered.
+- When another tool has work to do, say so with a **Codex:** or **Gemini:** prefix and a paste-ready prompt. Codex independently reviews high-risk changes (database, auth, money) before merge; Gemini is optional (e.g. comparing map tile providers).
+- Never ask for secrets in chat (passwords, connection strings, `sb_secret_` keys, API tokens). Ask for the non-secret part instead, such as the host after `@`. Real business data (buyer rows, contacts, prices) never goes into Git or prompts; ask for column headers only.
+- The platform serves one organization, the owner's shop (`docs/DECISIONS.md`).
+- The owner opens and merges pull requests; give the compare link, keep CI green, and update `docs/HANDOFF.md` in a separate commit after each verified merge (the owner has delegated this).
+- Staging failures: read the Worker's log line (`Database unavailable … code=… kind=…`) before guessing; see `docs/HANDOFF.md`, "How staging is wired".
+
 ## Read by task
 - UX: `docs/PRODUCT.md`.
 - Schema: `docs/DATA_MODEL.md` and `docs/ARCHITECTURE.md`.
