@@ -89,6 +89,7 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 | `/scenarios/new` | Trade builder | Seller offer, buyer bid, quantity, FX, freight, fees, validation and margin |
 | `/scenarios/:id` | Saved assessment | Input snapshot, calculation version, audit/revisions, export |
 | `/counterparties` | Relationship management | Contacts, facilities, role, status, communication log |
+| `/map` (implemented) | The organization's counterparty locations on a Mapbox map, with a list | Street or satellite map, pan and zoom, select a pin |
 | `/admin` | Organization control | Users, roles, data sources, settings, audit views |
 
 ### Workspace layout

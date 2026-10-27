@@ -278,6 +278,13 @@ describe('navigation', () => {
       screen.getByText('Sign in to see your organization’s counterparties.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
+
+    await userEvent.click(within(nav).getByRole('link', { name: 'Map' }));
+    expect(window.location.pathname).toBe('/map');
+    expect(within(nav).getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
+    expect(
+      screen.getByText('Sign in to see your organization’s counterparties.'),
+    ).toBeInTheDocument();
   });
 
   it('says when a page does not exist', () => {

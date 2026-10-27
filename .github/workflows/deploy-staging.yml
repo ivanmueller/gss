@@ -56,11 +56,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      # Public values, the same as env.staging.vars in apps/api/wrangler.jsonc.
+      # Public values, the same as env.staging.vars in apps/api/wrangler.jsonc. The Mapbox
+      # token is public too (built into the page and restricted to the app's address in
+      # Mapbox), but lives in a secret so it is not in Git and can be replaced; without it
+      # the map page lists locations and explains how to add one (README, "Map").
       - run: pnpm build
         env:
           VITE_SUPABASE_URL: https://nfwizbcpjpqxdoojfbdr.supabase.co
           VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_4gRcidcCPr7dsdATHL57nQ_QNY0SNAc
+          VITE_MAPBOX_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
       # Migrations go first so the Worker never runs against an older schema.
       - uses: supabase/setup-cli@v1
         if: needs.preflight.outputs.database == 'true'

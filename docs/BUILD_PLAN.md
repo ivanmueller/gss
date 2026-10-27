@@ -24,7 +24,7 @@ After GT-013–GT-015 establish secure organization-bound schema and minimal dat
 
 ## Phase 2 — Counterparties, facilities, map and table
 
-**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 MapLibre map with licensed tile source; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures.
+**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 Mapbox GL JS map with Mapbox tiles; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures.
 
 **Gate:** Verified/approximate geolocations display distinctly; map selection updates detail panel and table; tenant isolation holds for geographic queries; mobile/narrow screens remain usable.
 

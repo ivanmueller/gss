@@ -21,8 +21,8 @@ export function MapPanel() {
         <MapPinned aria-hidden="true" className="size-8 text-muted-foreground" />
         <p className="font-medium">Map placeholder</p>
         <p className="max-w-sm text-sm text-muted-foreground">
-          The MapLibre map arrives with GT-023, once a licensed tile provider is chosen. Pick a
-          facility from the Facilities section for now.
+          This demo has no map. Your organization’s real locations are on the Map page; pick a
+          synthetic facility from the Facilities section here.
         </p>
       </div>
     </section>

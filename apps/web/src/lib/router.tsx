@@ -26,6 +26,7 @@ export function usePath(): string {
 
 export type Route =
   | { page: 'workspace' }
+  | { page: 'map' }
   | { page: 'counterparties' }
   | { page: 'import' }
   | { page: 'counterparty'; id: string }
@@ -34,6 +35,7 @@ export type Route =
 export function matchRoute(path: string): Route {
   const trimmed = path.replace(/\/+$/, '') || '/';
   if (trimmed === '/') return { page: 'workspace' };
+  if (trimmed === '/map') return { page: 'map' };
   if (trimmed === '/counterparties') return { page: 'counterparties' };
   if (trimmed === '/counterparties/import') return { page: 'import' };
   const match = /^\/counterparties\/([0-9a-f-]{36})$/i.exec(trimmed);

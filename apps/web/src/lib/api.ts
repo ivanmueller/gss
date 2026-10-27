@@ -51,6 +51,30 @@ export interface CounterpartyList {
   truncated: boolean;
 }
 
+/** A located facility for a map pin (GET /facilities). */
+export interface MapFacility {
+  id: string;
+  counterpartyId: string;
+  legalName: string;
+  tradingName: string | null;
+  counterpartyTypes: string[];
+  name: string | null;
+  facilityType: string | null;
+  city: string | null;
+  region: string | null;
+  country: string;
+  latitude: string;
+  longitude: string;
+  locationPrecision: 'exact' | 'approximate';
+}
+
+export interface MapFacilities {
+  facilities: MapFacility[];
+  truncated: boolean;
+  /** The organization's facilities without coordinates, which no map can show. */
+  withoutCoordinates: number;
+}
+
 export interface ImportResult {
   committed: boolean;
   importBatchId: string | null;

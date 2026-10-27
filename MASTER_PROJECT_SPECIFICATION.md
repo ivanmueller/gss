@@ -18,7 +18,7 @@
 | API | Hono running on Cloudflare Workers | Lightweight typed HTTP layer; compatible with React/Vite on Workers |
 | Database | Supabase PostgreSQL + PostGIS | Relational records, managed authentication, spatial indexes |
 | Files | Private Supabase Storage | Contract and transport document attachments; signed access only |
-| Maps | MapLibre GL JS with licensed production tile provider | Flexible map visualization without coupling to one map-data vendor |
+| Maps | Mapbox GL JS with Mapbox map tiles (owner's decision, 2026-10-27; `docs/DECISIONS.md`) | One supported vendor for the map viewer, tiles and satellite imagery; map code kept in one component so the provider can change |
 | Trade economics | Pure TypeScript package using decimal arithmetic | Reproducible deterministic values and extensive unit tests |
 | Authentication | Supabase Auth + MFA and server-side membership checks | Least privilege and explicit organization isolation |
 | Testing | Vitest, Playwright, PostgreSQL integration tests, RLS tests | Automated regression protection, especially for money and permissions |
@@ -141,7 +141,7 @@ Desktop: top commodity/date filters; 55–65% interactive map and 35–45% right
 ## 4.1 Runtime flow
 
 ```
-Browser — React/Vite/MapLibre
+Browser — React/Vite/Mapbox GL JS
    |  HTTPS + Supabase Auth identity
 Cloudflare Worker — Hono API
    |  user verification + organization membership + validation
@@ -517,7 +517,7 @@ These are **release-readiness gates**, not calendar promises. Phase 0 and the mi
 
 ## Phase 2 — Counterparties, facilities, map and table
 
-**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 MapLibre map with licensed tile source; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures.
+**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 Mapbox GL JS map with Mapbox tiles; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures.
 
 **Gate:** Verified/approximate geolocations display distinctly; map selection updates detail panel and table; tenant isolation holds for geographic queries; mobile/narrow screens remain usable.
 
@@ -595,7 +595,7 @@ These are **not implementation blockers for Phase 0–2**, but must be decided b
 | Commercial feeds prohibited from reuse | Provenance and licensing registry before ingest |
 | Over-building AI/automation before product-market fit | Phase gates; human-in-the-loop; no proprietary orchestration framework initially |
 | Inability to restore critical trading records | Separate environments, backup verification and restore drills |
-| Vendor lock-in | Standard Postgres, domain package isolated from Workers, MapLibre, provider adapters |
+| Vendor lock-in | Standard Postgres, domain package isolated from Workers, Mapbox code kept in one map component, provider adapters |
 
 # 17. Concrete first implementation task for the coding team
 
@@ -612,7 +612,7 @@ Vendor capabilities were checked against public technical documentation availabl
 - Cloudflare Hyperdrive to Supabase: https://developers.cloudflare.com/hyperdrive/examples/connect-to-postgres/postgres-database-providers/supabase/
 - Supabase PostGIS: https://supabase.com/docs/guides/database/extensions/postgis
 - Supabase RLS: https://supabase.com/docs/guides/database/postgres/row-level-security
-- MapLibre: https://maplibre.org/maplibre-gl-js/docs/
+- Mapbox GL JS: https://docs.mapbox.com/mapbox-gl-js/
 - Codex repository instructions: https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex
 - Gemini CLI context configuration: https://geminicli.com/docs/reference/configuration/
 - Cursor 3 agent environment: https://cursor.com/changelog/3-0

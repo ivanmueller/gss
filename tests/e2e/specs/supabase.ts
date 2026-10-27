@@ -18,6 +18,7 @@ export const OTHER_ORG = {
   name: 'Synthetic Other E2E Org',
   counterpartyId: '00000000-0000-4000-8000-0000000e2ec0',
   counterpartyName: 'Synthetic Other Org Buyer',
+  facilityName: 'Synthetic Other Org Elevator',
 };
 
 export function env(name: string): string {
@@ -66,6 +67,12 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
     await sql`insert into app.organizations (id, display_name) values (${OTHER_ORG.id}, ${OTHER_ORG.name})`;
     await sql`insert into app.counterparties (id, organization_id, legal_name, primary_country, source, created_by)
       select ${OTHER_ORG.counterpartyId}, ${OTHER_ORG.id}, ${OTHER_ORG.counterpartyName}, 'US', 'manual', u.id
+      from auth.users u where u.email = ${E2E_USER.email}`;
+    // With coordinates, so a map query could show it if isolation failed.
+    await sql`insert into app.facilities (organization_id, counterparty_id, name, country,
+        latitude, longitude, location_precision, created_by)
+      select ${OTHER_ORG.id}, ${OTHER_ORG.counterpartyId}, ${OTHER_ORG.facilityName}, 'US',
+        46.877186, -96.789803, 'exact', u.id
       from auth.users u where u.email = ${E2E_USER.email}`;
   } finally {
     await sql.end();

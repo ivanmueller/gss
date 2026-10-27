@@ -9,7 +9,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - One private GitHub monorepo; React/Vite/strict TypeScript frontend; Hono API on Cloudflare Workers.
 - Supabase Postgres/PostGIS, Supabase Auth, private Storage, organization-aware access.
 - Shared domain/validation packages and a pure TypeScript trading-engine package using **decimal**, never JS float, for monetary arithmetic.
-- MapLibre GL JS with a properly licensed map tile provider.
+- Mapbox GL JS with Mapbox map tiles (owner's decision, `docs/DECISIONS.md`); keep Mapbox calls in one map component so the provider can be changed later.
 - Python is out of scope until analytics or optimization justifies it.
 
 ## Always follow

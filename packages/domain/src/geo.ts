@@ -24,3 +24,27 @@ export function parseBbox(text: string): Bbox | null {
   if (west >= east || south >= north) return null;
   return { west, south, east, north };
 }
+
+const SCALE = 1e6;
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/**
+ * A map view's edges as a box parseBbox accepts: rounded outward to six decimals and kept
+ * within the world. A view that wraps past ±180° asks for every longitude. Returns null
+ * when nothing of the view is left.
+ */
+export function bboxFromBounds(west: number, south: number, east: number, north: number) {
+  const wraps = west < -180 || east > 180;
+  const box: Bbox = {
+    west: wraps ? -180 : clamp(Math.floor(west * SCALE) / SCALE, -180, 180),
+    south: clamp(Math.floor(south * SCALE) / SCALE, -90, 90),
+    east: wraps ? 180 : clamp(Math.ceil(east * SCALE) / SCALE, -180, 180),
+    north: clamp(Math.ceil(north * SCALE) / SCALE, -90, 90),
+  };
+  return box.west < box.east && box.south < box.north ? box : null;
+}
+
+/** The `bbox` query parameter for a box: six decimals, no exponent. */
+export function formatBbox(bbox: Bbox): string {
+  return [bbox.west, bbox.south, bbox.east, bbox.north].map((value) => value.toFixed(6)).join(',');
+}

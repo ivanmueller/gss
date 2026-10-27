@@ -70,6 +70,16 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page.getByText('Already in the list; skipped')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Import 0 new counterparties' })).toBeDisabled();
 
+  // The map page. CI builds without a Mapbox token, so it lists the locations instead, and
+  // none of the imported ones has coordinates.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Map' }).click();
+  await expect(page.getByText(/The map is not set up yet/)).toBeVisible();
+  await expect(
+    page.getByText(
+      '0 locations have coordinates. 3 locations have no coordinates yet, so they are not on the map.',
+    ),
+  ).toBeVisible();
+
   expect(errors).toEqual([]);
 });
 
@@ -99,6 +109,20 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
     headers,
   });
   expect(await byOrg.json()).toEqual({ counterparties: [], truncated: false });
+
+  const world = '-180,-90,180,90';
+  const map = await request.get(`/api/v1/facilities?bbox=${world}`, { headers });
+  expect(map.status()).toBe(200);
+  expect(JSON.stringify(await map.json())).not.toContain(OTHER_ORG.facilityName);
+  const otherMap = await request.get(
+    `/api/v1/facilities?bbox=${world}&organization_id=${OTHER_ORG.id}`,
+    { headers },
+  );
+  expect(await otherMap.json()).toEqual({
+    facilities: [],
+    truncated: false,
+    withoutCoordinates: 0,
+  });
 
   const one = `/api/v1/counterparties/${OTHER_ORG.counterpartyId}`;
   expect((await request.get(one, { headers })).status()).toBe(404);

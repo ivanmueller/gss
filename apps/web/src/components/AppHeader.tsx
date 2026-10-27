@@ -20,6 +20,7 @@ export interface HeaderUser {
 
 const NAV = [
   { id: 'workspace', href: '/', label: 'Workspace' },
+  { id: 'map', href: '/map', label: 'Map' },
   { id: 'counterparties', href: '/counterparties', label: 'Counterparties' },
 ] as const;
 

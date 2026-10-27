@@ -7,7 +7,7 @@ See shared technical baseline, privacy requirements and transport-adapter sequen
 ## 4.1 Runtime flow
 
 ```
-Browser — React/Vite/MapLibre
+Browser — React/Vite/Mapbox GL JS
    |  HTTPS + Supabase Auth identity
 Cloudflare Worker — Hono API
    |  user verification + organization membership + validation
