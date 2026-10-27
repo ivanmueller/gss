@@ -11,7 +11,7 @@ Approved product intent and user experience boundaries; refer to `../MASTER_PROJ
 3. Identify economically plausible cross-border physical trades quickly, without implying that a quote is executable when it is not.
 4. Calculate and compare transparent delivered margins in normalized currency and quantity units.
 5. Retain proprietary counterparty, lane, pricing, and trade data securely as a compounding commercial asset.
-6. Support an internal team initially, with a data model capable of future white-label/organization separation.
+6. Serve one internal trading team, the owner's shop. White-label and multi-company use is out of scope (owner's decision, 2026-10-27, `docs/DECISIONS.md`).
 7. Make development reproducible across multiple AI coding agents and a human project owner.
 
 ## 1.2 Release 1: must have
@@ -43,7 +43,7 @@ Approved product intent and user experience boundaries; refer to `../MASTER_PROJ
 
 **Release 3:** Shipment milestones, invoice reconciliation, expected-versus-realized margin, role-based approvals, compliance workflows, price ingest adapters, document extraction with review.
 
-**Release 4 (conditional):** Quantitative opportunity analytics, Python optimization, research and forecasting, controlled runtime AI assistants, rail economics, automated exception alerts, external white-label tenants.
+**Release 4 (conditional):** Quantitative opportunity analytics, Python optimization, research and forecasting, controlled runtime AI assistants, rail economics, automated exception alerts.
 
 # 2. Users, roles, and workflows
 

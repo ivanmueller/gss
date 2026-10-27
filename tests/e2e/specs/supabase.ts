@@ -8,6 +8,8 @@ export const AUTH_STATE = 'playwright/.auth/user.json';
 export const E2E_USER = {
   email: 'e2e-trader@example.test',
   password: 'synthetic-e2e-password-1',
+  firstName: 'Synthetic',
+  lastName: 'Trader',
 };
 export const E2E_ORG_NAME = 'Synthetic E2E Org';
 /** An organization the e2e user does not belong to, with one counterparty. */
@@ -83,7 +85,12 @@ async function recreateAuthUser(request: APIRequestContext, url: string): Promis
   }
   const created = await request.post(`${url}/auth/v1/admin/users`, {
     headers: adminHeaders(),
-    data: { email: E2E_USER.email, password: E2E_USER.password, email_confirm: true },
+    data: {
+      email: E2E_USER.email,
+      password: E2E_USER.password,
+      email_confirm: true,
+      user_metadata: { first_name: E2E_USER.firstName, last_name: E2E_USER.lastName },
+    },
   });
   if (!created.ok()) throw new Error(`Creating the e2e user failed: ${String(created.status())}`);
 }

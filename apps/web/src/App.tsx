@@ -78,7 +78,7 @@ export function App({ account }: { account?: Account }) {
         }
         {...(account && {
           user: {
-            email: me.status === 'ok' ? me.email : account.email,
+            name: me.status === 'ok' ? me.name : null,
             organization: organization === undefined ? undefined : (organization?.name ?? null),
             check: me.status,
             onSignOut: account.signOut,

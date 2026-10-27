@@ -9,16 +9,21 @@ export interface MeOrganization {
 export type MeState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ok'; email: string | null; organizations: MeOrganization[] }
+  | { status: 'ok'; name: string | null; organizations: MeOrganization[] }
   | { status: 'error' };
 
-function readEmail(body: unknown): string | null {
-  return typeof body === 'object' &&
-    body !== null &&
-    'email' in body &&
-    typeof body.email === 'string'
-    ? body.email
-    : null;
+function stringProperty(body: unknown, key: string): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+/** "Ivan M.": first name and last initial; the first name alone; or null without one. */
+export function displayName(firstName: string | null, lastName: string | null): string | null {
+  if (firstName === null) return null;
+  const first = lastName === null ? undefined : lastName.codePointAt(0);
+  const initial = first === undefined ? '' : ` ${String.fromCodePoint(first).toUpperCase()}.`;
+  return `${firstName}${initial}`;
 }
 
 function readOrganizations(body: unknown): MeOrganization[] {
@@ -50,7 +55,14 @@ export function useMe(accessToken: string | null): MeState {
         if (controller.signal.aborted) return;
         setState(
           res.ok
-            ? { status: 'ok', email: readEmail(body), organizations: readOrganizations(body) }
+            ? {
+                status: 'ok',
+                name: displayName(
+                  stringProperty(body, 'firstName'),
+                  stringProperty(body, 'lastName'),
+                ),
+                organizations: readOrganizations(body),
+              }
             : { status: 'error' },
         );
       })
