@@ -79,10 +79,10 @@ An agent finishes with a **PR**, not a statement that work is "done." The PR con
 A working map without usable price context is not the intended product. For relevant UI issues, agents should implement the `docs/PRODUCT.md` screen layout and use these review checkpoints:
 
 1. **Map + synchronized facility table:** seller and buyer roles are visible with labels/icons, not only colors.
-2. **Right-hand quote inspector:** price, currency, quantity unit, grade, source, expiry and delivery basis adjacent to the quote; indicative/firm status is unambiguous.
+2. **Right-hand quote inspector** (now the workspace order book and its selection details): price, currency, quantity unit, grade, source, expiry and delivery basis adjacent to the quote; indicative/firm status is unambiguous.
 3. **Scenario workspace:** seller offer and buyer bid, freight/FX assumptions, explanations, blocked state and per-MT/total economics are legible.
 4. **Responsive behavior:** narrow viewports use tabs/accessible lists instead of forcing a tiny map; keyboard workflows are tested.
-5. **Verification:** actual browser screenshots or a short walkthrough from staging (using synthetic data), plus Playwright smoke tests; not just code generation or an unverified model assertion.
+5. **Verification:** actual browser screenshots or a short walkthrough from staging (using synthetic data: the Demo data switch), plus Playwright smoke tests; not just code generation or an unverified model assertion.
 
 Avoid premature redesigns of the approved React/Vite/Tailwind/shadcn/Mapbox GL JS stack. Keep reusable components and domain types separated. Record material visual/layout decisions in `docs/PRODUCT.md` or a reviewed issue.
 

@@ -1,6 +1,6 @@
 # Agent instructions — Canadian–U.S. Physical Grain Trading Platform
 
-This project has its **Phase 1 foundation and first Phase 2 slices** on staging, with the owner's real buyer data: sign-in with MFA, the counterparty directory and spreadsheet import, a Mapbox map, and coordinates found with Geocodio. Quotes, the trading engine and saved scenarios do not exist yet; the trading workspace still shows synthetic data. Before coding, read the *relevant sections* of `MASTER_PROJECT_SPECIFICATION.md` and current status in `docs/HANDOFF.md`.
+This project has its **Phase 1 foundation and first Phase 2 slices** on staging, with the owner's real buyer data: sign-in with MFA, the counterparty directory and spreadsheet import, a Mapbox map, and coordinates found with Geocodio. Quotes, the FX connector, the trading engine and saved scenarios do not exist yet; the trading workspace (map and order book in CAD) shows only made-up data, behind the profile menu's **Demo data** switch. Before coding, read the *relevant sections* of `MASTER_PROJECT_SPECIFICATION.md` and current status in `docs/HANDOFF.md`.
 
 ## Mission
 Build a secure, auditable Canadian-to-U.S. physical grain trading operations platform. The map is for discovery; executable economics comes from validated bid/offer records, quote delivery terms, source FX and freight inputs, and a deterministic saved scenario snapshot.
@@ -11,10 +11,11 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - Shared domain/validation packages and a pure TypeScript trading-engine package using **decimal**, never JS float, for monetary arithmetic.
 - Mapbox GL JS with Mapbox map tiles (owner's decision, `docs/DECISIONS.md`); keep Mapbox calls in one map component so the provider can be changed later.
 - Geocoding with Geocodio's free plan, from the Worker only, with every result reviewed before saving (owner's decision, `docs/DECISIONS.md`).
+- FX: the Bank of Canada's daily USD/CAD rate, fetched once a day by the Worker and stored per day with its source, stale after four days (owner's decision, `docs/DECISIONS.md`). Not built yet: GT-052, together with bids and offers.
 - Python is out of scope until analytics or optimization justifies it.
 
 ## Always follow
-1. Source of design intent: `MASTER_PROJECT_SPECIFICATION.md`. Per-module details: `docs/`. **Do not invent market prices, routing fees, FX quotes or regulatory outcomes.** Label all synthetic data.
+1. Source of design intent: `MASTER_PROJECT_SPECIFICATION.md`. Per-module details: `docs/`. **Do not invent market prices, routing fees, FX quotes or regulatory outcomes.** Label all synthetic data (in the web app, made-up data appears only while the Demo data switch is on, with the "Demo" tag beside GSS).
 2. A quote must carry side, commodity/grade, numeric units, currency, delivery basis, valid time, available quantity and provenance. Treat indicative/stale as non-executable.
 3. Normalize quantity/FX explicitly. Missing FX, freight or unit conversion must **block** margin calculations; do not treat missing as zero. Preserve quote revision IDs and calculation engine version in every saved scenario.
 4. Enforce organization isolation server-side; no browser service-role secrets; limit grants/RLS, secure private files; test cross-tenant denials.

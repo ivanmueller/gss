@@ -1,5 +1,34 @@
 # Documentation pack changelog
 
+## 2026-10-27 — Documents brought up to date with the owner's decisions
+
+The owner asked for every project file to match the decisions and changes merged on 27 October (ivanmueller/gss#23 to ivanmueller/gss#29). Updated:
+
+- `README.md`:
+  - a current status line (it still said there was no database or sign-in);
+  - a "Workspace" section: the order book, the Demo data switch, the FX rate;
+  - the database connection through Hyperdrive, with `DATABASE_URL` as a local fallback only;
+  - the shared money code in `packages/domain`.
+- `AGENTS.md`:
+  - status;
+  - the FX decision under the intended architecture;
+  - how synthetic data is labelled in the web app (the Demo tag).
+- FX source, the Bank of Canada daily rate (owner's decision), recorded in:
+  - `docs/ARCHITECTURE.md`, `docs/API.md` and `docs/DATA_MODEL.md`;
+  - `docs/TRADING_RULES.md` and its copy in the specification, which also gain the stale-rate rule and display rounding;
+  - `docs/BUILD_PLAN.md` (GT-052 pulled forward);
+  - `docs/REFERENCES.md`.
+- `MASTER_PROJECT_SPECIFICATION.md`:
+  - version line;
+  - FX as a permitted data source;
+  - the order book as the right-hand panel, with a pointer to its owner-approved exceptions to three interface conventions;
+  - references.
+- Other docs:
+  - `docs/PRODUCT.md` and `docs/AI_CODING_SYSTEM.md`: the quote inspector is now the order book;
+  - `docs/DECISIONS.md`: pointers on entries that later decisions changed.
+
+Product rules, formulas and schemas are unchanged apart from recording these decisions.
+
 ## 2026-10-26 — AI coding workflow pack integrated into the repository
 
 The pack update below arrived after the Phase 0 bootstrap (ivanmueller/gss#1) had merged, so three of its files were merged by hand rather than copied:

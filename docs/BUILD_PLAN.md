@@ -42,7 +42,7 @@ After GT-013–GT-015 establish secure organization-bound schema and minimal dat
 
 ## Phase 5 — Commercially useful freight and discovery
 
-**Tickets:** GT-050 freight quote/lane data model; GT-051 licensed road routing integration; GT-052 source/time-aware FX connector; GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
+**Tickets:** GT-050 freight quote/lane data model; GT-051 licensed road routing integration; GT-052 source/time-aware FX connector (the Bank of Canada daily rate; pulled forward by the owner to be built with bids and offers); GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
 
 **Gate:** Ranked opportunities differentiate confirmed, estimated and insufficient-data scenarios; shipping cost inclusion is auditable; no inaccurate route or estimated cost is presented as firm carrier freight.
 
