@@ -47,7 +47,9 @@ export function App({ account }: { account?: Account }) {
   function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
     if (!account) return <Notice>Sign in to see your organization’s counterparties.</Notice>;
     if (me.status === 'error')
-      return <Notice>The server could not confirm your organization. Reload to try again.</Notice>;
+      return (
+        <Notice>Your organization’s records appear once the server confirms your session.</Notice>
+      );
     if (organization === undefined) return <Notice>Loading…</Notice>;
     if (organization === null) {
       return (

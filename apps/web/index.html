@@ -9,8 +9,13 @@
       // Applies the saved light or night theme before the first paint, so the page never
       // flashes the wrong one. Keep in step with src/lib/theme.ts (same key and rules).
       (function () {
+        var saved = null;
         try {
-          var saved = localStorage.getItem('gss.theme');
+          saved = localStorage.getItem('gss.theme');
+        } catch (e) {
+          // Storage blocked: follow the device, as lib/theme.ts does.
+        }
+        try {
           var dark =
             saved === 'dark' ||
             (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);

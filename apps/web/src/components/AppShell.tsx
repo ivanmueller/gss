@@ -2,6 +2,7 @@ import {
   ArrowLeftRight,
   Building2,
   Calculator,
+  CircleAlert,
   LayoutDashboard,
   MapIcon,
   Menu,
@@ -17,6 +18,7 @@ import { Brand } from './Brand';
 import { ConnectionStatus } from './ConnectionStatus';
 import { ProfileMenu, type ProfileUser } from './ProfileMenu';
 import { Button } from './ui/button';
+import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
 export type NavSection = 'workspace' | 'map' | 'counterparties';
@@ -104,8 +106,14 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  // Tailwind's `lg`: from here the menu is always shown, so the slide-over closes.
+  // Tailwind's `lg`: from here the menu is always shown, so the slide-over closes, and stays
+  // closed if the window narrows again (state adjusted during render, as React advises).
   const wide = useMediaQuery('(min-width: 1024px)', false);
+  const [wasWide, setWasWide] = useState(wide);
+  if (wide !== wasWide) {
+    setWasWide(wide);
+    if (wide) setMenuOpen(false);
+  }
   return (
     <div className="min-h-dvh bg-background text-foreground">
       <a
@@ -119,7 +127,7 @@ export function AppShell({
       </div>
       <div className="flex min-h-dvh flex-col lg:pl-sidebar">
         <header className="sticky top-0 z-(--z-topbar) flex h-topbar shrink-0 items-center gap-2 border-b bg-background/90 px-4 backdrop-blur-sm lg:px-8">
-          <Sheet open={menuOpen && !wide} onOpenChange={setMenuOpen}>
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="-ml-2 lg:hidden">
                 <Menu aria-hidden="true" className="size-5!" />
@@ -148,6 +156,14 @@ export function AppShell({
           tabIndex={-1}
           className="mx-auto flex w-full max-w-content flex-1 flex-col gap-6 px-4 py-6 outline-none lg:px-8 lg:py-8"
         >
+          {user?.check === 'error' && (
+            <Callout variant="danger" icon={CircleAlert} role="alert">
+              <p>
+                <strong>The server could not confirm your session.</strong> Reload the page to try
+                again. If this keeps happening, sign out and sign in again.
+              </p>
+            </Callout>
+          )}
           {children}
         </main>
       </div>

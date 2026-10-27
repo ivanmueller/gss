@@ -39,6 +39,7 @@ export function ProfileMenu({ name, check, onSignOut }: ProfileUser) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <div className="px-2 py-1.5">
+          {/* A session problem is explained in the page itself (AppShell), not only here. */}
           {name ? (
             <p className="text-sm">
               <span className="block text-xs text-muted-foreground">Signed in as</span>{' '}
@@ -46,11 +47,6 @@ export function ProfileMenu({ name, check, onSignOut }: ProfileUser) {
             </p>
           ) : (
             <p className="text-sm font-medium">Signed in</p>
-          )}
-          {problem && (
-            <p className="mt-1 text-xs text-danger">
-              The server could not confirm your session. Reload to try again.
-            </p>
           )}
         </div>
         <DropdownMenuSeparator />

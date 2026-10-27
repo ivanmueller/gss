@@ -63,7 +63,7 @@ App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), 
 ## Layout
 
 - **Left menu:** the GSS logo slot and name at the top, then the pages. Planned pages (bids and offers, scenarios, team) are listed greyed out under "Coming next" and are not links. Below 1024 px the menu folds into a panel opened from the top bar.
-- **Top bar:** a connection dot (green when the server answers; red with the words "Server unreachable" when it does not) and the profile icon, which opens "Signed in as", the Dark mode switch and Sign out.
+- **Top bar:** a connection dot (green when the server answers; red with the words "Server unreachable" when it does not) and the profile icon, which opens "Signed in as", the Dark mode switch and Sign out. If the server rejects the session, a red notice appears at the top of the page and the profile icon gets a red dot.
 - **Pages:** each starts with `PageHeader` (an `<h1>`, a description and actions), up to 1,280 px wide.
 
 ## Rules for new screens

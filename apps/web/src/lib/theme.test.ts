@@ -164,4 +164,14 @@ describe('the pre-paint script in index.html', () => {
       }
     }
   });
+
+  it('follows the device when storage is blocked (Codex review)', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    systemDark = true;
+    run();
+    expect(isDark()).toBe(true);
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+  });
 });

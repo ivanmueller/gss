@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -228,20 +228,34 @@ describe('signed-in user', () => {
     window.history.replaceState(null, '', '/');
   });
 
-  it('marks the profile icon and explains when the API rejects the session', async () => {
+  it('warns on the page, not only in the menu, when the API rejects the session', async () => {
     mockMe(Response.json({ error: { code: 'MFA_REQUIRED' } }, { status: 403 }));
-    const user = userEvent.setup();
     render(
       <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
     );
 
-    const trigger = await screen.findByRole('button', {
-      name: 'Account: session not confirmed',
-    });
-    await user.click(trigger);
+    // Visible without opening anything (Codex review): the workspace stays on screen.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The server could not confirm your session.');
+    expect(alert).toBeVisible();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Workspace', level: 1 })).toBeInTheDocument();
+    // The profile icon is marked too.
     expect(
-      within(screen.getByRole('menu')).getByText(/server could not confirm your session/),
+      screen.getByRole('button', { name: 'Account: session not confirmed' }),
     ).toBeInTheDocument();
+  });
+
+  it('shows no session warning when the API accepts the session', async () => {
+    mockMe(Response.json(ALICE));
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Account' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
   });
 
   it('switches between the light and night themes with one switch', async () => {
@@ -399,6 +413,40 @@ describe('navigation', () => {
     await user.click(within(panel).getByRole('link', { name: 'Counterparties' }));
 
     expect(window.location.pathname).toBe('/counterparties');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps the phone menu closed after the window widens and narrows again', async () => {
+    // A viewport whose width can change mid-test, telling listeners as a browser would.
+    let wide = false;
+    const listeners = new Set<() => void>();
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (query: string) => ({
+        get matches() {
+          return query === '(min-width: 1024px)' && wide;
+        },
+        media: query,
+        addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+      }),
+    });
+    const resize = (next: boolean) => {
+      wide = next;
+      act(() => {
+        for (const listener of [...listeners]) listener();
+      });
+    };
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Open menu' }));
+    expect(screen.getByRole('dialog', { name: 'Menu' })).toBeInTheDocument();
+
+    resize(true);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Narrowing again must not bring the panel back by itself (Codex review).
+    resize(false);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
