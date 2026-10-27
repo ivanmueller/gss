@@ -162,7 +162,8 @@ describe('signed-in user', () => {
     render(<App account={{ email: 'session@example.test', accessToken: 'token-1', signOut }} />);
 
     expect(await screen.findByText('Alice S.')).toBeInTheDocument();
-    expect(screen.getByText(/Synthetic Org A/)).toBeInTheDocument();
+    // One organization only: the header names the person, not the company.
+    expect(screen.getByText(/^Signed in as/)).toHaveTextContent(/^Signed in as Alice S\.$/);
     expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', {
       headers: { Authorization: 'Bearer token-1' },
@@ -173,7 +174,7 @@ describe('signed-in user', () => {
     expect(signOut).toHaveBeenCalledTimes(1);
   });
 
-  it('says when the user has no organization yet', async () => {
+  it('says "Signed in" when the user has no name set', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) =>
@@ -188,8 +189,7 @@ describe('signed-in user', () => {
       <App account={{ email: 'alice@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
     );
 
-    expect(await screen.findByText(/no organization yet/)).toBeInTheDocument();
-    expect(screen.getByText(/^Signed in/)).toHaveTextContent(/^Signed in ·/);
+    expect(await screen.findByText('Signed in')).toBeInTheDocument();
     expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
   });
 
