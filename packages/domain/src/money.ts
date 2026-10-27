@@ -61,3 +61,59 @@ export function grossSpread(bid: QuotedPrice, offer: QuotedPrice): GrossSpread {
     unit: bid.unit,
   };
 }
+
+export type CadConversion =
+  | {
+      status: 'ok';
+      /** CAD per unit, exact: the quoted amount, or a USD amount times the rate, unrounded. */
+      amount: string;
+      currency: 'CAD';
+      unit: string;
+      /** The rate used, CAD per 1 USD; null when the price was already in CAD. */
+      cadPerUsd: string | null;
+    }
+  | { status: 'blocked'; reason: 'FX_MISSING' | 'CURRENCY_UNSUPPORTED' };
+
+/**
+ * A price in CAD, the reporting currency (docs/TRADING_RULES.md §5.3): a CAD price as quoted,
+ * a USD price as `USD × CAD per USD`, exactly and unrounded. Without a rate a USD price is
+ * blocked, never zero; other currencies are not supported yet. The caller keeps the original
+ * price and the rate alongside the result, so the conversion can always be shown and redone.
+ */
+export function toCad(price: QuotedPrice, cadPerUsd: string | null): CadConversion {
+  if (price.currency === 'CAD') {
+    decimal(price.amount);
+    return {
+      status: 'ok',
+      amount: price.amount,
+      currency: 'CAD',
+      unit: price.unit,
+      cadPerUsd: null,
+    };
+  }
+  if (price.currency !== 'USD') return { status: 'blocked', reason: 'CURRENCY_UNSUPPORTED' };
+  if (cadPerUsd === null) return { status: 'blocked', reason: 'FX_MISSING' };
+  const rate = decimal(cadPerUsd);
+  if (!rate.isPositive() || rate.isZero()) throw new Error(`Not an FX rate: "${cadPerUsd}"`);
+  // Exact: the product has at most the sum of both decimal places.
+  const product = decimal(price.amount).times(rate);
+  return {
+    status: 'ok',
+    amount: (product.isZero() ? new Exact(0) : product).toFixed(
+      places(price.amount) + places(cadPerUsd),
+    ),
+    currency: 'CAD',
+    unit: price.unit,
+    cadPerUsd,
+  };
+}
+
+/**
+ * An amount rounded for display or reporting, half away from zero ("986.005" → "986.01").
+ * Only at that boundary: sums, comparisons and spreads use the unrounded amounts
+ * (docs/TRADING_RULES.md §5.3).
+ */
+export function roundMoney(amount: string, decimalPlaces = 2): string {
+  const rounded = decimal(amount).toDecimalPlaces(decimalPlaces, Decimal.ROUND_HALF_UP);
+  return (rounded.isZero() ? new Exact(0) : rounded).toFixed(decimalPlaces);
+}

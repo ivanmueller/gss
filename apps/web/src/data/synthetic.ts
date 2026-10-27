@@ -1,10 +1,19 @@
-import type { Facility, Quote } from './types';
+import type { Facility, FxRate, Quote } from './types';
 
 // SYNTHETIC DEMO DATA. Every facility, location and quote here is fictional. The flaxseed
 // offer from Demo Seller A (CAD 820.00) and bid from Demo Buyer C (USD 725.00) are the golden
 // fixture from docs/TRADING_RULES.md. The other prices are made-up demo numbers, chosen to
-// show the order book's cases (positive, negative and blocked spreads, an expired quote);
-// they are not market prices, forecasts or advice.
+// show the order book's cases (spreads, USD quotes shown in CAD, a second level, an
+// expired quote); they are not market prices, forecasts or advice.
+
+/**
+ * SYNTHETIC: the golden fixture's rate (docs/TRADING_RULES.md §5.4), used to show USD quotes in
+ * CAD. It is not a market rate; which real rate the app uses is still to be decided.
+ */
+export const SYNTHETIC_FX: FxRate = {
+  cadPerUsd: '1.360000',
+  source: 'synthetic rate (golden fixture)',
+};
 
 export const SYNTHETIC_COMMODITIES = ['Flaxseed', 'Canola', 'Yellow peas', 'Durum wheat'] as const;
 

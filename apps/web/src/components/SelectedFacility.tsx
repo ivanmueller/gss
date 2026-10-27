@@ -1,26 +1,33 @@
 import { X } from 'lucide-react';
 
-import type { Facility, Quote } from '../data/types';
-import { formatPrice, formatQuantityRange, formatUtc } from '../lib/format';
-import { displayStatus, isLive } from '../lib/orderBook';
+import type { Facility, FxRate, Quote } from '../data/types';
+import { formatQuantityRange, formatUtc } from '../lib/format';
+import { cadPrice, displayStatus, isLive } from '../lib/orderBook';
+import { CadPrice, conversionText } from './CadPrice';
 import { QuoteStatusBadge } from './QuoteStatusBadge';
 import { RoleLabel } from './RoleLabel';
 import { Button } from './ui/button';
 
-function QuoteDetails({ quote, now }: { quote: Quote; now: Date }) {
-  const isOffer = quote.side === 'OFFER';
+function QuoteDetails({ quote, fx, now }: { quote: Quote; fx: FxRate | null; now: Date }) {
+  const isAsk = quote.side === 'OFFER';
+  const converted = cadPrice(quote, fx)?.fx;
   return (
     <section
-      aria-label={isOffer ? 'Seller offer' : 'Buyer bid'}
+      aria-label={isAsk ? 'Seller ask' : 'Buyer bid'}
       className="rounded-control border bg-card p-3"
     >
       <div className="flex items-center justify-between gap-2">
-        <RoleLabel role={isOffer ? 'seller' : 'buyer'} suffix={isOffer ? 'offer' : 'bid'} />
+        <RoleLabel role={isAsk ? 'seller' : 'buyer'} suffix={isAsk ? 'ask' : 'bid'} />
         <QuoteStatusBadge status={displayStatus(quote, now)} />
       </div>
-      <p className="mt-2 font-mono text-xl font-semibold tracking-tight tabular-nums">
-        {formatPrice(quote.price)}
+      <p className="mt-2 text-xl font-semibold tracking-tight">
+        <CadPrice quote={quote} fx={fx} />
       </p>
+      {converted && (
+        <p className="text-xs text-muted-foreground">
+          Quoted as {conversionText(quote, converted)}
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         Quoted {formatUtc(quote.quotedAt)} · valid until {formatUtc(quote.validUntil)}
       </p>
@@ -56,11 +63,14 @@ function QuoteDetails({ quote, now }: { quote: Quote; now: Date }) {
 export function SelectedFacility({
   facility,
   commodities,
+  fx,
   now,
   onClose,
 }: {
   facility: Facility;
   commodities: readonly string[];
+  /** The rate that puts USD quotes in CAD; null when there is none. */
+  fx: FxRate | null;
   now: Date;
   onClose: () => void;
 }) {
@@ -102,11 +112,11 @@ export function SelectedFacility({
         <dd>{facility.commodities.join(', ')}</dd>
       </dl>
       {quotes.length > 0 ? (
-        quotes.map((quote) => <QuoteDetails key={quote.id} quote={quote} now={now} />)
+        quotes.map((quote) => <QuoteDetails key={quote.id} quote={quote} fx={fx} now={now} />)
       ) : (
         <p className="rounded-control border border-dashed bg-card p-3 text-xs">
           <span className="block font-medium">
-            {facility.roles.includes('seller') ? 'No active offer' : 'No active bid'}
+            {facility.roles.includes('seller') ? 'No active ask' : 'No active bid'}
           </span>
           <span className="text-muted-foreground">
             Known facility with no recorded price in the chosen commodities, so it cannot be paired

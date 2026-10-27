@@ -83,8 +83,8 @@ const FALLBACK: MapColours = {
   road: '#f5f5f5',
   label: '#525252',
   labelHalo: '#ffffff',
-  bid: '#4f39f6',
-  offer: '#00786f',
+  bid: '#008236',
+  offer: '#c10007',
   hollow: '#ffffff',
   selected: '#0a0a0a',
 };

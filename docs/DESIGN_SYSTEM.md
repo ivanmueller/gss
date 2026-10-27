@@ -21,7 +21,7 @@ After a colour change, `pnpm --filter @grain/web test` checks that text still me
 
 ## Three layers
 
-1. **Palette** (`palette.css`): raw colours as ramps from 50 (lightest) to 950 (darkest), in OKLCH. Grey (pure neutral, no tint) for the light theme; slate (a cool blue-grey, matched to the owner's reference dashboard) for the night theme; blue, green, yellow, orange, red, teal and indigo. Apart from slate, the values are Tailwind CSS v4's palette. No brand colour yet, and nothing depends on one.
+1. **Palette** (`palette.css`): raw colours as ramps from 50 (lightest) to 950 (darkest), in OKLCH. Grey (pure neutral, no tint) for the light theme; slate (a cool blue-grey, matched to the owner's reference dashboard) for the night theme; blue, green, yellow, orange, red, teal and indigo (teal and indigo are not used by any role at the moment). Apart from slate, the values are Tailwind CSS v4's palette. No brand colour yet, and nothing depends on one.
 2. **Themes** (`themes.css`): what each colour is *for*, once for the light theme (`:root`, white and neutral greys) and once for the night theme (`.dark`, slate: page `#252c36`, cards `#313842`, menu a step darker). Components only ever use these roles.
 3. **Scales and the Tailwind bridge** (`scales.css`): type, spacing, rounding and shadows, and the roles exposed as Tailwind classes (`bg-card`, `text-danger`, `rounded-card`, `shadow-md`). Tailwind's default colours, radii, shadows and font sizes are switched off, so only these values exist.
 
@@ -38,10 +38,10 @@ Status and trading roles, each with five tokens: `<role>` (text, icons, dots), `
 | `caution` | yellow | Not yet reliable: indicative quotes, pending verification, synthetic data |
 | `warning` | orange | A likely problem to check before acting: low geocoding confidence, another province |
 | `danger` | red | Errors, server unreachable, destructive actions |
-| `bid` | indigo | Buyer bids |
-| `offer` | teal | Seller offers |
+| `bid` | green | Buyer bids |
+| `offer` | red | Seller offers, called asks in the order book |
 
-Severity rises from info to danger. Colour never carries meaning alone: statuses, bids and offers always show a word and usually an icon.
+Severity rises from info to danger. Colour never carries meaning alone: statuses, bids and offers always show a word and usually an icon. Bids and asks follow the trading convention (green and red) and so share their ramps with `success` and `danger`; they always sit under a heading or carry the word "Bid" or "Ask", so they are never read as a status.
 
 ## Scales
 
@@ -63,13 +63,13 @@ Mapbox draws the base map; the app repaints it with the theme's map roles. The "
 
 `Button` (primary, secondary, outline, ghost, danger; `asChild` styles a link as a button), `Input` and `Select`, `FileButton`, `Card` with `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `Badge` (one variant per role), `Callout` (boxed notes and alerts), `Table` parts, `Tabs`, `SegmentedControl` (toggle buttons), `DropdownMenu` and `Sheet` (slide-over panel), both on Radix for keyboard and screen-reader support.
 
-App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), `Brand` (logo slot and the GSS name), `ConnectionStatus` (the dot), `ProfileMenu`, `PageHeader`, `BackLink`, `CommodityPicker` (choose one, several or all commodities), `OrderBook` (bids and offers by commodity), `SelectedFacility`, `FacilityMap` (the only Mapbox code).
+App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), `Brand` (logo slot and the GSS name), `ConnectionStatus` (the dot), `ProfileMenu`, `PageHeader`, `BackLink`, `CommodityPicker` (choose one, several or all commodities), `OrderBook` (asks and bids by commodity, in CAD), `CadPrice` (a price in CAD, marked "FX" with the original price on hover when converted), `SelectedFacility`, `FacilityMap` (the only Mapbox code).
 
 ## Layout
 
 - **Left menu:** the GSS logo slot and name at the top, then the pages. Planned pages (bids and offers, scenarios, team) are listed greyed out under "Coming next" and are not links. Below 1024 px the menu folds into a panel opened from the top bar.
 - **Top bar:** a connection dot (green when the server answers; red with the words "Server unreachable" when it does not) and the profile icon, which opens "Signed in as", the Dark mode switch and Sign out. If the server rejects the session, a red notice appears at the top of the page and the profile icon gets a red dot.
-- **Pages:** each starts with `PageHeader` (an `<h1>`, a description and actions), up to 1,280 px wide.
+- **Pages:** each starts with `PageHeader` (an `<h1>`, a description and actions), up to 1,408 px wide (`--container-content`).
 
 ## Rules for new screens
 

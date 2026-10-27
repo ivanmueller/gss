@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatPrice, formatQuantityRange, formatSignedPrice, formatUtc } from './format';
+import {
+  formatPrice,
+  formatQuantityRange,
+  formatQuantityShort,
+  formatSignedPrice,
+  formatUtc,
+} from './format';
 
 describe('formatPrice', () => {
   it('shows currency, decimal amount and unit', () => {
@@ -36,6 +42,21 @@ describe('formatUtc', () => {
 describe('formatQuantityRange', () => {
   it('shows the range in metric tonnes', () => {
     expect(formatQuantityRange({ min: '21.000', max: '42.000' })).toBe('21.000–42.000 MT');
+  });
+});
+
+describe('formatQuantityShort', () => {
+  it.each([
+    [{ min: '21.000', max: '84.000' }, '21–84 MT'],
+    [{ min: '42.500', max: '100.050' }, '42.5–100.05 MT'],
+    [{ min: '100', max: '300' }, '100–300 MT'],
+    [{ min: '0.000', max: '10.0' }, '0–10 MT'],
+  ])('shortens %j to %s, from the text only', (range, text) => {
+    expect(formatQuantityShort(range)).toBe(text);
+  });
+
+  it('refuses a quantity that is not a decimal string', () => {
+    expect(() => formatQuantityShort({ min: '2e1', max: '84' })).toThrow(/Not a decimal/);
   });
 });
 

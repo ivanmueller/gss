@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compareDecimal, grossSpread } from './money';
+import { compareDecimal, grossSpread, roundMoney, toCad } from './money';
 
 const cad = (amount: string) => ({ amount, currency: 'CAD', unit: 'MT' });
 const usd = (amount: string) => ({ amount, currency: 'USD', unit: 'MT' });
@@ -56,5 +56,82 @@ describe('compareDecimal', () => {
     ['0.300000000001', '0.3', 1],
   ])('compares %s with %s', (a, b, sign) => {
     expect(Math.sign(compareDecimal(a, b))).toBe(sign);
+  });
+});
+
+describe('toCad', () => {
+  it('converts the golden fixture bid: USD 725.00 at 1.360000 CAD per USD is CAD 986.00', () => {
+    // docs/TRADING_RULES.md §5.4: revenue in CAD = 725 × 1.36 = CAD 986.00/MT.
+    const result = toCad(usd('725.00'), '1.360000');
+    expect(result).toEqual({
+      status: 'ok',
+      amount: '986.00000000',
+      currency: 'CAD',
+      unit: 'MT',
+      cadPerUsd: '1.360000',
+    });
+    expect(result.status === 'ok' && roundMoney(result.amount)).toBe('986.00');
+  });
+
+  it('keeps a CAD price as quoted, with no rate', () => {
+    expect(toCad(cad('820.00'), '1.360000')).toEqual({
+      status: 'ok',
+      amount: '820.00',
+      currency: 'CAD',
+      unit: 'MT',
+      cadPerUsd: null,
+    });
+    expect(toCad(cad('820.00'), null)).toMatchObject({ status: 'ok', amount: '820.00' });
+  });
+
+  it('blocks a USD price without a rate, never zero', () => {
+    expect(toCad(usd('725.00'), null)).toEqual({ status: 'blocked', reason: 'FX_MISSING' });
+  });
+
+  it('blocks a currency it cannot convert', () => {
+    expect(toCad({ amount: '725.00', currency: 'EUR', unit: 'MT' }, '1.360000')).toEqual({
+      status: 'blocked',
+      reason: 'CURRENCY_UNSUPPORTED',
+    });
+  });
+
+  it.each([
+    ['330.00', '1.360000', '448.80000000'],
+    ['0.1', '3', '0.3'],
+    ['725.13', '1.3612', '987.046956'],
+    ['123456789012345678.99', '1.360000000001', '167901233056913580.21541234567899'],
+    ['-12.50', '1.36', '-17.0000'],
+    ['0.00', '1.36', '0.0000'],
+  ])('USD %s at %s is CAD %s, exactly', (amount, rate, expected) => {
+    expect(toCad(usd(amount), rate)).toMatchObject({ status: 'ok', amount: expected });
+  });
+
+  it.each(['0', '0.000000', '-1.36', '1e3', 'abc', ''])('refuses %j as a rate', (rate) => {
+    expect(() => toCad(usd('725.00'), rate)).toThrow(/Not an FX rate|Not a decimal amount/);
+  });
+
+  it('refuses an amount that is not a decimal', () => {
+    expect(() => toCad(usd('7.25e2'), '1.36')).toThrow(/Not a decimal amount/);
+    expect(() => toCad(cad('7.25e2'), null)).toThrow(/Not a decimal amount/);
+  });
+});
+
+describe('roundMoney', () => {
+  it.each([
+    ['986.00000000', '986.00'],
+    ['986.005', '986.01'],
+    ['986.004999', '986.00'],
+    ['987.046956', '987.05'],
+    ['-0.004', '0.00'],
+    ['-17.005', '-17.01'],
+    ['181', '181.00'],
+    ['0.125', '0.13'],
+  ])('rounds %s to %s', (amount, expected) => {
+    expect(roundMoney(amount)).toBe(expected);
+  });
+
+  it('rounds to other places', () => {
+    expect(roundMoney('1.3649999', 4)).toBe('1.3650');
+    expect(roundMoney('42.5', 0)).toBe('43');
   });
 });

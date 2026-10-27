@@ -32,8 +32,12 @@
  *   caution   yellow  not yet reliable: indicative, pending, synthetic data
  *   warning   orange  likely problem: check before acting (low confidence, stale)
  *   danger    red     error, offline, destructive action
- *   bid       indigo  buyer bids
- *   offer     teal    seller offers
+ *   bid       green   buyer bids (the order book's right column)
+ *   offer     red     seller offers, called asks in the order book (its left column)
+ *
+ * Bids are green and asks red, the trading convention the owner asked for. They share their
+ * ramps with success and danger, so a bid or ask always carries its word ("Bid", "Ask") and
+ * sits in its own column, and is never mistaken for a status.
  *
  * In the night theme the subtle tints and their borders are see-through washes of the 500 step,
  * so a note looks the same on the page and on a card and never turns muddy.
@@ -104,16 +108,16 @@
   --danger-solid: var(--red-600);
   --danger-solid-foreground: var(--white);
 
-  --bid: var(--indigo-600);
-  --bid-subtle: var(--indigo-50);
-  --bid-border: var(--indigo-200);
-  --bid-solid: var(--indigo-600);
+  --bid: var(--green-700);
+  --bid-subtle: var(--green-50);
+  --bid-border: var(--green-200);
+  --bid-solid: var(--green-700);
   --bid-solid-foreground: var(--white);
 
-  --offer: var(--teal-700);
-  --offer-subtle: var(--teal-50);
-  --offer-border: var(--teal-200);
-  --offer-solid: var(--teal-700);
+  --offer: var(--red-700);
+  --offer-subtle: var(--red-50);
+  --offer-border: var(--red-200);
+  --offer-solid: var(--red-600);
   --offer-solid-foreground: var(--white);
 
   --map-land: var(--white);
@@ -186,16 +190,16 @@
   --danger-solid: var(--red-600);
   --danger-solid-foreground: var(--white);
 
-  --bid: var(--indigo-200);
-  --bid-subtle: color-mix(in oklch, var(--indigo-500) 15%, transparent);
-  --bid-border: color-mix(in oklch, var(--indigo-500) 35%, transparent);
-  --bid-solid: var(--indigo-600);
+  --bid: var(--green-400);
+  --bid-subtle: color-mix(in oklch, var(--green-500) 15%, transparent);
+  --bid-border: color-mix(in oklch, var(--green-500) 35%, transparent);
+  --bid-solid: var(--green-700);
   --bid-solid-foreground: var(--white);
 
-  --offer: var(--teal-400);
-  --offer-subtle: color-mix(in oklch, var(--teal-500) 15%, transparent);
-  --offer-border: color-mix(in oklch, var(--teal-500) 35%, transparent);
-  --offer-solid: var(--teal-700);
+  --offer: var(--red-300);
+  --offer-subtle: color-mix(in oklch, var(--red-500) 15%, transparent);
+  --offer-border: color-mix(in oklch, var(--red-500) 35%, transparent);
+  --offer-solid: var(--red-600);
   --offer-solid-foreground: var(--white);
 
   --map-land: var(--slate-600);
