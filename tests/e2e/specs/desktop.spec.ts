@@ -40,7 +40,9 @@ test('keeps the menu on the left and only a status dot and profile icon on top',
   await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
 });
 
-test('switches to the night theme and keeps it after a reload', async ({ page }) => {
+test('switches to the night theme with one switch and keeps it after a reload', async ({
+  page,
+}) => {
   await page.goto('/');
   const html = page.locator('html');
   await expect(html).not.toHaveClass(/\bdark\b/);
@@ -49,8 +51,11 @@ test('switches to the night theme and keeps it after a reload', async ({ page })
   );
 
   await page.getByRole('button', { name: 'Account' }).click();
-  await page.getByRole('menuitemradio', { name: 'Dark' }).click();
+  const toggle = page.getByRole('menuitemcheckbox', { name: 'Dark mode' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
   await expect(html).toHaveClass(/\bdark\b/);
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
   const darkBackground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   expect(darkBackground).not.toBe(lightBackground);
 
@@ -59,7 +64,7 @@ test('switches to the night theme and keeps it after a reload', async ({ page })
   await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
 
   await page.getByRole('button', { name: 'Account' }).click();
-  await page.getByRole('menuitemradio', { name: 'Light' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Dark mode' }).click();
   await expect(html).not.toHaveClass(/\bdark\b/);
 });
 

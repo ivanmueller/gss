@@ -1,5 +1,4 @@
 import * as MenuPrimitive from '@radix-ui/react-dropdown-menu';
-import { Check } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
 import { cn } from '../../lib/utils';
@@ -8,7 +7,6 @@ import { cn } from '../../lib/utils';
 
 export const DropdownMenu = MenuPrimitive.Root;
 export const DropdownMenuTrigger = MenuPrimitive.Trigger;
-export const DropdownMenuRadioGroup = MenuPrimitive.RadioGroup;
 
 export function DropdownMenuContent({
   className,
@@ -46,22 +44,40 @@ export function DropdownMenuItem({
   );
 }
 
-export function DropdownMenuRadioItem({
+/**
+ * An on/off setting inside a menu, drawn as a switch. It stays open when toggled, so the
+ * change is visible; screen readers hear a checkable menu item.
+ */
+export function DropdownMenuSwitchItem({
   className,
   children,
+  checked,
+  onSelect,
   ...props
-}: ComponentProps<typeof MenuPrimitive.RadioItem>) {
+}: Omit<ComponentProps<typeof MenuPrimitive.CheckboxItem>, 'checked'> & { checked: boolean }) {
   return (
-    <MenuPrimitive.RadioItem
-      data-slot="dropdown-menu-radio-item"
-      className={cn(itemClass, 'pr-8', className)}
+    <MenuPrimitive.CheckboxItem
+      data-slot="dropdown-menu-switch-item"
+      checked={checked}
+      onSelect={(event) => {
+        event.preventDefault();
+        onSelect?.(event);
+      }}
+      className={cn(itemClass, className)}
       {...props}
     >
       {children}
-      <MenuPrimitive.ItemIndicator className="absolute right-2 flex items-center">
-        <Check aria-hidden="true" className="text-foreground!" />
-      </MenuPrimitive.ItemIndicator>
-    </MenuPrimitive.RadioItem>
+      <span
+        aria-hidden="true"
+        data-checked={checked || undefined}
+        className="ml-auto flex h-5 w-9 shrink-0 items-center rounded-full border border-transparent bg-input p-0.5 transition-colors data-checked:bg-primary"
+      >
+        <span
+          data-checked={checked || undefined}
+          className="size-4 rounded-full bg-background shadow-xs transition-transform data-checked:translate-x-4 motion-reduce:transition-none"
+        />
+      </span>
+    </MenuPrimitive.CheckboxItem>
   );
 }
 

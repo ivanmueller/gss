@@ -1,16 +1,14 @@
-import { CircleUserRound, LogOut, Monitor, Moon, Sun } from 'lucide-react';
+import { CircleUserRound, LogOut, Moon } from 'lucide-react';
 
-import { useThemePreference, type ThemePreference } from '../lib/theme';
+import { useTheme } from '../lib/theme';
 import type { MeState } from '../lib/useMe';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSwitchItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 
@@ -21,19 +19,9 @@ export interface ProfileUser {
   onSignOut: () => void;
 }
 
-const THEMES: { value: ThemePreference; label: string; Icon: typeof Sun }[] = [
-  { value: 'light', label: 'Light', Icon: Sun },
-  { value: 'dark', label: 'Dark', Icon: Moon },
-  { value: 'system', label: 'System', Icon: Monitor },
-];
-
-function isThemePreference(value: string): value is ThemePreference {
-  return THEMES.some((theme) => theme.value === value);
-}
-
-/** The profile icon in the top bar, opening who is signed in, the theme and sign-out. */
+/** The profile icon in the top bar, opening who is signed in, the Dark mode switch and sign-out. */
 export function ProfileMenu({ name, check, onSignOut }: ProfileUser) {
-  const [theme, setTheme] = useThemePreference();
+  const [theme, setTheme] = useTheme();
   const problem = check === 'error';
   return (
     <DropdownMenu>
@@ -66,20 +54,15 @@ export function ProfileMenu({ name, check, onSignOut }: ProfileUser) {
           )}
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>Theme</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={theme}
-          onValueChange={(value) => {
-            if (isThemePreference(value)) setTheme(value);
+        <DropdownMenuSwitchItem
+          checked={theme === 'dark'}
+          onSelect={() => {
+            setTheme(theme === 'dark' ? 'light' : 'dark');
           }}
         >
-          {THEMES.map(({ value, label, Icon }) => (
-            <DropdownMenuRadioItem key={value} value={value}>
-              <Icon aria-hidden="true" />
-              {label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+          <Moon aria-hidden="true" />
+          Dark mode
+        </DropdownMenuSwitchItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onSignOut}>
           <LogOut aria-hidden="true" />

@@ -6,8 +6,9 @@
  * and another for the dark theme. Changing a ramp here changes every role built on it.
  *
  * Values are OKLCH (lightness 0–1, chroma, hue): equal steps look equally far apart, which keeps
- * the ramps even and the contrast predictable. They match Tailwind CSS v4's palette (MIT), so
- * they are well tested. tokens.test.ts checks text contrast against WCAG AA for every role.
+ * the ramps even and the contrast predictable. Apart from slate, they match Tailwind CSS v4's
+ * palette (MIT), so they are well tested. tokens.test.ts checks text contrast against WCAG AA
+ * for every role.
  *
  * There is no brand colour yet. When one is chosen, add its ramp here and point roles at it in
  * themes.css; the neutral and status ramps stay as they are.
@@ -16,7 +17,7 @@
   --white: oklch(1 0 0);
   --black: oklch(0 0 0);
 
-  /* Neutral grey, with no tint: the light and night themes are built from it. */
+  /* Neutral grey, with no tint: the light theme is built from it. */
   --gray-50: oklch(0.985 0 0);
   --gray-100: oklch(0.97 0 0);
   --gray-200: oklch(0.922 0 0);
@@ -28,6 +29,23 @@
   --gray-800: oklch(0.269 0 0);
   --gray-900: oklch(0.205 0 0);
   --gray-950: oklch(0.145 0 0);
+
+  /*
+   * Slate: a cool blue-grey, the night theme's surfaces. Built for this app from the owner's
+   * reference (a dark map dashboard): 900 is its panel colour (#252c36), 800 its raised card
+   * (#313842), 700 its map land (#3c4652). Same hue throughout, so the steps stay even.
+   */
+  --slate-50: oklch(0.984 0.003 257.3);
+  --slate-100: oklch(0.967 0.006 257.3);
+  --slate-200: oklch(0.925 0.01 257.3);
+  --slate-300: oklch(0.865 0.014 257.3);
+  --slate-400: oklch(0.775 0.018 257.3);
+  --slate-500: oklch(0.62 0.021 257.3);
+  --slate-600: oklch(0.5 0.022 257.3);
+  --slate-700: oklch(0.39 0.024 257.3);
+  --slate-800: oklch(0.338 0.021 257.3);
+  --slate-900: oklch(0.291 0.021 257.3);
+  --slate-950: oklch(0.245 0.019 257.3);
 
   /* Blue: information, links, focus. */
   --blue-50: oklch(0.97 0.014 254.604);

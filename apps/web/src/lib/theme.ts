@@ -1,11 +1,14 @@
 import { useSyncExternalStore } from 'react';
 
+import { useMediaQuery } from './useMediaQuery';
+
 // Light and night (dark) themes. The colours live in styles/tokens/themes.css; this module
 // only decides which one is on, by putting the `dark` class on <html>.
 //
-// The user's choice is kept in this browser (localStorage). "System" follows the device's
-// light or dark setting, live. The small script in index.html applies the saved choice before
-// the page first paints, so the app never flashes the wrong theme; keep the two in step.
+// The profile menu's Dark mode switch saves "light" or "dark" in this browser (localStorage).
+// Until the switch is used, the app follows the device's light or dark setting ("system"),
+// live. The small script in index.html applies the saved choice before the page first paints,
+// so the app never flashes the wrong theme; keep the two in step.
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type Theme = 'light' | 'dark';
@@ -71,9 +74,16 @@ function subscribe(onChange: () => void) {
   };
 }
 
-/** The user's theme choice and a setter, for the theme menu. */
+/** The user's theme choice ("system" until they choose) and a setter. */
 export function useThemePreference(): [ThemePreference, (preference: ThemePreference) => void] {
   return [useSyncExternalStore(subscribe, snapshot), setThemePreference];
+}
+
+/** The theme on screen now, and a setter, for the Dark mode switch. */
+export function useTheme(): [Theme, (theme: Theme) => void] {
+  const [preference] = useThemePreference();
+  const prefersDark = useMediaQuery(DARK_QUERY, false);
+  return [resolveTheme(preference, prefersDark), setThemePreference];
 }
 
 /**

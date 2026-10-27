@@ -99,7 +99,7 @@ Desktop: top commodity/date filters; 55–65% interactive map and 35–45% right
 
 ### App frame (implemented)
 
-A menu down the left side (the GSS logo slot and name at the top, then the pages; planned pages greyed out under "Coming next"), folding into a slide-over panel below 1,024 px. A top bar with only a connection dot (red, with the words "Server unreachable", when the API does not answer) and a profile icon that opens "Signed in as", the Light / Dark / System theme choice and Sign out. Look, tokens and components: `docs/DESIGN_SYSTEM.md`.
+A menu down the left side (the GSS logo slot and name at the top, then the pages; planned pages greyed out under "Coming next"), folding into a slide-over panel below 1,024 px. A top bar with only a connection dot (red, with the words "Server unreachable", when the API does not answer) and a profile icon that opens "Signed in as", a Dark mode switch and Sign out. Look, tokens and components: `docs/DESIGN_SYSTEM.md`.
 
 ### Interface conventions
 

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { setThemePreference } from './lib/theme';
 
 function mockHealth(response: Response | Error) {
   const fetchMock = vi.fn(() =>
@@ -168,6 +169,8 @@ const ALICE = {
 
 describe('signed-in user', () => {
   afterEach(() => {
+    // Back to following the device, as for a new visitor.
+    setThemePreference('system');
     window.localStorage.clear();
     document.documentElement.className = '';
   });
@@ -241,7 +244,7 @@ describe('signed-in user', () => {
     ).toBeInTheDocument();
   });
 
-  it('switches between the light and night themes, and back to the device setting', async () => {
+  it('switches between the light and night themes with one switch', async () => {
     mockMe(Response.json(ALICE));
     const user = userEvent.setup();
     render(
@@ -249,25 +252,38 @@ describe('signed-in user', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: 'Account' }));
-    expect(screen.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    await user.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
+    const toggle = screen.getByRole('menuitemcheckbox', { name: 'Dark mode' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    // One switch, not a list of theme choices.
+    expect(screen.queryByRole('menuitemradio')).not.toBeInTheDocument();
+
+    await user.click(toggle);
     expect(document.documentElement).toHaveClass('dark');
     expect(window.localStorage.getItem('gss.theme')).toBe('dark');
-
-    await user.click(screen.getByRole('button', { name: 'Account' }));
-    expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute(
+    // The menu stays open, showing the switch on.
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Dark mode' })).toHaveAttribute(
       'aria-checked',
       'true',
     );
-    await user.click(screen.getByRole('menuitemradio', { name: 'Light' }));
-    expect(document.documentElement).not.toHaveClass('dark');
 
-    await user.click(screen.getByRole('button', { name: 'Account' }));
-    await user.click(screen.getByRole('menuitemradio', { name: 'System' }));
-    expect(window.localStorage.getItem('gss.theme')).toBeNull();
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Dark mode' }));
+    expect(document.documentElement).not.toHaveClass('dark');
+    expect(window.localStorage.getItem('gss.theme')).toBe('light');
+  });
+
+  it('shows the switch on when the device is in dark mode and nothing is chosen yet', async () => {
+    setViewport(true);
+    mockMe(Response.json(ALICE));
+    const user = userEvent.setup();
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Dark mode' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
   });
 });
 
