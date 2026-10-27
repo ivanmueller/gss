@@ -25,7 +25,10 @@ pnpm check                      # format check, lint, typecheck, tests (CI also 
 pnpm --filter @grain/api dev    # API Worker: http://localhost:8787/api/v1/health
 pnpm --filter @grain/web dev    # web app with hot reload: http://localhost:5173 (proxies /api to :8787)
 pnpm preview:staging            # build, then serve web + API together as on staging: http://localhost:8787
+pnpm e2e                        # build, then run the Playwright browser tests (desktop and phone)
 ```
+
+`pnpm e2e` needs Chromium for Playwright 1.63.0: run `pnpm --filter @grain/e2e exec playwright install chromium` once.
 
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
 
@@ -38,6 +41,7 @@ Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pn
 ```
 apps/api/            Hono API on Cloudflare Workers (health endpoint only); serves apps/web on staging
 apps/web/            React + Vite + Tailwind web app shell (synthetic data only)
+tests/e2e/           Playwright browser tests against the staging Worker config
 packages/            shared packages (domain, trading-engine, database) — none yet
 docs/                specification sections, AI coding system, decisions, handoff, changelog
 .github/             CI workflow, Dependabot, issue and PR templates
