@@ -25,6 +25,11 @@
         "not_found_handling": "single-page-application",
         "run_worker_first": ["/api/*"],
       },
+      // Cloudflare Hyperdrive in front of Supabase: it verifies Supabase's certificate,
+      // which the Workers runtime cannot (docs/DECISIONS.md). Created by the "Set up
+      // Hyperdrive (staging)" workflow. `wrangler dev` reads the local database from
+      // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE.
+      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "bbc915879c6848abaa08605ff7d7825c" }],
       // Keeps Workers Logs on across deploys (the API logs secret-free failure reasons).
       "observability": {
         "logs": {

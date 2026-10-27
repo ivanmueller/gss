@@ -59,6 +59,8 @@ jobs:
             echo "E2E_DATABASE_URL=$DB_URL"
             echo "API_TEST_ADMIN_DATABASE_URL=$DB_URL"
             echo "API_TEST_DATABASE_URL=$APP_API_URL"
+            # The staging Worker's Hyperdrive binding points at the local database in wrangler dev.
+            echo "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=$APP_API_URL"
           } >> "$GITHUB_ENV"
           printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\nDATABASE_URL=%s\n' \
             "$API_URL" "$ANON_KEY" "$APP_API_URL" > apps/api/.dev.vars.staging
