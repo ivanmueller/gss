@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
-import { AppHeader } from './components/AppHeader';
-import { Link, matchRoute, usePath } from './lib/router';
+import { AppShell, type NavSection } from './components/AppShell';
+import { Link, matchRoute, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { useMe } from './lib/useMe';
 import { CoordinatesPage } from './pages/CoordinatesPage';
@@ -13,7 +13,28 @@ import { MapPage } from './pages/MapPage';
 import { Workspace } from './pages/Workspace';
 
 function Notice({ children }: { children: ReactNode }) {
-  return <p className="rounded-xl border bg-card px-4 py-6 text-center text-sm">{children}</p>;
+  return (
+    <p className="rounded-card border bg-card px-4 py-10 text-center text-sm text-muted-foreground shadow-xs">
+      {children}
+    </p>
+  );
+}
+
+/** The menu entry a page belongs to. */
+function section(route: Route): NavSection | null {
+  switch (route.page) {
+    case 'workspace':
+      return 'workspace';
+    case 'map':
+    case 'coordinates':
+      return 'map';
+    case 'counterparties':
+    case 'import':
+    case 'counterparty':
+      return 'counterparties';
+    case 'not-found':
+      return null;
+  }
 }
 
 export function App({ account }: { account?: Account }) {
@@ -64,7 +85,7 @@ export function App({ account }: { account?: Account }) {
       page = (
         <Notice>
           This page does not exist.{' '}
-          <Link href="/" className="underline underline-offset-4">
+          <Link href="/" className="font-medium text-foreground underline underline-offset-4">
             Go to the workspace
           </Link>
           .
@@ -74,27 +95,18 @@ export function App({ account }: { account?: Account }) {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <AppHeader
-        health={health}
-        current={
-          route.page === 'workspace' || route.page === 'map'
-            ? route.page
-            : route.page === 'coordinates'
-              ? 'map'
-              : route.page === 'not-found'
-                ? null
-                : 'counterparties'
-        }
-        {...(account && {
-          user: {
-            name: me.status === 'ok' ? me.name : null,
-            check: me.status,
-            onSignOut: account.signOut,
-          },
-        })}
-      />
-      <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4">{page}</main>
-    </div>
+    <AppShell
+      current={section(route)}
+      health={health}
+      {...(account && {
+        user: {
+          name: me.status === 'ok' ? me.name : null,
+          check: me.status,
+          onSignOut: account.signOut,
+        },
+      })}
+    >
+      {page}
+    </AppShell>
   );
 }

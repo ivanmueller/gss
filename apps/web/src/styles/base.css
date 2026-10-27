@@ -1,0 +1,36 @@
+/* Element defaults built on the tokens. Component styles live in components/ui. */
+
+/* `dark:` classes follow the theme class on <html>, not only the system setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-border);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+  }
+
+  /* One keyboard focus ring for every control. An outline, so it also shows in Windows'
+     high-contrast mode. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklch, var(--color-ring) 25%, transparent);
+  }
+}

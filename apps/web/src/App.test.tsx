@@ -111,24 +111,33 @@ describe('App shell', () => {
   });
 });
 
+/** The connection indicator in the top bar. */
+function connection() {
+  return within(screen.getByRole('banner')).getByRole('status');
+}
+
 describe('API status', () => {
-  it('reports a healthy API', async () => {
+  it('shows a quiet dot while the API answers', async () => {
     const fetchMock = mockHealth(Response.json({ status: 'ok', service: 'api' }));
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('API reachable');
+      expect(connection()).toHaveTextContent('Connected to the server');
     });
+    // Only the dot is visible; the words are for screen readers.
+    expect(within(connection()).queryByText('Server unreachable')).not.toBeInTheDocument();
+    expect(screen.queryByText('API reachable')).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/health', expect.anything());
   });
 
-  it('reports an unreachable API', async () => {
+  it('turns red and says so when the API is unreachable', async () => {
     mockHealth(new TypeError('Failed to fetch'));
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('API unreachable');
+      expect(within(connection()).getByText('Server unreachable')).toBeVisible();
     });
+    expect(connection()).toHaveTextContent('the app cannot load or save data');
   });
 
   it('treats an error response as unreachable', async () => {
@@ -136,79 +145,129 @@ describe('API status', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('API unreachable');
+      expect(within(connection()).getByText('Server unreachable')).toBeInTheDocument();
     });
   });
 });
 
+function mockMe(me: Response) {
+  const fetchMock = vi.fn((url: string) =>
+    Promise.resolve(url === '/api/v1/me' ? me : Response.json({ status: 'ok', service: 'api' })),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+const ALICE = {
+  id: 'user-1',
+  email: 'alice@example.test',
+  firstName: 'Alice',
+  lastName: 'synthetic',
+  organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
+};
+
 describe('signed-in user', () => {
-  it('shows the name confirmed by the API, never the email, and signs out', async () => {
-    const fetchMock = vi.fn((url: string) =>
-      Promise.resolve(
-        url === '/api/v1/me'
-          ? Response.json({
-              id: 'user-1',
-              email: 'alice@example.test',
-              firstName: 'Alice',
-              lastName: 'synthetic',
-              organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
-            })
-          : Response.json({ status: 'ok', service: 'api' }),
-      ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    const signOut = vi.fn();
-    const user = userEvent.setup();
-    render(<App account={{ email: 'session@example.test', accessToken: 'token-1', signOut }} />);
-
-    expect(await screen.findByText('Alice S.')).toBeInTheDocument();
-    // One organization only: the header names the person, not the company.
-    expect(screen.getByText(/^Signed in as/)).toHaveTextContent(/^Signed in as Alice S\.$/);
-    expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', {
-      headers: { Authorization: 'Bearer token-1' },
-      signal: expect.any(AbortSignal) as AbortSignal,
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Sign out' }));
-    expect(signOut).toHaveBeenCalledTimes(1);
+  afterEach(() => {
+    window.localStorage.clear();
+    document.documentElement.className = '';
   });
 
-  it('says "Signed in" when the user has no name set', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string) =>
-        Promise.resolve(
-          url === '/api/v1/me'
-            ? Response.json({ id: 'user-1', email: 'alice@example.test', organizations: [] })
-            : Response.json({ status: 'ok', service: 'api' }),
-        ),
-      ),
-    );
-    render(
-      <App account={{ email: 'alice@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
-    );
-
-    expect(await screen.findByText('Signed in')).toBeInTheDocument();
-    expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
-  });
-
-  it('warns when the API rejects the session', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string) =>
-        Promise.resolve(
-          url === '/api/v1/me'
-            ? Response.json({ error: { code: 'MFA_REQUIRED' } }, { status: 403 })
-            : Response.json({ status: 'ok', service: 'api' }),
-        ),
-      ),
-    );
+  it('shows only a profile icon until it is opened', async () => {
+    const fetchMock = mockMe(Response.json(ALICE));
     render(
       <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
     );
 
-    expect(await screen.findByText(/server could not confirm your session/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Account' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', {
+        headers: { Authorization: 'Bearer token-1' },
+        signal: expect.any(AbortSignal) as AbortSignal,
+      });
+    });
+    expect(screen.queryByText(/Signed in/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Alice S.')).not.toBeInTheDocument();
+  });
+
+  it('opens to the name confirmed by the API, never the email, and signs out', async () => {
+    mockMe(Response.json(ALICE));
+    const signOut = vi.fn();
+    const user = userEvent.setup();
+    render(<App account={{ email: 'session@example.test', accessToken: 'token-1', signOut }} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    const menu = await screen.findByRole('menu');
+    expect(await within(menu).findByText('Alice S.')).toBeInTheDocument();
+    // One organization only: the menu names the person, not the company.
+    expect(within(menu).getByText(/^Signed in as/).parentElement).toHaveTextContent(
+      /^Signed in as Alice S\.$/,
+    );
+    expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Synthetic Org A')).not.toBeInTheDocument();
+
+    await user.click(within(menu).getByRole('menuitem', { name: 'Sign out' }));
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('says "Signed in" when the user has no name set', async () => {
+    mockMe(Response.json({ id: 'user-1', email: 'alice@example.test', organizations: [] }));
+    window.history.replaceState(null, '', '/counterparties');
+    const user = userEvent.setup();
+    render(
+      <App account={{ email: 'alice@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    // The directory's notice appears once the API has answered /me.
+    expect(await screen.findByText(/not a member of an organization yet/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(within(screen.getByRole('menu')).getByText('Signed in')).toBeInTheDocument();
+    expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('marks the profile icon and explains when the API rejects the session', async () => {
+    mockMe(Response.json({ error: { code: 'MFA_REQUIRED' } }, { status: 403 }));
+    const user = userEvent.setup();
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Account: session not confirmed',
+    });
+    await user.click(trigger);
+    expect(
+      within(screen.getByRole('menu')).getByText(/server could not confirm your session/),
+    ).toBeInTheDocument();
+  });
+
+  it('switches between the light and night themes, and back to the device setting', async () => {
+    mockMe(Response.json(ALICE));
+    const user = userEvent.setup();
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    expect(screen.getByRole('menuitemradio', { name: 'System' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await user.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
+    expect(document.documentElement).toHaveClass('dark');
+    expect(window.localStorage.getItem('gss.theme')).toBe('dark');
+
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await user.click(screen.getByRole('menuitemradio', { name: 'Light' }));
+    expect(document.documentElement).not.toHaveClass('dark');
+
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'System' }));
+    expect(window.localStorage.getItem('gss.theme')).toBeNull();
   });
 });
 
@@ -219,7 +278,7 @@ describe('narrow screens', () => {
     render(<App />);
 
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    const list = screen.getByRole('list');
+    const list = within(screen.getByRole('region', { name: 'Facilities' })).getByRole('list');
     expect(within(list).getAllByRole('listitem')).toHaveLength(4);
     expect(within(list).getByText('USD 725.00/MT')).toBeInTheDocument();
     expect(within(list).getByText('No active bid')).toBeInTheDocument();
@@ -242,7 +301,7 @@ describe('narrow screens', () => {
     await user.click(screen.getByRole('tab', { name: 'Map' }));
 
     expect(screen.getByText('Map placeholder')).toBeInTheDocument();
-    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Facilities' })).not.toBeInTheDocument();
     expect(inspector()).toBeInTheDocument();
   });
 
@@ -274,6 +333,9 @@ describe('navigation', () => {
       'aria-current',
       'page',
     );
+    expect(within(nav).getByRole('link', { name: 'Workspace' })).not.toHaveAttribute(
+      'aria-current',
+    );
     expect(
       screen.getByText('Sign in to see your organization’s counterparties.'),
     ).toBeInTheDocument();
@@ -285,6 +347,43 @@ describe('navigation', () => {
     expect(
       screen.getByText('Sign in to see your organization’s counterparties.'),
     ).toBeInTheDocument();
+  });
+
+  it('keeps the menu entry lit on the pages below it', () => {
+    window.history.replaceState(null, '', '/map/coordinates');
+    render(<App />);
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('shows planned pages as not built, not as links', () => {
+    render(<App />);
+    const planned = screen.getByRole('list', { name: 'Coming next' });
+    expect(
+      within(planned)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Bids & offers', 'Scenarios', 'Team']);
+    expect(within(planned).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('names the platform and links home from the logo', () => {
+    window.history.replaceState(null, '', '/counterparties');
+    render(<App />);
+    expect(screen.getAllByRole('link', { name: 'GSS' })[0]).toHaveAttribute('href', '/');
+  });
+
+  it('opens the menu as a panel on narrow screens and closes it after choosing', async () => {
+    setViewport(false);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Open menu' }));
+    const panel = screen.getByRole('dialog', { name: 'Menu' });
+    await user.click(within(panel).getByRole('link', { name: 'Counterparties' }));
+
+    expect(window.location.pathname).toBe('/counterparties');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('says when a page does not exist', () => {

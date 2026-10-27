@@ -1,7 +1,9 @@
 import { type SyntheticEvent, useState } from 'react';
 
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import type { AuthClient } from '../lib/supabase';
-import { AuthCard, buttonClass, FieldError, inputClass } from './AuthCard';
+import { AuthCard, FieldError, fieldClass } from './AuthCard';
 
 export function SignInForm({ auth }: { auth: AuthClient }) {
   const [email, setEmail] = useState('');
@@ -21,11 +23,10 @@ export function SignInForm({ auth }: { auth: AuthClient }) {
 
   return (
     <AuthCard title="Sign in">
-      <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)}>
-        <label className="flex flex-col gap-1 text-sm">
+      <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+        <label className={fieldClass}>
           Email
-          <input
-            className={inputClass}
+          <Input
             type="email"
             autoComplete="username"
             required
@@ -35,10 +36,9 @@ export function SignInForm({ auth }: { auth: AuthClient }) {
             }}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className={fieldClass}>
           Password
-          <input
-            className={inputClass}
+          <Input
             type="password"
             autoComplete="current-password"
             required
@@ -49,9 +49,9 @@ export function SignInForm({ auth }: { auth: AuthClient }) {
           />
         </label>
         <FieldError message={error} />
-        <button className={buttonClass} type="submit" disabled={busy}>
+        <Button type="submit" className="mt-1 w-full" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
-        </button>
+        </Button>
         <p className="text-xs text-muted-foreground">
           Accounts are created by an administrator. There is no self sign-up.
         </p>

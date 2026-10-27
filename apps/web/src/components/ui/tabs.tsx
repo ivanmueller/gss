@@ -7,7 +7,7 @@ export function Tabs({ className, ...props }: ComponentProps<typeof TabsPrimitiv
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
-      className={cn('flex flex-col gap-2', className)}
+      className={cn('flex flex-col gap-3', className)}
       {...props}
     />
   );
@@ -18,7 +18,7 @@ export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrim
     <TabsPrimitive.List
       data-slot="tabs-list"
       className={cn(
-        'inline-flex w-fit items-center rounded-lg bg-muted p-1 text-muted-foreground',
+        'inline-flex w-fit items-center gap-0.5 rounded-control bg-muted p-0.5 text-muted-foreground',
         className,
       )}
       {...props}
@@ -31,7 +31,7 @@ export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsP
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
+        'inline-flex h-7 items-center gap-1.5 rounded-inset px-3 text-sm font-medium transition-colors hover:text-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
         className,
       )}
       {...props}
@@ -40,11 +40,5 @@ export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsP
 }
 
 export function TabsContent({ className, ...props }: ComponentProps<typeof TabsPrimitive.Content>) {
-  return (
-    <TabsPrimitive.Content
-      data-slot="tabs-content"
-      className={cn('outline-none', className)}
-      {...props}
-    />
-  );
+  return <TabsPrimitive.Content data-slot="tabs-content" className={cn(className)} {...props} />;
 }

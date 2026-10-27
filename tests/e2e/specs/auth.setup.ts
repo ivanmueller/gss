@@ -29,14 +29,19 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
   await page.getByLabel(/6-digit code/).fill(await generate({ secret }));
   await page.getByRole('button', { name: 'Confirm and continue' }).click();
 
-  // The name in the header comes from the API's /me, which answers only after reading
+  // The name in the profile menu comes from the API's /me, which answers only after reading
   // Postgres as app_api: the Supabase session at aal2 reached the Worker and the database.
   // Isolation is tested in supabase/tests, the API database tests and counterparties.spec.ts.
-  // The header shows the first name and last initial, never the email or the organization.
-  await expect(page.getByText('Signed in as Synthetic T.')).toBeVisible();
+  // The menu shows the first name and last initial, never the email or the organization.
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: 'Account' }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByText('Synthetic T.')).toBeVisible();
+  await expect(menu).toContainText('Signed in as Synthetic T.');
   await expect(page.getByText(E2E_USER.email)).toHaveCount(0);
   await expect(page.getByText(E2E_ORG_NAME)).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
 
   await page.context().storageState({ path: AUTH_STATE });
 });

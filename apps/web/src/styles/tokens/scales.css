@@ -1,0 +1,171 @@
+/*
+ * Layer 3 — scales and the bridge to Tailwind.
+ *
+ * Everything in @theme becomes a Tailwind class: `--radius-card` gives `rounded-card`,
+ * `--shadow-md` gives `shadow-md`, `--color-danger` gives `text-danger`, `bg-danger` and so on.
+ * Tailwind's own defaults for colours, radii, shadows and font sizes are switched off first,
+ * so only this system's values can be used and every screen stays consistent.
+ *
+ * To change a value everywhere, change it here (or the colour roles in themes.css). Components
+ * pick roles (`rounded-control`, `rounded-card`), not raw sizes, so one edit restyles them all.
+ */
+@theme {
+  --color-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --text-*: initial;
+
+  /*
+   * Typography. IBM Plex Sans for the interface, with tabular figures where numbers line up
+   * (prices, quantities); IBM Plex Mono for prices, codes and identifiers. Both are open-source
+   * (SIL OFL) and served with the app, not from Google. Swap the first name to change font.
+   */
+  --font-sans:
+    'IBM Plex Sans Variable', 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Font sizes with their line heights. Body text is `sm` (14 px), set in base.css. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+
+  /*
+   * Spacing on a 4 px grid: `p-1` is 4 px, `p-4` 16 px, `gap-6` 24 px. Prefer 1, 1.5, 2, 3, 4,
+   * 6, 8, 12 and 16. Layout sizes are named so the sidebar and top bar line up everywhere.
+   */
+  --spacing: 0.25rem;
+  --spacing-sidebar: 15rem;
+  --spacing-topbar: 3.5rem;
+  --container-content: 80rem;
+
+  /*
+   * Corner rounding. Every radius is a multiple of --radius-base, so changing that one value
+   * makes the whole app rounder or squarer (0 gives square corners everywhere).
+   */
+  --radius-base: 0.5rem;
+  --radius-xs: calc(var(--radius-base) * 0.25);
+  --radius-sm: calc(var(--radius-base) * 0.5);
+  --radius-md: calc(var(--radius-base) * 0.75);
+  --radius-lg: var(--radius-base);
+  --radius-xl: calc(var(--radius-base) * 1.5);
+  --radius-2xl: calc(var(--radius-base) * 2);
+  --radius-full: 9999px;
+  /* Per component: change one of these to restyle just that kind of element. */
+  --radius-control: var(--radius-md); /* buttons, inputs, selects, nav items */
+  --radius-inset: max(0px, calc(var(--radius-control) - 0.125rem)); /* inside a control */
+  --radius-badge: var(--radius-sm); /* badges and tags */
+  --radius-card: var(--radius-xl); /* cards, panels, tables */
+  --radius-popover: var(--radius-lg); /* menus and popovers */
+  --radius-dialog: var(--radius-xl); /* dialogs and drawers */
+
+  /*
+   * Four shadows, from flat to floating. How dark each one is lives in themes.css
+   * (--shadow-opacity-*), because the night theme needs darker shadows.
+   *   xs  cards, inputs, outline buttons
+   *   sm  raised on hover
+   *   md  menus and popovers
+   *   lg  drawers and dialogs
+   */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / var(--shadow-opacity-xs));
+  --shadow-sm:
+    0 1px 3px 0 oklch(0 0 0 / var(--shadow-opacity-sm)),
+    0 1px 2px -1px oklch(0 0 0 / var(--shadow-opacity-sm));
+  --shadow-md:
+    0 4px 8px -2px oklch(0 0 0 / var(--shadow-opacity-md)),
+    0 2px 4px -2px oklch(0 0 0 / var(--shadow-opacity-sm));
+  --shadow-lg:
+    0 12px 24px -6px oklch(0 0 0 / var(--shadow-opacity-lg)),
+    0 4px 8px -4px oklch(0 0 0 / var(--shadow-opacity-sm));
+}
+
+/* Colour roles from themes.css as Tailwind colours. `inline` keeps them switching with the theme. */
+@theme inline {
+  --color-white: var(--white);
+  --color-black: var(--black);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-overlay: var(--overlay);
+
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-border: var(--info-border);
+  --color-info-solid: var(--info-solid);
+  --color-info-solid-foreground: var(--info-solid-foreground);
+
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-border: var(--success-border);
+  --color-success-solid: var(--success-solid);
+  --color-success-solid-foreground: var(--success-solid-foreground);
+
+  --color-caution: var(--caution);
+  --color-caution-subtle: var(--caution-subtle);
+  --color-caution-border: var(--caution-border);
+  --color-caution-solid: var(--caution-solid);
+  --color-caution-solid-foreground: var(--caution-solid-foreground);
+
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-border: var(--warning-border);
+  --color-warning-solid: var(--warning-solid);
+  --color-warning-solid-foreground: var(--warning-solid-foreground);
+
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-border: var(--danger-border);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger-solid-foreground: var(--danger-solid-foreground);
+
+  --color-bid: var(--bid);
+  --color-bid-subtle: var(--bid-subtle);
+  --color-bid-border: var(--bid-border);
+  --color-bid-solid: var(--bid-solid);
+  --color-bid-solid-foreground: var(--bid-solid-foreground);
+
+  --color-offer: var(--offer);
+  --color-offer-subtle: var(--offer-subtle);
+  --color-offer-border: var(--offer-border);
+  --color-offer-solid: var(--offer-solid);
+  --color-offer-solid-foreground: var(--offer-solid-foreground);
+}
+
+/* Stacking order, used as `z-(--z-popover)`. */
+:root {
+  --z-topbar: 20;
+  --z-sidebar: 30;
+  --z-overlay: 40;
+  --z-popover: 50;
+}

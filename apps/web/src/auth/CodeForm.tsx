@@ -1,6 +1,8 @@
 import { type SyntheticEvent, useState } from 'react';
 
-import { buttonClass, FieldError, inputClass } from './AuthCard';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { FieldError, fieldClass } from './AuthCard';
 
 /** Six-digit authenticator code entry shared by setup and sign-in. */
 export function CodeForm({
@@ -24,11 +26,10 @@ export function CodeForm({
   }
 
   return (
-    <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)}>
-      <label className="flex flex-col gap-1 text-sm">
+    <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
+      <label className={fieldClass}>
         6-digit code from your authenticator app
-        <input
-          className={inputClass}
+        <Input
           inputMode="numeric"
           autoComplete="one-time-code"
           pattern="[0-9]{6}"
@@ -41,9 +42,9 @@ export function CodeForm({
         />
       </label>
       <FieldError message={error} />
-      <button className={buttonClass} type="submit" disabled={busy}>
+      <Button type="submit" className="mt-1 w-full" disabled={busy}>
         {busy ? 'Checking…' : submitLabel}
-      </button>
+      </Button>
     </form>
   );
 }

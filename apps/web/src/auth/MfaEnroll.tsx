@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { Button } from '../components/ui/button';
 import type { AuthClient } from '../lib/supabase';
 import { AuthCard, FieldError } from './AuthCard';
 import { CodeForm, WRONG_CODE } from './CodeForm';
@@ -66,7 +67,7 @@ export function MfaEnroll({ auth, onSignOut }: { auth: AuthClient; onSignOut: ()
             <img
               src={qrSource(factor.qrCode)}
               alt="QR code for your authenticator app"
-              className="mx-auto size-44 rounded-md border bg-white p-2"
+              className="mx-auto size-44 rounded-control border bg-white p-2"
             />
             <p className="text-xs text-muted-foreground">
               Can&apos;t scan? Enter this key in the app instead:{' '}
@@ -77,9 +78,14 @@ export function MfaEnroll({ auth, onSignOut }: { auth: AuthClient; onSignOut: ()
             <CodeForm submitLabel="Confirm and continue" onSubmit={verify} />
           </>
         )}
-        <button type="button" className="text-xs underline" onClick={onSignOut}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-center text-muted-foreground"
+          onClick={onSignOut}
+        >
           Sign out
-        </button>
+        </Button>
       </div>
     </AuthCard>
   );

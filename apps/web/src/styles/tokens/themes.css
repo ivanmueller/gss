@@ -1,0 +1,194 @@
+/*
+ * Layer 2 — themes: what each colour is FOR, once for the light theme and once for the night
+ * (dark) theme. Components use only these roles, through Tailwind classes such as `bg-card`,
+ * `text-muted-foreground`, `border-danger-border` or `bg-success-solid` (see scales.css).
+ *
+ * The light theme is on :root; the night theme applies when <html> has the `dark` class,
+ * which lib/theme.ts sets from the user's choice (Light, Dark or System).
+ *
+ * Both blocks must define the same roles; tokens.test.ts checks that, and checks every text
+ * role against its background for WCAG AA contrast (4.5:1) in both themes.
+ *
+ * Neutral roles
+ *   background / foreground       the page and its body text
+ *   card, popover                 raised surfaces: panels, tables; menus, drawers
+ *   muted / muted-foreground      quiet fills (tab bars, empty states) and secondary text
+ *   accent / accent-foreground    hover and selected rows, menu items
+ *   primary, secondary            filled buttons: the main action and the second one
+ *   border, input, ring           dividers, form-control outlines, keyboard focus
+ *   sidebar-*                     the left menu
+ *   overlay                       the dimmed backdrop behind a drawer
+ *
+ * Status and trading roles, each with the same five tokens:
+ *   <role>                        text, icons and dots on any surface (AA on background,
+ *                                 card and <role>-subtle)
+ *   <role>-subtle                 tinted background (badges, notes)
+ *   <role>-border                 border of a tinted surface
+ *   <role>-solid                  filled background (status dots, filled buttons)
+ *   <role>-solid-foreground       text on <role>-solid
+ *
+ *   info      blue    neutral facts, help, links to more detail
+ *   success   green   done, firm, verified, connected
+ *   caution   yellow  not yet reliable: indicative, pending, synthetic data
+ *   warning   orange  likely problem: check before acting (low confidence, stale)
+ *   danger    red     error, offline, destructive action
+ *   bid       indigo  buyer bids
+ *   offer     teal    seller offers
+ *
+ * In the night theme the subtle tints and their borders are see-through washes of the 500 step,
+ * so a note looks the same on the page and on a card and never turns muddy.
+ *
+ * Colour never carries meaning alone: statuses, bids and offers also show a word and an icon.
+ *
+ * Shadow opacity: how dark each of the four shadows in scales.css is. Shadows need more
+ * opacity to show on a dark page.
+ */
+:root {
+  color-scheme: light;
+
+  --background: var(--white);
+  --foreground: var(--gray-950);
+  --card: var(--white);
+  --card-foreground: var(--gray-950);
+  --popover: var(--white);
+  --popover-foreground: var(--gray-950);
+  --muted: var(--gray-100);
+  --muted-foreground: var(--gray-600);
+  --accent: var(--gray-100);
+  --accent-foreground: var(--gray-900);
+  --primary: var(--gray-900);
+  --primary-foreground: var(--gray-50);
+  --secondary: var(--gray-100);
+  --secondary-foreground: var(--gray-900);
+  --border: var(--gray-200);
+  --input: var(--gray-300);
+  --ring: var(--blue-600);
+  --sidebar: var(--gray-50);
+  --sidebar-foreground: var(--gray-950);
+  --sidebar-accent: var(--gray-200);
+  --sidebar-accent-foreground: var(--gray-950);
+  --sidebar-border: var(--gray-200);
+  --overlay: oklch(0 0 0 / 0.4);
+
+  --info: var(--blue-600);
+  --info-subtle: var(--blue-50);
+  --info-border: var(--blue-200);
+  --info-solid: var(--blue-600);
+  --info-solid-foreground: var(--white);
+
+  --success: var(--green-700);
+  --success-subtle: var(--green-50);
+  --success-border: var(--green-200);
+  --success-solid: var(--green-700);
+  --success-solid-foreground: var(--white);
+
+  --caution: var(--yellow-800);
+  --caution-subtle: var(--yellow-50);
+  --caution-border: var(--yellow-200);
+  --caution-solid: var(--yellow-400);
+  --caution-solid-foreground: var(--yellow-950);
+
+  --warning: var(--orange-700);
+  --warning-subtle: var(--orange-50);
+  --warning-border: var(--orange-200);
+  --warning-solid: var(--orange-700);
+  --warning-solid-foreground: var(--white);
+
+  --danger: var(--red-700);
+  --danger-subtle: var(--red-50);
+  --danger-border: var(--red-200);
+  --danger-solid: var(--red-600);
+  --danger-solid-foreground: var(--white);
+
+  --bid: var(--indigo-600);
+  --bid-subtle: var(--indigo-50);
+  --bid-border: var(--indigo-200);
+  --bid-solid: var(--indigo-600);
+  --bid-solid-foreground: var(--white);
+
+  --offer: var(--teal-700);
+  --offer-subtle: var(--teal-50);
+  --offer-border: var(--teal-200);
+  --offer-solid: var(--teal-700);
+  --offer-solid-foreground: var(--white);
+
+  --shadow-opacity-xs: 0.05;
+  --shadow-opacity-sm: 0.08;
+  --shadow-opacity-md: 0.12;
+  --shadow-opacity-lg: 0.16;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: var(--gray-950);
+  --foreground: var(--gray-50);
+  --card: var(--gray-900);
+  --card-foreground: var(--gray-50);
+  --popover: var(--gray-900);
+  --popover-foreground: var(--gray-50);
+  --muted: var(--gray-800);
+  --muted-foreground: var(--gray-400);
+  --accent: var(--gray-800);
+  --accent-foreground: var(--gray-50);
+  --primary: var(--gray-50);
+  --primary-foreground: var(--gray-900);
+  --secondary: var(--gray-800);
+  --secondary-foreground: var(--gray-50);
+  --border: var(--gray-800);
+  --input: var(--gray-700);
+  --ring: var(--blue-400);
+  --sidebar: var(--gray-900);
+  --sidebar-foreground: var(--gray-50);
+  --sidebar-accent: var(--gray-800);
+  --sidebar-accent-foreground: var(--gray-50);
+  --sidebar-border: var(--gray-800);
+  --overlay: oklch(0 0 0 / 0.6);
+
+  --info: var(--blue-400);
+  --info-subtle: color-mix(in oklch, var(--blue-500) 15%, transparent);
+  --info-border: color-mix(in oklch, var(--blue-500) 35%, transparent);
+  --info-solid: var(--blue-600);
+  --info-solid-foreground: var(--white);
+
+  --success: var(--green-400);
+  --success-subtle: color-mix(in oklch, var(--green-500) 15%, transparent);
+  --success-border: color-mix(in oklch, var(--green-500) 35%, transparent);
+  --success-solid: var(--green-700);
+  --success-solid-foreground: var(--white);
+
+  --caution: var(--yellow-400);
+  --caution-subtle: color-mix(in oklch, var(--yellow-500) 15%, transparent);
+  --caution-border: color-mix(in oklch, var(--yellow-500) 35%, transparent);
+  --caution-solid: var(--yellow-400);
+  --caution-solid-foreground: var(--yellow-950);
+
+  --warning: var(--orange-400);
+  --warning-subtle: color-mix(in oklch, var(--orange-500) 15%, transparent);
+  --warning-border: color-mix(in oklch, var(--orange-500) 35%, transparent);
+  --warning-solid: var(--orange-700);
+  --warning-solid-foreground: var(--white);
+
+  --danger: var(--red-400);
+  --danger-subtle: color-mix(in oklch, var(--red-500) 15%, transparent);
+  --danger-border: color-mix(in oklch, var(--red-500) 35%, transparent);
+  --danger-solid: var(--red-600);
+  --danger-solid-foreground: var(--white);
+
+  --bid: var(--indigo-300);
+  --bid-subtle: color-mix(in oklch, var(--indigo-500) 15%, transparent);
+  --bid-border: color-mix(in oklch, var(--indigo-500) 35%, transparent);
+  --bid-solid: var(--indigo-600);
+  --bid-solid-foreground: var(--white);
+
+  --offer: var(--teal-400);
+  --offer-subtle: color-mix(in oklch, var(--teal-500) 15%, transparent);
+  --offer-border: color-mix(in oklch, var(--teal-500) 35%, transparent);
+  --offer-solid: var(--teal-700);
+  --offer-solid-foreground: var(--white);
+
+  --shadow-opacity-xs: 0.3;
+  --shadow-opacity-sm: 0.4;
+  --shadow-opacity-md: 0.5;
+  --shadow-opacity-lg: 0.6;
+}

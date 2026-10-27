@@ -34,7 +34,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - Staging failures: read the Worker's log line (`Database unavailable … code=… kind=…`) before guessing; see `docs/HANDOFF.md`, "How staging is wired".
 
 ## Read by task
-- UX: `docs/PRODUCT.md`.
+- UX: `docs/PRODUCT.md`; look and feel, tokens and components: `docs/DESIGN_SYSTEM.md`.
 - Schema: `docs/DATA_MODEL.md` and `docs/ARCHITECTURE.md`.
 - API: `docs/API.md`.
 - Financial logic: `docs/TRADING_RULES.md` + `docs/ACCEPTANCE_TESTS.md`.
