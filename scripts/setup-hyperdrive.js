@@ -7,6 +7,9 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 
 const CONFIG_NAME = 'gss-staging';
+// Hyperdrive keeps its own pool; a few origin connections are plenty for this app and stay
+// well inside the Supabase free plan's session pool.
+const ORIGIN_CONNECTION_LIMIT = 5;
 const CA_NAME = 'supabase-root-2021-ca';
 const CA_FILE = new URL('../supabase/certs/supabase-root-2021-ca.crt', import.meta.url);
 
@@ -53,10 +56,14 @@ function origin() {
       'SUPABASE_HYPERDRIVE_URL must be postgresql://user:password@host:port/database.',
     );
   }
+  // Supabase's pooler runs transaction mode on 6543 and session mode on 5432, with the same
+  // host and login. Hyperdrive already pools in transaction mode, and stacking a second
+  // transaction pooler behind it drops connections, so always use session mode.
+  const supabasePooler = url.hostname.endsWith('.pooler.supabase.com');
   return {
     scheme: 'postgres',
     host: url.hostname,
-    port: Number(url.port || 5432),
+    port: supabasePooler ? 5432 : Number(url.port || 5432),
     database: decodeURIComponent(url.pathname.slice(1)) || 'postgres',
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
@@ -90,6 +97,7 @@ async function main() {
       name: CONFIG_NAME,
       origin: target,
       mtls: { ca_certificate_id: caId, sslmode },
+      origin_connection_limit: ORIGIN_CONNECTION_LIMIT,
       // Never cache: the API's queries return different rows per user (row level security
       // keyed on app.user_id), so a cached result could reach the wrong user.
       caching: { disabled: true },
@@ -112,6 +120,7 @@ async function main() {
     `- ID: \`${config.id}\``,
     `- Database host: \`${target.host}:${String(target.port)}\` as \`${target.user}\``,
     `- TLS: \`${sslmode}\` with \`${CA_NAME}\``,
+    `- Origin connections: at most ${String(ORIGIN_CONNECTION_LIMIT)}`,
     '- Query caching: off',
   ].join('\n');
   console.log(summary);
