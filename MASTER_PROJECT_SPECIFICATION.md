@@ -573,7 +573,7 @@ These are **not implementation blockers for Phase 0–2**, but must be decided b
 1. **Default pricing conventions:** Which commodities/grades, quote units, and reference standards are first, and which conversion tables/authorities are approved?
 2. **Commercial basis vocabulary:** Preferred delivery-term taxonomy; when are origin handling, delivered freight, or unloading included in buyer/seller prices?
 3. **Firm quote standard:** What human evidence is needed to mark a bid/offer firm, and for how long is it valid?
-4. **FX policy:** Manual deal rate, executable bank quote, or feed reference; what should happen when an FX quote ages out?
+4. **FX policy:** Resolved 2026-10-27: the Bank of Canada's daily USD/CAD rate as the reference rate, blocked when it is more than four days old (`docs/DECISIONS.md`).
 5. **Loss/dockage and quality adjustments:** Which charges/quantity basis apply to specific commodities and grades?
 6. **Border/compliance ownership:** Who is importer of record, who arranges customs broker, and which cost placeholders are required before trade approval?
 7. **Data rights:** Which external prices/data are licensed for storage, commercial display and derivative modeling?
