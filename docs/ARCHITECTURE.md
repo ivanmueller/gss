@@ -15,7 +15,7 @@ Cloudflare Worker — Hono API
    |  typed repositories / outbound adapters
 Supabase Postgres — PostGIS, quote history, scenarios, audit
 Supabase Storage — private supporting documents
-External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker); FX, routing, licensed price data (as added)
+External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker, planned: GT-052); routing, licensed price data (as added)
 ```
 
 The frontend calls one documented application API for sensitive operations. Avoid direct browser writes to commercial tables. Keep the system a **modular monolith** initially, not a distributed collection of microservices.
@@ -34,7 +34,7 @@ The frontend calls one documented application API for sensitive operations. Avoi
 
 ## 4.3 Database access policy
 
-Use one documented strategy for v1: **server-side API for all private domain reads/writes**. Supabase Auth handles sign-in, storage is accessed via short-lived signed URLs under server authorization, and server API database access uses a minimum-privilege role. If Hyperdrive is adopted, it is a connection pool for PostgreSQL clients—not an automatic way to apply end-user RLS. The API must explicitly filter and authorize `organization_id`, including on nested joins and updates. Set RLS and minimal grants on any exposed tables as defense in depth, with user-context policies where Data API access is allowed. Never use a service-role credential in the browser.
+Use one documented strategy for v1: **server-side API for all private domain reads/writes**. Supabase Auth handles sign-in, storage is accessed via short-lived signed URLs under server authorization, and server API database access uses a minimum-privilege role. Staging connects through Cloudflare Hyperdrive (`docs/DECISIONS.md`), which is a connection pool for PostgreSQL clients, not an automatic way to apply end-user RLS. The API must explicitly filter and authorize `organization_id`, including on nested joins and updates. Set RLS and minimal grants on any exposed tables as defense in depth, with user-context policies where Data API access is allowed. Never use a service-role credential in the browser.
 
 ## 4.4 Environment separation
 

@@ -19,7 +19,7 @@ API prefix: `/api/v1`. JSON request/response with consistent envelope and UTC IS
 | `POST /api/v1/quotes` | Create with source+terms | Trader/Admin |
 | `POST /api/v1/quotes/{id}/revisions` | Append new economic quotation | Trader/Admin |
 | `POST /api/v1/quotes/{id}/withdraw` | Withdraw quote; audit | Trader/Admin |
-| `GET /api/v1/fx-quotes` | Known reference FX quotes, provenance | Signed-in |
+| `GET /api/v1/fx-quotes` | Known reference FX quotes, provenance (the Bank of Canada daily USD/CAD rate, owner's decision) | Signed-in |
 | `POST /api/v1/scenarios/calculate` | Stateless validated calculation, no DB mutation | Analyst+ |
 | `POST /api/v1/scenarios` | Save first immutable version | Analyst+ |
 | `GET /api/v1/scenarios/{id}` | Load scenario and versions | Signed-in |

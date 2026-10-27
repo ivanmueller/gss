@@ -1,6 +1,13 @@
 # Grain Trading Platform
 
-Canadian–U.S. physical grain trading operations platform. The repository has the Phase 0 tooling, CI and a staging deploy, plus the GT-010 web app shell: the workspace layout with **synthetic** facilities and quotes, served by the same Cloudflare Worker as the API. No database, authentication, real quotes, trading engine or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
+Canadian–U.S. physical grain trading operations platform. The repository has the Phase 0 tooling, CI and a staging deploy. On staging, one Cloudflare Worker serves the web app and the API:
+
+- sign-in with an authenticator code;
+- the counterparty directory with spreadsheet import and logos;
+- a Mapbox map, with coordinates looked up through Geocodio;
+- a trading workspace (map and order book) that runs on made-up demo data until bids and offers are built.
+
+No real quotes, FX connector, trading engine or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
 
 1. Read `MASTER_PROJECT_SPECIFICATION.md` for product and technical requirements.
 2. Read `docs/BUILD_PLAN.md` for staged work and its early end-to-end demonstration path.
@@ -43,7 +50,18 @@ update auth.users
  where email = 'user@example.com';
 ```
 
+The same menu holds the **Demo data** and **Dark mode** switches (see "Workspace" below and `docs/DESIGN_SYSTEM.md`).
+
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
+
+## Workspace
+
+The opening page shows a commodity picker and a seller/buyer filter above the map. Beside the map is an order book; the facility list is below.
+
+- **Order book:** for each commodity, sellers' asks in red boxes on the left and buyers' bids in green boxes on the right, best first, all in CAD per tonne. The gross spread (best bid minus best ask, before freight and basis) is in each commodity's heading. A dashed circle marks an indicative price; "FX" marks a price converted from USD.
+- **Hiding the book:** the arrow tab on its left edge slides it away and back.
+- **Demo data:** no real bids or offers exist yet, so the workspace shows made-up sellers, buyers and prices only while **Demo data** is on (profile icon → Demo data). It is off until turned on, and the browser remembers the choice. While it is on, a yellow "Demo" tag sits beside GSS. The demo converts USD at the golden fixture's 1.360000, labelled synthetic.
+- **Real exchange rate:** real quotes will use the Bank of Canada's daily rate, not built yet (`docs/DECISIONS.md`).
 
 ## Counterparties
 
@@ -78,7 +96,7 @@ The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifie
 
 ## Staging deploy
 
-Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, builds the web app, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev` (the Worker serves `apps/web/dist` alongside the API), and checks `/api/v1/health`, the web page at `/`, and that unknown `/api/*` paths return 404. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds the owner's real data (`docs/DECISIONS.md`); the trading workspace still shows synthetic data.
+Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, builds the web app, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev` (the Worker serves `apps/web/dist` alongside the API), and checks `/api/v1/health`, the web page at `/`, and that unknown `/api/*` paths return 404. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds the owner's real data (`docs/DECISIONS.md`); the trading workspace shows only made-up data, behind the Demo data switch.
 
 ## Database
 
@@ -88,15 +106,15 @@ Supabase Postgres. Migrations live in `supabase/migrations/` and pgTAP tests in 
 - **Staging:** after a merge, the Deploy staging workflow runs `supabase db push` against the hosted `gss-staging` project (ref `nfwizbcpjpqxdoojfbdr`). It skips with a notice until the `SUPABASE_STAGING_DB_URL` repository secret exists.
 - **Locally (optional):** with Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development), run `supabase db start` then `supabase test db`.
 
-Application tables live in the private `app` schema, which the Supabase Data API does not expose; the API Worker reaches them as the least-privilege `app_api` role (`docs/DECISIONS.md`). The Worker's `DATABASE_URL` secret (Cloudflare dashboard → the Worker → Settings → Variables and Secrets) holds the `app_api` transaction-pooler URL; locally it goes in `apps/api/.dev.vars.staging`. `pnpm --filter @grain/api test:db` runs the API's database code as `app_api` against a database with the migrations applied (`API_TEST_ADMIN_DATABASE_URL`, `API_TEST_DATABASE_URL`).
+Application tables live in the private `app` schema, which the Supabase Data API does not expose; the API Worker reaches them as the least-privilege `app_api` role (`docs/DECISIONS.md`). On staging the Worker connects through the Hyperdrive binding ("Staging database connection" above). `DATABASE_URL` is only a fallback when there is no binding (local runs, CI), set in `apps/api/.dev.vars.staging`; the old Cloudflare `DATABASE_URL` secret is no longer used. `pnpm --filter @grain/api test:db` runs the API's database code as `app_api` against a database with the migrations applied (`API_TEST_ADMIN_DATABASE_URL`, `API_TEST_DATABASE_URL`).
 
 ## Layout
 
 ```
 apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search, geocoding); serves apps/web on staging
-apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory and map); design tokens in src/styles, shared components in src/components/ui (docs/DESIGN_SYSTEM.md)
+apps/web/            React + Vite + Tailwind web app (workspace on demo data; real counterparty directory and map); design tokens in src/styles, shared components in src/components/ui (docs/DESIGN_SYSTEM.md)
 tests/e2e/           Playwright browser tests against the staging Worker config
-packages/domain/     shared validation used by web and API (counterparty import rows, PNG check, regions)
+packages/domain/     shared code for web and API: validation (counterparty import rows, PNG check, regions) and exact money arithmetic (spreads, USD→CAD, rounding)
 supabase/            database migrations, pgTAP tests and local CLI config
 docs/                specification sections, AI coding system, decisions, handoff, changelog
 .github/             CI workflow, Dependabot, issue and PR templates

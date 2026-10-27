@@ -8,7 +8,7 @@ All engine implementations must follow this file; do not change rules without go
 
 - **Counterparty:** Legal/commercial organization or person; can act as buyer, seller, broker or carrier.
 - **Facility:** Geocoded physical location of pickup/delivery; multiple facilities can belong to one counterparty.
-- **Seller offer:** A seller-originated request for a price for grain being sold by that seller; may be firm or indicative.
+- **Seller offer:** A seller-originated request for a price for grain being sold by that seller; may be firm or indicative. The workspace order book calls it an **ask**.
 - **Buyer bid:** A buyer-originated price for the grain that buyer is willing to purchase; may be firm or indicative.
 - **Quote revision:** Immutable economic record of price, currency, quantity, time, specification and delivery basis.
 - **Trade scenario:** Reproducible saved assessment; not a contract or execution.
@@ -28,10 +28,11 @@ For freight and landed costs, store responsibility and applicability (which leg 
 - Internal canonical quantity: metric tonnes (`MT`); store original quoted quantity and unit unchanged as well.
 - Internal reporting currency for first release: CAD; store source currency and the exact FX `CAD per 1 USD` conversion factor used.
 - Currency unit must have explicit pair and direction, `USD/CAD = CAD per USD`. If converting a USD price to CAD: `CAD_price = USD_price × CAD_per_USD`.
+- FX reference (owner's decision, 2026-10-27, `docs/DECISIONS.md`): the Bank of Canada's daily USD/CAD rate. A rate more than four calendar days old is stale; USD prices are then not converted and scenarios needing them are blocked.
 - A `USD/bushel` quote cannot normalize without a vetted commodity-specific and applicable contractual pounds-per-bushel convention. The conversion value, source and version must be snapshotted.
 - Distinguish U.S. short ton (`2,000 lb`), metric tonne (`1,000 kg`), and other vendor-specific units.
 - Freight quoted per load requires an actual contract payload assumption to convert to per-MT; do not infer payload from truck class alone.
-- Quantities, rates and totals retain working precision; round only at explicit reporting or settlement boundaries.
+- Quantities, rates and totals retain working precision; round only at explicit reporting or settlement boundaries. On screen, converted amounts are rounded to cents, half away from zero; ranking, spreads and sums use the exact amounts.
 - Negative margin is valid and displayed plainly. Unavailable margin is **null plus an error**, never zero.
 
 ## 5.4 Baseline economics

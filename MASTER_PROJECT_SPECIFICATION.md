@@ -1,7 +1,7 @@
 # Canadian–U.S. Physical Grain Trading Platform
 ## Master Project Specification & Technical Build Plan
 
-**Version:** 1.0 — product/architecture baseline; AI delivery workflow clarified 2026-10-26  
+**Version:** 1.0 — product/architecture baseline; AI delivery workflow clarified 2026-10-26; amended 2026-10-27 with the owner's decisions recorded in `docs/DECISIONS.md` (one organization, Mapbox, Geocodio, the Bank of Canada FX rate, the workspace order book)  
 **Prepared:** 26 October 2026  
 **Audience:** Company owners, grain traders, software engineers, Claude Code, OpenAI Codex, Gemini CLI, external developers  
 **Status:** Design specification; not a claim that software, integrations, live market data, or production infrastructure have been implemented.
@@ -124,7 +124,7 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 
 ### Workspace layout
 
-Desktop: top commodity/date filters; 55–65% interactive map and 35–45% right-hand selection/quote inspector; bottom or alternate full-width opportunities table. At narrower widths, map and table become tabs, with an accessible list alternative. Map pins differentiate supplier offers and buyer bids; no map pin implies an executable current quote just because a facility exists.
+Desktop: top commodity/date filters; 55–65% interactive map and 35–45% right-hand selection/quote inspector (implemented as the workspace order book, `docs/PRODUCT.md`); bottom or alternate full-width opportunities table. At narrower widths, map and table become tabs, with an accessible list alternative. Map pins differentiate supplier offers and buyer bids; no map pin implies an executable current quote just because a facility exists.
 
 ### Interface conventions
 
@@ -132,6 +132,7 @@ Desktop: top commodity/date filters; 55–65% interactive map and 35–45% right
 - Quote timestamp and `valid_until` appear adjacent to every price.
 - Monetary figures always display currency and unit, e.g., `USD 725.00/MT`, never `725` alone.
 - Firm/indicative/expired/withdrawn states are visually distinct and accessible.
+- The workspace order book has owner-approved exceptions to these three conventions (`docs/PRODUCT.md`, `docs/DECISIONS.md`).
 - Highlight missing delivery terms and specification conflicts before revealing an actionable margin.
 - A quote with zero/missing available volume must not pass the valid pairing check.
 - Saved scenarios are labeled `Indicative scenario – not an executed trade` until explicitly converted through a later workflow.
@@ -150,7 +151,7 @@ Cloudflare Worker — Hono API
    |  typed repositories / outbound adapters
 Supabase Postgres — PostGIS, quote history, scenarios, audit
 Supabase Storage — private supporting documents
-External adapters — FX, geocoding, tiles, routing, licensed price data (as added)
+External adapters — FX (Bank of Canada daily rate), geocoding, tiles, routing, licensed price data (as added)
 ```
 
 The frontend calls one documented application API for sensitive operations. Avoid direct browser writes to commercial tables. Keep the system a **modular monolith** initially, not a distributed collection of microservices.
@@ -185,7 +186,7 @@ Production secrets live in platform secret stores, never in Git or AI prompt fil
 
 - **Counterparty:** Legal/commercial organization or person; can act as buyer, seller, broker or carrier.
 - **Facility:** Geocoded physical location of pickup/delivery; multiple facilities can belong to one counterparty.
-- **Seller offer:** A seller-originated request for a price for grain being sold by that seller; may be firm or indicative.
+- **Seller offer:** A seller-originated request for a price for grain being sold by that seller; may be firm or indicative. The workspace order book calls it an **ask**.
 - **Buyer bid:** A buyer-originated price for the grain that buyer is willing to purchase; may be firm or indicative.
 - **Quote revision:** Immutable economic record of price, currency, quantity, time, specification and delivery basis.
 - **Trade scenario:** Reproducible saved assessment; not a contract or execution.
@@ -205,10 +206,11 @@ For freight and landed costs, store responsibility and applicability (which leg 
 - Internal canonical quantity: metric tonnes (`MT`); store original quoted quantity and unit unchanged as well.
 - Internal reporting currency for first release: CAD; store source currency and the exact FX `CAD per 1 USD` conversion factor used.
 - Currency unit must have explicit pair and direction, `USD/CAD = CAD per USD`. If converting a USD price to CAD: `CAD_price = USD_price × CAD_per_USD`.
+- FX reference (owner's decision, 2026-10-27, `docs/DECISIONS.md`): the Bank of Canada's daily USD/CAD rate. A rate more than four calendar days old is stale; USD prices are then not converted and scenarios needing them are blocked.
 - A `USD/bushel` quote cannot normalize without a vetted commodity-specific and applicable contractual pounds-per-bushel convention. The conversion value, source and version must be snapshotted.
 - Distinguish U.S. short ton (`2,000 lb`), metric tonne (`1,000 kg`), and other vendor-specific units.
 - Freight quoted per load requires an actual contract payload assumption to convert to per-MT; do not infer payload from truck class alone.
-- Quantities, rates and totals retain working precision; round only at explicit reporting or settlement boundaries.
+- Quantities, rates and totals retain working precision; round only at explicit reporting or settlement boundaries. On screen, converted amounts are rounded to cents, half away from zero; ranking, spreads and sums use the exact amounts.
 - Negative margin is valid and displayed plainly. Unavailable margin is **null plus an error**, never zero.
 
 ## 5.4 Baseline economics
@@ -313,7 +315,7 @@ API prefix: `/api/v1`. JSON request/response with consistent envelope and UTC IS
 | `POST /api/v1/quotes` | Create with source+terms | Trader/Admin |
 | `POST /api/v1/quotes/{id}/revisions` | Append new economic quotation | Trader/Admin |
 | `POST /api/v1/quotes/{id}/withdraw` | Withdraw quote; audit | Trader/Admin |
-| `GET /api/v1/fx-quotes` | Known reference FX quotes, provenance | Signed-in |
+| `GET /api/v1/fx-quotes` | Known reference FX quotes, provenance (the Bank of Canada daily USD/CAD rate, owner's decision) | Signed-in |
 | `POST /api/v1/scenarios/calculate` | Stateless validated calculation, no DB mutation | Analyst+ |
 | `POST /api/v1/scenarios` | Save first immutable version | Analyst+ |
 | `GET /api/v1/scenarios/{id}` | Load scenario and versions | Signed-in |
@@ -377,7 +379,7 @@ Map pins are facilities; eligible bid/offer indicators derive from current quote
 
 # 9. Data ingestion and provenance
 
-**MVP permitted sources:** trader-entered quotations, verified communications, user-supplied licensed CSV/Excel exports, public reference facility information with documented permission, and hand-entered carrier/FX assumptions. No unlicensed automated scraping of protected market price sources.
+**MVP permitted sources:** trader-entered quotations, verified communications, user-supplied licensed CSV/Excel exports, public reference facility information with documented permission, hand-entered carrier/FX assumptions, and the Bank of Canada's published daily exchange rates (owner's decision, 2026-10-27; its terms of use to be checked under §15 item 7). No unlicensed automated scraping of protected market price sources.
 
 Each import has `source`, `license_or_permission`, `retrieved_at`, `effective_at`, `checksum`, `record_count`, `import_batch_id`, deduplication key, validation errors and an operator review state. Import into a staging table first, validate unit/grade/location/tenant, and then publish as versioned records. Keep raw source files in restricted storage if agreements allow it.
 
@@ -536,7 +538,7 @@ These are **release-readiness gates**, not calendar promises. Phase 0 and the mi
 
 ## Phase 5 — Commercially useful freight and discovery
 
-**Tickets:** GT-050 freight quote/lane data model; GT-051 licensed road routing integration; GT-052 source/time-aware FX connector; GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
+**Tickets:** GT-050 freight quote/lane data model; GT-051 licensed road routing integration; GT-052 source/time-aware FX connector (the Bank of Canada daily rate; pulled forward by the owner to be built with bids and offers); GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
 
 **Gate:** Ranked opportunities differentiate confirmed, estimated and insufficient-data scenarios; shipping cost inclusion is auditable; no inaccurate route or estimated cost is presented as firm carrier freight.
 
@@ -614,6 +616,8 @@ Vendor capabilities were checked against public technical documentation availabl
 - Supabase PostGIS: https://supabase.com/docs/guides/database/extensions/postgis
 - Supabase RLS: https://supabase.com/docs/guides/database/postgres/row-level-security
 - Mapbox GL JS: https://docs.mapbox.com/mapbox-gl-js/
+- Geocodio API: https://www.geocod.io/docs/
+- Bank of Canada daily exchange rates and Valet API: https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates/, https://www.bankofcanada.ca/valet-api-how-to/
 - Codex repository instructions: https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex
 - Gemini CLI context configuration: https://geminicli.com/docs/reference/configuration/
 - Cursor 3 agent environment: https://cursor.com/changelog/3-0
