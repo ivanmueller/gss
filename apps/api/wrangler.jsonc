@@ -8,6 +8,13 @@
   // production gets its own environment and an approval-gated workflow later.
   "env": {
     "staging": {
+      // Public values: the project URL and publishable key are meant to be known.
+      // Access is enforced by Supabase Auth and by the API's own checks.
+      // `wrangler dev --env staging` reads overrides from .dev.vars.staging (gitignored).
+      "vars": {
+        "SUPABASE_URL": "https://nfwizbcpjpqxdoojfbdr.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_4gRcidcCPr7dsdATHL57nQ_QNY0SNAc",
+      },
       // The same Worker serves the web app built by `pnpm build`, so the browser and
       // API share one origin. /api/* always reaches the Worker; any other unknown
       // path returns the app's index.html.

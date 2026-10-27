@@ -29,16 +29,38 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm build
       - uses: supabase/setup-cli@v1
         with:
           version: 2.122.0
-      # Throwaway local Supabase: apply every migration from scratch, then run the
-      # pgTAP tests in supabase/tests.
-      - name: Database tests
+      # Throwaway local Supabase with its sign-in service: every migration is applied
+      # from scratch. Services the tests do not use are left out.
+      - name: Start local Supabase
         run: |
-          supabase db start
-          supabase test db
+          supabase start -x studio,imgproxy,realtime,storage-api,edge-runtime,logflare,vector
+          supabase status -o env > "$RUNNER_TEMP/supabase.env"
+      # Build the web app and configure the local Worker against that Supabase.
+      # These are the CLI's well-known local development keys, not secrets.
+      - name: Point the app at local Supabase
+        run: |
+          set -a; . "$RUNNER_TEMP/supabase.env"; set +a
+          for name in API_URL ANON_KEY SERVICE_ROLE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::supabase status gave no $name; it gave: $(cut -d= -f1 "$RUNNER_TEMP/supabase.env" | tr '\n' ' ')"
+              exit 1
+            fi
+          done
+          {
+            echo "VITE_SUPABASE_URL=$API_URL"
+            echo "VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "E2E_SUPABASE_URL=$API_URL"
+            echo "E2E_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
+            echo "E2E_SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+          printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\n' "$API_URL" "$ANON_KEY" \
+            > apps/api/.dev.vars.staging
+      - run: pnpm build
+      - name: Database tests
+        run: supabase test db
       - name: Install Playwright Chromium
         run: pnpm --filter @grain/e2e exec playwright install --with-deps chromium
       # Browser tests against the built app served by the staging Worker config.

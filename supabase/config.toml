@@ -8,3 +8,20 @@ project_id = "gss"
 # `app` schema, which is deliberately not listed.
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
+
+# Mirrors the hosted gss-staging settings the owner applies in the dashboard:
+# no self sign-up (administrators create users) and TOTP two-factor enabled.
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:8787"
+# Blocks every self sign-up; administrators still create users.
+enable_signup = false
+
+[auth.email]
+# Keep true: in the CLI this switches email/password sign-in itself on or off.
+enable_signup = true
+enable_confirmations = false
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true

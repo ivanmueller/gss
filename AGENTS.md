@@ -42,7 +42,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - `pnpm --filter @grain/api dev`: local API Worker at `http://localhost:8787/api/v1/health`.
 - `pnpm --filter @grain/web dev`: web app with hot reload at `http://localhost:5173`; `/api` is proxied to port 8787.
 - `pnpm preview:staging`: build, then serve web and API together as on staging.
-- `pnpm e2e`: build, then run the Playwright browser tests (CI runs them in the required `check` job).
+- `pnpm e2e`: build, then run the Playwright browser tests (CI runs them in the required `check` job). Needs a local Supabase with sign-in (`supabase start`); see README "Quick start".
 - `supabase db start` then `supabase test db`: apply migrations to a local Supabase and run the pgTAP tests (needs Docker; CI runs them in `check`).
 
 ## Database rules
