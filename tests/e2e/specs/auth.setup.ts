@@ -33,7 +33,7 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
   // Postgres as app_api: the Supabase session at aal2 reached the Worker and the database.
   // Isolation is tested in supabase/tests, the API database tests and counterparties.spec.ts.
   // The menu shows the first name and last initial, never the email or the organization.
-  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeAttached();
   await page.getByRole('button', { name: 'Account' }).click();
   const menu = page.getByRole('menu');
   await expect(menu.getByText('Synthetic T.')).toBeVisible();

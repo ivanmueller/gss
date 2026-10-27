@@ -142,3 +142,21 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - Ageing out (proposed default; the owner can change the number): the Bank does not publish on weekends or bank holidays, so the latest rate carries over them. A rate more than four calendar days old (for example, a stopped feed) is stale. USD prices are then listed apart as "CAD/USD rate out of date", never converted at an old rate without saying so, and scenarios needing it are blocked (`FX quote missing/stale`, `docs/TRADING_RULES.md`).
 - Before going live: check the Bank's terms of use for the data (§15 item 7, data rights).
 - When: the connector is ticket GT-052. It is needed as soon as a real USD price is entered, so it is built with bids and offers, after counterparty editing and member management (the owner's order). Until then the workspace demo keeps the synthetic 1.360000, labelled as such.
+
+**2026-10-27 — Demo data switch replaces the workspace's demo notes (owner's request).** The owner asked for a cleaner workspace and one switch for the made-up data. Choices:
+- **Demo data** switch in the profile menu, above Dark mode, kept per browser (`localStorage`, `gss.demo`; `lib/demo.ts`). It is **off until turned on**, so nobody meets made-up prices by default. While it is on, a yellow **Demo** tag sits beside the GSS name on every page. Hovering it explains that the workspace shows made-up sellers, buyers and prices.
+- With it off, the workspace shows the truth for now: no pins, and "No asks or bids yet" with a pointer to the switch. No made-up facility, price or FX rate is used.
+- Removed at the owner's request:
+  - the Workspace heading and description (the heading stays for screen readers);
+  - the "Synthetic demo data" banner;
+  - the order book's note on CAD conversion and spreads, and its "Synthetic" tag;
+  - the facility list's "synthetic" word;
+  - the "Not in the book" list.
+
+  These per-page labels are replaced by the Demo tag, which is how `AGENTS.md`'s "label all synthetic data" is now met on the workspace.
+- Kept, because the trading rules need them:
+  - converted prices still carry the FX mark, whose text, like the selection details, names the rate as synthetic;
+  - "Gross spread" keeps its caveat (before freight and basis, not a margin) as a hover text;
+  - USD quotes without a rate are still left out with a visible warning, never priced at zero.
+- Expired, withdrawn and past-due quotes are simply not shown in the book; they stay in the selection details and the facility table with their status.
+- The real pages (counterparties, map, import) are unchanged and keep their "Your organization's records" note.

@@ -5,13 +5,12 @@ import { CommodityPicker } from '../components/CommodityPicker';
 import { FacilityList } from '../components/FacilityList';
 import { FacilityTable } from '../components/FacilityTable';
 import { OrderBook } from '../components/OrderBook';
-import { PageHeader } from '../components/PageHeader';
 import { SelectedFacility } from '../components/SelectedFacility';
-import { SyntheticBanner } from '../components/SyntheticBanner';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES, SYNTHETIC_FX } from '../data/synthetic';
 import type { Facility, FacilityRole } from '../data/types';
+import { useDemoData } from '../lib/demo';
 import { mapboxToken, type MapboxToken, type MapPin } from '../lib/mapbox';
 import { buildOrderBooks } from '../lib/orderBook';
 import { useTheme } from '../lib/theme';
@@ -26,6 +25,7 @@ const DESKTOP_QUERY = '(min-width: 1024px)';
 const OVERLAY_QUERY = '(min-width: 1280px)';
 // The order book's width over the map (27rem), in pixels.
 const OVERLAY_WIDTH = 432;
+const NO_FACILITIES: readonly Facility[] = [];
 
 type RoleFilter = 'all' | FacilityRole;
 
@@ -82,8 +82,8 @@ function MapUnavailable({ refused }: { refused: boolean }) {
 
 /**
  * The trading workspace: the chosen commodities' sellers and buyers on the map, the order
- * book of their asks and bids in CAD, and the facility list. On synthetic data, with the
- * golden fixture's synthetic CAD/USD rate, until bids and offers are built.
+ * book of their asks and bids in CAD, and the facility list. Until bids and offers are built
+ * it shows made-up data (with the golden fixture's CAD/USD rate) only while demo data is on.
  */
 export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) {
   const isDesktop = useMediaQuery(DESKTOP_QUERY, true);
@@ -106,21 +106,25 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
   const [refused, setRefused] = useState(false);
   // Over the map, the order book can be tucked away to the right to see the whole map.
   const [bookOpen, setBookOpen] = useState(true);
-  const fx = SYNTHETIC_FX;
+  // Until bids and offers are built, the only prices are the made-up ones shown with demo
+  // data on (profile menu); with it off the workspace is empty, which is the truth.
+  const [demo] = useDemoData();
+  const facilities = demo ? SYNTHETIC_FACILITIES : NO_FACILITIES;
+  const fx = demo ? SYNTHETIC_FX : null;
 
   const visible = useMemo(
     () =>
-      SYNTHETIC_FACILITIES.filter(
+      facilities.filter(
         (facility) =>
           facility.commodities.some((commodity) => commodities.includes(commodity)) &&
           (roleFilter === 'all' || facility.roles.includes(roleFilter)),
       ),
-    [commodities, roleFilter],
+    [facilities, commodities, roleFilter],
   );
   const pins = useMemo(() => visible.map(pinOf), [visible]);
   const books = useMemo(
-    () => buildOrderBooks(SYNTHETIC_FACILITIES, commodities, fx, now),
-    [commodities, fx, now],
+    () => (demo ? buildOrderBooks(facilities, commodities, fx, now) : []),
+    [demo, facilities, commodities, fx, now],
   );
   // A facility hidden by the filters is no longer selected.
   const selected = visible.find((facility) => facility.id === selectedId) ?? null;
@@ -164,17 +168,31 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
     </div>
   );
 
-  const facilityProps = { facilities: visible, commodities, fx, ...selection };
-  const bookProps = { books, fx, selected: selectedBlock, ...selection };
+  const facilityProps = {
+    facilities: visible,
+    commodities,
+    fx,
+    ...(demo ? {} : { emptyText: 'No facilities with asks or bids yet.' }),
+    ...selection,
+  };
+  const bookProps = {
+    books,
+    selected: selectedBlock,
+    empty: demo ? undefined : (
+      <>
+        <span className="block font-medium text-foreground">No asks or bids yet.</span>
+        Turn on Demo data in the profile menu to try the workspace with made-up prices.
+      </>
+    ),
+    ...selection,
+  };
 
   return (
     <section aria-labelledby="workspace-heading" className="flex flex-col gap-4">
-      <PageHeader
-        id="workspace-heading"
-        title="Workspace"
-        description="Sellers and buyers of the chosen commodities on the map, with their asks and bids in CAD in the order book. A demo on synthetic data until bids and offers are built."
-      />
-      <SyntheticBanner />
+      {/* The menu already says where the user is; the heading is kept for screen readers. */}
+      <h1 id="workspace-heading" className="sr-only">
+        Workspace
+      </h1>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <CommodityPicker
           commodities={SYNTHETIC_COMMODITIES}
@@ -194,7 +212,7 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
 
       {floating ? (
         <>
-          <div className="h-[calc(100dvh-19rem)] min-h-[34rem]">
+          <div className="h-[calc(100dvh-11rem)] min-h-[34rem]">
             {map(
               // Flush with the map's right edge, full height. The tab on its left edge points
               // right to tuck the book away and left to bring it back.

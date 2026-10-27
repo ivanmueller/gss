@@ -1,13 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
-import { SYNTHETIC_NOW } from './synthetic';
+import { showDemoData } from './synthetic';
 
-// The synthetic quotes expire in November 2026; read them at a fixed time so they stay live.
+// Demo data on, read at a fixed time: the synthetic quotes expire in November 2026.
 test.beforeEach(async ({ page }) => {
-  await page.clock.setFixedTime(SYNTHETIC_NOW);
+  await showDemoData(page);
 });
 
-test('loads the workspace with synthetic data and no console errors', async ({ page }) => {
+/** The "Demo" tag beside the GSS name, where it is on screen. */
+const demoTag = (page: Page) => page.getByText(/^demo$/i).filter({ visible: true });
+
+test('loads the workspace with demo data and no console errors', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -16,8 +19,10 @@ test('loads the workspace with synthetic data and no console errors', async ({ p
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
-  await expect(page.getByRole('note')).toContainText('Synthetic demo data');
+  // The heading is for screen readers only; the page itself carries no demo notes.
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeAttached();
+  await expect(demoTag(page)).toBeVisible();
+  await expect(page.getByText('Synthetic demo data')).toHaveCount(0);
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(10);
   await expect(page.getByRole('complementary', { name: 'Order book' })).toContainText(
     'Flaxseed · No. 1 CW',
@@ -71,16 +76,42 @@ test('switches to the night theme with one switch and keeps it after a reload', 
 
   await page.reload();
   await expect(html).toHaveClass(/\bdark\b/);
-  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeAttached();
 
   await page.getByRole('button', { name: 'Account' }).click();
   await page.getByRole('menuitemcheckbox', { name: 'Dark mode' }).click();
   await expect(html).not.toHaveClass(/\bdark\b/);
 });
 
+test('turns demo data off and on with the switch above Dark mode', async ({ page }) => {
+  await page.goto('/');
+  const book = page.getByRole('complementary', { name: 'Order book' });
+  await expect(demoTag(page)).toBeVisible();
+  await expect(book).toContainText('Flaxseed · No. 1 CW');
+
+  await page.getByRole('button', { name: 'Account' }).click();
+  await expect(page.getByRole('menuitemcheckbox')).toHaveText(['Demo data', 'Dark mode']);
+  const demo = page.getByRole('menuitemcheckbox', { name: 'Demo data' });
+  await expect(demo).toHaveAttribute('aria-checked', 'true');
+  await demo.click();
+  await expect(demo).toHaveAttribute('aria-checked', 'false');
+  await page.keyboard.press('Escape');
+
+  // Off: no tag, and the workspace says there are no asks or bids rather than showing any.
+  await expect(demoTag(page)).toHaveCount(0);
+  await expect(book).toContainText('No asks or bids yet.');
+  await expect(page.getByRole('table')).toContainText('No facilities with asks or bids yet.');
+
+  await page.getByRole('button', { name: 'Account' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Demo data' }).click();
+  await page.keyboard.press('Escape');
+  await expect(demoTag(page)).toBeVisible();
+  await expect(book).toContainText('Flaxseed · No. 1 CW');
+});
+
 test('uses the IBM Plex Sans typeface served with the app', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeAttached();
   const loaded = await page.evaluate(async () => {
     await document.fonts.ready;
     return document.fonts.check('16px "IBM Plex Sans Variable"');

@@ -17,6 +17,8 @@ interface FacilityTableProps {
   commodities: readonly string[];
   /** The rate that puts USD quotes in CAD; null when there is none. */
   fx: FxRate | null;
+  /** What to say when no facility is shown; by default, that none match the filters. */
+  emptyText?: string;
   now: Date;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -27,6 +29,7 @@ export function FacilityTable({
   facilities,
   commodities,
   fx,
+  emptyText = 'No facilities match these filters.',
   now,
   selectedId,
   onSelect,
@@ -36,7 +39,7 @@ export function FacilityTable({
       <section aria-labelledby="facilities-heading" className="overflow-hidden">
         <CardHeader>
           <CardTitle id="facilities-heading">Facilities</CardTitle>
-          <CardDescription>{facilities.length} shown · synthetic</CardDescription>
+          <CardDescription>{facilities.length} shown</CardDescription>
         </CardHeader>
         <Table className="min-w-[44rem]">
           <TableHeader>
@@ -88,7 +91,7 @@ export function FacilityTable({
             {facilities.length === 0 && (
               <tr className="border-t">
                 <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
-                  No facilities match these filters.
+                  {emptyText}
                 </TableCell>
               </tr>
             )}
