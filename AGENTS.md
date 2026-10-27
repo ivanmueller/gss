@@ -44,6 +44,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - `pnpm preview:staging`: build, then serve web and API together as on staging.
 - `pnpm e2e`: build, then run the Playwright browser tests (CI runs them in the required `check` job). Needs a local Supabase with sign-in (`supabase start`); see README "Quick start".
 - `supabase db start` then `supabase test db`: apply migrations to a local Supabase and run the pgTAP tests (needs Docker; CI runs them in `check`).
+- `pnpm --filter @grain/api test:db`: the API's database code as `app_api` against a migrated database (see README "Database").
 
 ## Database rules
 - Every schema change is a new file in `supabase/migrations/`; never edit a migration that has reached `main`.

@@ -1,12 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { app } from './index';
+import type { Database } from './db';
+import { createApp } from './index';
 
 const ENV = {
   SUPABASE_URL: 'https://example-project.supabase.co/',
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
+  DATABASE_URL: 'postgresql://app_api.ref:secret@db.example.test:6543/postgres',
 };
 const USER_ID = '00000000-0000-4000-8000-00000000a11c';
+
+function fakeDatabase(): Database & {
+  memberships: ReturnType<typeof vi.fn<Database['memberships']>>;
+  close: ReturnType<typeof vi.fn<Database['close']>>;
+} {
+  return {
+    memberships: vi.fn<Database['memberships']>(() =>
+      Promise.resolve([
+        { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'trader' },
+      ]),
+    ),
+    close: vi.fn<Database['close']>(() => Promise.resolve()),
+  };
+}
+
+let db = fakeDatabase();
+const openDatabase = vi.fn<(url: string) => Database>(() => db);
+const app = createApp(openDatabase);
 
 /** An unsigned token with the given claims; only Supabase Auth (mocked here) judges validity. */
 function token(claims: Record<string, unknown>): string {
@@ -30,6 +50,8 @@ function get(path: string, authorization?: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  db = fakeDatabase();
+  openDatabase.mockClear();
 });
 
 describe('GET /api/v1/health', () => {
@@ -54,16 +76,70 @@ describe('GET /api/v1/health', () => {
 describe('GET /api/v1/me', () => {
   const valid = token({ sub: USER_ID, aal: 'aal2' });
 
-  it('returns the user when Supabase accepts an aal2 token', async () => {
+  it('returns the verified user and their organizations', async () => {
     const fetchMock = mockAuthServer(Response.json({ id: USER_ID, email: 'alice@example.test' }));
     const res = await get('/api/v1/me', `Bearer ${valid}`);
 
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(await res.json()).toEqual({ id: USER_ID, email: 'alice@example.test' });
+    expect(await res.json()).toEqual({
+      id: USER_ID,
+      email: 'alice@example.test',
+      organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
+    });
     expect(fetchMock).toHaveBeenCalledWith('https://example-project.supabase.co/auth/v1/user', {
       headers: { apikey: 'sb_publishable_test', Authorization: `Bearer ${valid}` },
     });
+    expect(openDatabase).toHaveBeenCalledWith(ENV.DATABASE_URL);
+    expect(db.memberships).toHaveBeenCalledWith(USER_ID);
+    expect(db.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the database only about the verified user', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    await app.request(
+      '/api/v1/me?user_id=00000000-0000-4000-8000-000000000b0b',
+      {
+        headers: {
+          Authorization: `Bearer ${valid}`,
+          'X-User-Id': '00000000-0000-4000-8000-000000000b0b',
+        },
+      },
+      ENV,
+    );
+
+    expect(db.memberships).toHaveBeenCalledTimes(1);
+    expect(db.memberships).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it('does not open the database for a refused request', async () => {
+    mockAuthServer(Response.json({ msg: 'invalid JWT' }, { status: 401 }));
+    await get('/api/v1/me', `Bearer ${valid}`);
+
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing database configuration', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const res = await app.request(
+      '/api/v1/me',
+      { headers: { Authorization: `Bearer ${valid}` } },
+      { ...ENV, DATABASE_URL: '' },
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: { code: 'MISCONFIGURED' } });
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('fails closed and still disconnects when the database errors', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    db.memberships.mockRejectedValueOnce(new Error('connection refused'));
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
+    expect(db.close).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a request without a token', async () => {
@@ -134,7 +210,7 @@ describe('GET /api/v1/me', () => {
     const res = await app.request(
       '/api/v1/me',
       { headers: { Authorization: `Bearer ${valid}` } },
-      { SUPABASE_URL: '', SUPABASE_PUBLISHABLE_KEY: '' },
+      { SUPABASE_URL: '', SUPABASE_PUBLISHABLE_KEY: '', DATABASE_URL: ENV.DATABASE_URL },
     );
 
     expect(res.status).toBe(500);

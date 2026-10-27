@@ -13,6 +13,8 @@ const HEALTH = {
 export interface HeaderUser {
   /** Email as reported by the API's /me, falling back to the session's. */
   email: string | null;
+  /** Organization name from /me; null once /me answered with no membership. */
+  organization: string | null | undefined;
   check: MeState['status'];
   onSignOut: () => void;
 }
@@ -41,6 +43,12 @@ export function AppHeader({ health, user }: { health: ApiHealth; user?: HeaderUs
             <div className="flex items-center gap-2 text-xs">
               <p>
                 Signed in as <span className="font-medium">{user.email ?? 'unknown user'}</span>
+                {user.organization !== undefined && (
+                  <span className="text-muted-foreground">
+                    {' · '}
+                    {user.organization ?? 'no organization yet'}
+                  </span>
+                )}
                 {user.check === 'error' && (
                   <span className="text-red-700"> · server could not confirm your session</span>
                 )}

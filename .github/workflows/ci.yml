@@ -43,24 +43,34 @@ jobs:
       - name: Point the app at local Supabase
         run: |
           set -a; . "$RUNNER_TEMP/supabase.env"; set +a
-          for name in API_URL ANON_KEY SERVICE_ROLE_KEY; do
+          for name in API_URL ANON_KEY SERVICE_ROLE_KEY DB_URL; do
             if [ -z "${!name:-}" ]; then
               echo "::error::supabase status gave no $name; it gave: $(cut -d= -f1 "$RUNNER_TEMP/supabase.env" | tr '\n' ' ')"
               exit 1
             fi
           done
+          # The API's database role gets a login for this throwaway database only.
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -q \
+            -c "alter role app_api with login password 'ci-only-app-api-password'"
+          APP_API_URL="postgresql://app_api:ci-only-app-api-password@127.0.0.1:54322/postgres"
           {
             echo "VITE_SUPABASE_URL=$API_URL"
             echo "VITE_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
             echo "E2E_SUPABASE_URL=$API_URL"
             echo "E2E_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY"
             echo "E2E_SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "E2E_DATABASE_URL=$DB_URL"
+            echo "API_TEST_ADMIN_DATABASE_URL=$DB_URL"
+            echo "API_TEST_DATABASE_URL=$APP_API_URL"
           } >> "$GITHUB_ENV"
-          printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\n' "$API_URL" "$ANON_KEY" \
-            > apps/api/.dev.vars.staging
+          printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\nDATABASE_URL=%s\n' \
+            "$API_URL" "$ANON_KEY" "$APP_API_URL" > apps/api/.dev.vars.staging
       - run: pnpm build
       - name: Database tests
         run: supabase test db
+      # The API's database code, as app_api, against the same database.
+      - name: API database tests
+        run: pnpm --filter @grain/api test:db
       - name: Install Playwright Chromium
         run: pnpm --filter @grain/e2e exec playwright install --with-deps chromium
       # Browser tests against the built app served by the staging Worker config.
