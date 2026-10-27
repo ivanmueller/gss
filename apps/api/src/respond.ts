@@ -43,6 +43,30 @@ function postgresCode(error: unknown): { code: string; constraint: string } | nu
     : null;
 }
 
+// Kinds of connection failure, recognised from the error text, which is never logged itself.
+const FAILURE_KINDS: [RegExp, string][] = [
+  [/certificate|tls|ssl|handshake/i, 'tls'],
+  [/password authentication|authentication failed|SASL|SCRAM/i, 'authentication'],
+  [/tenant or user not found/i, 'unknown_user'],
+  [/timeout|timed out/i, 'timeout'],
+  [/refused/i, 'connection_refused'],
+  [/getaddrinfo|ENOTFOUND|EAI_AGAIN|dns/i, 'dns'],
+  [/closed|reset|ended|destroyed/i, 'connection_closed'],
+];
+
+/**
+ * A short, secret-free description of a database failure for the logs: the SQLSTATE or
+ * driver error code and a kind. Messages and URLs are never logged (they can carry
+ * credentials or data).
+ */
+export function failureSummary(error: unknown): string {
+  const code = postgresCode(error)?.code;
+  const safeCode = code !== undefined && /^[A-Z0-9_]{2,40}$/.test(code) ? code : 'none';
+  const text = error instanceof Error ? `${error.name} ${error.message}` : '';
+  const kind = FAILURE_KINDS.find(([pattern]) => pattern.test(text))?.[1] ?? 'other';
+  return `code=${safeCode} kind=${kind}`;
+}
+
 /** Maps a database failure to a response without exposing database details. */
 function databaseFailure(c: ApiContext, error: unknown) {
   const pg = postgresCode(error);
@@ -58,6 +82,7 @@ function databaseFailure(c: ApiContext, error: unknown) {
   if (pg && (pg.code.startsWith('22') || pg.code.startsWith('23'))) {
     return apiError(c, 422, 'VALIDATION_FAILED', 'The database refused a value.');
   }
+  console.error(`Database unavailable in request ${c.get('requestId')}: ${failureSummary(error)}`);
   return apiError(c, 503, 'DATABASE_UNAVAILABLE', 'The database is unavailable.');
 }
 

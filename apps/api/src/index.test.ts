@@ -99,12 +99,55 @@ describe('GET /api/v1/me', () => {
 
   it('fails closed and still disconnects when the database errors', async () => {
     mockAuthServer(Response.json({ id: USER_ID }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     db.memberships.mockRejectedValueOnce(new Error('connection refused'));
     const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
 
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
     expect(db.close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      Object.assign(new Error('password authentication failed for user "app_api"'), {
+        code: '28P01',
+      }),
+      'code=28P01 kind=authentication',
+    ],
+    [
+      Object.assign(new Error('Tenant or user not found'), { code: 'XX000' }),
+      'code=XX000 kind=unknown_user',
+    ],
+    [
+      new Error('TLS handshake failed: invalid peer certificate: UnknownIssuer'),
+      'code=none kind=tls',
+    ],
+    [
+      Object.assign(new Error('write CONNECT_TIMEOUT db.example.test:6543'), {
+        code: 'CONNECT_TIMEOUT',
+      }),
+      'code=CONNECT_TIMEOUT kind=timeout',
+    ],
+    [
+      Object.assign(new Error('postgresql://u:secret@h'), { code: 'not a code' }),
+      'code=none kind=other',
+    ],
+  ])('logs why the database failed, without the message (%s)', async (error, summary) => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const logged: unknown[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(...args);
+    });
+    db.memberships.mockRejectedValueOnce(error);
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(503);
+    expect(logged).toEqual([
+      `Database unavailable in request ${res.headers.get('x-request-id') ?? ''}: ${summary}`,
+    ]);
   });
 
   it('rejects a request without a token', async () => {
