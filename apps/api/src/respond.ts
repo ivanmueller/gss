@@ -93,9 +93,7 @@ function databaseFailure(c: ApiContext, error: unknown) {
   return apiError(c, 503, 'DATABASE_UNAVAILABLE', 'The database is unavailable.');
 }
 
-// Driver errors meaning the connection itself was lost before an answer arrived. Every
-// Database method is safe to run again: reads change nothing, a logo upload replaces the
-// same row, and an import that did commit is refused the second time as already imported.
+// Driver errors meaning the connection itself was lost before an answer arrived.
 const CONNECTION_LOST = new Set([
   'CONNECTION_CLOSED',
   'CONNECTION_ENDED',
@@ -121,8 +119,10 @@ function closeLater(c: ApiContext, db: Database) {
 
 /**
  * Opens the database for one request, runs `handle` as the verified user and always
- * disconnects. A lost connection is retried once on a fresh one. Missing configuration
- * and database failures fail closed.
+ * disconnects. For reads (GET), a lost connection is retried once on a fresh one; writes
+ * are never retried, because a lost connection does not say whether the write committed,
+ * and replaying it could undo someone else's later change. Missing configuration and
+ * database failures fail closed.
  */
 export async function withDatabase(
   c: ApiContext,
@@ -135,6 +135,7 @@ export async function withDatabase(
     return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
   }
   const ctx = { userId: c.get('user').id, requestId: c.get('requestId') };
+  const readOnly = c.req.method === 'GET' || c.req.method === 'HEAD';
   for (let attempt = 1; ; attempt += 1) {
     let db: Database;
     try {
@@ -146,7 +147,7 @@ export async function withDatabase(
     try {
       return await handle(db, ctx);
     } catch (error) {
-      if (attempt === 1 && connectionLost(error)) {
+      if (readOnly && attempt === 1 && connectionLost(error)) {
         console.warn(
           `Database connection lost in request ${ctx.requestId}: ${failureSummary(error)}; retrying`,
         );
