@@ -26,8 +26,43 @@ insert into app.organization_members (organization_id, user_id, role, status, jo
   ('00000000-0000-4000-8000-0000000000bb', '00000000-0000-4000-8000-00000000da7e', 'analyst', 'invited', null),
   ('00000000-0000-4000-8000-0000000000cc', '00000000-0000-4000-8000-00000000a11c', 'viewer', 'active', now());
 
--- Lets pgTAP functions run while the role is app_api; rolled back with the test.
-grant usage on schema extensions to app_api;
+-- Test-only setup, rolled back with the transaction. Supabase's `postgres` is not a
+-- superuser, and since Postgres 16 creating a role grants ADMIN on it but not the
+-- right to SET ROLE to it, so grant that here.
+grant app_api to current_user;
+
+-- Helpers (session temp schema). They switch to app_api only around the query
+-- itself, so every pgTAP assertion runs as the test owner and app_api never needs
+-- access to the extensions schema where pgTAP lives.
+create function pg_temp.api_rows(uid text, query text) returns jsonb
+language plpgsql as $fn$
+declare
+  result jsonb;
+begin
+  perform set_config('app.user_id', coalesce(uid, ''), true);
+  set local role app_api;
+  execute format('select coalesce(jsonb_agg(q), ''[]''::jsonb) from (%s) q', query) into result;
+  reset role;
+  perform set_config('app.user_id', '', true);
+  return result;
+end
+$fn$;
+
+create function pg_temp.api_count(uid text, query text) returns int
+language sql as $fn$
+  select jsonb_array_length(pg_temp.api_rows(uid, query))
+$fn$;
+
+create function pg_temp.api_exec(uid text, statement text) returns void
+language plpgsql as $fn$
+begin
+  perform set_config('app.user_id', coalesce(uid, ''), true);
+  set local role app_api;
+  execute statement;
+  reset role;
+  perform set_config('app.user_id', '', true);
+end
+$fn$;
 
 -- Structure and privileges ---------------------------------------------------
 select is(
@@ -135,96 +170,104 @@ select throws_ok(
 );
 
 -- As the API role ------------------------------------------------------------------
-set local role app_api;
+-- alice 00000000-0000-4000-8000-00000000a11c, bob 00000000-0000-4000-8000-000000000b0b, carol 00000000-0000-4000-8000-0000000ca201, dave 00000000-0000-4000-8000-00000000da7e.
 
-select is((select count(*)::int from app.organizations), 0, 'no user context: no organizations');
-select is((select count(*)::int from app.organization_members), 0, 'no user context: no memberships');
+select is(pg_temp.api_count(null, 'select 1 from app.organizations'), 0, 'no user context: no organizations');
+select is(pg_temp.api_count(null, 'select 1 from app.organization_members'), 0, 'no user context: no memberships');
 
 -- alice: active in A; also active in C, but C is inactive.
-select set_config('app.user_id', '00000000-0000-4000-8000-00000000a11c', true);
-select results_eq(
-  'select display_name from app.organizations order by display_name',
-  $$values ('Synthetic Org A')$$,
+select is(
+  pg_temp.api_rows('00000000-0000-4000-8000-00000000a11c', 'select display_name from app.organizations'),
+  '[{"display_name": "Synthetic Org A"}]'::jsonb,
   'alice sees only organization A'
 );
-select results_eq(
-  'select distinct organization_id from app.organization_members',
-  $$values ('00000000-0000-4000-8000-0000000000aa'::uuid)$$,
+select is(
+  pg_temp.api_rows('00000000-0000-4000-8000-00000000a11c', 'select distinct organization_id from app.organization_members'),
+  '[{"organization_id": "00000000-0000-4000-8000-0000000000aa"}]'::jsonb,
   'alice sees memberships of organization A only'
 );
-select is((select count(*)::int from app.organization_members), 2, 'alice sees both members of A (herself and suspended carol)');
 select is(
-  (select count(*)::int from app.organizations where id = '00000000-0000-4000-8000-0000000000bb'),
+  pg_temp.api_count('00000000-0000-4000-8000-00000000a11c', 'select 1 from app.organization_members'),
+  2,
+  'alice sees both members of A (herself and suspended carol)'
+);
+select is(
+  pg_temp.api_count('00000000-0000-4000-8000-00000000a11c', $$select 1 from app.organizations where id = '00000000-0000-4000-8000-0000000000bb'$$),
   0,
   'alice cannot read organization B by guessing its id'
 );
 select is(
-  (select count(*)::int from app.organizations where id = '00000000-0000-4000-8000-0000000000cc'),
+  pg_temp.api_count('00000000-0000-4000-8000-00000000a11c', $$select 1 from app.organizations where id = '00000000-0000-4000-8000-0000000000cc'$$),
   0,
   'alice cannot read inactive organization C'
 );
 select throws_ok(
-  $$insert into app.organizations (display_name) values ('Sneaky Org')$$,
+  $q$select pg_temp.api_exec('00000000-0000-4000-8000-00000000a11c', $$insert into app.organizations (display_name) values ('Sneaky Org')$$)$q$,
   '42501', null, 'alice cannot create organizations through the API role'
 );
 select throws_ok(
-  $$update app.organization_members set role = 'org_admin'
-     where user_id = '00000000-0000-4000-8000-00000000a11c'$$,
+  $q$select pg_temp.api_exec('00000000-0000-4000-8000-00000000a11c', $$update app.organization_members set role = 'org_admin' where user_id = '00000000-0000-4000-8000-00000000a11c'$$)$q$,
   '42501', null, 'alice cannot change her own role through the API role'
 );
 select throws_ok(
-  $$delete from app.organization_members$$,
+  $q$select pg_temp.api_exec('00000000-0000-4000-8000-00000000a11c', 'delete from app.organization_members')$q$,
   '42501', null, 'alice cannot delete memberships through the API role'
 );
 
 -- bob: active admin in B.
-select set_config('app.user_id', '00000000-0000-4000-8000-000000000b0b', true);
-select results_eq(
-  'select display_name from app.organizations order by display_name',
-  $$values ('Synthetic Org B')$$,
+select is(
+  pg_temp.api_rows('00000000-0000-4000-8000-000000000b0b', 'select display_name from app.organizations'),
+  '[{"display_name": "Synthetic Org B"}]'::jsonb,
   'bob sees only organization B'
 );
-select results_eq(
-  'select distinct organization_id from app.organization_members',
-  $$values ('00000000-0000-4000-8000-0000000000bb'::uuid)$$,
+select is(
+  pg_temp.api_rows('00000000-0000-4000-8000-000000000b0b', 'select distinct organization_id from app.organization_members'),
+  '[{"organization_id": "00000000-0000-4000-8000-0000000000bb"}]'::jsonb,
   'bob sees memberships of organization B only'
 );
 
 -- carol: suspended in A.
-select set_config('app.user_id', '00000000-0000-4000-8000-0000000ca201', true);
-select is((select count(*)::int from app.organizations), 0, 'a suspended member sees no organizations');
-select is((select count(*)::int from app.organization_members), 0, 'a suspended member sees no memberships');
+select is(pg_temp.api_count('00000000-0000-4000-8000-0000000ca201', 'select 1 from app.organizations'), 0, 'a suspended member sees no organizations');
+select is(pg_temp.api_count('00000000-0000-4000-8000-0000000ca201', 'select 1 from app.organization_members'), 0, 'a suspended member sees no memberships');
 
 -- dave: invited to B, not yet joined.
-select set_config('app.user_id', '00000000-0000-4000-8000-00000000da7e', true);
-select is((select count(*)::int from app.organizations), 0, 'an invited member sees no organizations');
-select is((select count(*)::int from app.organization_members), 0, 'an invited member sees no memberships, not even their own');
+select is(pg_temp.api_count('00000000-0000-4000-8000-00000000da7e', 'select 1 from app.organizations'), 0, 'an invited member sees no organizations');
+select is(
+  pg_temp.api_count('00000000-0000-4000-8000-00000000da7e', 'select 1 from app.organization_members'),
+  0,
+  'an invited member sees no memberships, not even their own'
+);
 
 -- A signed-in user with no memberships.
-select set_config('app.user_id', '00000000-0000-4000-8000-00000000ffff', true);
-select is((select count(*)::int from app.organizations), 0, 'a user without memberships sees no organizations');
-select is((select count(*)::int from app.organization_members), 0, 'a user without memberships sees no memberships');
+select is(
+  pg_temp.api_count('00000000-0000-4000-8000-00000000ffff', 'select 1 from app.organizations'),
+  0,
+  'a user without memberships sees no organizations'
+);
+select is(
+  pg_temp.api_count('00000000-0000-4000-8000-00000000ffff', 'select 1 from app.organization_members'),
+  0,
+  'a user without memberships sees no memberships'
+);
 
 -- A malformed user id fails closed.
-select set_config('app.user_id', 'not-a-uuid', true);
 select throws_ok(
-  'select count(*) from app.organizations',
+  $q$select pg_temp.api_count('not-a-uuid', 'select 1 from app.organizations')$q$,
   '22P02', null, 'a malformed user context raises an error instead of returning rows'
 );
 select throws_ok(
-  'select count(*) from app.organization_members',
+  $q$select pg_temp.api_count('not-a-uuid', 'select 1 from app.organization_members')$q$,
   '22P02', null, 'a malformed user context raises an error on memberships too'
 );
 
-reset role;
-select set_config('app.user_id', '', true);
-
 -- Inactivating an organization removes access at once.
 update app.organizations set active = false where id = '00000000-0000-4000-8000-0000000000bb';
-set local role app_api;
-select set_config('app.user_id', '00000000-0000-4000-8000-000000000b0b', true);
-select is((select count(*)::int from app.organizations), 0, 'bob loses access when organization B is inactivated');
-select is((select count(*)::int from app.organization_members), 0, 'bob loses membership visibility when organization B is inactivated');
+select is(pg_temp.api_count('00000000-0000-4000-8000-000000000b0b', 'select 1 from app.organizations'), 0, 'bob loses access when organization B is inactivated');
+select is(
+  pg_temp.api_count('00000000-0000-4000-8000-000000000b0b', 'select 1 from app.organization_members'),
+  0,
+  'bob loses membership visibility when organization B is inactivated'
+);
 
 select * from finish();
 rollback;
