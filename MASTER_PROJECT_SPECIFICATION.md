@@ -12,13 +12,14 @@
 
 | Decision | Baseline choice | Rationale |
 |---|---|---|
-| Code and project management | Private GitHub monorepo | One canonical history of changes, issues, reviews, and project documentation |
+| Code and project management | GitHub monorepo, public by the owner's choice (`docs/DECISIONS.md`); real data and secrets never committed | One canonical history of changes, issues, reviews, and project documentation |
 | Main programming language | Strict TypeScript | Share validation and trading types across user interface and API |
 | Web app | React + Vite + Tailwind CSS + shadcn/ui | Responsive private operations interface with inexpensive deployment |
 | API | Hono running on Cloudflare Workers | Lightweight typed HTTP layer; compatible with React/Vite on Workers |
 | Database | Supabase PostgreSQL + PostGIS | Relational records, managed authentication, spatial indexes |
 | Files | Private Supabase Storage | Contract and transport document attachments; signed access only |
 | Maps | Mapbox GL JS with Mapbox map tiles (owner's decision, 2026-10-27; `docs/DECISIONS.md`) | One supported vendor for the map viewer, tiles and satellite imagery; map code kept in one component so the provider can change |
+| Geocoding | Geocodio free plan from the API Worker; results reviewed by operations or admin before saving (owner's decision, 2026-10-27; `docs/DECISIONS.md`) | Free for a small directory, results may be stored, one service for Canada and the U.S. |
 | Trade economics | Pure TypeScript package using decimal arithmetic | Reproducible deterministic values and extensive unit tests |
 | Authentication | Supabase Auth + MFA and server-side membership checks | Least privilege and explicit organization isolation |
 | Testing | Vitest, Playwright, PostgreSQL integration tests, RLS tests | Automated regression protection, especially for money and permissions |
@@ -386,7 +387,7 @@ Make an early operational distinction between **known buyer facility**, **buyer 
 
 ## 10.1 Security baseline
 
-- Private GitHub organization repository; protected main branch, required CI and at least one reviewer for financial and permission changes.
+- GitHub repository (public by the owner's choice, so no real data or secrets in Git); protected main branch, required CI and at least one reviewer for financial and permission changes.
 - Auth with MFA; restricted employee provisioning; no open public signup in v1.
 - Least-privilege API database credentials, tenant authorization on every request, private buckets and time-limited document links.
 - RLS and explicit grants on exposed Postgres schemas; security tests for inter-tenant reads, writes, exports and nested-resource access.

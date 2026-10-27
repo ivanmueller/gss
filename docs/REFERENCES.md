@@ -10,6 +10,7 @@ Vendor capabilities were checked against public technical documentation availabl
 - Supabase PostGIS: https://supabase.com/docs/guides/database/extensions/postgis
 - Supabase RLS: https://supabase.com/docs/guides/database/postgres/row-level-security
 - Mapbox GL JS: https://docs.mapbox.com/mapbox-gl-js/
+- Geocodio API: https://www.geocod.io/docs/ (accuracy types: https://www.geocod.io/guides/accuracy-types-scores)
 - Codex repository instructions: https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex
 - Gemini CLI context configuration: https://geminicli.com/docs/reference/configuration/
 - Cursor 3 agent environment: https://cursor.com/changelog/3-0

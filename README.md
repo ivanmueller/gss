@@ -78,7 +78,7 @@ The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifie
 
 ## Staging deploy
 
-Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, builds the web app, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev` (the Worker serves `apps/web/dist` alongside the API), and checks `/api/v1/health`, the web page at `/`, and that unknown `/api/*` paths return 404. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds synthetic data only.
+Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, builds the web app, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev` (the Worker serves `apps/web/dist` alongside the API), and checks `/api/v1/health`, the web page at `/`, and that unknown `/api/*` paths return 404. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds the owner's real data (`docs/DECISIONS.md`); the trading workspace still shows synthetic data.
 
 ## Database
 
@@ -93,7 +93,7 @@ Application tables live in the private `app` schema, which the Supabase Data API
 ## Layout
 
 ```
-apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search); serves apps/web on staging
+apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search, geocoding); serves apps/web on staging
 apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory and map)
 tests/e2e/           Playwright browser tests against the staging Worker config
 packages/domain/     shared validation used by web and API (counterparty import rows, PNG check, regions)

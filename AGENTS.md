@@ -1,15 +1,16 @@
 # Agent instructions — Canadian–U.S. Physical Grain Trading Platform
 
-This project is at **Phase 0 / early Phase 1**: documentation, monorepo tooling, CI, a staging deploy, a read-only API health endpoint and a web app shell on synthetic data. No working application or live data exists. Before coding, read the *relevant sections* of `MASTER_PROJECT_SPECIFICATION.md` and current status in `docs/HANDOFF.md`.
+This project has its **Phase 1 foundation and first Phase 2 slices** on staging, with the owner's real buyer data: sign-in with MFA, the counterparty directory and spreadsheet import, a Mapbox map, and coordinates found with Geocodio. Quotes, the trading engine and saved scenarios do not exist yet; the trading workspace still shows synthetic data. Before coding, read the *relevant sections* of `MASTER_PROJECT_SPECIFICATION.md` and current status in `docs/HANDOFF.md`.
 
 ## Mission
 Build a secure, auditable Canadian-to-U.S. physical grain trading operations platform. The map is for discovery; executable economics comes from validated bid/offer records, quote delivery terms, source FX and freight inputs, and a deterministic saved scenario snapshot.
 
 ## Intended architecture
-- One private GitHub monorepo; React/Vite/strict TypeScript frontend; Hono API on Cloudflare Workers.
+- One GitHub monorepo, public by the owner's choice (`docs/DECISIONS.md`): never commit real business data or secrets. React/Vite/strict TypeScript frontend; Hono API on Cloudflare Workers.
 - Supabase Postgres/PostGIS, Supabase Auth, private Storage, organization-aware access.
 - Shared domain/validation packages and a pure TypeScript trading-engine package using **decimal**, never JS float, for monetary arithmetic.
 - Mapbox GL JS with Mapbox map tiles (owner's decision, `docs/DECISIONS.md`); keep Mapbox calls in one map component so the provider can be changed later.
+- Geocoding with Geocodio's free plan, from the Worker only, with every result reviewed before saving (owner's decision, `docs/DECISIONS.md`).
 - Python is out of scope until analytics or optimization justifies it.
 
 ## Always follow
