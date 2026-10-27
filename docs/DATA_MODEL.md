@@ -42,3 +42,14 @@ All tenant-owned tables contain `organization_id uuid not null`, with foreign ke
 
 Use WGS84 lat/lng and actual facility/address location; distinguish approximate municipality geocoding from exact geocoding. A farmer counterparty's residential location must not be displayed on a map without business need and permission. Store the precision/visibility policy and prefer generalized area display when appropriate.
 
+## Implemented in migrations
+
+Migrations in `supabase/migrations/` are authoritative for what exists; this list tracks them.
+
+| Migration | Adds |
+|---|---|
+| `20261027020000_app_schema_and_api_role.sql` | Private `app` schema; `app_api` role (no login, no RLS bypass); `app.current_user_id()` reading the transaction's `app.user_id`; `app.touch_updated_at()` trigger function. |
+| `20261027020100_organizations_and_members.sql` | `app.organizations` (display_name, brand_settings, active); `app.organization_members` (role enum `viewer`/`analyst`/`trader`/`operations`/`org_admin` from §2.1, status enum `invited`/`active`/`suspended`, joined_at required once joined, unique per organization and user); `app.is_active_member(org)`; RLS read policies for `app_api`; no writes through `app_api` yet. |
+
+Not yet implemented from this model: role capabilities (§2.1 table), member management, audit events (GT-016) and every commercial table.
+
