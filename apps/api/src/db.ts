@@ -1,4 +1,5 @@
 import type {
+  Bbox,
   ContactInput,
   CounterpartyInput,
   FacilityInput,
@@ -84,8 +85,35 @@ export interface ImportBatchInput {
   counterparties: NewCounterparty[];
 }
 
+/** A located facility for a map pin, with the counterparty it belongs to. */
+export interface MapFacility {
+  id: string;
+  counterpartyId: string;
+  legalName: string;
+  tradingName: string | null;
+  counterpartyTypes: string[];
+  name: string | null;
+  facilityType: FacilityType | null;
+  city: string | null;
+  region: string | null;
+  country: string;
+  latitude: string;
+  longitude: string;
+  locationPrecision: LocationPrecision;
+}
+
+export interface MapFacilities {
+  /** Facilities inside the box, up to MAP_LIMIT + 1 so the caller can tell there were more. */
+  facilities: MapFacility[];
+  /** Facilities the user can see that have no coordinates, so no map can show them. */
+  withoutCoordinates: number;
+}
+
 /** Largest list returned by listCounterparties. */
 export const LIST_LIMIT = 5000;
+
+/** Largest number of facilities returned for one map view. */
+export const MAP_LIMIT = 5000;
 
 /** What the API reads from and writes to Postgres. Every call runs as the given, already verified user. */
 export interface Database {
@@ -96,6 +124,11 @@ export interface Database {
     organizationId: string | null,
   ) => Promise<CounterpartySummary[]>;
   getCounterparty: (ctx: RequestContext, id: string) => Promise<CounterpartyDetail | null>;
+  facilitiesInBbox: (
+    ctx: RequestContext,
+    organizationId: string | null,
+    bbox: Bbox,
+  ) => Promise<MapFacilities>;
   getLogo: (ctx: RequestContext, counterpartyId: string) => Promise<Logo | null>;
   putLogo: (
     ctx: RequestContext,
@@ -286,6 +319,33 @@ export function createDatabase(sql: postgres.Sql): Database {
           contacts: [...contacts],
           facilities: [...facilities],
         };
+      });
+    },
+
+    facilitiesInBbox(ctx, organizationId, bbox) {
+      return asUser(ctx, async (tx) => {
+        const inOrganization = () =>
+          organizationId === null ? tx`true` : tx`f.organization_id = ${organizationId}`;
+        // app.location_in_bbox wraps PostGIS, which app_api cannot reach directly.
+        const facilities = await tx<MapFacility[]>`
+          select f.id, f.counterparty_id as "counterpartyId", c.legal_name as "legalName",
+                 c.trading_name as "tradingName",
+                 to_jsonb(c.types::text[]) as "counterpartyTypes",
+                 f.name, f.facility_type::text as "facilityType", f.city, f.region, f.country,
+                 f.latitude::text as latitude, f.longitude::text as longitude,
+                 f.location_precision::text as "locationPrecision"
+          from app.facilities f
+          join app.counterparties c on c.id = f.counterparty_id
+          where app.location_in_bbox(f.location, ${bbox.west}, ${bbox.south},
+                                     ${bbox.east}, ${bbox.north})
+            and ${inOrganization()}
+          order by lower(c.legal_name), c.id, lower(f.name), f.id
+          limit ${MAP_LIMIT + 1}
+        `;
+        const [missing] = await tx<{ count: number }[]>`
+          select count(*)::int as count from app.facilities f
+          where f.location is null and ${inOrganization()}`;
+        return { facilities: [...facilities], withoutCoordinates: missing?.count ?? 0 };
       });
     },
 

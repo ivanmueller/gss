@@ -47,6 +47,9 @@ export function fakeDatabase(): Mocked<Database> {
     canEditDirectory: vi.fn<Database['canEditDirectory']>(() => Promise.resolve(true)),
     listCounterparties: vi.fn<Database['listCounterparties']>(() => Promise.resolve([])),
     getCounterparty: vi.fn<Database['getCounterparty']>(() => Promise.resolve(null)),
+    facilitiesInBbox: vi.fn<Database['facilitiesInBbox']>(() =>
+      Promise.resolve({ facilities: [], withoutCoordinates: 0 }),
+    ),
     getLogo: vi.fn<Database['getLogo']>(() => Promise.resolve(null)),
     putLogo: vi.fn<Database['putLogo']>(() =>
       Promise.resolve({ status: 'saved', sha256: 'f'.repeat(64) }),
