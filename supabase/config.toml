@@ -14,10 +14,12 @@ extra_search_path = ["public", "extensions"]
 [auth]
 enabled = true
 site_url = "http://127.0.0.1:8787"
+# Blocks every self sign-up; administrators still create users.
 enable_signup = false
 
 [auth.email]
-enable_signup = false
+# Keep true: in the CLI this switches email/password sign-in itself on or off.
+enable_signup = true
 enable_confirmations = false
 
 [auth.mfa.totp]

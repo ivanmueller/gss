@@ -9,9 +9,19 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
   await page.goto('/');
   await page.getByLabel('Email').fill(E2E_USER.email);
   await page.getByLabel('Password').fill(E2E_USER.password);
+  const signIn = page.waitForResponse((res) => res.url().includes('/auth/v1/token'));
   await page.getByRole('button', { name: 'Sign in' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Set up your authenticator app' })).toBeVisible();
+  // The page shows one generic error by design, so report Supabase's own answer.
+  const signInResponse = await signIn;
+  if (!signInResponse.ok()) {
+    throw new Error(
+      `Password sign-in returned ${String(signInResponse.status())}: ${await signInResponse.text()}`,
+    );
+  }
+  await expect(page.getByRole('heading', { name: 'Set up your authenticator app' })).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(page.getByRole('img', { name: 'QR code for your authenticator app' })).toBeVisible();
   const secret = (await page.getByTestId('totp-secret').textContent())?.trim() ?? '';
   expect(secret).not.toBe('');
