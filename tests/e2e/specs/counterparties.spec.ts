@@ -80,6 +80,12 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
     ),
   ).toBeVisible();
 
+  // Finding coordinates. CI has no Geocodio key, so the lookup says what is missing.
+  await page.getByRole('link', { name: 'Find coordinates from addresses' }).click();
+  await expect(page.getByRole('heading', { name: 'Find coordinates' })).toBeVisible();
+  await page.getByRole('button', { name: 'Look up addresses' }).click();
+  await expect(page.getByRole('alert')).toContainText('Finding coordinates is not set up');
+
   expect(errors).toEqual([]);
 });
 
@@ -123,6 +129,31 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
     truncated: false,
     withoutCoordinates: 0,
   });
+
+  const lookUp = await request.post('/api/v1/facilities/geocode', {
+    headers,
+    data: { organizationId: OTHER_ORG.id },
+  });
+  expect(lookUp.status()).toBe(403);
+  const save = await request.post('/api/v1/facilities/coordinates', {
+    headers,
+    data: {
+      organizationId: OTHER_ORG.id,
+      matches: [
+        {
+          facilityId: OTHER_ORG.counterpartyId,
+          latitude: '46.877186',
+          longitude: '-96.789803',
+          precision: 'exact',
+          accuracyType: 'rooftop',
+          confidence: '1.00',
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          signature: '0'.repeat(64),
+        },
+      ],
+    },
+  });
+  expect(save.status()).toBe(403);
 
   const one = `/api/v1/counterparties/${OTHER_ORG.counterpartyId}`;
   expect((await request.get(one, { headers })).status()).toBe(404);

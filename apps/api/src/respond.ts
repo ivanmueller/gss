@@ -13,6 +13,8 @@ export interface ApiEnv {
     HYPERDRIVE?: { connectionString: string };
     /** Postgres URL for the `app_api` role, used when there is no Hyperdrive binding. */
     DATABASE_URL?: string;
+    /** Geocodio API key (Worker secret) for looking facility addresses up. */
+    GEOCODIO_API_KEY?: string;
   };
   Variables: { user: AuthUser; requestId: string };
 }
