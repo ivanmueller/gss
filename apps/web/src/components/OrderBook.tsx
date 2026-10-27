@@ -1,8 +1,7 @@
-import { ChevronDown, FlaskConical, TriangleAlert } from 'lucide-react';
+import { ChevronDown, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import type { FxRate } from '../data/types';
-import { formatQuantityShort, formatSignedPrice, formatUtc } from '../lib/format';
+import { formatQuantityShort, formatSignedPrice } from '../lib/format';
 import {
   displayStatus,
   largestQuantity,
@@ -97,7 +96,11 @@ function SpreadLine({ book }: { book: CommodityBook }) {
   const { spread } = book;
   if (spread.status === 'ok') {
     return (
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <p
+        // The caveat stays one hover away (owner's decision to drop the note under the heading).
+        title="Best bid minus best ask, before freight and basis: not a margin."
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+      >
         Gross spread{' '}
         <span className="font-mono font-semibold text-foreground tabular-nums">
           {formatSignedPrice(spread)}
@@ -140,11 +143,7 @@ function Ladder({
   );
 }
 
-function CommoditySection({
-  book,
-  fx,
-  ...selection
-}: { book: CommodityBook; fx: FxRate | null } & Selection) {
+function CommoditySection({ book, ...selection }: { book: CommodityBook } & Selection) {
   const largest = largestQuantity([book]);
   const live = book.asks.length + book.bids.length;
   const title = book.grade ? `${book.commodity} · ${book.grade}` : book.commodity;
@@ -188,28 +187,6 @@ function CommoditySection({
             USD quotes are left out of the book: there is no CAD/USD rate to convert them.
           </p>
         )}
-        {book.outOfBook.length > 0 && (
-          <div className="flex flex-col gap-1 text-xs">
-            <p className="font-medium text-muted-foreground">Not in the book</p>
-            <ul className="flex flex-col gap-1">
-              {book.outOfBook.map(({ facility, quote, reason }) => (
-                <li
-                  key={quote.id}
-                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground"
-                >
-                  <span className="text-foreground">{facility.name}</span>
-                  <CadPrice quote={quote} fx={reason === 'FX_MISSING' ? null : fx} />
-                  {reason === 'NOT_LIVE' && (
-                    <>
-                      <QuoteStatusBadge status={displayStatus(quote, selection.now)} />
-                      <span>valid until {formatUtc(quote.validUntil)}</span>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
     </details>
   );
@@ -222,18 +199,18 @@ function CommoditySection({
  */
 export function OrderBook({
   books,
-  fx,
   selected,
+  empty,
   id,
   inert,
   className,
   ...selection
 }: {
   books: readonly CommodityBook[];
-  /** The CAD/USD rate the books were built with; null when there is none. */
-  fx: FxRate | null;
   /** The selected facility's details, shown above the books. */
   selected?: ReactNode;
+  /** What to say when there are no books; by default, to choose a commodity. */
+  empty?: ReactNode;
   id?: string;
   /** Hidden from keyboard and screen readers while tucked away. */
   inert?: boolean;
@@ -247,35 +224,22 @@ export function OrderBook({
         aria-labelledby="order-book-heading"
         className={cn('flex flex-col overflow-hidden', className)}
       >
-        <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
-          <div>
-            <h2 id="order-book-heading" className="text-base font-semibold">
-              Order book
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {fx
-                ? `In CAD. USD quotes converted at ${fx.cadPerUsd} CAD per USD, ${fx.source}.`
-                : 'In CAD. USD quotes are left out: no CAD/USD rate is set up.'}{' '}
-              Spread: best bid minus best ask, before freight and basis; not a margin.
-            </p>
-          </div>
-          <Badge variant="caution">
-            <FlaskConical aria-hidden="true" />
-            Synthetic
-          </Badge>
+        <div className="border-b px-4 py-3">
+          <h2 id="order-book-heading" className="text-base font-semibold">
+            Order book
+          </h2>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {selected}
           {books.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              Choose a commodity to see its asks and bids.
+              {empty ?? 'Choose a commodity to see its asks and bids.'}
             </p>
           ) : (
             books.map((book) => (
               <CommoditySection
                 key={`${book.commodity}:${book.grade}`}
                 book={book}
-                fx={fx}
                 {...selection}
               />
             ))

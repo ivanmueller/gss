@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { setDemoData } from './lib/demo';
 import { setThemePreference } from './lib/theme';
 
 function mockHealth(response: Response | Error) {
@@ -32,6 +33,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, 'matchMedia');
+  setDemoData(false);
 });
 
 function table() {
@@ -39,13 +41,15 @@ function table() {
 }
 
 describe('App shell', () => {
-  it('opens on the workspace: a synthetic demo with an order book and facility table', () => {
+  it('opens on the workspace, empty until demo data is turned on', () => {
     render(<App />);
 
     expect(screen.getByRole('heading', { name: 'Workspace', level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole('note')).toHaveTextContent('Synthetic demo data');
-    expect(screen.getByRole('complementary', { name: 'Order book' })).toBeInTheDocument();
-    expect(within(table()).getAllByRole('row')).toHaveLength(10); // header + 9 facilities
+    expect(screen.getByRole('complementary', { name: 'Order book' })).toHaveTextContent(
+      'No asks or bids yet.',
+    );
+    expect(table()).toHaveTextContent('No facilities with asks or bids yet.');
+    expect(screen.queryByText('Demo')).not.toBeInTheDocument();
     // Tests build without a Mapbox token, so the map explains itself (Workspace.test.tsx covers it).
     expect(screen.getByText('Map not available')).toBeInTheDocument();
   });
@@ -222,6 +226,44 @@ describe('signed-in user', () => {
     await user.click(screen.getByRole('menuitemcheckbox', { name: 'Dark mode' }));
     expect(document.documentElement).not.toHaveClass('dark');
     expect(window.localStorage.getItem('gss.theme')).toBe('light');
+  });
+
+  it('turns demo data on and off with a switch above Dark mode, showing Demo beside GSS', async () => {
+    mockMe(Response.json(ALICE));
+    const user = userEvent.setup();
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+    expect(screen.queryByText('Demo')).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: 'Account' }));
+    expect(screen.getAllByRole('menuitemcheckbox').map((item) => item.textContent)).toEqual([
+      'Demo data',
+      'Dark mode',
+    ]);
+    const toggle = screen.getByRole('menuitemcheckbox', { name: 'Demo data' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await user.click(toggle);
+    expect(window.localStorage.getItem('gss.demo')).toBe('on');
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Demo data' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await user.keyboard('{Escape}');
+
+    // Beside the GSS name (in the menu and, on small screens, the top bar), outside its link.
+    const [tag] = screen.getAllByText('Demo');
+    expect(tag).toHaveAttribute('title', expect.stringMatching(/^Demo data is on/));
+    expect(tag?.closest('a')).toBeNull();
+    expect(screen.getAllByRole('link', { name: 'GSS' }).length).toBeGreaterThan(0);
+    expect(within(table()).getAllByRole('row')).toHaveLength(10); // header + 9 facilities
+
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Demo data' }));
+    await user.keyboard('{Escape}');
+    expect(window.localStorage.getItem('gss.demo')).toBeNull();
+    expect(screen.queryByText('Demo')).not.toBeInTheDocument();
+    expect(table()).toHaveTextContent('No facilities with asks or bids yet.');
   });
 
   it('shows the switch on when the device is in dark mode and nothing is chosen yet', async () => {

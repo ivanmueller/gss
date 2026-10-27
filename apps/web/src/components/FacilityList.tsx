@@ -9,6 +9,8 @@ interface FacilityListProps {
   commodities: readonly string[];
   /** The rate that puts USD quotes in CAD; null when there is none. */
   fx: FxRate | null;
+  /** What to say when no facility is shown; by default, that none match the filters. */
+  emptyText?: string;
   now: Date;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -19,6 +21,7 @@ export function FacilityList({
   facilities,
   commodities,
   fx,
+  emptyText = 'No facilities match these filters.',
   now,
   selectedId,
   onSelect,
@@ -28,12 +31,10 @@ export function FacilityList({
       <section aria-labelledby="facility-list-heading" className="overflow-hidden">
         <CardHeader>
           <CardTitle id="facility-list-heading">Facilities</CardTitle>
-          <CardDescription>{facilities.length} shown · synthetic</CardDescription>
+          <CardDescription>{facilities.length} shown</CardDescription>
         </CardHeader>
         {facilities.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No facilities match these filters.
-          </p>
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{emptyText}</p>
         ) : (
           <ul className="divide-y">
             {facilities.map((facility) => {

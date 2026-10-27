@@ -1,5 +1,6 @@
-import { CircleUserRound, LogOut, Moon } from 'lucide-react';
+import { CircleUserRound, FlaskConical, LogOut, Moon } from 'lucide-react';
 
+import { useDemoData } from '../lib/demo';
 import { useTheme } from '../lib/theme';
 import type { MeState } from '../lib/useMe';
 import { Button } from './ui/button';
@@ -19,9 +20,13 @@ export interface ProfileUser {
   onSignOut: () => void;
 }
 
-/** The profile icon in the top bar, opening who is signed in, the Dark mode switch and sign-out. */
+/**
+ * The profile icon in the top bar, opening who is signed in, the Demo data and Dark mode
+ * switches, and sign-out.
+ */
 export function ProfileMenu({ name, check, onSignOut }: ProfileUser) {
   const [theme, setTheme] = useTheme();
+  const [demo, setDemo] = useDemoData();
   const problem = check === 'error';
   return (
     <DropdownMenu>
@@ -50,6 +55,15 @@ export function ProfileMenu({ name, check, onSignOut }: ProfileUser) {
           )}
         </div>
         <DropdownMenuSeparator />
+        <DropdownMenuSwitchItem
+          checked={demo}
+          onSelect={() => {
+            setDemo(!demo);
+          }}
+        >
+          <FlaskConical aria-hidden="true" />
+          Demo data
+        </DropdownMenuSwitchItem>
         <DropdownMenuSwitchItem
           checked={theme === 'dark'}
           onSelect={() => {

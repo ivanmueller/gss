@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FacilityMapProps } from '../components/FacilityMap';
+import { setDemoData } from '../lib/demo';
 import { setThemePreference } from '../lib/theme';
 import { Workspace } from './Workspace';
 
@@ -55,12 +56,15 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-27T12:00:00Z'));
   // A desktop: the order book sits over the map's right side.
   setWidth(1440);
+  // The made-up sellers, buyers and prices; the tests that need it off say so.
+  setDemoData(true);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   Reflect.deleteProperty(window, 'matchMedia');
   setThemePreference('system');
+  setDemoData(false);
   window.localStorage.clear();
 });
 
@@ -93,11 +97,17 @@ async function chooseOnly(commodity: string) {
 }
 
 describe('Workspace', () => {
-  it('labels the demo as synthetic and shows every commodity by default', async () => {
+  it('shows every commodity by default, without page text or per-page demo labels', async () => {
     await renderReady();
 
-    expect(screen.getByRole('note')).toHaveTextContent('Synthetic demo data');
-    expect(within(book()).getByText('Synthetic')).toBeInTheDocument();
+    // The owner's decision: "Demo" beside GSS (AppShell) replaces the notes on this page.
+    expect(screen.getByRole('heading', { level: 1, name: 'Workspace' })).toHaveClass('sr-only');
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.queryByText('Synthetic')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Synthetic demo data/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sellers and buyers of the chosen/)).not.toBeInTheDocument();
+    expect(within(book()).getByRole('heading', { name: 'Order book' })).toBeInTheDocument();
+    expect(book()).not.toHaveTextContent(/In CAD|not a margin|Not in the book/);
     expect(screen.getByRole('button', { name: /^Commodities: All/ })).toBeInTheDocument();
     for (const title of [
       'Flaxseed · No. 1 CW',
@@ -158,8 +168,10 @@ describe('Workspace', () => {
       'title',
       'Converted from USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)',
     );
-    expect(book()).toHaveTextContent(
-      'In CAD. USD quotes converted at 1.360000 CAD per USD, synthetic rate (golden fixture).',
+    // The spread's caveat is one hover away.
+    expect(within(spread).getByText(/Gross spread/)).toHaveAttribute(
+      'title',
+      'Best bid minus best ask, before freight and basis: not a margin.',
     );
     // Every price in the book is in CAD.
     const prices = within(book()).getAllByText(PRICE);
@@ -191,15 +203,33 @@ describe('Workspace', () => {
     expect(second).toHaveTextContent(/^Bid:\s*Demo Buyer I/);
   });
 
-  it('keeps an expired bid out of the book and says so', async () => {
+  it('leaves an expired bid out of the book entirely', async () => {
     await renderReady();
+    // Demo Buyer I's CAD 430.00 bid expired on 2026-10-20; its live CAD 420.00 bid stays.
     const peas = section('Yellow peas · No. 2 CAN');
-    const ladder = within(peas).getByRole('list', { name: 'Asks and bids' });
-    expect(ladder).not.toHaveTextContent('CAD 430.00/MT');
-    const notInBook = within(peas).getByText('Not in the book').parentElement;
-    expect(notInBook).toHaveTextContent('Demo Buyer I');
-    expect(notInBook).toHaveTextContent('CAD 430.00/MT');
-    expect(notInBook).toHaveTextContent('Expired');
+    expect(peas).toHaveTextContent('CAD 420.00/MT');
+    expect(book()).not.toHaveTextContent('CAD 430.00/MT');
+    expect(within(book()).queryByText('Expired')).not.toBeInTheDocument();
+  });
+
+  it('is empty with demo data off: no made-up facilities, prices or rate', async () => {
+    setDemoData(false);
+    await renderReady();
+    expect(within(screen.getByRole('list', { name: 'Pins' })).queryAllByRole('listitem')).toEqual(
+      [],
+    );
+    expect(book()).toHaveTextContent('No asks or bids yet.');
+    expect(book()).toHaveTextContent('Turn on Demo data in the profile menu');
+    expect(within(book()).queryByRole('list', { name: 'Asks and bids' })).not.toBeInTheDocument();
+    expect(table()).toHaveTextContent('No facilities with asks or bids yet.');
+    expect(screen.getByText('0 shown')).toBeInTheDocument();
+
+    // Turning it on fills the page in place.
+    act(() => {
+      setDemoData(true);
+    });
+    expect(pins()).toHaveLength(9);
+    expect(within(book()).getAllByRole('list', { name: 'Asks and bids' })).toHaveLength(4);
   });
 
   it('keeps times out of the book, and shows them with the original price on selection', async () => {
@@ -365,13 +395,12 @@ describe('Workspace', () => {
   it('moves quotes out of the book once they pass their valid-until time', async () => {
     vi.setSystemTime(new Date('2026-11-10T00:00:00Z'));
     await renderReady();
-    const flax = section('Flaxseed · No. 1 CW');
-    const notInBook = within(flax).getByText('Not in the book').parentElement;
-    expect(notInBook).toHaveTextContent('Demo Seller A');
-    expect(notInBook).toHaveTextContent('Demo Buyer C');
-    expect(within(flax).getByRole('list', { name: 'Asks and bids' })).not.toHaveTextContent(
-      'Demo Buyer C',
-    );
+    const ladder = within(section('Flaxseed · No. 1 CW')).getByRole('list', {
+      name: 'Asks and bids',
+    });
+    expect(ladder).not.toHaveTextContent('Demo Seller A');
+    expect(ladder).not.toHaveTextContent('Demo Buyer C');
+    expect(ladder).toHaveTextContent('Demo Seller F');
   });
 
   it('re-checks quotes every minute while the page stays open', () => {
@@ -387,10 +416,6 @@ describe('Workspace', () => {
       vi.advanceTimersByTime(60_000);
     });
     expect(ladder()).not.toHaveTextContent('Demo Buyer C');
-    const flax = () => section('Flaxseed · No. 1 CW');
-    expect(within(flax()).getByText('Not in the book').parentElement).toHaveTextContent(
-      'Demo Buyer C',
-    );
   });
 
   it('uses tabs for the map, order book and facilities on narrow screens', async () => {
