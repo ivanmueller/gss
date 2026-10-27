@@ -10,6 +10,9 @@ export interface AuthBindings {
 export interface AuthUser {
   id: string;
   email: string | null;
+  /** From the user's Supabase metadata (`first_name`, `last_name`); for display only. */
+  firstName: string | null;
+  lastName: string | null;
 }
 
 export interface AuthEnv {
@@ -28,6 +31,16 @@ function stringField(value: unknown, key: string): string | null {
   if (typeof value !== 'object' || value === null) return null;
   const field: unknown = (value as Record<string, unknown>)[key];
   return typeof field === 'string' ? field : null;
+}
+
+/** A trimmed name part from the user's metadata, or null when missing or unusable. */
+function namePart(body: unknown, key: string): string | null {
+  const metadata =
+    typeof body === 'object' && body !== null
+      ? (body as Record<string, unknown>).user_metadata
+      : undefined;
+  const value = stringField(metadata, key)?.trim() ?? '';
+  return value.length > 0 && value.length <= 100 ? value : null;
 }
 
 /** Claims from a JWT payload. Only trusted after Supabase Auth has accepted the token. */
@@ -88,6 +101,11 @@ export const requireUser: MiddlewareHandler<AuthEnv> = async (c, next) => {
     return fail(c, 403, 'MFA_REQUIRED', 'Complete two-factor authentication first.');
   }
 
-  c.set('user', { id, email });
+  c.set('user', {
+    id,
+    email,
+    firstName: namePart(body, 'first_name'),
+    lastName: namePart(body, 'last_name'),
+  });
   return next();
 };

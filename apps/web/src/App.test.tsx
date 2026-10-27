@@ -142,13 +142,15 @@ describe('API status', () => {
 });
 
 describe('signed-in user', () => {
-  it('shows the email confirmed by the API and signs out', async () => {
+  it('shows the name confirmed by the API, never the email, and signs out', async () => {
     const fetchMock = vi.fn((url: string) =>
       Promise.resolve(
         url === '/api/v1/me'
           ? Response.json({
               id: 'user-1',
               email: 'alice@example.test',
+              firstName: 'Alice',
+              lastName: 'synthetic',
               organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
             })
           : Response.json({ status: 'ok', service: 'api' }),
@@ -159,8 +161,9 @@ describe('signed-in user', () => {
     const user = userEvent.setup();
     render(<App account={{ email: 'session@example.test', accessToken: 'token-1', signOut }} />);
 
-    expect(await screen.findByText('alice@example.test')).toBeInTheDocument();
+    expect(await screen.findByText('Alice S.')).toBeInTheDocument();
     expect(screen.getByText(/Synthetic Org A/)).toBeInTheDocument();
+    expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', {
       headers: { Authorization: 'Bearer token-1' },
       signal: expect.any(AbortSignal) as AbortSignal,
@@ -186,6 +189,8 @@ describe('signed-in user', () => {
     );
 
     expect(await screen.findByText(/no organization yet/)).toBeInTheDocument();
+    expect(screen.getByText(/^Signed in/)).toHaveTextContent(/^Signed in ·/);
+    expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
   });
 
   it('warns when the API rejects the session', async () => {

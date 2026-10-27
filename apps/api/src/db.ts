@@ -164,8 +164,15 @@ function enumArray(values: readonly string[]): string {
   return `{${values.join(',')}}`;
 }
 
-/** Driver settings for the API: no prepared statements (transaction pooler), one connection. */
-export function connectionOptions(url: string): postgres.Options<Record<string, never>> {
+/**
+ * Driver settings for the API: no prepared statements (transaction pooler), one connection.
+ * Through Hyperdrive the Worker talks to Cloudflare's own endpoint, and Hyperdrive makes the
+ * verified TLS connection to the database, so the driver itself uses no TLS.
+ */
+export function connectionOptions(
+  url: string,
+  viaHyperdrive = false,
+): postgres.Options<Record<string, never>> {
   return {
     prepare: false,
     max: 1,
@@ -173,7 +180,7 @@ export function connectionOptions(url: string): postgres.Options<Record<string, 
     connect_timeout: 10,
     fetch_types: false,
     // verify-full checks the certificate chain and host name; postgres.js 'require' does not.
-    ssl: isLocalHost(url) ? false : 'verify-full',
+    ssl: viaHyperdrive || isLocalHost(url) ? false : 'verify-full',
   };
 }
 
@@ -184,8 +191,8 @@ export function connectionOptions(url: string): postgres.Options<Record<string, 
  * pooler, hence no prepared statements; TLS with certificate verification is required for
  * anything that is not local.
  */
-export function postgresDatabase(url: string): Database {
-  return createDatabase(postgres(url, connectionOptions(url)));
+export function postgresDatabase(url: string, options: { viaHyperdrive?: boolean } = {}): Database {
+  return createDatabase(postgres(url, connectionOptions(url, options.viaHyperdrive)));
 }
 
 /** The Database over an existing connection; tests use it to inspect that connection. */

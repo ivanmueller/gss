@@ -12,8 +12,8 @@ const HEALTH = {
 } as const;
 
 export interface HeaderUser {
-  /** Email as reported by the API's /me, falling back to the session's. */
-  email: string | null;
+  /** First name and last initial from the API's /me, e.g. "Ivan M."; null when not set. */
+  name: string | null;
   /** Organization name from /me; null once /me answered with no membership. */
   organization: string | null | undefined;
   check: MeState['status'];
@@ -71,7 +71,13 @@ export function AppHeader({
           {user && (
             <div className="flex items-center gap-2 text-xs">
               <p>
-                Signed in as <span className="font-medium">{user.email ?? 'unknown user'}</span>
+                {user.name ? (
+                  <>
+                    Signed in as <span className="font-medium">{user.name}</span>
+                  </>
+                ) : (
+                  'Signed in'
+                )}
                 {user.organization !== undefined && (
                   <span className="text-muted-foreground">
                     {' · '}

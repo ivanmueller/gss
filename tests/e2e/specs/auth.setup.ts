@@ -29,10 +29,12 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
   await page.getByLabel(/6-digit code/).fill(await generate({ secret }));
   await page.getByRole('button', { name: 'Confirm and continue' }).click();
 
-  // The email and organization in the header come from the API's /me: the Supabase session
+  // The name and organization in the header come from the API's /me: the Supabase session
   // at aal2 reached the Worker, which read Postgres as app_api. Isolation between users and
   // organizations is tested in supabase/tests, the API database tests and counterparties.spec.ts.
-  await expect(page.getByText(E2E_USER.email)).toBeVisible();
+  // The header shows the first name and last initial, never the email.
+  await expect(page.getByText('Signed in as Synthetic T.')).toBeVisible();
+  await expect(page.getByText(E2E_USER.email)).toHaveCount(0);
   await expect(page.getByText(E2E_ORG_NAME)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
 

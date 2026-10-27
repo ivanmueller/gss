@@ -70,7 +70,7 @@ Map pins are facilities; eligible bid/offer indicators derive from current quote
 
 ## 10.2 Privacy and data controls
 
-Classify contact data and trade prices as confidential. Do not publish seller coordinates or phone numbers outside explicitly approved staff roles. White-label tenants should be isolated by organization from day one; do not assume users should be able to discover the contact network of other tenants. Confirm vendor data residency and contractual restrictions before production rollout.
+Classify contact data and trade prices as confidential. Do not publish seller coordinates or phone numbers outside explicitly approved staff roles. Records belong to the shop's one organization and are visible only to its active members. Confirm vendor data residency and contractual restrictions before production rollout.
 
 ## 10.3 Physical trade/compliance considerations
 

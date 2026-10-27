@@ -41,7 +41,7 @@ An authenticated trader can open the Canadian–U.S. map, filter a commodity and
 3. Identify economically plausible cross-border physical trades quickly, without implying that a quote is executable when it is not.
 4. Calculate and compare transparent delivered margins in normalized currency and quantity units.
 5. Retain proprietary counterparty, lane, pricing, and trade data securely as a compounding commercial asset.
-6. Support an internal team initially, with a data model capable of future white-label/organization separation.
+6. Serve one internal trading team, the owner's shop. White-label and multi-company use is out of scope (owner's decision, 2026-10-27, `docs/DECISIONS.md`).
 7. Make development reproducible across multiple AI coding agents and a human project owner.
 
 ## 1.2 Release 1: must have
@@ -73,7 +73,7 @@ An authenticated trader can open the Canadian–U.S. map, filter a commodity and
 
 **Release 3:** Shipment milestones, invoice reconciliation, expected-versus-realized margin, role-based approvals, compliance workflows, price ingest adapters, document extraction with review.
 
-**Release 4 (conditional):** Quantitative opportunity analytics, Python optimization, research and forecasting, controlled runtime AI assistants, rail economics, automated exception alerts, external white-label tenants.
+**Release 4 (conditional):** Quantitative opportunity analytics, Python optimization, research and forecasting, controlled runtime AI assistants, rail economics, automated exception alerts.
 
 # 2. Users, roles, and workflows
 
@@ -398,7 +398,7 @@ Make an early operational distinction between **known buyer facility**, **buyer 
 
 ## 10.2 Privacy and data controls
 
-Classify contact data and trade prices as confidential. Do not publish seller coordinates or phone numbers outside explicitly approved staff roles. White-label tenants should be isolated by organization from day one; do not assume users should be able to discover the contact network of other tenants. Confirm vendor data residency and contractual restrictions before production rollout.
+Classify contact data and trade prices as confidential. Do not publish seller coordinates or phone numbers outside explicitly approved staff roles. Records belong to the shop's one organization and are visible only to its active members. Confirm vendor data residency and contractual restrictions before production rollout.
 
 ## 10.3 Physical trade/compliance considerations
 
@@ -577,7 +577,7 @@ These are **not implementation blockers for Phase 0–2**, but must be decided b
 6. **Border/compliance ownership:** Who is importer of record, who arranges customs broker, and which cost placeholders are required before trade approval?
 7. **Data rights:** Which external prices/data are licensed for storage, commercial display and derivative modeling?
 8. **Internal confidentiality:** Whether exact farm addresses or farmer private contacts can be viewed by all employees.
-9. **Multi-tenant branding:** Will white-label mean separate company databases/domains or one strictly isolated database with branded organizations?
+9. **Multi-tenant branding:** Resolved 2026-10-27: no white-label or multi-company use (`docs/DECISIONS.md`).
 10. **Release governance:** Who can approve new trade economics and database/schema production changes?
 
 **Proposed safe defaults:** CAD per MT reporting, manually verified quote data, manual freight, zero loss *only if explicitly acknowledged*, no automatic execution, one internal organization initially, and an organization-aware schema.

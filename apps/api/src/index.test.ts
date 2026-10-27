@@ -42,7 +42,13 @@ describe('GET /api/v1/me', () => {
   const valid = token({ sub: USER_ID, aal: 'aal2' });
 
   it('returns the verified user and their organizations', async () => {
-    const fetchMock = mockAuthServer(Response.json({ id: USER_ID, email: 'alice@example.test' }));
+    const fetchMock = mockAuthServer(
+      Response.json({
+        id: USER_ID,
+        email: 'alice@example.test',
+        user_metadata: { first_name: ' Alice ', last_name: 'Synthetic' },
+      }),
+    );
     const res = await get('/api/v1/me', `Bearer ${valid}`);
 
     expect(res.status).toBe(200);
@@ -50,14 +56,37 @@ describe('GET /api/v1/me', () => {
     expect(await res.json()).toEqual({
       id: USER_ID,
       email: 'alice@example.test',
+      firstName: 'Alice',
+      lastName: 'Synthetic',
       organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
     });
     expect(fetchMock).toHaveBeenCalledWith('https://example-project.supabase.co/auth/v1/user', {
       headers: { apikey: 'sb_publishable_test', Authorization: `Bearer ${valid}` },
     });
-    expect(openDatabase).toHaveBeenCalledWith(ENV.DATABASE_URL);
+    expect(openDatabase).toHaveBeenCalledWith(ENV.DATABASE_URL, { viaHyperdrive: false });
     expect(db.memberships).toHaveBeenCalledWith(USER_ID);
     expect(db.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns no name when the user has none or it is unusable', async () => {
+    mockAuthServer(
+      Response.json({ id: USER_ID, user_metadata: { first_name: '   ', last_name: 42 } }),
+    );
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+
+    expect(await res.json()).toMatchObject({ firstName: null, lastName: null });
+  });
+
+  it('uses the Hyperdrive binding when the Worker has one', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const hyperdrive = 'postgresql://app_api:local@hyperdrive.example.test:5432/postgres';
+    await app.request(
+      '/api/v1/me',
+      { headers: { Authorization: `Bearer ${valid}` } },
+      { ...ENV, HYPERDRIVE: { connectionString: hyperdrive } },
+    );
+
+    expect(openDatabase).toHaveBeenCalledWith(hyperdrive, { viaHyperdrive: true });
   });
 
   it('asks the database only about the verified user', async () => {
@@ -134,6 +163,7 @@ describe('GET /api/v1/me', () => {
       Object.assign(new Error('postgresql://u:secret@h'), { code: 'not a code' }),
       'code=none kind=other',
     ],
+    [new Error('internal error; reference = abc123'), 'code=none kind=runtime_socket'],
   ])('logs why the database failed, without the message (%s)', async (error, summary) => {
     mockAuthServer(Response.json({ id: USER_ID }));
     const logged: unknown[] = [];

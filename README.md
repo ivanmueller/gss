@@ -34,11 +34,24 @@ pnpm e2e                        # build, then run the Playwright browser tests (
 
 Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up: an administrator adds each user in the Supabase dashboard. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
 
+The header shows the user's first name and last initial, never the email. Set a user's name in the Supabase SQL editor:
+
+```sql
+update auth.users
+   set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb)
+                            || jsonb_build_object('first_name', 'First', 'last_name', 'Last')
+ where email = 'user@example.com';
+```
+
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
 
 ## Counterparties
 
 Signed-in members see their organization's counterparties under **Counterparties**, as a table or by logo. Operations and admin members can import a CSV spreadsheet (in Excel: Save As → "CSV UTF-8 (Comma delimited)"), match its columns, review the result and import; companies already in the list are skipped. They can also upload a PNG logo (up to 512 KB) on a counterparty's page. Real records go only into the database, never into Git.
+
+## Staging database connection
+
+The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifies Supabase's certificate (`docs/DECISIONS.md`). To create or update it: give the Cloudflare API token Hyperdrive and SSL and Certificates edit permissions, add the GitHub secret `SUPABASE_HYPERDRIVE_URL` (`postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres`, Supabase's session pooler), then run **Actions → Set up Hyperdrive (staging)**. Its summary shows the configuration ID that `apps/api/wrangler.jsonc` binds as `HYPERDRIVE`.
 
 ## Staging deploy
 

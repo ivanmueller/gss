@@ -33,4 +33,11 @@ export default defineConfig(
     files: ['**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
   },
+  {
+    // Node scripts run by CI workflows.
+    files: ['scripts/**/*.js'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', fetch: 'readonly', URL: 'readonly' },
+    },
+  },
 );

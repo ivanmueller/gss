@@ -6,13 +6,18 @@ import type { Database, RequestContext } from './db';
 
 export interface ApiEnv {
   Bindings: AuthBindings & {
-    /** Postgres URL for the `app_api` role (Worker secret). */
+    /**
+     * Cloudflare Hyperdrive in front of Supabase (staging). Hyperdrive verifies Supabase's
+     * certificate against Supabase's own CA, which the Workers runtime cannot do itself.
+     */
+    HYPERDRIVE?: { connectionString: string };
+    /** Postgres URL for the `app_api` role, used when there is no Hyperdrive binding. */
     DATABASE_URL?: string;
   };
   Variables: { user: AuthUser; requestId: string };
 }
 
-export type DatabaseFactory = (url: string) => Database;
+export type DatabaseFactory = (url: string, options?: { viaHyperdrive?: boolean }) => Database;
 
 export type ApiContext = Context<ApiEnv>;
 
@@ -52,6 +57,8 @@ const FAILURE_KINDS: [RegExp, string][] = [
   [/refused/i, 'connection_refused'],
   [/getaddrinfo|ENOTFOUND|EAI_AGAIN|dns/i, 'dns'],
   [/closed|reset|ended|destroyed/i, 'connection_closed'],
+  // The Workers runtime reports socket failures, including a refused certificate, this way.
+  [/internal error/i, 'runtime_socket'],
 ];
 
 /**
@@ -95,12 +102,14 @@ export async function withDatabase(
   openDatabase: DatabaseFactory,
   handle: (db: Database, ctx: RequestContext) => Promise<Response>,
 ): Promise<Response> {
-  if (!c.env.DATABASE_URL) {
+  const hyperdrive = c.env.HYPERDRIVE;
+  const url = hyperdrive?.connectionString ?? c.env.DATABASE_URL;
+  if (!url) {
     return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
   }
   let db: Database;
   try {
-    db = openDatabase(c.env.DATABASE_URL);
+    db = openDatabase(url, { viaHyperdrive: hyperdrive !== undefined });
   } catch {
     // The error can carry the whole URL, password included, so it is neither logged nor returned.
     return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
