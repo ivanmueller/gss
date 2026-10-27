@@ -1,80 +1,91 @@
-import { useState } from 'react';
+import type { ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
 import { AppHeader } from './components/AppHeader';
-import { FacilityList } from './components/FacilityList';
-import { FacilityTable } from './components/FacilityTable';
-import { FilterBar, type RoleFilter } from './components/FilterBar';
-import { MapPanel } from './components/MapPanel';
-import { QuoteInspector } from './components/QuoteInspector';
-import { SyntheticBanner } from './components/SyntheticBanner';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
-import { SYNTHETIC_FACILITIES } from './data/synthetic';
+import { Link, matchRoute, usePath } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { useMe } from './lib/useMe';
-import { useMediaQuery } from './lib/useMediaQuery';
+import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
+import { CounterpartyPage } from './pages/CounterpartyPage';
+import { ImportPage } from './pages/ImportPage';
+import { Workspace } from './pages/Workspace';
 
-// Tailwind's `lg` breakpoint.
-const DESKTOP_QUERY = '(min-width: 1024px)';
+function Notice({ children }: { children: ReactNode }) {
+  return <p className="rounded-xl border bg-card px-4 py-6 text-center text-sm">{children}</p>;
+}
 
 export function App({ account }: { account?: Account }) {
   const health = useApiHealth();
   const me = useMe(account?.accessToken ?? null);
-  const isDesktop = useMediaQuery(DESKTOP_QUERY, true);
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
-  const [selectedId, setSelectedId] = useState(SYNTHETIC_FACILITIES[0]?.id ?? '');
+  const route = matchRoute(usePath());
+  const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
 
-  const visible =
-    roleFilter === 'all'
-      ? SYNTHETIC_FACILITIES
-      : SYNTHETIC_FACILITIES.filter((facility) => facility.roles.includes(roleFilter));
-  const selected = SYNTHETIC_FACILITIES.find((facility) => facility.id === selectedId);
+  // Pages with the organization's records need a signed-in member of an organization.
+  function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
+    if (!account) return <Notice>Sign in to see your organization’s counterparties.</Notice>;
+    if (me.status === 'error')
+      return <Notice>The server could not confirm your organization. Reload to try again.</Notice>;
+    if (organization === undefined) return <Notice>Loading…</Notice>;
+    if (organization === null) {
+      return (
+        <Notice>
+          You are not a member of an organization yet. Ask an administrator to add you.
+        </Notice>
+      );
+    }
+    return render({ token: account.accessToken, organization });
+  }
 
-  const listProps = { facilities: visible, selectedId, onSelect: setSelectedId };
-  const inspector = <QuoteInspector facility={selected} />;
+  let page: ReactNode;
+  switch (route.page) {
+    case 'workspace':
+      page = <Workspace />;
+      break;
+    case 'counterparties':
+      page = directory((session) => <CounterpartiesPage session={session} />);
+      break;
+    case 'import':
+      page = directory((session) => <ImportPage session={session} />);
+      break;
+    case 'counterparty':
+      page = directory((session) => (
+        <CounterpartyPage key={route.id} session={session} id={route.id} />
+      ));
+      break;
+    case 'not-found':
+      page = (
+        <Notice>
+          This page does not exist.{' '}
+          <Link href="/" className="underline underline-offset-4">
+            Go to the workspace
+          </Link>
+          .
+        </Notice>
+      );
+      break;
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <AppHeader
         health={health}
+        current={
+          route.page === 'workspace'
+            ? 'workspace'
+            : route.page === 'not-found'
+              ? null
+              : 'counterparties'
+        }
         {...(account && {
           user: {
             email: me.status === 'ok' ? me.email : account.email,
-            organization: me.status === 'ok' ? (me.organizations[0]?.name ?? null) : undefined,
+            organization: organization === undefined ? undefined : (organization?.name ?? null),
             check: me.status,
             onSignOut: account.signOut,
           },
         })}
       />
-      <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4">
-        <SyntheticBanner />
-        <FilterBar value={roleFilter} onChange={setRoleFilter} />
-        {isDesktop ? (
-          <div className="grid grid-cols-[3fr_2fr] gap-4">
-            <MapPanel />
-            {inspector}
-            <div className="col-span-2">
-              <FacilityTable {...listProps} />
-            </div>
-          </div>
-        ) : (
-          <>
-            <Tabs defaultValue="list">
-              <TabsList aria-label="Workspace view">
-                <TabsTrigger value="list">List</TabsTrigger>
-                <TabsTrigger value="map">Map</TabsTrigger>
-              </TabsList>
-              <TabsContent value="list">
-                <FacilityList {...listProps} />
-              </TabsContent>
-              <TabsContent value="map">
-                <MapPanel />
-              </TabsContent>
-            </Tabs>
-            {inspector}
-          </>
-        )}
-      </main>
+      <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4">{page}</main>
     </div>
   );
 }

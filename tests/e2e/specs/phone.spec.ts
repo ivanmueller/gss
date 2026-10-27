@@ -15,3 +15,13 @@ test('uses a facility list and tabs, with no sideways scrolling', async ({ page 
   await expect(page.getByText('Map placeholder')).toBeVisible();
   await expect(page.getByRole('complementary')).toContainText('Demo Seller A');
 });
+
+test('counterparties fit the phone screen', async ({ page }) => {
+  await page.goto('/counterparties');
+  await expect(page.getByRole('heading', { name: 'Counterparties' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  const overflows = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  );
+  expect(overflows).toBe(false);
+});

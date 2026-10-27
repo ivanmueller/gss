@@ -250,3 +250,34 @@ describe('narrow screens', () => {
     expect(screen.getByRole('table')).toBeInTheDocument();
   });
 });
+
+describe('navigation', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('marks the current page and moves between pages', async () => {
+    render(<App />);
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Workspace' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    await userEvent.click(within(nav).getByRole('link', { name: 'Counterparties' }));
+    expect(within(nav).getByRole('link', { name: 'Counterparties' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(
+      screen.getByText('Sign in to see your organization’s counterparties.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
+  it('says when a page does not exist', () => {
+    window.history.replaceState(null, '', '/nowhere');
+    render(<App />);
+    expect(screen.getByText(/This page does not exist/)).toBeInTheDocument();
+  });
+});

@@ -2,46 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-
-const ENV = {
-  SUPABASE_URL: 'https://example-project.supabase.co/',
-  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
-  DATABASE_URL: 'postgresql://app_api.ref:secret@db.example.test:6543/postgres',
-};
-const USER_ID = '00000000-0000-4000-8000-00000000a11c';
-
-function fakeDatabase(): Database & {
-  memberships: ReturnType<typeof vi.fn<Database['memberships']>>;
-  close: ReturnType<typeof vi.fn<Database['close']>>;
-} {
-  return {
-    memberships: vi.fn<Database['memberships']>(() =>
-      Promise.resolve([
-        { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'trader' },
-      ]),
-    ),
-    close: vi.fn<Database['close']>(() => Promise.resolve()),
-  };
-}
+import { ENV, fakeDatabase, mockAuthServer, token, USER_ID } from './testing/helpers';
 
 let db = fakeDatabase();
 const openDatabase = vi.fn<(url: string) => Database>(() => db);
 const app = createApp(openDatabase);
-
-/** An unsigned token with the given claims; only Supabase Auth (mocked here) judges validity. */
-function token(claims: Record<string, unknown>): string {
-  const part = (value: unknown) =>
-    btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `${part({ alg: 'ES256', typ: 'JWT' })}.${part(claims)}.signature`;
-}
-
-function mockAuthServer(response: Response | Error) {
-  const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() =>
-    response instanceof Error ? Promise.reject(response) : Promise.resolve(response),
-  );
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
-}
 
 function get(path: string, authorization?: string) {
   const headers: Record<string, string> = authorization ? { Authorization: authorization } : {};

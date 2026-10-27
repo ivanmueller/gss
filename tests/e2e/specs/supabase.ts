@@ -30,7 +30,19 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
   const url = env('E2E_SUPABASE_URL');
   const sql = postgres(env('E2E_DATABASE_URL'), { max: 1, onnotice: () => undefined });
   try {
-    // App tables reference auth.users, so remove the previous run's rows first.
+    // App tables reference auth.users and the organization, so remove the previous
+    // run's rows first. Deletes are audited, so the audit trail goes after the records.
+    for (const table of [
+      'counterparty_logos',
+      'facilities',
+      'counterparty_contacts',
+      'counterparties',
+      'import_batches',
+      'audit_events',
+    ]) {
+      await sql`delete from ${sql(`app.${table}`)} where organization_id in
+        (select id from app.organizations where display_name = ${E2E_ORG_NAME})`;
+    }
     await sql`delete from app.organization_members
       where user_id in (select id from auth.users where email = ${E2E_USER.email})`;
     await sql`delete from app.organizations where display_name = ${E2E_ORG_NAME}`;

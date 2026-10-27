@@ -9,6 +9,7 @@
     "test:db": "vitest run --config vitest.db.config.ts"
   },
   "dependencies": {
+    "@grain/domain": "workspace:*",
     "hono": "^4.13.14",
     "postgres": "^3.4.9"
   },

@@ -1,20 +1,22 @@
 import { Hono } from 'hono';
 
-import { type AuthBindings, type AuthUser, requireUser } from './auth';
-import { type Database, postgresDatabase } from './db';
+import { requireUser } from './auth';
+import { counterpartyRoutes } from './counterparties';
+import { postgresDatabase } from './db';
+import { withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
-export interface ApiEnv {
-  Bindings: AuthBindings & {
-    /** Postgres URL for the `app_api` role (Worker secret). */
-    DATABASE_URL?: string;
-  };
-  Variables: { user: AuthUser };
-}
-
-export type DatabaseFactory = (url: string) => Database;
+export type { ApiEnv, DatabaseFactory } from './respond';
 
 export function createApp(openDatabase: DatabaseFactory) {
   const app = new Hono<ApiEnv>().basePath('/api/v1');
+
+  // Every response carries a request id; writes record it in the audit trail.
+  app.use('*', async (c, next) => {
+    const requestId = crypto.randomUUID();
+    c.set('requestId', requestId);
+    c.header('X-Request-Id', requestId);
+    await next();
+  });
 
   // Public liveness probe. It reads nothing and returns no tenant or
   // environment data, so it needs no authentication.
@@ -27,17 +29,10 @@ export function createApp(openDatabase: DatabaseFactory) {
   // including unknown paths, so a new route cannot be left public by mistake.
   app.use('*', requireUser);
 
-  app.get('/me', async (c) => {
+  app.get('/me', (c) => {
     const user = c.get('user');
     c.header('Cache-Control', 'no-store');
-    if (!c.env.DATABASE_URL) {
-      return c.json(
-        { error: { code: 'MISCONFIGURED', message: 'The database is not configured.' } },
-        500,
-      );
-    }
-    const db = openDatabase(c.env.DATABASE_URL);
-    try {
+    return withDatabase(c, openDatabase, async (db) => {
       const organizations = await db.memberships(user.id);
       return c.json({
         id: user.id,
@@ -48,15 +43,10 @@ export function createApp(openDatabase: DatabaseFactory) {
           role: m.role,
         })),
       });
-    } catch {
-      return c.json(
-        { error: { code: 'DATABASE_UNAVAILABLE', message: 'The database is unavailable.' } },
-        503,
-      );
-    } finally {
-      await db.close();
-    }
+    });
   });
+
+  app.route('/counterparties', counterpartyRoutes(openDatabase));
 
   return app;
 }
