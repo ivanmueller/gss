@@ -5,8 +5,16 @@ import { apiJson, ApiError } from './api';
 export type Resource<T> =
   { status: 'loading' } | { status: 'ok'; data: T } | { status: 'error'; error: ApiError };
 
-/** GETs an API path as the signed-in user, again whenever the path or token changes or reload is called. */
-export function useApiResource<T>(path: string | null, token: string): [Resource<T>, () => void] {
+/**
+ * GETs an API path as the signed-in user, again whenever the path or token changes or reload
+ * is called. With `keepPrevious`, the last result stays while a different path loads (a map
+ * keeps its pins while the next view loads).
+ */
+export function useApiResource<T>(
+  path: string | null,
+  token: string,
+  { keepPrevious = false }: { keepPrevious?: boolean } = {},
+): [Resource<T>, () => void] {
   const [state, setState] = useState<{
     path: string;
     version: number;
@@ -40,6 +48,9 @@ export function useApiResource<T>(path: string | null, token: string): [Resource
   }, []);
 
   // While a reload of the same path runs, keep showing the last result; a different path
-  // shows loading until its first result lands.
-  return [state?.path === path ? state.resource : { status: 'loading' }, reload];
+  // shows loading until its first result lands, unless keepPrevious is set.
+  return [
+    state && (state.path === path || keepPrevious) ? state.resource : { status: 'loading' },
+    reload,
+  ];
 }

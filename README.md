@@ -11,7 +11,7 @@ Canadian–U.S. physical grain trading operations platform. The repository has t
 
 **Initial AI workflow:** Evaluate Cursor 3 Agents Window as the primary hub, Claude for implementation, Codex for independent review, and Gemini for targeted alternate approaches. Claude Code or Google Antigravity 2.0 may replace the primary interface after a small controlled comparison. This is a **recommendation**, not a requirement or configured integration.
 
-**Recommended stack:** React/Vite, TypeScript, Hono/Cloudflare Workers, Supabase PostgreSQL/PostGIS/Auth/Storage, MapLibre; pnpm, Vitest, Playwright.
+**Recommended stack:** React/Vite, TypeScript, Hono/Cloudflare Workers, Supabase PostgreSQL/PostGIS/Auth/Storage, Mapbox GL JS; pnpm, Vitest, Playwright.
 
 **Important:** Do not publish live grain prices, counterparty contact data, geocoordinates of private farms, credentials, or real contract documents in a public repository or as unredacted prompts to AI tools.
 
@@ -49,6 +49,18 @@ update auth.users
 
 Signed-in members see their organization's counterparties under **Counterparties**, as a table or by logo. Operations and admin members can import a CSV spreadsheet (in Excel: Save As → "CSV UTF-8 (Comma delimited)"), match its columns, review the result and import; companies already in the list are skipped. They can also upload a PNG logo (up to 512 KB) on a counterparty's page. Real records go only into the database, never into Git.
 
+## Map
+
+**Map** shows the organization's counterparty locations on a Mapbox map (Mapbox GL JS, `docs/DECISIONS.md`), as street map or satellite: filled pins are exact locations, hollow pins approximate ones (such as a town). Clicking a pin shows the location; the list under the map links to each counterparty. Locations without coordinates cannot be shown, and the page says how many there are.
+
+The map needs a Mapbox **public** token, built into the web app when staging deploys. It is not a secret (every visitor's browser receives it), so Mapbox limits where it works; it is still kept out of Git so it can be replaced. Never use a secret token (`sk.`): the build refuses one.
+
+1. In Mapbox (account.mapbox.com → **Tokens** → **Create a token**): name it, keep only the public scopes, and under URL restrictions add `https://grain-trading-api-staging.ivan-mueller02.workers.dev`. Create it and copy the token (it starts with `pk.`).
+2. In GitHub (**Settings → Secrets and variables → Actions → New repository secret**): name `MAPBOX_PUBLIC_TOKEN`, paste the token, **Add secret**.
+3. Run **Actions → Deploy staging → Run workflow** (or merge any change), then open **Map** on staging.
+
+Without the token, the page lists the locations and explains what is missing. To replace the token, update the secret and deploy again.
+
 ## Staging database connection
 
 The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifies Supabase's certificate (`docs/DECISIONS.md`). To create or update it: give the Cloudflare API token Hyperdrive and SSL and Certificates edit permissions, add the GitHub secret `SUPABASE_HYPERDRIVE_URL` (`postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres`, Supabase's session pooler), then run **Actions → Set up Hyperdrive (staging)**. Its summary shows the configuration ID that `apps/api/wrangler.jsonc` binds as `HYPERDRIVE`. Locally, `wrangler dev --env staging` connects that binding to the database in `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (CI sets it to the throwaway database).
@@ -71,7 +83,7 @@ Application tables live in the private `app` schema, which the Supabase Data API
 
 ```
 apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search); serves apps/web on staging
-apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory)
+apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory and map)
 tests/e2e/           Playwright browser tests against the staging Worker config
 packages/domain/     shared validation used by web and API (counterparty import rows, PNG check, regions)
 supabase/            database migrations, pgTAP tests and local CLI config

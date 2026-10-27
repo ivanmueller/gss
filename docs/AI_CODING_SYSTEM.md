@@ -84,7 +84,7 @@ A working map without usable price context is not the intended product. For rele
 4. **Responsive behavior:** narrow viewports use tabs/accessible lists instead of forcing a tiny map; keyboard workflows are tested.
 5. **Verification:** actual browser screenshots or a short walkthrough from staging (using synthetic data), plus Playwright smoke tests; not just code generation or an unverified model assertion.
 
-Avoid premature redesigns of the approved React/Vite/Tailwind/shadcn/MapLibre stack. Keep reusable components and domain types separated. Record material visual/layout decisions in `docs/PRODUCT.md` or a reviewed issue.
+Avoid premature redesigns of the approved React/Vite/Tailwind/shadcn/Mapbox GL JS stack. Keep reusable components and domain types separated. Record material visual/layout decisions in `docs/PRODUCT.md` or a reviewed issue.
 
 ## 8. Faster path to a real demonstration (without skipping foundations)
 

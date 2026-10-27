@@ -8,6 +8,7 @@ import { useMe } from './lib/useMe';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { ImportPage } from './pages/ImportPage';
+import { MapPage } from './pages/MapPage';
 import { Workspace } from './pages/Workspace';
 
 function Notice({ children }: { children: ReactNode }) {
@@ -41,6 +42,9 @@ export function App({ account }: { account?: Account }) {
     case 'workspace':
       page = <Workspace />;
       break;
+    case 'map':
+      page = directory((session) => <MapPage session={session} />);
+      break;
     case 'counterparties':
       page = directory((session) => <CounterpartiesPage session={session} />);
       break;
@@ -70,8 +74,8 @@ export function App({ account }: { account?: Account }) {
       <AppHeader
         health={health}
         current={
-          route.page === 'workspace'
-            ? 'workspace'
+          route.page === 'workspace' || route.page === 'map'
+            ? route.page
             : route.page === 'not-found'
               ? null
               : 'counterparties'

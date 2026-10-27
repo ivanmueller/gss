@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseBbox } from './geo';
+import { bboxFromBounds, formatBbox, parseBbox } from './geo';
 
 describe('parseBbox', () => {
   it('reads west,south,east,north in degrees', () => {
@@ -44,5 +44,41 @@ describe('parseBbox', () => {
     ['-110,49,-95,49', 'no height'],
   ])('refuses %j (%s)', (text) => {
     expect(parseBbox(text)).toBeNull();
+  });
+});
+
+describe('bboxFromBounds and formatBbox', () => {
+  it('round outward to six decimals, in a form parseBbox accepts', () => {
+    const box = bboxFromBounds(-106.6700461, 49.0000009, -95.1234561, 60.5);
+    expect(box).toEqual({ west: -106.670047, south: 49, east: -95.123456, north: 60.5 });
+    const text = formatBbox(box ?? { west: 0, south: 0, east: 0, north: 0 });
+    expect(text).toBe('-106.670047,49.000000,-95.123456,60.500000');
+    expect(parseBbox(text)).toEqual(box);
+  });
+
+  it('asks for every longitude when the view wraps past ±180°, and stays within the poles', () => {
+    expect(bboxFromBounds(-250, -95, 40, 95)).toEqual({
+      west: -180,
+      south: -90,
+      east: 180,
+      north: 90,
+    });
+    expect(bboxFromBounds(170, 50, 190, 60)).toEqual({
+      west: -180,
+      south: 50,
+      east: 180,
+      north: 60,
+    });
+  });
+
+  it('gives null when nothing of the view is left', () => {
+    expect(bboxFromBounds(-100, 91, -90, 95)).toBeNull();
+    expect(bboxFromBounds(-100, 50, -100, 50)).toBeNull();
+  });
+
+  it('writes small values without an exponent', () => {
+    expect(formatBbox({ west: -0.0000001, south: 0, east: 0.000001, north: 1 })).toBe(
+      '-0.000000,0.000000,0.000001,1.000000',
+    );
   });
 });
