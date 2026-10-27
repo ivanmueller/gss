@@ -1,6 +1,6 @@
 # Ordered build plan
 
-Issues are proposed identifiers. File them in the private GitHub repository when available.
+Issues are proposed identifiers. File them in the GitHub repository when available.
 
 # 13. Execution plan, ordered backlog and acceptance gates
 

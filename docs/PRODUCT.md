@@ -90,6 +90,7 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 | `/scenarios/:id` | Saved assessment | Input snapshot, calculation version, audit/revisions, export |
 | `/counterparties` | Relationship management | Contacts, facilities, role, status, communication log |
 | `/map` (implemented) | The organization's counterparty locations on a Mapbox map, with a list | Street or satellite map, pan and zoom, select a pin |
+| `/map/coordinates` (implemented) | Find coordinates for locations without them (Geocodio), review, save | Look up addresses, tick or untick each result, save; operations and admin only |
 | `/admin` | Organization control | Users, roles, data sources, settings, audit views |
 
 ### Workspace layout

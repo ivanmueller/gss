@@ -15,7 +15,7 @@ Cloudflare Worker — Hono API
    |  typed repositories / outbound adapters
 Supabase Postgres — PostGIS, quote history, scenarios, audit
 Supabase Storage — private supporting documents
-External adapters — FX, geocoding, tiles, routing, licensed price data (as added)
+External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker); FX, routing, licensed price data (as added)
 ```
 
 The frontend calls one documented application API for sensitive operations. Avoid direct browser writes to commercial tables. Keep the system a **modular monolith** initially, not a distributed collection of microservices.
@@ -58,7 +58,7 @@ Map pins are facilities; eligible bid/offer indicators derive from current quote
 
 ## 10.1 Security baseline
 
-- Private GitHub organization repository; protected main branch, required CI and at least one reviewer for financial and permission changes.
+- GitHub repository (public by the owner's choice, so no real data or secrets in Git); protected main branch, required CI and at least one reviewer for financial and permission changes.
 - Auth with MFA; restricted employee provisioning; no open public signup in v1.
 - Least-privilege API database credentials, tenant authorization on every request, private buckets and time-limited document links.
 - RLS and explicit grants on exposed Postgres schemas; security tests for inter-tenant reads, writes, exports and nested-resource access.
