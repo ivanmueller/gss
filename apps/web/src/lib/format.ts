@@ -1,13 +1,24 @@
 import type { Price } from '../data/types';
 
 const DECIMAL = /^\d+(\.\d+)?$/;
+const SIGNED = /^-?\d+(\.\d+)?$/;
 
-/** "USD 725.00/MT". Built from the decimal string; no floating-point conversion. */
+/** "−12.50" with a true minus sign, "0.00" without one: a signed decimal string as text. */
+function withMinus(amount: string): string {
+  if (!amount.startsWith('-')) return amount;
+  const digits = amount.slice(1);
+  return /^0+(\.0+)?$/.test(digits) ? digits : `\u2212${digits}`;
+}
+
+/**
+ * "USD 725.00/MT", or "CAD −17.00/MT" for a negative (basis) price. Built from the decimal
+ * string; no floating-point conversion.
+ */
 export function formatPrice(price: Price): string {
-  if (!DECIMAL.test(price.amount)) {
+  if (!SIGNED.test(price.amount)) {
     throw new Error(`Price amount is not a decimal string: "${price.amount}"`);
   }
-  return `${price.currency} ${price.amount}/${price.unit}`;
+  return `${price.currency} ${withMinus(price.amount)}/${price.unit}`;
 }
 
 /** "2026-10-26 15:00 UTC". Shown in UTC so every viewer reads the same time. */
@@ -20,8 +31,6 @@ export function formatUtc(iso: string): string {
   return `${text.slice(0, 10)} ${text.slice(11, 16)} UTC`;
 }
 
-const SIGNED = /^-?\d+(\.\d+)?$/;
-
 /**
  * "CAD +22.00/MT", "CAD −15.00/MT" (a true minus sign), "CAD 0.00/MT": a spread from its
  * decimal string, signed so a negative one is plain to see.
@@ -30,11 +39,9 @@ export function formatSignedPrice(price: { amount: string; currency: string; uni
   if (!SIGNED.test(price.amount)) {
     throw new Error(`Amount is not a decimal string: "${price.amount}"`);
   }
-  const negative = price.amount.startsWith('-');
-  const digits = negative ? price.amount.slice(1) : price.amount;
-  const zero = /^0+(\.0+)?$/.test(digits);
-  const sign = zero ? '' : negative ? '\u2212' : '+';
-  return `${price.currency} ${sign}${digits}/${price.unit}`;
+  const shown = withMinus(price.amount);
+  const plus = !shown.startsWith('\u2212') && !/^0+(\.0+)?$/.test(shown);
+  return `${price.currency} ${plus ? '+' : ''}${shown}/${price.unit}`;
 }
 
 export function formatQuantityRange(range: { min: string; max: string }): string {

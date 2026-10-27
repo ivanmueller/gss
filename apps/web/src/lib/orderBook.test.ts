@@ -131,6 +131,35 @@ describe('order book', () => {
     });
   });
 
+  it('builds the book from converted prices with many decimal places, or negative ones', () => {
+    // USD 725.0000000 × 1.360000 = CAD 986.0000000000000, equal to a CAD 986.00 bid.
+    const precise = facilityWith('Precise', {
+      side: 'BID',
+      price: { amount: '725.0000000', currency: 'USD', unit: 'MT' },
+      quotedAt: '2026-10-20T00:00:00Z',
+    });
+    const cadBid = facilityWith('CAD bid', {
+      side: 'BID',
+      price: { amount: '986.00', currency: 'CAD', unit: 'MT' },
+    });
+    // A basis quote: USD −12.50 × 1.360000 = CAD −17.00.
+    const basis = facilityWith('Basis', {
+      side: 'OFFER',
+      price: { amount: '-12.50', currency: 'USD', unit: 'MT' },
+    });
+    const [flax] = buildOrderBooks([cadBid, precise, basis], ['Flaxseed'], SYNTHETIC_FX, NOW);
+    // Equal in CAD, so the earlier quote leads.
+    expect(flax?.bids.map((entry) => [entry.facility.name, entry.cad, entry.cadDisplay])).toEqual([
+      ['Precise', '986.0000000000000', '986.00'],
+      ['CAD bid', '986.00', '986.00'],
+    ]);
+    expect(flax?.asks.map((entry) => [entry.cad, entry.cadDisplay])).toEqual([
+      ['-17.00000000', '-17.00'],
+    ]);
+    // 986.0000000000000 − (−17.00000000), rounded once.
+    expect(flax?.spread).toEqual({ status: 'ok', amount: '1003.00', currency: 'CAD', unit: 'MT' });
+  });
+
   it('drops quotes once their valid-until time has passed', () => {
     const flax = book('Flaxseed', SYNTHETIC_FX, new Date('2026-11-10T00:00:00Z'));
     expect(ladder(flax.asks)).toEqual(['Demo Seller F 805.00']);
