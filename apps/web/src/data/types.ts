@@ -39,6 +39,12 @@ export interface Facility {
   roles: readonly FacilityRole[];
   region: string;
   country: 'CA' | 'US';
+  /** WGS84 degrees, for the map. */
+  latitude: number;
+  longitude: number;
   locationPrecision: 'approximate' | 'exact';
+  /** What the facility buys or sells, whether or not it has a quote right now. */
+  commodities: readonly string[];
+  /** Newest first. */
   quotes: readonly Quote[];
 }

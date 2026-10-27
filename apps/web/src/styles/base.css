@@ -34,3 +34,32 @@
     background-color: color-mix(in oklch, var(--color-ring) 25%, transparent);
   }
 }
+
+/* Mapbox's own controls (zoom buttons, attribution), restyled with the tokens so they follow
+   the light and night themes. Outside any layer and scoped under .mapboxgl-map, because
+   Mapbox's stylesheet is unlayered and would otherwise win. */
+.mapboxgl-map .mapboxgl-ctrl-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background-color: var(--color-card);
+  box-shadow: var(--shadow-sm);
+}
+.mapboxgl-map .mapboxgl-ctrl-group button + button {
+  border-top-color: var(--color-border);
+}
+.mapboxgl-map .mapboxgl-ctrl-group button:not(:disabled):hover {
+  background-color: var(--color-accent);
+}
+.dark .mapboxgl-map .mapboxgl-ctrl-icon {
+  filter: invert(1);
+}
+.mapboxgl-map .mapboxgl-ctrl-attrib {
+  background-color: color-mix(in oklch, var(--color-card) 80%, transparent);
+  color: var(--color-muted-foreground);
+}
+.mapboxgl-map .mapboxgl-ctrl-attrib a {
+  color: var(--color-muted-foreground);
+}
+.dark .mapboxgl-map .mapboxgl-ctrl-attrib-button {
+  filter: invert(1);
+}

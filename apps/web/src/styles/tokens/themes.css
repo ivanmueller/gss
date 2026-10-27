@@ -40,6 +40,10 @@
  *
  * Colour never carries meaning alone: statuses, bids and offers also show a word and an icon.
  *
+ * Map: the Mapbox base map's land, water, borders, roads and labels, which
+ * components/FacilityMap.tsx reads and paints over Mapbox's light or dark style. Light is
+ * white land on grey water; night is slate. Pins use the bid and offer roles.
+ *
  * Shadow opacity: how dark each of the four shadows in scales.css is. Shadows need more
  * opacity to show on a dark page.
  */
@@ -112,6 +116,13 @@
   --offer-solid: var(--teal-700);
   --offer-solid-foreground: var(--white);
 
+  --map-land: var(--white);
+  --map-water: var(--gray-200);
+  --map-border: var(--gray-300);
+  --map-road: var(--gray-100);
+  --map-label: var(--gray-600);
+  --map-label-halo: var(--white);
+
   --shadow-opacity-xs: 0.05;
   --shadow-opacity-sm: 0.08;
   --shadow-opacity-md: 0.12;
@@ -175,7 +186,7 @@
   --danger-solid: var(--red-600);
   --danger-solid-foreground: var(--white);
 
-  --bid: var(--indigo-300);
+  --bid: var(--indigo-200);
   --bid-subtle: color-mix(in oklch, var(--indigo-500) 15%, transparent);
   --bid-border: color-mix(in oklch, var(--indigo-500) 35%, transparent);
   --bid-solid: var(--indigo-600);
@@ -186,6 +197,13 @@
   --offer-border: color-mix(in oklch, var(--teal-500) 35%, transparent);
   --offer-solid: var(--teal-700);
   --offer-solid-foreground: var(--white);
+
+  --map-land: var(--slate-600);
+  --map-water: var(--slate-700);
+  --map-border: var(--slate-500);
+  --map-road: var(--slate-500);
+  --map-label: var(--slate-200);
+  --map-label-halo: var(--slate-700);
 
   --shadow-opacity-xs: 0.2;
   --shadow-opacity-sm: 0.28;

@@ -11,7 +11,10 @@ test('loads the workspace with synthetic data and no console errors', async ({ p
 
   await expect(page.getByRole('heading', { name: 'Workspace', level: 1 })).toBeVisible();
   await expect(page.getByRole('note')).toContainText('Synthetic demo data');
-  await expect(page.getByRole('table').getByRole('row')).toHaveCount(5);
+  await expect(page.getByRole('table').getByRole('row')).toHaveCount(10);
+  await expect(page.getByRole('complementary', { name: 'Order book' })).toContainText(
+    'Flaxseed · No. 1 CW',
+  );
   expect(errors).toEqual([]);
 });
 
@@ -98,4 +101,21 @@ test('selects a facility from the keyboard', async ({ page }) => {
 
   await expect(buyerD).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('complementary')).toContainText('No active bid');
+});
+
+test('narrows the workspace to the chosen commodities', async ({ page }) => {
+  await page.goto('/');
+  const book = page.getByRole('complementary', { name: 'Order book' });
+
+  await page.getByRole('button', { name: 'Commodities: All' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'All commodities' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Canola' }).click();
+  await page.keyboard.press('Escape');
+
+  await expect(page.getByRole('button', { name: 'Commodities: Canola' })).toBeVisible();
+  await expect(book).toContainText('Canola · No. 1 Canada');
+  await expect(book).not.toContainText('Flaxseed');
+  // Bid 712.00 minus offer 690.00, both in CAD, exactly.
+  await expect(book.getByRole('group', { name: 'Spreads' })).toContainText('CAD +22.00/MT');
+  await expect(page.getByRole('table').getByRole('row')).toHaveCount(4);
 });

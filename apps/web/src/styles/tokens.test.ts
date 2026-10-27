@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { encodeSrgb, oklchToLinearRgb, type Rgb } from '../lib/colour';
+
 // Checks the colour tokens themselves: both themes define the same roles, every role points
 // at a palette colour, and text stays readable (WCAG 2.2 AA) in the light and night themes.
 
@@ -34,8 +36,6 @@ const PALETTE = declarations(palette, ':root');
 const LIGHT = declarations(themes, ':root');
 const DARK = declarations(themes, '.dark');
 
-type Rgb = [number, number, number];
-
 interface Paint {
   /** Linear-light sRGB. */
   rgb: Rgb;
@@ -45,24 +45,6 @@ interface Paint {
 const VAR = /^var\(--([\w-]+)\)$/;
 /** A see-through wash of a palette colour, as the night theme's tints use. */
 const WASH = /^color-mix\(in oklch, var\(--([\w-]+)\) ([\d.]+)%, transparent\)$/;
-
-/** OKLCH to linear-light sRGB (Björn Ottosson's OKLab matrices), clipped to the sRGB gamut. */
-function oklchToLinearRgb(l: number, c: number, h: number): Rgb {
-  const rad = (h * Math.PI) / 180;
-  const a = c * Math.cos(rad);
-  const b = c * Math.sin(rad);
-  const lms = [
-    (l + 0.3963377774 * a + 0.2158037573 * b) ** 3,
-    (l - 0.1055613458 * a - 0.0638541728 * b) ** 3,
-    (l - 0.0894841775 * a - 1.291485548 * b) ** 3,
-  ] as const;
-  const clip = (v: number) => Math.min(1, Math.max(0, v));
-  return [
-    clip(4.0767416621 * lms[0] - 3.3077115913 * lms[1] + 0.2309699292 * lms[2]),
-    clip(-1.2684380046 * lms[0] + 2.6097574011 * lms[1] - 0.3413193965 * lms[2]),
-    clip(-0.0041960863 * lms[0] - 0.7034186147 * lms[1] + 1.707614701 * lms[2]),
-  ];
-}
 
 /** A theme role's colour, following var() references and washes into the palette. */
 function paint(theme: Map<string, string>, role: string): Paint {
@@ -80,7 +62,7 @@ function paint(theme: Map<string, string>, role: string): Paint {
   return { rgb: oklchToLinearRgb(Number(match[1]), Number(match[2]), Number(match[3])), alpha };
 }
 
-const encode = (v: number) => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055);
+const encode = encodeSrgb;
 const decode = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 
 /** A see-through colour laid over an opaque one, blended as browsers do (in gamma sRGB). */
@@ -127,6 +109,8 @@ const TEXT_PAIRS: [string, string][] = [
   ['secondary-foreground', 'secondary'],
   ['sidebar-foreground', 'sidebar'],
   ['sidebar-accent-foreground', 'sidebar-accent'],
+  ['map-label', 'map-land'],
+  ['map-label', 'map-water'],
   ...STATUS_ROLES.flatMap((role): [string, string][] => [
     [role, 'background'],
     [role, 'card'],
@@ -140,6 +124,11 @@ const TEXT_PAIRS: [string, string][] = [
 const GRAPHIC_PAIRS: [string, string][] = [
   ['ring', 'background'],
   ['ring', 'card'],
+  // Map pins on the base map.
+  ['bid', 'map-land'],
+  ['bid', 'map-water'],
+  ['offer', 'map-land'],
+  ['offer', 'map-water'],
 ];
 
 describe('colour tokens', () => {
@@ -167,7 +156,7 @@ describe('colour tokens', () => {
       }
     });
 
-    it(`keeps the focus ring visible in the ${name} theme (3:1)`, () => {
+    it(`keeps the focus ring and map pins visible in the ${name} theme (3:1)`, () => {
       for (const [graphic, surface] of GRAPHIC_PAIRS) {
         expect(
           contrast(theme, graphic, surface),

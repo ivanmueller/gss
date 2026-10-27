@@ -11,11 +11,11 @@ import { MapPage } from './MapPage';
 vi.mock('../components/FacilityMap', () => ({
   default: (props: FacilityMapProps) => (
     <div>
-      <p>{`Stand-in map: ${props.basemap}, ${String(props.facilities.length)} pins`}</p>
+      <p>{`Stand-in map: ${props.basemap}, ${props.theme}, ${String(props.pins.length)} pins`}</p>
       <button
         type="button"
         onClick={() => {
-          props.onViewChange({ west: -110, south: 49, east: -95, north: 60 });
+          props.onViewChange?.({ west: -110, south: 49, east: -95, north: 60 });
         }}
       >
         Move to the prairies
@@ -23,7 +23,7 @@ vi.mock('../components/FacilityMap', () => ({
       <button
         type="button"
         onClick={() => {
-          props.onViewChange({ west: -100, south: 49, east: -97, north: 50 });
+          props.onViewChange?.({ west: -100, south: 49, east: -97, north: 50 });
         }}
       >
         Zoom in
@@ -103,7 +103,7 @@ describe('MapPage with a Mapbox token', () => {
         '2 locations in view. 1 location has no coordinates yet, so it is not on the map.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText('Stand-in map: streets, 2 pins')).toBeInTheDocument();
+    expect(screen.getByText('Stand-in map: map, light, 2 pins')).toBeInTheDocument();
     expect(calls).toHaveLength(1);
     expect(calls[0]?.headers.get('Authorization')).toBe('Bearer synthetic-token');
 
@@ -143,7 +143,7 @@ describe('MapPage with a Mapbox token', () => {
     await screen.findByText(/2 locations in view/);
 
     await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
-    expect(screen.getByText('Stand-in map: streets, 2 pins')).toBeInTheDocument();
+    expect(screen.getByText('Stand-in map: map, light, 2 pins')).toBeInTheDocument();
   });
 
   it('switches between the street map and satellite', async () => {
@@ -154,7 +154,7 @@ describe('MapPage with a Mapbox token', () => {
 
     await userEvent.click(satellite);
     expect(satellite).toHaveAttribute('aria-pressed', 'true');
-    expect(await screen.findByText('Stand-in map: satellite, 0 pins')).toBeInTheDocument();
+    expect(await screen.findByText('Stand-in map: satellite, light, 0 pins')).toBeInTheDocument();
   });
 
   it('says when the locations were cut at the limit', async () => {
