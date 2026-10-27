@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Database } from './db';
+import { postgresDatabase, type Database } from './db';
 import { createApp } from './index';
 import { ENV, fakeDatabase, mockAuthServer, token, USER_ID } from './testing/helpers';
 
@@ -197,5 +197,66 @@ describe('unknown routes', () => {
 
   it('outside /api/v1 are not served by the API', async () => {
     expect((await get('/health')).status).toBe(404);
+  });
+});
+
+describe('a malformed database URL', () => {
+  it('answers MISCONFIGURED without logging or returning the URL', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const logged: unknown[] = [];
+    for (const method of ['error', 'warn', 'log', 'info'] as const) {
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        logged.push(...args);
+      });
+    }
+    const real = createApp(postgresDatabase);
+    const res = await real.request(
+      '/api/v1/me',
+      { headers: { Authorization: `Bearer ${token({ sub: USER_ID, aal: 'aal2' })}` } },
+      {
+        ...ENV,
+        DATABASE_URL: 'postgresql://app_api:synthetic-leak-check@[not-a-host:6543/postgres',
+      },
+    );
+    const body = await res.text();
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(500);
+    expect(JSON.parse(body)).toMatchObject({ error: { code: 'MISCONFIGURED' } });
+    expect(body).not.toContain('synthetic-leak-check');
+    expect(JSON.stringify(logged, Object.getOwnPropertyNames(new Error()))).not.toContain(
+      'synthetic-leak-check',
+    );
+    expect(logged.map(String).join(' ')).not.toContain('synthetic-leak-check');
+  });
+});
+
+describe('an unexpected error', () => {
+  it('is answered as JSON and logged by type only', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const errors: unknown[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(...args);
+    });
+    // A failure no handler catches: disconnecting throws an error that carries a secret.
+    const leaky = fakeDatabase();
+    leaky.close.mockRejectedValueOnce(
+      Object.assign(new Error('synthetic-leak-check'), { input: 'synthetic-leak-check' }),
+    );
+    const failing = createApp(() => leaky);
+    const res = await failing.request(
+      '/api/v1/me',
+      { headers: { Authorization: `Bearer ${token({ sub: USER_ID, aal: 'aal2' })}` } },
+      ENV,
+    );
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(JSON.parse(body)).toEqual({
+      error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' },
+    });
+    expect(body).not.toContain('synthetic-leak-check');
+    expect(errors).toEqual([`Unhandled Error in request ${res.headers.get('x-request-id') ?? ''}`]);
   });
 });

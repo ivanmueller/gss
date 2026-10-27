@@ -1,4 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+import { OTHER_ORG } from './supabase';
 
 // Synthetic, fictional companies only.
 const CSV = [
@@ -69,4 +71,57 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page.getByRole('button', { name: 'Import 0 new counterparties' })).toBeDisabled();
 
   expect(errors).toEqual([]);
+});
+
+/** The signed-in user's access token, from the Supabase session in local storage. */
+async function accessToken(page: Page): Promise<string> {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
+  return page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const session = JSON.parse(localStorage.getItem(key) ?? '{}') as { access_token?: string };
+        if (session.access_token) return session.access_token;
+      }
+    }
+    throw new Error('no Supabase session in local storage');
+  });
+}
+
+test("another organization's counterparties stay hidden, even by id", async ({ page, request }) => {
+  const headers = { Authorization: `Bearer ${await accessToken(page)}` };
+
+  const all = await request.get('/api/v1/counterparties', { headers });
+  expect(all.status()).toBe(200);
+  expect(JSON.stringify(await all.json())).not.toContain(OTHER_ORG.counterpartyName);
+
+  const byOrg = await request.get(`/api/v1/counterparties?organization_id=${OTHER_ORG.id}`, {
+    headers,
+  });
+  expect(await byOrg.json()).toEqual({ counterparties: [], truncated: false });
+
+  const one = `/api/v1/counterparties/${OTHER_ORG.counterpartyId}`;
+  expect((await request.get(one, { headers })).status()).toBe(404);
+  expect((await request.get(`${one}/logo`, { headers })).status()).toBe(404);
+  const upload = await request.put(`${one}/logo`, {
+    headers: { ...headers, 'Content-Type': 'image/png' },
+    data: PNG,
+  });
+  expect(upload.status()).toBe(404);
+
+  const intoOther = await request.post('/api/v1/counterparties/import', {
+    headers,
+    data: {
+      organizationId: OTHER_ORG.id,
+      fileName: 'cross-org.csv',
+      commit: true,
+      rows: [{ line: 2, values: { legalName: 'Synthetic Intruder', country: 'US' } }],
+    },
+  });
+  expect(intoOther.status()).toBe(403);
+
+  await page.goto(`/counterparties/${OTHER_ORG.counterpartyId}`);
+  await expect(page.getByRole('alert')).toHaveText(
+    'This counterparty does not exist or is not in your organization.',
+  );
 });

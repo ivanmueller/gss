@@ -73,7 +73,13 @@ export async function withDatabase(
   if (!c.env.DATABASE_URL) {
     return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
   }
-  const db = openDatabase(c.env.DATABASE_URL);
+  let db: Database;
+  try {
+    db = openDatabase(c.env.DATABASE_URL);
+  } catch {
+    // The error can carry the whole URL, password included, so it is neither logged nor returned.
+    return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
+  }
   try {
     return await handle(db, { userId: c.get('user').id, requestId: c.get('requestId') });
   } catch (error) {

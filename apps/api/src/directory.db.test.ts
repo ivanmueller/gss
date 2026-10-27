@@ -1,7 +1,14 @@
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { postgresDatabase, type Database, type ImportBatchInput, type RequestContext } from './db';
+import {
+  connectionOptions,
+  createDatabase,
+  postgresDatabase,
+  type Database,
+  type ImportBatchInput,
+  type RequestContext,
+} from './db';
 
 // Integration test of the counterparty directory: the real driver, as `app_api`, against
 // the real migrations, row level security and audit trigger. Fixtures are synthetic and
@@ -218,6 +225,27 @@ describe('the counterparty directory as app_api', () => {
       code: '23505',
       constraint_name: 'import_batches_organization_id_kind_content_sha256_key',
     });
+  });
+
+  it('leaves no user or request id on the connection after writes and refused writes', async () => {
+    const sql = postgres(API_URL, connectionOptions(API_URL));
+    const own = createDatabase(sql);
+    const context = async () => {
+      const [row] = await sql<{ user_id: string | null; request_id: string | null }[]>`
+        select current_setting('app.user_id', true) as user_id,
+               current_setting('app.request_id', true) as request_id`;
+      return [row?.user_id ?? '', row?.request_id ?? ''];
+    };
+    try {
+      await own.putLogo(as(users.olivia), id(), PNG);
+      expect(await context()).toEqual(['', '']);
+      await expect(own.importCounterparties(as(users.victor), batch())).rejects.toThrow();
+      expect(await context()).toEqual(['', '']);
+      await own.listCounterparties(as(users.victor), null);
+      expect(await context()).toEqual(['', '']);
+    } finally {
+      await sql.end();
+    }
   });
 
   it('saves and serves a logo for editors only', async () => {

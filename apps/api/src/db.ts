@@ -164,22 +164,32 @@ function enumArray(values: readonly string[]): string {
   return `{${values.join(',')}}`;
 }
 
-/**
- * Connects as `app_api` (docs/DECISIONS.md, database access model). Each call runs in a
- * transaction that first sets `app.user_id` (and `app.request_id` for the audit trail), so
- * row level security decides what is visible and writable. Uses the Supabase transaction
- * pooler, hence no prepared statements; TLS is required for anything that is not local.
- */
-export function postgresDatabase(url: string): Database {
-  const sql = postgres(url, {
+/** Driver settings for the API: no prepared statements (transaction pooler), one connection. */
+export function connectionOptions(url: string): postgres.Options<Record<string, never>> {
+  return {
     prepare: false,
     max: 1,
     idle_timeout: 5,
     connect_timeout: 10,
     fetch_types: false,
-    ssl: isLocalHost(url) ? false : 'require',
-  });
+    // verify-full checks the certificate chain and host name; postgres.js 'require' does not.
+    ssl: isLocalHost(url) ? false : 'verify-full',
+  };
+}
 
+/**
+ * Connects as `app_api` (docs/DECISIONS.md, database access model). Each call runs in a
+ * transaction that first sets `app.user_id` (and `app.request_id` for the audit trail), so
+ * row level security decides what is visible and writable. Uses the Supabase transaction
+ * pooler, hence no prepared statements; TLS with certificate verification is required for
+ * anything that is not local.
+ */
+export function postgresDatabase(url: string): Database {
+  return createDatabase(postgres(url, connectionOptions(url)));
+}
+
+/** The Database over an existing connection; tests use it to inspect that connection. */
+export function createDatabase(sql: postgres.Sql): Database {
   function asUser<T>(ctx: RequestContext, run: (tx: postgres.TransactionSql) => Promise<T>) {
     return sql.begin(async (tx) => {
       await tx`select set_config('app.user_id', ${ctx.userId}, true),

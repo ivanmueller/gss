@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { requireUser } from './auth';
 import { counterpartyRoutes } from './counterparties';
 import { postgresDatabase } from './db';
-import { withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
+import { apiError, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
 export type { ApiEnv, DatabaseFactory } from './respond';
 
@@ -16,6 +16,13 @@ export function createApp(openDatabase: DatabaseFactory) {
     c.set('requestId', requestId);
     c.header('X-Request-Id', requestId);
     await next();
+  });
+
+  // Errors no route handled. Only the error's type is logged: an error object can carry
+  // configuration such as a connection string, and its message can echo request data.
+  app.onError((error, c) => {
+    console.error(`Unhandled ${error.name} in request ${c.get('requestId')}`);
+    return apiError(c, 500, 'INTERNAL_ERROR', 'Something went wrong.');
   });
 
   // Public liveness probe. It reads nothing and returns no tenant or
