@@ -93,9 +93,36 @@ function databaseFailure(c: ApiContext, error: unknown) {
   return apiError(c, 503, 'DATABASE_UNAVAILABLE', 'The database is unavailable.');
 }
 
+// Driver errors meaning the connection itself was lost before an answer arrived. Every
+// Database method is safe to run again: reads change nothing, a logo upload replaces the
+// same row, and an import that did commit is refused the second time as already imported.
+const CONNECTION_LOST = new Set([
+  'CONNECTION_CLOSED',
+  'CONNECTION_ENDED',
+  'CONNECTION_DESTROYED',
+  'CONNECT_TIMEOUT',
+  'ECONNRESET',
+  'EPIPE',
+]);
+
+function connectionLost(error: unknown): boolean {
+  return CONNECTION_LOST.has(postgresCode(error)?.code ?? '');
+}
+
+/** Disconnects after the response is sent where the runtime allows it, so a slow close never delays an answer. */
+function closeLater(c: ApiContext, db: Database) {
+  const closing = db.close().catch(() => undefined);
+  try {
+    c.executionCtx.waitUntil(closing);
+  } catch {
+    // No execution context (tests): the close still runs, unawaited.
+  }
+}
+
 /**
  * Opens the database for one request, runs `handle` as the verified user and always
- * disconnects. Missing configuration and database failures fail closed.
+ * disconnects. A lost connection is retried once on a fresh one. Missing configuration
+ * and database failures fail closed.
  */
 export async function withDatabase(
   c: ApiContext,
@@ -107,18 +134,27 @@ export async function withDatabase(
   if (!url) {
     return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
   }
-  let db: Database;
-  try {
-    db = openDatabase(url, { viaHyperdrive: hyperdrive !== undefined });
-  } catch {
-    // The error can carry the whole URL, password included, so it is neither logged nor returned.
-    return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
-  }
-  try {
-    return await handle(db, { userId: c.get('user').id, requestId: c.get('requestId') });
-  } catch (error) {
-    return databaseFailure(c, error);
-  } finally {
-    await db.close();
+  const ctx = { userId: c.get('user').id, requestId: c.get('requestId') };
+  for (let attempt = 1; ; attempt += 1) {
+    let db: Database;
+    try {
+      db = openDatabase(url, { viaHyperdrive: hyperdrive !== undefined });
+    } catch {
+      // The error can carry the whole URL, password included, so it is neither logged nor returned.
+      return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
+    }
+    try {
+      return await handle(db, ctx);
+    } catch (error) {
+      if (attempt === 1 && connectionLost(error)) {
+        console.warn(
+          `Database connection lost in request ${ctx.requestId}: ${failureSummary(error)}; retrying`,
+        );
+        continue;
+      }
+      return databaseFailure(c, error);
+    } finally {
+      closeLater(c, db);
+    }
   }
 }

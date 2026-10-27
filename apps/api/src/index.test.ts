@@ -138,6 +138,71 @@ describe('GET /api/v1/me', () => {
     expect(db.close).toHaveBeenCalledTimes(1);
   });
 
+  it('retries once on a fresh connection when the connection is lost', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const warnings: unknown[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(...args);
+    });
+    db.memberships.mockRejectedValueOnce(
+      Object.assign(new Error('write CONNECTION_CLOSED db.example.test:5432'), {
+        code: 'CONNECTION_CLOSED',
+      }),
+    );
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(200);
+    expect(openDatabase).toHaveBeenCalledTimes(2);
+    expect(db.memberships).toHaveBeenCalledTimes(2);
+    expect(db.close).toHaveBeenCalledTimes(2);
+    expect(warnings).toEqual([
+      `Database connection lost in request ${res.headers.get('x-request-id') ?? ''}: code=CONNECTION_CLOSED kind=connection_closed; retrying`,
+    ]);
+  });
+
+  it('gives up after the second lost connection', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const logged: unknown[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(...args);
+    });
+    const timeout = Object.assign(new Error('write CONNECT_TIMEOUT db.example.test:5432'), {
+      code: 'CONNECT_TIMEOUT',
+    });
+    db.memberships.mockRejectedValueOnce(timeout).mockRejectedValueOnce(timeout);
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(503);
+    expect(db.memberships).toHaveBeenCalledTimes(2);
+    expect(logged).toEqual([
+      `Database unavailable in request ${res.headers.get('x-request-id') ?? ''}: code=CONNECT_TIMEOUT kind=timeout`,
+    ]);
+  });
+
+  it('does not retry other database errors', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    db.memberships.mockRejectedValueOnce(
+      Object.assign(new Error('password authentication failed'), { code: '28P01' }),
+    );
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(503);
+    expect(db.memberships).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers even when disconnecting fails', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    db.close.mockRejectedValueOnce(new Error('close failed'));
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+
+    expect(res.status).toBe(200);
+  });
+
   it.each([
     [
       Object.assign(new Error('password authentication failed for user "app_api"'), {
@@ -152,12 +217,6 @@ describe('GET /api/v1/me', () => {
     [
       new Error('TLS handshake failed: invalid peer certificate: UnknownIssuer'),
       'code=none kind=tls',
-    ],
-    [
-      Object.assign(new Error('write CONNECT_TIMEOUT db.example.test:6543'), {
-        code: 'CONNECT_TIMEOUT',
-      }),
-      'code=CONNECT_TIMEOUT kind=timeout',
     ],
     [
       Object.assign(new Error('postgresql://u:secret@h'), { code: 'not a code' }),
@@ -306,22 +365,14 @@ describe('a malformed database URL', () => {
 
 describe('an unexpected error', () => {
   it('is answered as JSON and logged by type only', async () => {
-    mockAuthServer(Response.json({ id: USER_ID }));
+    // A failure no handler catches: the sign-in service answers with text, not JSON, and
+    // the parse error's message quotes that text.
+    mockAuthServer(new Response('synthetic-leak-check', { status: 200 }));
     const errors: unknown[] = [];
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(...args);
     });
-    // A failure no handler catches: disconnecting throws an error that carries a secret.
-    const leaky = fakeDatabase();
-    leaky.close.mockRejectedValueOnce(
-      Object.assign(new Error('synthetic-leak-check'), { input: 'synthetic-leak-check' }),
-    );
-    const failing = createApp(() => leaky);
-    const res = await failing.request(
-      '/api/v1/me',
-      { headers: { Authorization: `Bearer ${token({ sub: USER_ID, aal: 'aal2' })}` } },
-      ENV,
-    );
+    const res = await get('/api/v1/me', `Bearer ${token({ sub: USER_ID, aal: 'aal2' })}`);
     vi.restoreAllMocks();
 
     expect(res.status).toBe(500);
@@ -330,6 +381,8 @@ describe('an unexpected error', () => {
       error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' },
     });
     expect(body).not.toContain('synthetic-leak-check');
-    expect(errors).toEqual([`Unhandled Error in request ${res.headers.get('x-request-id') ?? ''}`]);
+    expect(errors).toEqual([
+      `Unhandled SyntaxError in request ${res.headers.get('x-request-id') ?? ''}`,
+    ]);
   });
 });
