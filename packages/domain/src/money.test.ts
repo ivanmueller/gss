@@ -135,3 +135,69 @@ describe('roundMoney', () => {
     expect(roundMoney('42.5', 0)).toBe('43');
   });
 });
+
+describe('calculated amounts', () => {
+  // Reference arithmetic in BigInt: an amount as an integer number of 10^-24 units.
+  const SCALE = 24;
+  function big(text: string): bigint {
+    const negative = text.startsWith('-');
+    const [whole = '0', fraction = ''] = (negative ? text.slice(1) : text).split('.');
+    const units = BigInt(whole + fraction.padEnd(SCALE, '0'));
+    return negative ? -units : units;
+  }
+
+  it('rounds, compares and subtracts a converted amount with more than 12 decimal places', () => {
+    // Codex's failing input: valid quoted values whose product has 13 decimal places.
+    const converted = toCad(usd('725.0000000'), '1.360000');
+    expect(converted).toMatchObject({ status: 'ok', amount: '986.0000000000000' });
+    const amount = converted.status === 'ok' ? converted.amount : '';
+    expect(roundMoney(amount)).toBe('986.00');
+    expect(compareDecimal(amount, '986.00')).toBe(0);
+    expect(compareDecimal(amount, '986.0000000000001')).toBeLessThan(0);
+    expect(grossSpread(cad(amount), cad('805.00'))).toEqual({
+      status: 'ok',
+      amount: '181.0000000000000',
+      currency: 'CAD',
+      unit: 'MT',
+    });
+  });
+
+  it.each([
+    ['999999999999999999.999999999999', '999999999999999999.999999999999'],
+    ['-999999999999999999.999999999999', '0.000000000001'],
+    ['123456789012345678.123456789012', '1.360000000001'],
+    ['0.000000000001', '0.000000000001'],
+  ])('converts USD %s at %s and takes spreads exactly, at the edges', (usdAmount, rate) => {
+    const converted = toCad(usd(usdAmount), rate);
+    if (converted.status !== 'ok') throw new Error('expected a conversion');
+    // The product is exact: 24 decimal places at most, checked against BigInt.
+    expect(big(converted.amount)).toBe((big(usdAmount) * big(rate)) / 10n ** BigInt(SCALE));
+
+    // A spread between two converted amounts is exact too, and can be rounded.
+    const other = toCad(usd('-0.000000000001'), '999999999999999999.999999999999');
+    if (other.status !== 'ok') throw new Error('expected a conversion');
+    const spread = grossSpread(cad(converted.amount), cad(other.amount));
+    if (spread.status !== 'ok') throw new Error('expected a spread');
+    expect(big(spread.amount)).toBe(big(converted.amount) - big(other.amount));
+    expect(roundMoney(spread.amount)).toMatch(/^-?\d+\.\d{2}$/);
+    expect(Math.sign(compareDecimal(converted.amount, other.amount))).toBe(
+      Math.sign(Number(big(converted.amount) - big(other.amount))),
+    );
+  });
+
+  it('still limits quoted values to 18 integer and 12 decimal places', () => {
+    expect(() => toCad(usd('725.0000000000001'), '1.36')).toThrow(/Not a decimal amount/);
+    expect(() => toCad(usd('1234567890123456789'), '1.36')).toThrow(/Not a decimal amount/);
+    expect(() => toCad(usd('725.00'), '1.3600000000001')).toThrow(/Not a decimal amount/);
+  });
+
+  it('refuses amounts beyond the calculated range', () => {
+    const tooPrecise = `1.${'0'.repeat(24)}1`;
+    const tooLarge = '1'.repeat(41);
+    for (const text of [tooPrecise, tooLarge, '1e3', '']) {
+      expect(() => roundMoney(text)).toThrow(/Not a decimal amount/);
+      expect(() => compareDecimal(text, '0')).toThrow(/Not a decimal amount/);
+      expect(() => grossSpread(cad(text), cad('0'))).toThrow(/Not a decimal amount/);
+    }
+  });
+});

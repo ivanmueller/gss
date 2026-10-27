@@ -1,9 +1,17 @@
 import { Decimal } from 'decimal.js';
 
-// Money arithmetic for prices quoted as decimal strings. Uses decimal.js, never JavaScript
-// floating point (docs/TRADING_RULES.md §5.3), with enough precision that subtraction of
-// any accepted amount is exact.
-const Exact = Decimal.clone({ precision: 64, rounding: Decimal.ROUND_HALF_EVEN });
+// Money arithmetic on decimal strings. Uses decimal.js, never JavaScript floating point
+// (docs/TRADING_RULES.md §5.3).
+//
+// Two ranges of input:
+// - Quoted values, prices and rates as people enter them: up to 18 integer and 12 fraction
+//   digits. toCad multiplies two of them, so its result has at most 36 integer and 24
+//   fraction digits.
+// - Amounts, anything compared, subtracted or rounded here, quoted or calculated: up to 40
+//   integer and 24 fraction digits, which holds every toCad result and the difference of two.
+// At 128 significant digits, a product of two quoted values (60 digits at most) and a
+// difference of two amounts (65) are always exact.
+const Exact = Decimal.clone({ precision: 128, rounding: Decimal.ROUND_HALF_EVEN });
 
 /** A price as quoted: a decimal string ("725.00"), its currency and its unit. */
 export interface QuotedPrice {
@@ -12,14 +20,20 @@ export interface QuotedPrice {
   unit: string;
 }
 
-// A plain decimal: optional minus, up to 18 integer and 12 fraction digits, no exponent,
-// no thousands separators, no spaces.
-const DECIMAL = /^-?\d{1,18}(?:\.\d{1,12})?$/;
+// Plain decimals: an optional minus, digits, an optional fraction; no exponent, no thousands
+// separators, no spaces.
+const QUOTED = /^-?\d{1,18}(?:\.\d{1,12})?$/;
+const AMOUNT = /^-?\d{1,40}(?:\.\d{1,24})?$/;
 
-function decimal(text: string): Decimal {
-  if (!DECIMAL.test(text)) throw new Error(`Not a decimal amount: "${text}"`);
+function parse(text: string, pattern: RegExp): Decimal {
+  if (!pattern.test(text)) throw new Error(`Not a decimal amount: "${text}"`);
   return new Exact(text);
 }
+
+/** A price or rate as entered. */
+const quoted = (text: string) => parse(text, QUOTED);
+/** A quoted or calculated amount. */
+const amount = (text: string) => parse(text, AMOUNT);
 
 /** Decimal places as written: "790.00" has 2 (decimal.js would count 0). */
 function places(text: string): number {
@@ -28,7 +42,7 @@ function places(text: string): number {
 
 /** Compares two decimal amounts exactly: negative if a < b, 0 if equal, positive if a > b. */
 export function compareDecimal(a: string, b: string): number {
-  return decimal(a).comparedTo(decimal(b));
+  return amount(a).comparedTo(amount(b));
 }
 
 export type SpreadBlocked = 'CURRENCY_MISMATCH' | 'UNIT_MISMATCH';
@@ -48,8 +62,8 @@ export type GrossSpread =
 export function grossSpread(bid: QuotedPrice, offer: QuotedPrice): GrossSpread {
   if (bid.currency !== offer.currency) return { status: 'blocked', reason: 'CURRENCY_MISMATCH' };
   if (bid.unit !== offer.unit) return { status: 'blocked', reason: 'UNIT_MISMATCH' };
-  const bidAmount = decimal(bid.amount);
-  const offerAmount = decimal(offer.amount);
+  const bidAmount = amount(bid.amount);
+  const offerAmount = amount(offer.amount);
   const difference = bidAmount.minus(offerAmount);
   return {
     status: 'ok',
@@ -82,7 +96,7 @@ export type CadConversion =
  */
 export function toCad(price: QuotedPrice, cadPerUsd: string | null): CadConversion {
   if (price.currency === 'CAD') {
-    decimal(price.amount);
+    quoted(price.amount);
     return {
       status: 'ok',
       amount: price.amount,
@@ -93,10 +107,10 @@ export function toCad(price: QuotedPrice, cadPerUsd: string | null): CadConversi
   }
   if (price.currency !== 'USD') return { status: 'blocked', reason: 'CURRENCY_UNSUPPORTED' };
   if (cadPerUsd === null) return { status: 'blocked', reason: 'FX_MISSING' };
-  const rate = decimal(cadPerUsd);
+  const rate = quoted(cadPerUsd);
   if (!rate.isPositive() || rate.isZero()) throw new Error(`Not an FX rate: "${cadPerUsd}"`);
   // Exact: the product has at most the sum of both decimal places.
-  const product = decimal(price.amount).times(rate);
+  const product = quoted(price.amount).times(rate);
   return {
     status: 'ok',
     amount: (product.isZero() ? new Exact(0) : product).toFixed(
@@ -113,7 +127,7 @@ export function toCad(price: QuotedPrice, cadPerUsd: string | null): CadConversi
  * Only at that boundary: sums, comparisons and spreads use the unrounded amounts
  * (docs/TRADING_RULES.md §5.3).
  */
-export function roundMoney(amount: string, decimalPlaces = 2): string {
-  const rounded = decimal(amount).toDecimalPlaces(decimalPlaces, Decimal.ROUND_HALF_UP);
+export function roundMoney(value: string, decimalPlaces = 2): string {
+  const rounded = amount(value).toDecimalPlaces(decimalPlaces, Decimal.ROUND_HALF_UP);
   return (rounded.isZero() ? new Exact(0) : rounded).toFixed(decimalPlaces);
 }

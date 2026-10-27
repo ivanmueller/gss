@@ -18,8 +18,18 @@ describe('formatPrice', () => {
     expect(formatPrice({ amount: '0.10', currency: 'CAD', unit: 'MT' })).toBe('CAD 0.10/MT');
   });
 
+  it('shows a negative amount (a basis quote) with a true minus sign, and zero unsigned', () => {
+    expect(formatPrice({ amount: '-17.00', currency: 'CAD', unit: 'MT' })).toBe(
+      'CAD \u221217.00/MT',
+    );
+    expect(formatPrice({ amount: '-12.50', currency: 'USD', unit: 'MT' })).toBe(
+      'USD \u221212.50/MT',
+    );
+    expect(formatPrice({ amount: '-0.00', currency: 'CAD', unit: 'MT' })).toBe('CAD 0.00/MT');
+  });
+
   it('rejects amounts that are not decimal strings', () => {
-    for (const amount of ['', '7.25e2', '-1.00', '1,000.00', 'NaN', ' 1.00']) {
+    for (const amount of ['', '7.25e2', '+1.00', '--1.00', '-', '1,000.00', 'NaN', ' 1.00']) {
       expect(() => formatPrice({ amount, currency: 'USD', unit: 'MT' })).toThrow(/decimal/);
     }
   });
