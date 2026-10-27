@@ -56,7 +56,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # Public values, the same as env.staging.vars in apps/api/wrangler.jsonc.
       - run: pnpm build
+        env:
+          VITE_SUPABASE_URL: https://nfwizbcpjpqxdoojfbdr.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_4gRcidcCPr7dsdATHL57nQ_QNY0SNAc
       # Migrations go first so the Worker never runs against an older schema.
       - uses: supabase/setup-cli@v1
         if: needs.preflight.outputs.database == 'true'
@@ -95,8 +99,11 @@ jobs:
           [[ "$page" == *'<div id="root"></div>'* ]] || { echo "::error::/ did not return the web app."; exit 1; }
           echo "/ -> web app"
 
-          # Unknown API paths must reach the Worker (404), not fall back to the web app.
-          status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate' "$URL/api/v1/does-not-exist")
-          echo "/api/v1/does-not-exist -> $status"
-          test "$status" = 404
+          # API paths other than /health must reach the Worker and require sign-in (401),
+          # never fall back to the web app.
+          for path in /api/v1/me /api/v1/does-not-exist; do
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              -H 'Accept: text/html' -H 'Sec-Fetch-Mode: navigate' "$URL$path")
+            echo "$path (no sign-in) -> $status"
+            test "$status" = 401
+          done

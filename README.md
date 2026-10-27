@@ -28,7 +28,11 @@ pnpm preview:staging            # build, then serve web + API together as on sta
 pnpm e2e                        # build, then run the Playwright browser tests (desktop and phone)
 ```
 
-`pnpm e2e` needs Chromium for Playwright 1.63.0: run `pnpm --filter @grain/e2e exec playwright install chromium` once.
+`pnpm e2e` needs Chromium for Playwright 1.63.0 (`pnpm --filter @grain/e2e exec playwright install chromium`, once) and a local Supabase with its sign-in service: `supabase start`, then set the variables listed in `.env.example` from `supabase status -o env` and write `apps/api/.dev.vars.staging`. CI does exactly this in `.github/workflows/ci.yml`.
+
+## Sign-in
+
+Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up: an administrator adds each user in the Supabase dashboard. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
 
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
 

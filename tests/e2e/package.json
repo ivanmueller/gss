@@ -9,6 +9,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
+    "otplib": "^13.5.0",
     "typescript": "~6.0.3"
   }
 }
