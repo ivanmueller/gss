@@ -29,8 +29,9 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
   await page.getByLabel(/6-digit code/).fill(await generate({ secret }));
   await page.getByRole('button', { name: 'Confirm and continue' }).click();
 
-  // The email and organization in the header come from the API's /me, so this proves
-  // the whole chain: Supabase session at aal2 → Worker → Postgres as app_api → RLS.
+  // The email and organization in the header come from the API's /me: the Supabase session
+  // at aal2 reached the Worker, which read Postgres as app_api. Isolation between users and
+  // organizations is tested in supabase/tests, the API database tests and counterparties.spec.ts.
   await expect(page.getByText(E2E_USER.email)).toBeVisible();
   await expect(page.getByText(E2E_ORG_NAME)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();

@@ -27,6 +27,20 @@ API prefix: `/api/v1`. JSON request/response with consistent envelope and UTC IS
 | `GET /api/v1/scenarios/{id}/export.csv` | Export authorized economics | Signed-in |
 | `GET /api/v1/audit` | Approved audit history | Admin |
 
+### Implemented so far
+
+| Method/path | Notes |
+|---|---|
+| `GET /api/v1/health` | Public liveness probe. |
+| `GET /api/v1/me` | The verified user and their active organizations with roles. |
+| `GET /api/v1/counterparties?organization_id=` | Counterparties visible to the user (up to 5,000, with `truncated`), with contact and location counts, regions and logo checksum. |
+| `GET /api/v1/counterparties/{id}` | One counterparty with contacts and facilities; 404 when missing or in another organization. |
+| `GET /api/v1/counterparties/{id}/logo` | The PNG logo (`image/png`, `nosniff`, sandboxing CSP, ETag). |
+| `PUT /api/v1/counterparties/{id}/logo` | Body: the PNG itself (`Content-Type: image/png`, at most 512 KB). Operations/Admin. |
+| `POST /api/v1/counterparties/import` | Body: `organizationId`, `fileName`, `commit`, `rows` (`line` plus values keyed by field; see `packages/domain/src/directory.ts`). `commit: false` returns the review without writing; `commit: true` creates the new counterparties in one transaction (201), or answers 422 when a row has problems, 409 `NOTHING_TO_IMPORT` or `ALREADY_IMPORTED`. Operations/Admin. |
+
+Every response has an `X-Request-Id` header; writes record it in the audit trail. `POST /api/v1/counterparties` (create one) is replaced for now by an import of one row.
+
 ### Example calculation request
 
 ```json

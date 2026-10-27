@@ -1,47 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Database } from './db';
+import { postgresDatabase, type Database } from './db';
 import { createApp } from './index';
-
-const ENV = {
-  SUPABASE_URL: 'https://example-project.supabase.co/',
-  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
-  DATABASE_URL: 'postgresql://app_api.ref:secret@db.example.test:6543/postgres',
-};
-const USER_ID = '00000000-0000-4000-8000-00000000a11c';
-
-function fakeDatabase(): Database & {
-  memberships: ReturnType<typeof vi.fn<Database['memberships']>>;
-  close: ReturnType<typeof vi.fn<Database['close']>>;
-} {
-  return {
-    memberships: vi.fn<Database['memberships']>(() =>
-      Promise.resolve([
-        { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'trader' },
-      ]),
-    ),
-    close: vi.fn<Database['close']>(() => Promise.resolve()),
-  };
-}
+import { ENV, fakeDatabase, mockAuthServer, token, USER_ID } from './testing/helpers';
 
 let db = fakeDatabase();
 const openDatabase = vi.fn<(url: string) => Database>(() => db);
 const app = createApp(openDatabase);
-
-/** An unsigned token with the given claims; only Supabase Auth (mocked here) judges validity. */
-function token(claims: Record<string, unknown>): string {
-  const part = (value: unknown) =>
-    btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `${part({ alg: 'ES256', typ: 'JWT' })}.${part(claims)}.signature`;
-}
-
-function mockAuthServer(response: Response | Error) {
-  const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(() =>
-    response instanceof Error ? Promise.reject(response) : Promise.resolve(response),
-  );
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
-}
 
 function get(path: string, authorization?: string) {
   const headers: Record<string, string> = authorization ? { Authorization: authorization } : {};
@@ -134,12 +99,55 @@ describe('GET /api/v1/me', () => {
 
   it('fails closed and still disconnects when the database errors', async () => {
     mockAuthServer(Response.json({ id: USER_ID }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     db.memberships.mockRejectedValueOnce(new Error('connection refused'));
     const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
 
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
     expect(db.close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      Object.assign(new Error('password authentication failed for user "app_api"'), {
+        code: '28P01',
+      }),
+      'code=28P01 kind=authentication',
+    ],
+    [
+      Object.assign(new Error('Tenant or user not found'), { code: 'XX000' }),
+      'code=XX000 kind=unknown_user',
+    ],
+    [
+      new Error('TLS handshake failed: invalid peer certificate: UnknownIssuer'),
+      'code=none kind=tls',
+    ],
+    [
+      Object.assign(new Error('write CONNECT_TIMEOUT db.example.test:6543'), {
+        code: 'CONNECT_TIMEOUT',
+      }),
+      'code=CONNECT_TIMEOUT kind=timeout',
+    ],
+    [
+      Object.assign(new Error('postgresql://u:secret@h'), { code: 'not a code' }),
+      'code=none kind=other',
+    ],
+  ])('logs why the database failed, without the message (%s)', async (error, summary) => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const logged: unknown[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(...args);
+    });
+    db.memberships.mockRejectedValueOnce(error);
+    const res = await get('/api/v1/me', `Bearer ${valid}`);
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(503);
+    expect(logged).toEqual([
+      `Database unavailable in request ${res.headers.get('x-request-id') ?? ''}: ${summary}`,
+    ]);
   });
 
   it('rejects a request without a token', async () => {
@@ -232,5 +240,66 @@ describe('unknown routes', () => {
 
   it('outside /api/v1 are not served by the API', async () => {
     expect((await get('/health')).status).toBe(404);
+  });
+});
+
+describe('a malformed database URL', () => {
+  it('answers MISCONFIGURED without logging or returning the URL', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const logged: unknown[] = [];
+    for (const method of ['error', 'warn', 'log', 'info'] as const) {
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        logged.push(...args);
+      });
+    }
+    const real = createApp(postgresDatabase);
+    const res = await real.request(
+      '/api/v1/me',
+      { headers: { Authorization: `Bearer ${token({ sub: USER_ID, aal: 'aal2' })}` } },
+      {
+        ...ENV,
+        DATABASE_URL: 'postgresql://app_api:synthetic-leak-check@[not-a-host:6543/postgres',
+      },
+    );
+    const body = await res.text();
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(500);
+    expect(JSON.parse(body)).toMatchObject({ error: { code: 'MISCONFIGURED' } });
+    expect(body).not.toContain('synthetic-leak-check');
+    expect(JSON.stringify(logged, Object.getOwnPropertyNames(new Error()))).not.toContain(
+      'synthetic-leak-check',
+    );
+    expect(logged.map(String).join(' ')).not.toContain('synthetic-leak-check');
+  });
+});
+
+describe('an unexpected error', () => {
+  it('is answered as JSON and logged by type only', async () => {
+    mockAuthServer(Response.json({ id: USER_ID }));
+    const errors: unknown[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(...args);
+    });
+    // A failure no handler catches: disconnecting throws an error that carries a secret.
+    const leaky = fakeDatabase();
+    leaky.close.mockRejectedValueOnce(
+      Object.assign(new Error('synthetic-leak-check'), { input: 'synthetic-leak-check' }),
+    );
+    const failing = createApp(() => leaky);
+    const res = await failing.request(
+      '/api/v1/me',
+      { headers: { Authorization: `Bearer ${token({ sub: USER_ID, aal: 'aal2' })}` } },
+      ENV,
+    );
+    vi.restoreAllMocks();
+
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(JSON.parse(body)).toEqual({
+      error: { code: 'INTERNAL_ERROR', message: 'Something went wrong.' },
+    });
+    expect(body).not.toContain('synthetic-leak-check');
+    expect(errors).toEqual([`Unhandled Error in request ${res.headers.get('x-request-id') ?? ''}`]);
   });
 });

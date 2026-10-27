@@ -36,6 +36,10 @@ Email and password through Supabase Auth, plus a required authenticator-app code
 
 `pnpm format` rewrites code to the Prettier style. Markdown is not reformatted, so the specification pack stays as delivered.
 
+## Counterparties
+
+Signed-in members see their organization's counterparties under **Counterparties**, as a table or by logo. Operations and admin members can import a CSV spreadsheet (in Excel: Save As → "CSV UTF-8 (Comma delimited)"), match its columns, review the result and import; companies already in the list are skipped. They can also upload a PNG logo (up to 512 KB) on a counterparty's page. Real records go only into the database, never into Git.
+
 ## Staging deploy
 
 Each merge to `main` runs `.github/workflows/deploy-staging.yml`: it repeats `pnpm check`, builds the web app, deploys `apps/api` with `wrangler deploy --env staging` to `https://grain-trading-api-staging.<subdomain>.workers.dev` (the Worker serves `apps/web/dist` alongside the API), and checks `/api/v1/health`, the web page at `/`, and that unknown `/api/*` paths return 404. Until the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` exist, it skips with a notice. Staging holds synthetic data only.
@@ -53,10 +57,10 @@ Application tables live in the private `app` schema, which the Supabase Data API
 ## Layout
 
 ```
-apps/api/            Hono API on Cloudflare Workers (health endpoint only); serves apps/web on staging
-apps/web/            React + Vite + Tailwind web app shell (synthetic data only)
+apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties); serves apps/web on staging
+apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory)
 tests/e2e/           Playwright browser tests against the staging Worker config
-packages/            shared packages (domain, trading-engine, database) — none yet
+packages/domain/     shared validation used by web and API (counterparty import rows, PNG check, regions)
 supabase/            database migrations, pgTAP tests and local CLI config
 docs/                specification sections, AI coding system, decisions, handoff, changelog
 .github/             CI workflow, Dependabot, issue and PR templates

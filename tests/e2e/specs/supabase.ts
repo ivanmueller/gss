@@ -10,6 +10,13 @@ export const E2E_USER = {
   password: 'synthetic-e2e-password-1',
 };
 export const E2E_ORG_NAME = 'Synthetic E2E Org';
+/** An organization the e2e user does not belong to, with one counterparty. */
+export const OTHER_ORG = {
+  id: '00000000-0000-4000-8000-0000000e2e0b',
+  name: 'Synthetic Other E2E Org',
+  counterpartyId: '00000000-0000-4000-8000-0000000e2ec0',
+  counterpartyName: 'Synthetic Other Org Buyer',
+};
 
 export function env(name: string): string {
   const value = process.env[name];
@@ -30,10 +37,22 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
   const url = env('E2E_SUPABASE_URL');
   const sql = postgres(env('E2E_DATABASE_URL'), { max: 1, onnotice: () => undefined });
   try {
-    // App tables reference auth.users, so remove the previous run's rows first.
+    // App tables reference auth.users and the organization, so remove the previous
+    // run's rows first. Deletes are audited, so the audit trail goes after the records.
+    for (const table of [
+      'counterparty_logos',
+      'facilities',
+      'counterparty_contacts',
+      'counterparties',
+      'import_batches',
+      'audit_events',
+    ]) {
+      await sql`delete from ${sql(`app.${table}`)} where organization_id in
+        (select id from app.organizations where display_name in (${E2E_ORG_NAME}, ${OTHER_ORG.name}))`;
+    }
     await sql`delete from app.organization_members
       where user_id in (select id from auth.users where email = ${E2E_USER.email})`;
-    await sql`delete from app.organizations where display_name = ${E2E_ORG_NAME}`;
+    await sql`delete from app.organizations where display_name in (${E2E_ORG_NAME}, ${OTHER_ORG.name})`;
     await recreateAuthUser(request, url);
     await sql`with org as (
         insert into app.organizations (display_name) values (${E2E_ORG_NAME}) returning id
@@ -41,6 +60,11 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
       insert into app.organization_members (organization_id, user_id, role, status, joined_at)
       select org.id, u.id, 'org_admin', 'active', now()
       from org, auth.users u where u.email = ${E2E_USER.email}`;
+    // Another tenant's record, created outside the API, that the e2e user must never see.
+    await sql`insert into app.organizations (id, display_name) values (${OTHER_ORG.id}, ${OTHER_ORG.name})`;
+    await sql`insert into app.counterparties (id, organization_id, legal_name, primary_country, source, created_by)
+      select ${OTHER_ORG.counterpartyId}, ${OTHER_ORG.id}, ${OTHER_ORG.counterpartyName}, 'US', 'manual', u.id
+      from auth.users u where u.email = ${E2E_USER.email}`;
   } finally {
     await sql.end();
   }

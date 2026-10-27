@@ -1,5 +1,6 @@
 import { Wheat } from 'lucide-react';
 
+import { Link } from '../lib/router';
 import type { ApiHealth } from '../lib/useApiHealth';
 import type { MeState } from '../lib/useMe';
 import { cn } from '../lib/utils';
@@ -19,17 +20,45 @@ export interface HeaderUser {
   onSignOut: () => void;
 }
 
-export function AppHeader({ health, user }: { health: ApiHealth; user?: HeaderUser }) {
+const NAV = [
+  { id: 'workspace', href: '/', label: 'Workspace' },
+  { id: 'counterparties', href: '/counterparties', label: 'Counterparties' },
+] as const;
+
+export function AppHeader({
+  health,
+  user,
+  current = null,
+}: {
+  health: ApiHealth;
+  user?: HeaderUser;
+  current?: (typeof NAV)[number]['id'] | null;
+}) {
   const { text, dot } = HEALTH[health];
   return (
     <header className="border-b bg-card">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-        <div className="flex items-center gap-2">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <Wheat aria-hidden="true" className="size-6 text-primary" />
           <div>
             <h1 className="text-base leading-tight font-semibold">Grain Trading Workspace</h1>
             <p className="text-xs text-muted-foreground">Canada–U.S. physical grain · demo shell</p>
           </div>
+          <nav aria-label="Main" className="flex items-center gap-1 text-sm sm:ml-4">
+            {NAV.map((item) => (
+              <Link
+                key={item.id}
+                href={item.href}
+                aria-current={current === item.id ? 'page' : undefined}
+                className={cn(
+                  'rounded-md px-2 py-1 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  current === item.id && 'bg-muted font-medium',
+                )}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
           <p
