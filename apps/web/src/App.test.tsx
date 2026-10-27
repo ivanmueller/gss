@@ -146,7 +146,11 @@ describe('signed-in user', () => {
     const fetchMock = vi.fn((url: string) =>
       Promise.resolve(
         url === '/api/v1/me'
-          ? Response.json({ id: 'user-1', email: 'alice@example.test' })
+          ? Response.json({
+              id: 'user-1',
+              email: 'alice@example.test',
+              organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
+            })
           : Response.json({ status: 'ok', service: 'api' }),
       ),
     );
@@ -156,6 +160,7 @@ describe('signed-in user', () => {
     render(<App account={{ email: 'session@example.test', accessToken: 'token-1', signOut }} />);
 
     expect(await screen.findByText('alice@example.test')).toBeInTheDocument();
+    expect(screen.getByText(/Synthetic Org A/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/me', {
       headers: { Authorization: 'Bearer token-1' },
       signal: expect.any(AbortSignal) as AbortSignal,
@@ -163,6 +168,24 @@ describe('signed-in user', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('says when the user has no organization yet', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url === '/api/v1/me'
+            ? Response.json({ id: 'user-1', email: 'alice@example.test', organizations: [] })
+            : Response.json({ status: 'ok', service: 'api' }),
+        ),
+      ),
+    );
+    render(
+      <App account={{ email: 'alice@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+
+    expect(await screen.findByText(/no organization yet/)).toBeInTheDocument();
   });
 
   it('warns when the API rejects the session', async () => {

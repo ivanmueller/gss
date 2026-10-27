@@ -3,6 +3,8 @@
   "name": "grain-trading-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  // postgres.js (the database driver) needs Node.js APIs such as Buffer.
+  "compatibility_flags": ["nodejs_compat"],
   // CI runs `wrangler deploy --env staging`, which publishes grain-trading-api-staging
   // on workers.dev. The top-level config is for local `wrangler dev` of the API alone;
   // production gets its own environment and an approval-gated workflow later.

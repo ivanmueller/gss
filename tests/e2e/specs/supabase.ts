@@ -1,4 +1,5 @@
 import type { APIRequestContext } from '@playwright/test';
+import postgres from 'postgres';
 
 /** Where the setup project saves the signed-in session for the other projects. */
 export const AUTH_STATE = 'playwright/.auth/user.json';
@@ -8,6 +9,7 @@ export const E2E_USER = {
   email: 'e2e-trader@example.test',
   password: 'synthetic-e2e-password-1',
 };
+export const E2E_ORG_NAME = 'Synthetic E2E Org';
 
 export function env(name: string): string {
   const value = process.env[name];
@@ -20,9 +22,31 @@ function adminHeaders() {
   return { apikey: key, Authorization: `Bearer ${key}` };
 }
 
-/** Deletes any previous copy of the synthetic user, then creates it fresh. */
+/**
+ * Deletes any previous copy of the synthetic user, then creates it fresh as the active
+ * admin of a synthetic organization.
+ */
 export async function recreateE2eUser(request: APIRequestContext): Promise<void> {
   const url = env('E2E_SUPABASE_URL');
+  const sql = postgres(env('E2E_DATABASE_URL'), { max: 1, onnotice: () => undefined });
+  try {
+    // App tables reference auth.users, so remove the previous run's rows first.
+    await sql`delete from app.organization_members
+      where user_id in (select id from auth.users where email = ${E2E_USER.email})`;
+    await sql`delete from app.organizations where display_name = ${E2E_ORG_NAME}`;
+    await recreateAuthUser(request, url);
+    await sql`with org as (
+        insert into app.organizations (display_name) values (${E2E_ORG_NAME}) returning id
+      )
+      insert into app.organization_members (organization_id, user_id, role, status, joined_at)
+      select org.id, u.id, 'org_admin', 'active', now()
+      from org, auth.users u where u.email = ${E2E_USER.email}`;
+  } finally {
+    await sql.end();
+  }
+}
+
+async function recreateAuthUser(request: APIRequestContext, url: string): Promise<void> {
   const list = await request.get(`${url}/auth/v1/admin/users?per_page=1000`, {
     headers: adminHeaders(),
   });

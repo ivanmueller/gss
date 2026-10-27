@@ -48,7 +48,7 @@ Supabase Postgres. Migrations live in `supabase/migrations/` and pgTAP tests in 
 - **Staging:** after a merge, the Deploy staging workflow runs `supabase db push` against the hosted `gss-staging` project (ref `nfwizbcpjpqxdoojfbdr`). It skips with a notice until the `SUPABASE_STAGING_DB_URL` repository secret exists.
 - **Locally (optional):** with Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development), run `supabase db start` then `supabase test db`.
 
-Application tables live in the private `app` schema, which the Supabase Data API does not expose; the API Worker will reach them as the least-privilege `app_api` role (`docs/DECISIONS.md`).
+Application tables live in the private `app` schema, which the Supabase Data API does not expose; the API Worker reaches them as the least-privilege `app_api` role (`docs/DECISIONS.md`). The Worker's `DATABASE_URL` secret (Cloudflare dashboard → the Worker → Settings → Variables and Secrets) holds the `app_api` transaction-pooler URL; locally it goes in `apps/api/.dev.vars.staging`. `pnpm --filter @grain/api test:db` runs the API's database code as `app_api` against a database with the migrations applied (`API_TEST_ADMIN_DATABASE_URL`, `API_TEST_DATABASE_URL`).
 
 ## Layout
 

@@ -1,7 +1,7 @@
 import { expect, test as setup } from '@playwright/test';
 import { generate } from 'otplib';
 
-import { AUTH_STATE, E2E_USER, recreateE2eUser } from './supabase';
+import { AUTH_STATE, E2E_ORG_NAME, E2E_USER, recreateE2eUser } from './supabase';
 
 setup('signs in with password and sets up the authenticator', async ({ page, request }) => {
   await recreateE2eUser(request);
@@ -29,9 +29,10 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
   await page.getByLabel(/6-digit code/).fill(await generate({ secret }));
   await page.getByRole('button', { name: 'Confirm and continue' }).click();
 
-  // The email in the header comes from the API's /me, so this also proves the
-  // Worker accepted the session at assurance level aal2.
+  // The email and organization in the header come from the API's /me, so this proves
+  // the whole chain: Supabase session at aal2 → Worker → Postgres as app_api → RLS.
   await expect(page.getByText(E2E_USER.email)).toBeVisible();
+  await expect(page.getByText(E2E_ORG_NAME)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Grain Trading Workspace' })).toBeVisible();
 
   await page.context().storageState({ path: AUTH_STATE });
