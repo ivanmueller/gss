@@ -97,7 +97,7 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 
 Desktop: top commodity/date filters; 55–65% interactive map and 35–45% right-hand selection/quote inspector; bottom or alternate full-width opportunities table. At narrower widths, map and table become tabs, with an accessible list alternative. Map pins differentiate supplier offers and buyer bids; no map pin implies an executable current quote just because a facility exists.
 
-Implemented (owner's request, on synthetic data until bids and offers exist): a commodity picker (one, several or all) and a sellers/buyers filter above a Mapbox map that fills the centre of the page; an order book floating on the map's right side from 1,280 px (below the map from 1,024 px); the facility table below. The order book shows, per commodity and grade, the live offers and bids side by side, best first, with quoted and valid-until times, status and quantity, and the gross spread (best bid minus best offer) per currency. CAD and USD quotes are not compared until an FX rate exists, and expired or past-due quotes are listed apart. Picking a pin, a row or an order-book entry selects the facility everywhere and shows its details at the top of the order book. Phones get Map, Order book and Facilities tabs.
+Implemented (owner's request, on synthetic data until bids and offers exist): a commodity picker (one, several or all) and a sellers/buyers filter above a Mapbox map that fills the centre of the page; an order book flush against the map's right side from 1,280 px, with an arrow tab that slides it away and back (below the map from 1,024 px); the facility table below. The order book shows, per commodity and grade, the live asks (sellers, left) and bids (buyers, right), best first, all in CAD, each with its status and quantity, and the gross spread (best bid minus best ask). USD quotes are converted at a CAD/USD rate (for now the golden fixture's synthetic 1.360000, labelled) and keep their original price and the rate, shown on selection; without a rate they are listed apart, never priced at zero. Expired or past-due quotes are listed apart. Quoted and valid-until times are in the selection details and the table rather than the book. Picking a pin, a row or an order-book entry selects the facility everywhere and shows its details at the top of the order book. Phones get Map, Order book and Facilities tabs.
 
 ### App frame (implemented)
 
@@ -106,7 +106,8 @@ A menu down the left side (the GSS logo slot and name at the top, then the pages
 ### Interface conventions
 
 - Buyer bid vs seller offer must use **words and icons in addition to color**.
-- Quote timestamp and `valid_until` appear adjacent to every price.
+- Quote timestamp and `valid_until` appear adjacent to every price. Exception (owner's decision, 2026-10-27, `docs/DECISIONS.md`): the workspace order book leaves them out to stay compact; they are one click away in the selection details and shown in the facility table.
+- A price converted to CAD shows that it was converted, and the original price and rate stay one click (or hover) away.
 - Monetary figures always display currency and unit, e.g., `USD 725.00/MT`, never `725` alone.
 - Firm/indicative/expired/withdrawn states are visually distinct and accessible.
 - Highlight missing delivery terms and specification conflicts before revealing an actionable margin.

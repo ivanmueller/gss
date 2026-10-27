@@ -51,7 +51,7 @@
   --spacing: 0.25rem;
   --spacing-sidebar: 15rem;
   --spacing-topbar: 3.5rem;
-  --container-content: 80rem;
+  --container-content: 88rem;
 
   /*
    * Corner rounding. Every radius is a multiple of --radius-base, so changing that one value

@@ -1,4 +1,4 @@
-import { MapPinned } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPinned } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { CommodityPicker } from '../components/CommodityPicker';
@@ -10,21 +10,22 @@ import { SelectedFacility } from '../components/SelectedFacility';
 import { SyntheticBanner } from '../components/SyntheticBanner';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES } from '../data/synthetic';
+import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES, SYNTHETIC_FX } from '../data/synthetic';
 import type { Facility, FacilityRole } from '../data/types';
 import { mapboxToken, type MapboxToken, type MapPin } from '../lib/mapbox';
 import { buildOrderBooks } from '../lib/orderBook';
 import { useTheme } from '../lib/theme';
 import { useMediaQuery } from '../lib/useMediaQuery';
+import { cn } from '../lib/utils';
 
 // Mapbox GL JS is large, so it is fetched only when a map is shown.
 const FacilityMap = lazy(() => import('../components/FacilityMap'));
 
-// Tailwind's `lg` breakpoint; from `xl` the order book floats over the map's right side.
+// Tailwind's `lg` breakpoint; from `xl` the order book sits over the map's right side.
 const DESKTOP_QUERY = '(min-width: 1024px)';
 const OVERLAY_QUERY = '(min-width: 1280px)';
-// The floating order book's width (27rem) and gap (0.75rem), in pixels.
-const OVERLAY_WIDTH = 444;
+// The order book's width over the map (27rem), in pixels.
+const OVERLAY_WIDTH = 432;
 
 type RoleFilter = 'all' | FacilityRole;
 
@@ -34,7 +35,7 @@ const ROLES: readonly { value: RoleFilter; label: string }[] = [
   { value: 'buyer', label: 'Buyers' },
 ];
 
-/** Buyers in the bid colour, sellers in the offer colour; approximate locations hollow. */
+/** Buyers in the bid colour, sellers in the ask colour; approximate locations hollow. */
 function pinOf(facility: Facility): MapPin {
   return {
     id: facility.id,
@@ -51,7 +52,7 @@ function Legend() {
     <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
       <span className="flex items-center gap-1.5">
         <span aria-hidden="true" className={`${dot} border-offer bg-offer`} />
-        Seller offer
+        Seller ask
       </span>
       <span className="flex items-center gap-1.5">
         <span aria-hidden="true" className={`${dot} border-bid bg-bid`} />
@@ -81,8 +82,8 @@ function MapUnavailable({ refused }: { refused: boolean }) {
 
 /**
  * The trading workspace: the chosen commodities' sellers and buyers on the map, the order
- * book of their bids and offers, and the facility list. On synthetic data until bids and
- * offers are built.
+ * book of their asks and bids in CAD, and the facility list. On synthetic data, with the
+ * golden fixture's synthetic CAD/USD rate, until bids and offers are built.
  */
 export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) {
   const isDesktop = useMediaQuery(DESKTOP_QUERY, true);
@@ -103,6 +104,9 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
+  // Over the map, the order book can be tucked away to the right to see the whole map.
+  const [bookOpen, setBookOpen] = useState(true);
+  const fx = SYNTHETIC_FX;
 
   const visible = useMemo(
     () =>
@@ -115,8 +119,8 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
   );
   const pins = useMemo(() => visible.map(pinOf), [visible]);
   const books = useMemo(
-    () => buildOrderBooks(SYNTHETIC_FACILITIES, commodities, now),
-    [commodities, now],
+    () => buildOrderBooks(SYNTHETIC_FACILITIES, commodities, fx, now),
+    [commodities, fx, now],
   );
   // A facility hidden by the filters is no longer selected.
   const selected = visible.find((facility) => facility.id === selectedId) ?? null;
@@ -126,6 +130,7 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
     <SelectedFacility
       facility={selected}
       commodities={commodities}
+      fx={fx}
       now={now}
       onClose={() => {
         setSelectedId(null);
@@ -133,7 +138,8 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
     />
   );
 
-  const map: ReactNode = (
+  const floating = isDesktop && overlay;
+  const map = (over?: ReactNode) => (
     <div className="relative size-full overflow-hidden rounded-card border bg-muted shadow-xs">
       {mapbox.status === 'ok' && !refused ? (
         <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Loading map…</p>}>
@@ -144,7 +150,7 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
             pins={pins}
             selectedId={selected?.id ?? null}
             controls="top-left"
-            coveredRight={isDesktop && overlay ? OVERLAY_WIDTH : 0}
+            coveredRight={floating && bookOpen ? OVERLAY_WIDTH : 0}
             onSelect={setSelectedId}
             onTokenRefused={() => {
               setRefused(true);
@@ -154,17 +160,19 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
       ) : (
         <MapUnavailable refused={refused} />
       )}
+      {over}
     </div>
   );
 
-  const facilityProps = { facilities: visible, commodities, ...selection };
+  const facilityProps = { facilities: visible, commodities, fx, ...selection };
+  const bookProps = { books, fx, selected: selectedBlock, ...selection };
 
   return (
     <section aria-labelledby="workspace-heading" className="flex flex-col gap-4">
       <PageHeader
         id="workspace-heading"
         title="Workspace"
-        description="Sellers and buyers of the chosen commodities on the map, with their bids and offers in the order book. A demo on synthetic data until bids and offers are built."
+        description="Sellers and buyers of the chosen commodities on the map, with their asks and bids in CAD in the order book. A demo on synthetic data until bids and offers are built."
       />
       <SyntheticBanner />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -184,17 +192,51 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
         </div>
       </div>
 
-      {isDesktop ? (
+      {floating ? (
         <>
-          <div className="relative flex flex-col gap-4 xl:block xl:h-[calc(100dvh-19rem)] xl:min-h-[34rem]">
-            <div className="h-[32rem] xl:absolute xl:inset-0 xl:h-auto">{map}</div>
-            <OrderBook
-              books={books}
-              selected={selectedBlock}
-              className="max-h-[44rem] xl:absolute xl:top-3 xl:right-3 xl:bottom-3 xl:max-h-none xl:w-[27rem] xl:shadow-md"
-              {...selection}
-            />
+          <div className="h-[calc(100dvh-19rem)] min-h-[34rem]">
+            {map(
+              // Flush with the map's right edge, full height. The tab on its left edge points
+              // right to tuck the book away and left to bring it back.
+              <div
+                className={cn(
+                  'absolute inset-y-0 right-0 w-[27rem] transition-transform duration-200 motion-reduce:transition-none',
+                  !bookOpen && 'translate-x-full',
+                )}
+              >
+                <button
+                  type="button"
+                  aria-expanded={bookOpen}
+                  aria-controls="order-book"
+                  onClick={() => {
+                    setBookOpen((open) => !open);
+                  }}
+                  className="absolute top-1/2 right-full flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-l-control border border-r-0 bg-card text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                >
+                  {bookOpen ? (
+                    <ChevronRight aria-hidden="true" className="size-4" />
+                  ) : (
+                    <ChevronLeft aria-hidden="true" className="size-4" />
+                  )}
+                  <span className="sr-only">
+                    {bookOpen ? 'Hide order book' : 'Show order book'}
+                  </span>
+                </button>
+                <OrderBook
+                  id="order-book"
+                  inert={!bookOpen}
+                  className="size-full rounded-none border-0 border-l shadow-none"
+                  {...bookProps}
+                />
+              </div>,
+            )}
           </div>
+          <FacilityTable {...facilityProps} />
+        </>
+      ) : isDesktop ? (
+        <>
+          <div className="h-[32rem]">{map()}</div>
+          <OrderBook className="max-h-[44rem]" {...bookProps} />
           <FacilityTable {...facilityProps} />
         </>
       ) : (
@@ -205,13 +247,13 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
             <TabsTrigger value="list">Facilities</TabsTrigger>
           </TabsList>
           <TabsContent value="map" className="flex flex-col gap-4">
-            <div className="h-[60vh] min-h-80">{map}</div>
+            <div className="h-[60vh] min-h-80">{map()}</div>
             {selectedBlock && (
               <div className="overflow-hidden rounded-card border bg-card">{selectedBlock}</div>
             )}
           </TabsContent>
           <TabsContent value="book">
-            <OrderBook books={books} selected={selectedBlock} {...selection} />
+            <OrderBook {...bookProps} />
           </TabsContent>
           <TabsContent value="list">
             <FacilityList {...facilityProps} />

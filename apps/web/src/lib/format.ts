@@ -40,3 +40,14 @@ export function formatSignedPrice(price: { amount: string; currency: string; uni
 export function formatQuantityRange(range: { min: string; max: string }): string {
   return `${range.min}–${range.max} MT`;
 }
+
+/** "21.000" → "21", "42.500" → "42.5": a decimal string without trailing zeros, as text. */
+function trimZeros(text: string): string {
+  if (!DECIMAL.test(text)) throw new Error(`Not a decimal string: "${text}"`);
+  return text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+}
+
+/** "21–84 MT": the short form for tight spaces such as the order book. */
+export function formatQuantityShort(range: { min: string; max: string }): string {
+  return `${trimZeros(range.min)}–${trimZeros(range.max)} MT`;
+}

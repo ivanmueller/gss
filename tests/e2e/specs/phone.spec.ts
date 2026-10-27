@@ -1,8 +1,12 @@
 import { expect, test } from '@playwright/test';
 
+import { SYNTHETIC_NOW } from './synthetic';
+
 test('uses tabs for the map, order book and facilities, with no sideways scrolling', async ({
   page,
 }) => {
+  // The synthetic quotes expire in November 2026; read them at a fixed time.
+  await page.clock.setFixedTime(SYNTHETIC_NOW);
   await page.goto('/');
 
   await expect(page.getByRole('tablist', { name: 'Workspace view' })).toBeVisible();

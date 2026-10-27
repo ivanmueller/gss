@@ -1,106 +1,178 @@
 import { describe, expect, it } from 'vitest';
 
-import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES } from '../data/synthetic';
-import type { Facility, Quote } from '../data/types';
-import { buildOrderBooks, isLive, largestQuantity, type CommodityBook } from './orderBook';
+import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES, SYNTHETIC_FX } from '../data/synthetic';
+import type { Facility, FxRate, Quote } from '../data/types';
+import {
+  buildOrderBooks,
+  isLive,
+  largestQuantity,
+  type BookQuote,
+  type CommodityBook,
+  type OutOfBook,
+} from './orderBook';
 
 const NOW = new Date('2026-10-27T12:00:00Z');
 
-function book(commodity: string, now = NOW): CommodityBook {
-  const [found] = buildOrderBooks(SYNTHETIC_FACILITIES, [commodity], now);
+function book(commodity: string, fx: FxRate | null = SYNTHETIC_FX, now = NOW): CommodityBook {
+  const [found] = buildOrderBooks(SYNTHETIC_FACILITIES, [commodity], fx, now);
   if (!found) throw new Error(`no book for ${commodity}`);
   return found;
 }
 
-/** "Demo Seller F 805.00" for each quote, best first. */
-function ladder(entries: { facility: Facility; quote: Quote }[]): string[] {
-  return entries.map(({ facility, quote }) => `${facility.name} ${quote.price.amount}`);
+/** "Demo Seller F 805.00" for each quote, best first, in CAD. */
+function ladder(entries: BookQuote[]): string[] {
+  return entries.map(({ facility, cadDisplay }) => `${facility.name} ${cadDisplay}`);
+}
+
+function left(entries: OutOfBook[]): string[] {
+  return entries.map(({ facility, reason, cadDisplay }) =>
+    [facility.name, reason, cadDisplay ?? 'no CAD price'].join(' '),
+  );
+}
+
+/** One facility with one quote, for cases the synthetic data does not cover. */
+function facilityWith(name: string, quote: Partial<Quote> & Pick<Quote, 'side' | 'price'>) {
+  const base = SYNTHETIC_FACILITIES[0];
+  const template = base?.quotes[0];
+  if (!base || !template) throw new Error('fixture changed');
+  return {
+    ...base,
+    id: name,
+    name,
+    quotes: [{ ...template, status: 'firm', id: `q-${name}`, ...quote }],
+  } satisfies Facility;
 }
 
 describe('order book', () => {
-  it('compares flaxseed only within a currency, and blocks CAD against USD', () => {
+  it('puts the golden fixture USD bid in CAD at 1.36, beside the CAD asks', () => {
     const flax = book('Flaxseed');
     expect(flax.grade).toBe('No. 1 CW');
-    const [cad, usd] = flax.currencies;
-
-    expect(cad?.currency).toBe('CAD');
-    expect(ladder(cad?.offers ?? [])).toEqual(['Demo Seller F 805.00', 'Demo Seller A 820.00']);
-    expect(ladder(cad?.bids ?? [])).toEqual(['Demo Buyer G 790.00']);
-    // A negative spread is shown plainly, and is indicative because the best bid is.
-    expect(cad?.spread).toEqual({ status: 'ok', amount: '-15.00', currency: 'CAD', unit: 'MT' });
-    expect(cad?.indicative).toBe(true);
-
-    // The golden fixture's USD bid has no USD offer to compare with: no spread, never zero.
-    expect(usd?.currency).toBe('USD');
-    expect(ladder(usd?.bids ?? [])).toEqual(['Demo Buyer C 725.00']);
-    expect(usd?.spread).toEqual({ status: 'missing', side: 'offer' });
-    expect(flax.needsFx).toBe(true);
+    expect(ladder(flax.asks)).toEqual(['Demo Seller F 805.00', 'Demo Seller A 820.00']);
+    // docs/TRADING_RULES.md §5.4: USD 725.00 × 1.360000 = CAD 986.00.
+    expect(ladder(flax.bids)).toEqual(['Demo Buyer C 986.00', 'Demo Buyer G 790.00']);
+    const [converted, local] = flax.bids;
+    expect(converted?.cad).toBe('986.00000000');
+    expect(converted?.fx).toEqual(SYNTHETIC_FX);
+    expect(converted?.quote.price).toEqual({ amount: '725.00', currency: 'USD', unit: 'MT' });
+    expect(local?.fx).toBeNull();
+    // Best bid CAD 986.00 minus best ask CAD 805.00, indicative because the best bid is.
+    expect(flax.spread).toEqual({ status: 'ok', amount: '181.00', currency: 'CAD', unit: 'MT' });
+    expect(flax.indicative).toBe(true);
+    expect(flax.outOfBook).toEqual([]);
   });
 
-  it('computes a firm canola spread exactly', () => {
-    const [cad] = book('Canola').currencies;
-    expect(ladder(cad?.offers ?? [])).toEqual(['Demo Seller A 690.00', 'Demo Seller E 702.50']);
-    expect(cad?.spread).toEqual({ status: 'ok', amount: '22.00', currency: 'CAD', unit: 'MT' });
-    expect(cad?.indicative).toBe(false);
-    expect(book('Canola').needsFx).toBe(false);
+  it('computes a firm canola spread exactly, as quoted', () => {
+    const canola = book('Canola');
+    expect(ladder(canola.asks)).toEqual(['Demo Seller A 690.00', 'Demo Seller E 702.50']);
+    expect(ladder(canola.bids)).toEqual(['Demo Buyer G 712.00']);
+    expect(canola.spread).toEqual({ status: 'ok', amount: '22.00', currency: 'CAD', unit: 'MT' });
+    expect(canola.indicative).toBe(false);
   });
 
-  it('leaves expired quotes out of the book and lists them separately', () => {
+  it('ranks a converted bid among CAD bids, and lists expired quotes apart', () => {
     const peas = book('Yellow peas');
-    const [cad] = peas.currencies;
-    expect(ladder(cad?.bids ?? [])).toEqual(['Demo Buyer I 420.00']);
-    expect(cad?.spread).toEqual({ status: 'ok', amount: '25.00', currency: 'CAD', unit: 'MT' });
-    expect(ladder(peas.stale)).toEqual(['Demo Buyer I 430.00']);
+    expect(ladder(peas.asks)).toEqual(['Demo Seller E 395.00']);
+    // USD 330.00 × 1.36 = CAD 448.80, above the CAD 420.00 bid.
+    expect(ladder(peas.bids)).toEqual(['Demo Buyer H 448.80', 'Demo Buyer I 420.00']);
+    expect(peas.spread).toEqual({ status: 'ok', amount: '53.80', currency: 'CAD', unit: 'MT' });
+    expect(left(peas.outOfBook)).toEqual(['Demo Buyer I NOT_LIVE 430.00']);
   });
 
-  it('has no spread for durum when the offer and bid are in different currencies', () => {
+  it('pairs a USD durum bid with a CAD ask once converted', () => {
     const durum = book('Durum wheat');
-    expect(durum.currencies.map((c) => [c.currency, c.spread])).toEqual([
-      ['CAD', { status: 'missing', side: 'bid' }],
-      ['USD', { status: 'missing', side: 'offer' }],
+    expect(ladder(durum.asks)).toEqual(['Demo Seller F 355.00']);
+    expect(ladder(durum.bids)).toEqual(['Demo Buyer H 408.00']);
+    expect(durum.spread).toEqual({ status: 'ok', amount: '53.00', currency: 'CAD', unit: 'MT' });
+  });
+
+  it('without a rate, lists USD quotes apart instead of pricing them, never at zero', () => {
+    const flax = book('Flaxseed', null);
+    expect(ladder(flax.bids)).toEqual(['Demo Buyer G 790.00']);
+    expect(left(flax.outOfBook)).toEqual(['Demo Buyer C FX_MISSING no CAD price']);
+    // Only CAD quotes left: a negative spread, shown plainly.
+    expect(flax.spread).toEqual({ status: 'ok', amount: '-15.00', currency: 'CAD', unit: 'MT' });
+
+    const durum = book('Durum wheat', null);
+    expect(durum.bids).toEqual([]);
+    expect(durum.spread).toEqual({ status: 'missing', side: 'bid' });
+    expect(left(durum.outOfBook)).toEqual(['Demo Buyer H FX_MISSING no CAD price']);
+  });
+
+  it('sorts and spreads on exact CAD amounts, rounding only for display', () => {
+    const fx = { cadPerUsd: '1.3612', source: 'test rate' };
+    const usdBid = facilityWith('USD bid', {
+      side: 'BID',
+      price: { amount: '725.13', currency: 'USD', unit: 'MT' },
+    });
+    const cadBid = facilityWith('CAD bid', {
+      side: 'BID',
+      price: { amount: '987.05', currency: 'CAD', unit: 'MT' },
+    });
+    const ask = facilityWith('Ask', {
+      side: 'OFFER',
+      price: { amount: '805.00', currency: 'CAD', unit: 'MT' },
+    });
+    const [flax] = buildOrderBooks([usdBid, cadBid, ask], ['Flaxseed'], fx, NOW);
+    // 725.13 × 1.3612 = 987.046956: shown as 987.05, but below the CAD 987.05 bid.
+    expect(flax?.bids.map((entry) => [entry.facility.name, entry.cad, entry.cadDisplay])).toEqual([
+      ['CAD bid', '987.05', '987.05'],
+      ['USD bid', '987.046956', '987.05'],
     ]);
-    expect(durum.needsFx).toBe(true);
+    // The best bid here is in CAD, so the spread is exact as quoted.
+    expect(flax?.spread).toMatchObject({ amount: '182.05' });
+
+    const [onlyUsd] = buildOrderBooks([usdBid, ask], ['Flaxseed'], fx, NOW);
+    // 987.046956 − 805.00 = 182.046956, rounded once: 182.05.
+    expect(onlyUsd?.spread).toEqual({
+      status: 'ok',
+      amount: '182.05',
+      currency: 'CAD',
+      unit: 'MT',
+    });
   });
 
   it('drops quotes once their valid-until time has passed', () => {
-    const later = new Date('2026-11-10T00:00:00Z');
-    const flax = book('Flaxseed', later);
-    expect(flax.currencies.map((c) => c.currency)).toEqual(['CAD']);
-    expect(ladder(flax.currencies[0]?.offers ?? [])).toEqual(['Demo Seller F 805.00']);
-    expect(ladder(flax.stale)).toEqual(['Demo Seller A 820.00', 'Demo Buyer C 725.00']);
+    const flax = book('Flaxseed', SYNTHETIC_FX, new Date('2026-11-10T00:00:00Z'));
+    expect(ladder(flax.asks)).toEqual(['Demo Seller F 805.00']);
+    expect(ladder(flax.bids)).toEqual(['Demo Buyer G 790.00']);
+    expect(left(flax.outOfBook)).toEqual([
+      'Demo Seller A NOT_LIVE 820.00',
+      'Demo Buyer C NOT_LIVE 986.00',
+    ]);
   });
 
   it('builds books only for the chosen commodities, in the order given', () => {
-    expect(
-      buildOrderBooks(SYNTHETIC_FACILITIES, ['Durum wheat', 'Canola'], NOW).map((b) => b.commodity),
-    ).toEqual(['Durum wheat', 'Canola']);
-    expect(buildOrderBooks(SYNTHETIC_FACILITIES, [], NOW)).toEqual([]);
-    expect(
-      buildOrderBooks(SYNTHETIC_FACILITIES, [...SYNTHETIC_COMMODITIES], NOW).map(
-        (b) => b.commodity,
-      ),
-    ).toEqual([...SYNTHETIC_COMMODITIES]);
+    const commodities = (chosen: string[]) =>
+      buildOrderBooks(SYNTHETIC_FACILITIES, chosen, SYNTHETIC_FX, NOW).map((b) => b.commodity);
+    expect(commodities(['Durum wheat', 'Canola'])).toEqual(['Durum wheat', 'Canola']);
+    expect(commodities([])).toEqual([]);
+    expect(commodities([...SYNTHETIC_COMMODITIES])).toEqual([...SYNTHETIC_COMMODITIES]);
   });
 
   it('keeps an empty book for a commodity nobody quotes', () => {
-    expect(buildOrderBooks(SYNTHETIC_FACILITIES, ['Oats'], NOW)).toEqual([
-      { commodity: 'Oats', grade: '', currencies: [], needsFx: false, stale: [] },
+    expect(buildOrderBooks(SYNTHETIC_FACILITIES, ['Oats'], SYNTHETIC_FX, NOW)).toEqual([
+      {
+        commodity: 'Oats',
+        grade: '',
+        asks: [],
+        bids: [],
+        spread: { status: 'missing', side: 'ask' },
+        indicative: false,
+        outOfBook: [],
+      },
     ]);
   });
 
   it('ranks equal prices by time quoted', () => {
-    const base = SYNTHETIC_FACILITIES[0];
-    const offer = base?.quotes[0];
-    if (!base || !offer) throw new Error('fixture changed');
-    const late = { ...base, id: 'late', name: 'Late', quotes: [{ ...offer, id: 'q-late' }] };
-    const early = {
-      ...base,
-      id: 'early',
-      name: 'Early',
-      quotes: [{ ...offer, id: 'q-early', quotedAt: '2026-10-20T00:00:00Z' }],
-    };
-    const [flax] = buildOrderBooks([late, early], ['Flaxseed'], NOW);
-    expect(ladder(flax?.currencies[0]?.offers ?? [])).toEqual(['Early 820.00', 'Late 820.00']);
+    const price = { amount: '820.00', currency: 'CAD', unit: 'MT' } as const;
+    const late = facilityWith('Late', { side: 'OFFER', price });
+    const early = facilityWith('Early', {
+      side: 'OFFER',
+      price,
+      quotedAt: '2026-10-20T00:00:00Z',
+    });
+    const [flax] = buildOrderBooks([late, early], ['Flaxseed'], SYNTHETIC_FX, NOW);
+    expect(ladder(flax?.asks ?? [])).toEqual(['Early 820.00', 'Late 820.00']);
   });
 
   it('treats only firm and indicative quotes before valid-until as live', () => {

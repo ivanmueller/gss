@@ -14,6 +14,14 @@ export interface Price {
   unit: PriceUnit;
 }
 
+/** A CAD/USD rate and where it came from (docs/TRADING_RULES.md §5.3). */
+export interface FxRate {
+  /** CAD per 1 USD, a decimal string, e.g. "1.360000". Never a JavaScript number. */
+  cadPerUsd: string;
+  /** Where the rate came from, shown next to every price converted with it. */
+  source: string;
+}
+
 export interface Quote {
   id: string;
   side: QuoteSide;

@@ -11,6 +11,7 @@ vi.mock('../components/FacilityMap', () => ({
   default: (props: FacilityMapProps) => (
     <div>
       <p>{`Stand-in map: ${props.basemap}, ${props.theme}, controls ${String(props.controls)}`}</p>
+      <p>{`Covered on the right: ${String(props.coveredRight ?? 0)} px`}</p>
       <ul aria-label="Pins">
         {props.pins.map((pin) => (
           <li key={pin.id}>
@@ -35,11 +36,12 @@ vi.mock('../components/FacilityMap', () => ({
 
 const MAPBOX = { status: 'ok', token: 'pk.synthetic' } as const;
 
-function setWide(wide: boolean) {
+/** A window this many pixels wide, for the page's `(min-width: …px)` queries. */
+function setWidth(width: number) {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: (query: string) => ({
-      matches: wide && query === '(min-width: 1024px)',
+      matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
       media: query,
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
@@ -51,7 +53,8 @@ beforeEach(() => {
   // Quotes are live or expired against the time the page opens; fix it.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-27T12:00:00Z'));
-  setWide(true);
+  // A desktop: the order book sits over the map's right side.
+  setWidth(1440);
 });
 
 afterEach(() => {
@@ -71,6 +74,8 @@ async function renderReady() {
 const book = () => screen.getByRole('complementary', { name: 'Order book' });
 const table = () => screen.getByRole('table');
 const pins = () => within(screen.getByRole('list', { name: 'Pins' })).getAllByRole('listitem');
+/** The prices shown, e.g. "CAD 805.00/MT". */
+const PRICE = /^[A-Z]{3} \d+\.\d{2}\/MT$/;
 
 /** The order book's section for one commodity (its <details>). */
 function section(title: string): HTMLElement {
@@ -123,58 +128,132 @@ describe('Workspace', () => {
     expect(text).toContain('fac-demo-buyer-c bid');
   });
 
-  it('shows the flaxseed spread in CAD, negative and indicative, and blocks CAD against USD', async () => {
+  it('puts asks on the left and bids on the right, best first, all in CAD', async () => {
     await renderReady();
     const flax = section('Flaxseed · No. 1 CW');
 
-    const spreads = within(flax).getByRole('group', { name: 'Spreads' });
-    expect(within(spreads).getByText('CAD \u221215.00/MT')).toBeInTheDocument();
-    expect(within(spreads).getByText('Indicative')).toBeInTheDocument();
-    expect(within(spreads).getByText('No spread: no USD offer')).toBeInTheDocument();
-    expect(within(flax).getByText(/needs a CAD\/USD rate/)).toBeInTheDocument();
+    // The golden fixture's USD 725.00 bid at 1.360000 is CAD 986.00, the best bid.
+    const spread = within(flax).getByRole('group', { name: 'Spread' });
+    expect(spread).toHaveTextContent('Gross spread CAD +181.00/MT');
+    expect(within(spread).getByText('Indicative')).toBeInTheDocument();
 
-    // Best first: the cheaper CAD offer leads; the USD bid sits in its own ladder.
-    const cad = within(flax).getByRole('list', { name: 'CAD bids and offers' });
-    const [first, second] = within(cad).getAllByRole('listitem');
-    expect(first).toHaveTextContent('Demo Seller F');
-    expect(first).toHaveTextContent('Demo Buyer G');
-    expect(second).toHaveTextContent('Demo Seller A');
-    expect(second).toHaveTextContent('No bid');
-    expect(within(flax).getByRole('list', { name: 'USD bids and offers' })).toHaveTextContent(
-      'Demo Buyer C',
+    const ladder = within(flax).getByRole('list', { name: 'Asks and bids' });
+    const [first, second] = within(ladder).getAllByRole('listitem');
+    if (!first || !second) throw new Error('expected two levels');
+    const [bestAsk, bestBid] = within(first).getAllByRole('button');
+    if (!bestAsk || !bestBid) throw new Error('expected an ask and a bid on the first level');
+    expect(bestAsk).toHaveAccessibleName(/^Ask:\s*Demo Seller F.*CAD 805\.00\/MT/);
+    expect(bestBid).toHaveAccessibleName(/^Bid:\s*Demo Buyer C.*CAD 986\.00\/MT/);
+    expect(
+      within(second)
+        .getAllByRole('button')
+        .map((cell) => cell.textContent),
+    ).toEqual([
+      expect.stringMatching(/^Ask:\s*Demo Seller A.*CAD 820\.00\/MT/),
+      expect.stringMatching(/^Bid:\s*Demo Buyer G.*CAD 790\.00\/MT/),
+    ]);
+
+    // The converted bid says so, with the original price and rate on hover.
+    expect(within(bestBid).getByText('FX')).toHaveAttribute(
+      'title',
+      'Converted from USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)',
     );
+    expect(book()).toHaveTextContent(
+      'In CAD. USD quotes converted at 1.360000 CAD per USD, synthetic rate (golden fixture).',
+    );
+    // Every price in the book is in CAD.
+    const prices = within(book()).getAllByText(PRICE);
+    expect(prices.length).toBeGreaterThan(10);
+    expect(prices.filter((price) => !price.textContent.startsWith('CAD '))).toEqual([]);
   });
 
-  it('shows a positive canola spread and no spread for durum across currencies', async () => {
+  it('pairs every commodity in CAD, so no side shows an empty "no offer" box', async () => {
     await renderReady();
-    const canola = section('Canola · No. 1 Canada');
-    expect(within(canola).getByText('CAD +22.00/MT')).toBeInTheDocument();
-    expect(within(canola).queryByText(/needs a CAD\/USD rate/)).not.toBeInTheDocument();
-
+    expect(within(section('Canola · No. 1 Canada')).getByText('CAD +22.00/MT')).toBeInTheDocument();
+    // Durum: a CAD ask and a USD bid, comparable once the bid is in CAD (USD 300.00 × 1.36).
     const durum = section('Durum wheat · No. 1 CWAD');
-    expect(within(durum).getByText('No spread: no CAD bid')).toBeInTheDocument();
-    expect(within(durum).getByText('No spread: no USD offer')).toBeInTheDocument();
-    expect(within(durum).queryByText(/Gross spread/)).not.toBeInTheDocument();
+    expect(within(durum).getByRole('group', { name: 'Spread' })).toHaveTextContent(
+      'Gross spread CAD +53.00/MT',
+    );
+    expect(within(durum).getByRole('button', { name: /^Bid:\s*Demo Buyer H/ })).toHaveTextContent(
+      'CAD 408.00/MT',
+    );
+    expect(within(book()).queryByText(/^No (offer|ask|bid)$/)).not.toBeInTheDocument();
+    expect(within(book()).queryByText(/No spread/)).not.toBeInTheDocument();
+
+    // Peas: one ask and two bids; the second level's ask side is simply empty.
+    const peas = section('Yellow peas · No. 2 CAN');
+    const [, second] = within(
+      within(peas).getByRole('list', { name: 'Asks and bids' }),
+    ).getAllByRole('listitem');
+    if (!second) throw new Error('expected a second level');
+    expect(within(second).getAllByRole('button')).toHaveLength(1);
+    expect(second).toHaveTextContent(/^Bid:\s*Demo Buyer I/);
   });
 
   it('keeps an expired bid out of the book and says so', async () => {
     await renderReady();
     const peas = section('Yellow peas · No. 2 CAN');
-    const cad = within(peas).getByRole('list', { name: 'CAD bids and offers' });
-    expect(cad).not.toHaveTextContent('CAD 430.00/MT');
+    const ladder = within(peas).getByRole('list', { name: 'Asks and bids' });
+    expect(ladder).not.toHaveTextContent('CAD 430.00/MT');
     const notInBook = within(peas).getByText('Not in the book').parentElement;
     expect(notInBook).toHaveTextContent('Demo Buyer I');
     expect(notInBook).toHaveTextContent('CAD 430.00/MT');
     expect(notInBook).toHaveTextContent('Expired');
   });
 
-  it('shows quoted and valid-until times next to every price', async () => {
+  it('keeps times out of the book, and shows them with the original price on selection', async () => {
+    const user = userEvent.setup();
     await renderReady();
-    const prices = within(book()).getAllByText(/^[A-Z]{3} \d+\.\d{2}\/MT$/);
-    for (const price of prices) {
-      expect(price.parentElement).toHaveTextContent(/Quoted .* UTC · valid until .* UTC/);
+    for (const ladder of within(book()).getAllByRole('list', { name: 'Asks and bids' })) {
+      expect(ladder).not.toHaveTextContent(/Quoted|valid until/);
     }
-    expect(prices.length).toBeGreaterThan(10);
+
+    await user.click(within(book()).getByRole('button', { name: /^Bid:\s*Demo Buyer C/ }));
+    const selected = within(book()).getByRole('region', { name: 'Demo Buyer C' });
+    const bid = within(selected).getByRole('region', { name: 'Buyer bid' });
+    expect(within(bid).getByText(PRICE)).toHaveTextContent('CAD 986.00/MT');
+    expect(bid).toHaveTextContent(
+      'Quoted as USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)',
+    );
+    expect(bid).toHaveTextContent('Quoted 2026-10-26 16:30 UTC · valid until 2026-11-09 23:59 UTC');
+
+    // The table shows CAD too, with the times.
+    const row = within(table()).getByRole('button', { name: 'Demo Buyer H' }).closest('tr');
+    expect(row).toHaveTextContent('CAD 408.00/MT');
+    expect(row).toHaveTextContent('CAD 448.80/MT');
+    expect(row).toHaveTextContent(/Quoted .* UTC · valid until .* UTC/);
+  });
+
+  it('tucks the order book away to the right with the arrow tab, and brings it back', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+    expect(screen.getByText('Covered on the right: 432 px')).toBeInTheDocument();
+
+    const hide = screen.getByRole('button', { name: 'Hide order book' });
+    expect(hide).toHaveAttribute('aria-expanded', 'true');
+    expect(hide).toHaveAttribute('aria-controls', 'order-book');
+    expect(book()).toHaveAttribute('id', 'order-book');
+    await user.click(hide);
+
+    const show = screen.getByRole('button', { name: 'Show order book' });
+    expect(show).toHaveAttribute('aria-expanded', 'false');
+    // Out of reach of the keyboard and screen readers while tucked away.
+    expect(book()).toHaveAttribute('inert');
+    expect(screen.getByText('Covered on the right: 0 px')).toBeInTheDocument();
+
+    await user.click(show);
+    expect(book()).not.toHaveAttribute('inert');
+    expect(screen.getByRole('button', { name: 'Hide order book' })).toBeInTheDocument();
+  });
+
+  it('stacks the order book under the map on a narrower desktop, without the tab', async () => {
+    setWidth(1100);
+    await renderReady();
+    expect(book()).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /order book$/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Covered on the right: 0 px')).toBeInTheDocument();
+    expect(table()).toBeInTheDocument();
   });
 
   it('narrows the map, order book and table to the chosen commodities', async () => {
@@ -290,28 +369,32 @@ describe('Workspace', () => {
     const notInBook = within(flax).getByText('Not in the book').parentElement;
     expect(notInBook).toHaveTextContent('Demo Seller A');
     expect(notInBook).toHaveTextContent('Demo Buyer C');
-    expect(within(flax).queryByRole('list', { name: 'USD bids and offers' })).toBeNull();
+    expect(within(flax).getByRole('list', { name: 'Asks and bids' })).not.toHaveTextContent(
+      'Demo Buyer C',
+    );
   });
 
   it('re-checks quotes every minute while the page stays open', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     vi.setSystemTime(new Date('2026-11-09T23:58:30Z'));
     render(<Workspace mapbox={{ status: 'missing' }} />);
-    const flax = () => section('Flaxseed · No. 1 CW');
-    expect(within(flax()).getByRole('list', { name: 'USD bids and offers' })).toBeInTheDocument();
+    const ladder = () =>
+      within(section('Flaxseed · No. 1 CW')).getByRole('list', { name: 'Asks and bids' });
+    expect(ladder()).toHaveTextContent('Demo Buyer C');
 
     // Demo Buyer C's bid is valid until 23:59; a minute later it has left the book.
     act(() => {
       vi.advanceTimersByTime(60_000);
     });
-    expect(within(flax()).queryByRole('list', { name: 'USD bids and offers' })).toBeNull();
+    expect(ladder()).not.toHaveTextContent('Demo Buyer C');
+    const flax = () => section('Flaxseed · No. 1 CW');
     expect(within(flax()).getByText('Not in the book').parentElement).toHaveTextContent(
       'Demo Buyer C',
     );
   });
 
   it('uses tabs for the map, order book and facilities on narrow screens', async () => {
-    setWide(false);
+    setWidth(400);
     const user = userEvent.setup();
     await renderReady();
 

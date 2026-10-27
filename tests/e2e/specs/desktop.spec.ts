@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
 
+import { SYNTHETIC_NOW } from './synthetic';
+
+// The synthetic quotes expire in November 2026; read them at a fixed time so they stay live.
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(SYNTHETIC_NOW);
+});
+
 test('loads the workspace with synthetic data and no console errors', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (message) => {
@@ -81,15 +88,65 @@ test('uses the IBM Plex Sans typeface served with the app', async ({ page }) => 
   expect(loaded).toBe(true);
 });
 
-test('shows the selected buyer bid with its validity', async ({ page }) => {
+test('shows the selected buyer bid in CAD, with its USD price, rate and validity', async ({
+  page,
+}) => {
   await page.goto('/');
 
   await page.getByRole('button', { name: 'Demo Buyer C', exact: true }).click();
 
   const bid = page.getByRole('complementary').getByRole('region', { name: 'Buyer bid' });
-  await expect(bid).toContainText('USD 725.00/MT');
+  // The golden fixture: USD 725.00 at 1.360000 CAD per USD is CAD 986.00.
+  await expect(bid).toContainText('CAD 986.00/MT');
+  await expect(bid).toContainText('Quoted as USD 725.00/MT at 1.360000 CAD per USD');
   await expect(bid).toContainText('valid until 2026-11-09 23:59 UTC');
   await expect(bid).toContainText('Not executable');
+});
+
+test('keeps the order book flush with the map, and tucks it away with the arrow tab', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const book = page.getByRole('complementary', { name: 'Order book' });
+  await expect(book).toContainText('Flaxseed · No. 1 CW');
+  // Where the book sits inside the map's frame (its wrapper's parent), in pixels.
+  const edges = () =>
+    book.evaluate((element) => {
+      const frame = element.parentElement?.parentElement;
+      if (!frame) throw new Error('order book is not inside the map frame');
+      const own = element.getBoundingClientRect();
+      const inner = frame.getBoundingClientRect();
+      const border = parseFloat(getComputedStyle(frame).borderRightWidth);
+      return {
+        left: own.left,
+        right: own.right,
+        top: own.top,
+        bottom: own.bottom,
+        frameRight: inner.right - border,
+        frameTop: inner.top + border,
+        frameBottom: inner.bottom - border,
+      };
+    });
+
+  // Flush right and full height: no map shows beside, above or below it.
+  const open = await edges();
+  expect(Math.abs(open.right - open.frameRight)).toBeLessThan(1);
+  expect(Math.abs(open.top - open.frameTop)).toBeLessThan(1);
+  expect(Math.abs(open.bottom - open.frameBottom)).toBeLessThan(1);
+
+  const hide = page.getByRole('button', { name: 'Hide order book' });
+  await expect(hide).toHaveAttribute('aria-expanded', 'true');
+  await hide.click();
+  const show = page.getByRole('button', { name: 'Show order book' });
+  await expect(show).toBeVisible();
+  // Slid out past the map's right edge, leaving only the tab.
+  await expect.poll(async () => (await edges()).left - open.frameRight).toBeGreaterThanOrEqual(-1);
+  // Out of reach of the keyboard and screen readers while tucked away.
+  await expect(book).toHaveAttribute('inert', '');
+
+  await show.click();
+  await expect.poll(async () => Math.round((await edges()).left)).toBe(Math.round(open.left));
+  await expect(page.getByRole('button', { name: 'Hide order book' })).toBeVisible();
 });
 
 test('selects a facility from the keyboard', async ({ page }) => {
@@ -115,7 +172,7 @@ test('narrows the workspace to the chosen commodities', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Commodities: Canola' })).toBeVisible();
   await expect(book).toContainText('Canola · No. 1 Canada');
   await expect(book).not.toContainText('Flaxseed');
-  // Bid 712.00 minus offer 690.00, both in CAD, exactly.
-  await expect(book.getByRole('group', { name: 'Spreads' })).toContainText('CAD +22.00/MT');
+  // Bid 712.00 minus ask 690.00, both in CAD, exactly.
+  await expect(book.getByRole('group', { name: 'Spread' })).toContainText('CAD +22.00/MT');
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(4);
 });

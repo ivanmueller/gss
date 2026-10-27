@@ -1,4 +1,4 @@
-import type { Facility } from '../data/types';
+import type { Facility, FxRate } from '../data/types';
 import { cn } from '../lib/utils';
 import { FacilityQuotes } from './FacilityQuotes';
 import { RoleLabel } from './RoleLabel';
@@ -7,6 +7,8 @@ import { Card, CardDescription, CardHeader, CardTitle } from './ui/card';
 interface FacilityListProps {
   facilities: readonly Facility[];
   commodities: readonly string[];
+  /** The rate that puts USD quotes in CAD; null when there is none. */
+  fx: FxRate | null;
   now: Date;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -16,6 +18,7 @@ interface FacilityListProps {
 export function FacilityList({
   facilities,
   commodities,
+  fx,
   now,
   selectedId,
   onSelect,
@@ -57,7 +60,12 @@ export function FacilityList({
                         {facility.region}, {facility.country}
                       </span>
                     </span>
-                    <FacilityQuotes facility={facility} commodities={commodities} now={now} />
+                    <FacilityQuotes
+                      facility={facility}
+                      commodities={commodities}
+                      fx={fx}
+                      now={now}
+                    />
                   </button>
                 </li>
               );
