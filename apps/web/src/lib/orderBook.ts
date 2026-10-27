@@ -168,16 +168,3 @@ export function buildOrderBooks(
     });
   });
 }
-
-/** The longest quantity in a set of books, for scaling the quantity bars. */
-export function largestQuantity(books: readonly CommodityBook[]): string | null {
-  let largest: string | null = null;
-  for (const { asks, bids } of books) {
-    for (const { quote } of [...asks, ...bids]) {
-      if (largest === null || compareDecimal(quote.quantityMt.max, largest) > 0) {
-        largest = quote.quantityMt.max;
-      }
-    }
-  }
-  return largest;
-}

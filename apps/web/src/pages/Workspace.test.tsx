@@ -78,15 +78,22 @@ async function renderReady() {
 const book = () => screen.getByRole('complementary', { name: 'Order book' });
 const table = () => screen.getByRole('table');
 const pins = () => within(screen.getByRole('list', { name: 'Pins' })).getAllByRole('listitem');
-/** The prices shown, e.g. "CAD 805.00/MT". */
-const PRICE = /^[A-Z]{3} \d+\.\d{2}\/MT$/;
+/** A commodity's title in the order book, e.g. "Flaxseed · No. 1 CW" (grade in grey). */
+const title = (text: string) =>
+  within(book()).getByText(
+    (_, element) => element?.textContent === text && element.tagName === 'SPAN',
+  );
 
 /** The order book's section for one commodity (its <details>). */
-function section(title: string): HTMLElement {
-  const summary = within(book()).getByText(title).closest('details');
-  if (!summary) throw new Error(`no section ${title}`);
-  return summary;
+function section(text: string): HTMLElement {
+  const details = title(text).closest('details');
+  if (!details) throw new Error(`no section ${text}`);
+  return details;
 }
+
+const SPREAD_CAVEAT = 'Best bid minus best ask, before freight and basis: not a margin.';
+/** A section's gross spread, which carries its caveat as a tooltip. */
+const spreadOf = (details: HTMLElement) => within(details).getByTitle(SPREAD_CAVEAT);
 
 async function chooseOnly(commodity: string) {
   const user = userEvent.setup();
@@ -108,14 +115,16 @@ describe('Workspace', () => {
     expect(screen.queryByText(/Sellers and buyers of the chosen/)).not.toBeInTheDocument();
     expect(within(book()).getByRole('heading', { name: 'Order book' })).toBeInTheDocument();
     expect(book()).not.toHaveTextContent(/In CAD|not a margin|Not in the book/);
+    // Prices are shown without a currency each: the panel's heading says it once.
+    expect(within(book()).getByText('CAD/MT')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Commodities: All/ })).toBeInTheDocument();
-    for (const title of [
+    for (const text of [
       'Flaxseed · No. 1 CW',
       'Canola · No. 1 Canada',
       'Yellow peas · No. 2 CAN',
       'Durum wheat · No. 1 CWAD',
     ]) {
-      expect(within(book()).getByText(title)).toBeInTheDocument();
+      expect(title(text)).toBeInTheDocument();
     }
     expect(within(table()).getAllByRole('row')).toHaveLength(10); // header + 9 facilities
     expect(pins()).toHaveLength(9);
@@ -142,10 +151,10 @@ describe('Workspace', () => {
     await renderReady();
     const flax = section('Flaxseed · No. 1 CW');
 
-    // The golden fixture's USD 725.00 bid at 1.360000 is CAD 986.00, the best bid.
-    const spread = within(flax).getByRole('group', { name: 'Spread' });
-    expect(spread).toHaveTextContent('Gross spread CAD +181.00/MT');
-    expect(within(spread).getByText('Indicative')).toBeInTheDocument();
+    // The golden fixture's USD 725.00 bid at 1.360000 is CAD 986.00, the best bid. The spread
+    // is in the section's heading, marked indicative because the best bid is.
+    const spread = spreadOf(flax);
+    expect(spread).toHaveTextContent(/^Spread\s*\+181\.00\s*indicative$/);
 
     const ladder = within(flax).getByRole('list', { name: 'Asks and bids' });
     const [first, second] = within(ladder).getAllByRole('listitem');
@@ -157,40 +166,40 @@ describe('Workspace', () => {
     expect(
       within(second)
         .getAllByRole('button')
-        .map((cell) => cell.textContent),
+        .map((cell) => cell.getAttribute('aria-label')),
     ).toEqual([
-      expect.stringMatching(/^Ask:\s*Demo Seller A.*CAD 820\.00\/MT/),
-      expect.stringMatching(/^Bid:\s*Demo Buyer G.*CAD 790\.00\/MT/),
+      'Ask: Demo Seller A, CAD 820.00/MT, indicative, Saskatchewan, Ex-farm, 21–42 MT',
+      'Bid: Demo Buyer G, CAD 790.00/MT, indicative, Saskatchewan, Delivered, 20–60 MT',
     ]);
+    // On screen: the name, the place, the coloured price and the quantity; no status tags.
+    expect(bestAsk).toHaveTextContent(/^Demo Seller FSaskatchewan · Ex-farm805\.0030–60 MT$/);
+    expect(within(ladder).queryByText(/^(Firm|Indicative)$/)).not.toBeInTheDocument();
 
     // The converted bid says so, with the original price and rate on hover.
     expect(within(bestBid).getByText('FX')).toHaveAttribute(
       'title',
       'Converted from USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)',
     );
-    // The spread's caveat is one hover away.
-    expect(within(spread).getByText(/Gross spread/)).toHaveAttribute(
-      'title',
-      'Best bid minus best ask, before freight and basis: not a margin.',
+    expect(bestBid).toHaveAccessibleName(
+      /converted from USD 725\.00\/MT at 1\.360000 CAD per USD, synthetic rate \(golden fixture\), indicative/,
     );
-    // Every price in the book is in CAD.
-    const prices = within(book()).getAllByText(PRICE);
-    expect(prices.length).toBeGreaterThan(10);
-    expect(prices.filter((price) => !price.textContent.startsWith('CAD '))).toEqual([]);
+    // The marks are explained once, at the foot of the book; no USD price is on screen.
+    expect(book()).toHaveTextContent('Indicative, not firm');
+    expect(book()).toHaveTextContent('Converted from USD');
+    expect(ladder).not.toHaveTextContent(/USD \d/);
   });
 
   it('pairs every commodity in CAD, so no side shows an empty "no offer" box', async () => {
     await renderReady();
-    expect(within(section('Canola · No. 1 Canada')).getByText('CAD +22.00/MT')).toBeInTheDocument();
+    // Canola: both best quotes firm, so the spread carries no mark.
+    expect(spreadOf(section('Canola · No. 1 Canada'))).toHaveTextContent(/^Spread\s*\+22\.00$/);
     // Durum: a CAD ask and a USD bid, comparable once the bid is in CAD (USD 300.00 × 1.36).
     const durum = section('Durum wheat · No. 1 CWAD');
-    expect(within(durum).getByRole('group', { name: 'Spread' })).toHaveTextContent(
-      'Gross spread CAD +53.00/MT',
+    expect(spreadOf(durum)).toHaveTextContent(/Spread\s*\+53\.00/);
+    expect(within(durum).getByRole('button', { name: /^Bid: Demo Buyer H/ })).toHaveAccessibleName(
+      /CAD 408\.00\/MT/,
     );
-    expect(within(durum).getByRole('button', { name: /^Bid:\s*Demo Buyer H/ })).toHaveTextContent(
-      'CAD 408.00/MT',
-    );
-    expect(within(book()).queryByText(/^No (offer|ask|bid)$/)).not.toBeInTheDocument();
+    expect(within(book()).queryByText(/^No (offer|ask|bid)/)).not.toBeInTheDocument();
     expect(within(book()).queryByText(/No spread/)).not.toBeInTheDocument();
 
     // Peas: one ask and two bids; the second level's ask side is simply empty.
@@ -200,15 +209,17 @@ describe('Workspace', () => {
     ).getAllByRole('listitem');
     if (!second) throw new Error('expected a second level');
     expect(within(second).getAllByRole('button')).toHaveLength(1);
-    expect(second).toHaveTextContent(/^Bid:\s*Demo Buyer I/);
+    expect(within(second).getByRole('button')).toHaveAccessibleName(/^Bid: Demo Buyer I/);
   });
 
   it('leaves an expired bid out of the book entirely', async () => {
     await renderReady();
     // Demo Buyer I's CAD 430.00 bid expired on 2026-10-20; its live CAD 420.00 bid stays.
     const peas = section('Yellow peas · No. 2 CAN');
-    expect(peas).toHaveTextContent('CAD 420.00/MT');
-    expect(book()).not.toHaveTextContent('CAD 430.00/MT');
+    expect(within(peas).getByRole('button', { name: /^Bid: Demo Buyer I/ })).toHaveAccessibleName(
+      /CAD 420\.00\/MT/,
+    );
+    expect(book()).not.toHaveTextContent('430.00');
     expect(within(book()).queryByText('Expired')).not.toBeInTheDocument();
   });
 
@@ -242,7 +253,7 @@ describe('Workspace', () => {
     await user.click(within(book()).getByRole('button', { name: /^Bid:\s*Demo Buyer C/ }));
     const selected = within(book()).getByRole('region', { name: 'Demo Buyer C' });
     const bid = within(selected).getByRole('region', { name: 'Buyer bid' });
-    expect(within(bid).getByText(PRICE)).toHaveTextContent('CAD 986.00/MT');
+    expect(within(bid).getByText(/^CAD \d/)).toHaveTextContent('CAD 986.00/MT');
     expect(bid).toHaveTextContent(
       'Quoted as USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)',
     );
@@ -291,7 +302,7 @@ describe('Workspace', () => {
     await chooseOnly('Canola');
 
     expect(screen.getByRole('button', { name: 'Commodities: Canola' })).toBeInTheDocument();
-    expect(within(book()).getByText('Canola · No. 1 Canada')).toBeInTheDocument();
+    expect(title('Canola · No. 1 Canada')).toBeInTheDocument();
     expect(within(book()).queryByText(/Flaxseed/)).not.toBeInTheDocument();
     expect(pins().map((pin) => pin.textContent.split(' ')[0])).toEqual([
       'fac-demo-seller-a',

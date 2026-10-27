@@ -203,7 +203,9 @@ test('narrows the workspace to the chosen commodities', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Commodities: Canola' })).toBeVisible();
   await expect(book).toContainText('Canola · No. 1 Canada');
   await expect(book).not.toContainText('Flaxseed');
-  // Bid 712.00 minus ask 690.00, both in CAD, exactly.
-  await expect(book.getByRole('group', { name: 'Spread' })).toContainText('CAD +22.00/MT');
+  // Bid 712.00 minus ask 690.00, both in CAD, exactly; the caveat is the spread's tooltip.
+  await expect(
+    book.getByTitle('Best bid minus best ask, before freight and basis: not a margin.'),
+  ).toContainText('+22.00');
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(4);
 });
