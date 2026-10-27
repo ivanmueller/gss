@@ -14,10 +14,21 @@ create schema app;
 revoke all on schema app from public;
 revoke all on schema app from anon, authenticated, service_role;
 
+-- Create app_api, or refuse to continue if a role by that name already holds more
+-- than it should. LOGIN is allowed because environments enable it separately.
 do $$
+declare
+  existing pg_roles%rowtype;
 begin
-  if not exists (select from pg_roles where rolname = 'app_api') then
+  select * into existing from pg_roles where rolname = 'app_api';
+  if not found then
     create role app_api nologin noinherit;
+  elsif existing.rolsuper or existing.rolbypassrls or existing.rolcreaterole
+     or existing.rolcreatedb or existing.rolreplication
+     or exists (select 1 from pg_auth_members where member = existing.oid) then
+    raise exception 'role app_api already exists with privileges it must not have '
+      '(superuser, bypassrls, createrole, createdb, replication or role memberships); '
+      'remove them or drop the role before applying this migration';
   end if;
 end
 $$;

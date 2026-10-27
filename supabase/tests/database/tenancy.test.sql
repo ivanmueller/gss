@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(38);
+select plan(45);
 
 -- Fixtures ------------------------------------------------------------------
 -- Users: alice (active trader in A, active viewer in inactive org C),
@@ -65,8 +65,21 @@ select is(
   'every function in app has explicit privileges (none left on the public default)'
 );
 select ok(
-  (select not rolsuper and not rolbypassrls and not rolcanlogin from pg_roles where rolname = 'app_api'),
-  'app_api is not superuser, cannot bypass RLS and has no login in migrations'
+  (select not rolsuper and not rolbypassrls from pg_roles where rolname = 'app_api'),
+  'app_api is not superuser and cannot bypass RLS'
+);
+select ok(
+  (select not rolcanlogin from pg_roles where rolname = 'app_api'),
+  'migrations do not give app_api a login (each environment enables it separately)'
+);
+select ok(
+  (select not rolcreaterole and not rolcreatedb and not rolreplication from pg_roles where rolname = 'app_api'),
+  'app_api cannot create roles or databases or replicate'
+);
+select is(
+  (select count(*)::int from pg_auth_members m join pg_roles r on r.oid = m.member where r.rolname = 'app_api'),
+  0,
+  'app_api is not a member of any other role'
 );
 select ok(not has_schema_privilege('app_api', 'auth', 'usage'), 'app_api cannot use the auth schema');
 select ok(
@@ -185,16 +198,22 @@ select is((select count(*)::int from app.organization_members), 0, 'a suspended 
 -- dave: invited to B, not yet joined.
 select set_config('app.user_id', '00000000-0000-4000-8000-00000000da7e', true);
 select is((select count(*)::int from app.organizations), 0, 'an invited member sees no organizations');
+select is((select count(*)::int from app.organization_members), 0, 'an invited member sees no memberships, not even their own');
 
 -- A signed-in user with no memberships.
 select set_config('app.user_id', '00000000-0000-4000-8000-00000000ffff', true);
 select is((select count(*)::int from app.organizations), 0, 'a user without memberships sees no organizations');
+select is((select count(*)::int from app.organization_members), 0, 'a user without memberships sees no memberships');
 
 -- A malformed user id fails closed.
 select set_config('app.user_id', 'not-a-uuid', true);
 select throws_ok(
   'select count(*) from app.organizations',
   '22P02', null, 'a malformed user context raises an error instead of returning rows'
+);
+select throws_ok(
+  'select count(*) from app.organization_members',
+  '22P02', null, 'a malformed user context raises an error on memberships too'
 );
 
 reset role;
@@ -205,6 +224,7 @@ update app.organizations set active = false where id = '00000000-0000-4000-8000-
 set local role app_api;
 select set_config('app.user_id', '00000000-0000-4000-8000-000000000b0b', true);
 select is((select count(*)::int from app.organizations), 0, 'bob loses access when organization B is inactivated');
+select is((select count(*)::int from app.organization_members), 0, 'bob loses membership visibility when organization B is inactivated');
 
 select * from finish();
 rollback;
