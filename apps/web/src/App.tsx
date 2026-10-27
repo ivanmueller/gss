@@ -79,7 +79,6 @@ export function App({ account }: { account?: Account }) {
         {...(account && {
           user: {
             name: me.status === 'ok' ? me.name : null,
-            organization: organization === undefined ? undefined : (organization?.name ?? null),
             check: me.status,
             onSignOut: account.signOut,
           },
