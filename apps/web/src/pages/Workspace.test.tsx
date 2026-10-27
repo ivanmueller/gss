@@ -115,8 +115,8 @@ describe('Workspace', () => {
     expect(screen.queryByText(/Sellers and buyers of the chosen/)).not.toBeInTheDocument();
     expect(within(book()).getByRole('heading', { name: 'Order book' })).toBeInTheDocument();
     expect(book()).not.toHaveTextContent(/In CAD|not a margin|Not in the book/);
-    // Prices are shown without a currency each: the panel's heading says it once.
-    expect(within(book()).getByText('CAD/MT')).toBeInTheDocument();
+    // Prices are shown per tonne without a currency each: the panel's heading says it once.
+    expect(within(book()).getByText('CAD', { exact: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Commodities: All/ })).toBeInTheDocument();
     for (const text of [
       'Flaxseed · No. 1 CW',
@@ -171,8 +171,11 @@ describe('Workspace', () => {
       'Ask: Demo Seller A, CAD 820.00/MT, indicative, Saskatchewan, Ex-farm, 21–42 MT',
       'Bid: Demo Buyer G, CAD 790.00/MT, indicative, Saskatchewan, Delivered, 20–60 MT',
     ]);
-    // On screen: the name, the place, the coloured price and the quantity; no status tags.
-    expect(bestAsk).toHaveTextContent(/^Demo Seller FSaskatchewan · Ex-farm805\.0030–60 MT$/);
+    // On screen, in a red or green box: the name, the place, the price per tonne and the
+    // quantity; no status tags, and no volume bar.
+    expect(bestAsk).toHaveTextContent(/^Demo Seller FSaskatchewan · Ex-farm805\.00\/MT30–60 MT$/);
+    expect(bestAsk).toHaveClass('bg-offer-subtle');
+    expect(bestBid).toHaveClass('bg-bid-subtle');
     expect(within(ladder).queryByText(/^(Firm|Indicative)$/)).not.toBeInTheDocument();
 
     // The converted bid says so, with the original price and rate on hover.
