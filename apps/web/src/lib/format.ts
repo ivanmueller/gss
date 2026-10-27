@@ -20,6 +20,23 @@ export function formatUtc(iso: string): string {
   return `${text.slice(0, 10)} ${text.slice(11, 16)} UTC`;
 }
 
+const SIGNED = /^-?\d+(\.\d+)?$/;
+
+/**
+ * "CAD +22.00/MT", "CAD −15.00/MT" (a true minus sign), "CAD 0.00/MT": a spread from its
+ * decimal string, signed so a negative one is plain to see.
+ */
+export function formatSignedPrice(price: { amount: string; currency: string; unit: string }) {
+  if (!SIGNED.test(price.amount)) {
+    throw new Error(`Amount is not a decimal string: "${price.amount}"`);
+  }
+  const negative = price.amount.startsWith('-');
+  const digits = negative ? price.amount.slice(1) : price.amount;
+  const zero = /^0+(\.0+)?$/.test(digits);
+  const sign = zero ? '' : negative ? '\u2212' : '+';
+  return `${price.currency} ${sign}${digits}/${price.unit}`;
+}
+
 export function formatQuantityRange(range: { min: string; max: string }): string {
   return `${range.min}–${range.max} MT`;
 }

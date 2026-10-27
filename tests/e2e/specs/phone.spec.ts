@@ -1,21 +1,30 @@
 import { expect, test } from '@playwright/test';
 
-test('uses a facility list and tabs, with no sideways scrolling', async ({ page }) => {
+test('uses tabs for the map, order book and facilities, with no sideways scrolling', async ({
+  page,
+}) => {
   await page.goto('/');
 
   await expect(page.getByRole('tablist', { name: 'Workspace view' })).toBeVisible();
   await expect(page.getByRole('table')).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Facilities' }).getByRole('listitem')).toHaveCount(
-    4,
-  );
+  // CI builds without a Mapbox token, so the map tab explains itself.
+  await expect(page.getByText('Map not available')).toBeVisible();
   const overflows = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   );
   expect(overflows).toBe(false);
 
-  await page.getByRole('tab', { name: 'Map' }).click();
-  await expect(page.getByText('Map placeholder')).toBeVisible();
-  await expect(page.getByRole('complementary')).toContainText('Demo Seller A');
+  await page.getByRole('tab', { name: 'Order book' }).click();
+  await expect(page.getByRole('complementary', { name: 'Order book' })).toContainText(
+    'Demo Seller A',
+  );
+  await page.getByRole('tab', { name: 'Facilities' }).click();
+  await expect(page.getByRole('region', { name: 'Facilities' }).getByRole('listitem')).toHaveCount(
+    9,
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
+    false,
+  );
 });
 
 test('counterparties fit the phone screen', async ({ page }) => {

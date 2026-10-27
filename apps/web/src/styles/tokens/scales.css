@@ -25,7 +25,10 @@
     'Apple Color Emoji', 'Segoe UI Emoji';
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
-  /* Font sizes with their line heights. Body text is `sm` (14 px), set in base.css. */
+  /* Font sizes with their line heights. Body text is `sm` (14 px), set in base.css; `2xs`
+     (11 px) is for dense labels such as the order book's column headings. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
   --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;
   --text-sm: 0.875rem;

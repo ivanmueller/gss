@@ -15,6 +15,7 @@ How the web app looks, and where to change it. The code lives in `apps/web/src/s
 | The typeface | `--font-sans` and the font import in `main.tsx` | `styles/tokens/scales.css` |
 | Menu width, top bar height, page width | `--spacing-sidebar`, `--spacing-topbar`, `--container-content` | `styles/tokens/scales.css` |
 | The left menu's pages | `NAV` (and `PLANNED`) | `components/AppShell.tsx` |
+| The map's land, water, borders, roads and labels | `--map-land`, `--map-water`, `--map-border`, `--map-road`, `--map-label`, `--map-label-halo`, per theme | `styles/tokens/themes.css` |
 
 After a colour change, `pnpm --filter @grain/web test` checks that text still meets WCAG AA contrast in both themes.
 
@@ -44,7 +45,7 @@ Severity rises from info to danger. Colour never carries meaning alone: statuses
 
 ## Scales
 
-- **Type:** IBM Plex Sans (interface) and IBM Plex Mono (prices, codes), open source (SIL OFL) and served with the app. Sizes `xs` 12, `sm` 14 (body), `base` 16, `lg` 18, `xl` 20, `2xl` 24 (page titles), `3xl` 30 px. Inputs use 16 px on phones so the browser does not zoom in.
+- **Type:** IBM Plex Sans (interface) and IBM Plex Mono (prices, codes), open source (SIL OFL) and served with the app. Sizes `2xs` 11 (dense labels, such as the order book's column headings), `xs` 12, `sm` 14 (body), `base` 16, `lg` 18, `xl` 20, `2xl` 24 (page titles), `3xl` 30 px. Inputs use 16 px on phones so the browser does not zoom in.
 - **Spacing:** a 4 px grid (`p-1` = 4 px, `p-4` = 16 px). Prefer 1, 1.5, 2, 3, 4, 6, 8, 12, 16.
 - **Rounding:** every radius is a multiple of `--radius-base` (8 px): `xs` 2, `sm` 4, `md` 6, `lg` 8, `xl` 12, `2xl` 16, `full`. Components use `rounded-control` (6), `rounded-badge` (4), `rounded-card` (12), `rounded-popover` (8), `rounded-dialog` (12).
 - **Shadows:** `shadow-xs` cards, inputs, outline buttons; `shadow-sm` raised on hover; `shadow-md` menus; `shadow-lg` drawers and dialogs. Opacity light theme 5 / 8 / 12 / 16 %, night theme 20 / 28 / 36 / 45 %.
@@ -54,11 +55,15 @@ Severity rises from info to danger. Colour never carries meaning alone: statuses
 
 The profile menu (top right) has one **Dark mode** switch. Until someone uses it, the app follows the device's light or dark setting; after that, the switch's position is kept in this browser (`localStorage`, key `gss.theme`). `lib/theme.ts` puts the `dark` class on `<html>`; a small script in `index.html` does the same before the first paint so the page never flashes the wrong theme. Both follow the same rules, which `lib/theme.test.ts` checks. Logos, the authenticator QR code and the Mapbox map keep their own light colours.
 
+## The map
+
+Mapbox draws the base map; the app repaints it with the theme's map roles. The "Map" style is Mapbox's light style in the light theme (white land, grey water, like the owner's reference) and its dark style in the night theme (slate land and water); "Satellite" is the same in both. Pins use the `bid` and `offer` roles, hollow for approximate locations, and the chosen pin gets a ring in `foreground`. Mapbox cannot read CSS variables, so `components/FacilityMap.tsx` reads the tokens from the page and converts them to hex (`lib/colour.ts`) whenever the style or theme changes. Mapbox's zoom buttons and attribution are restyled in `styles/base.css`. `styles/tokens.test.ts` checks that labels and pins stand out from the land and water in both themes.
+
 ## Components (`components/ui`)
 
 `Button` (primary, secondary, outline, ghost, danger; `asChild` styles a link as a button), `Input` and `Select`, `FileButton`, `Card` with `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `Badge` (one variant per role), `Callout` (boxed notes and alerts), `Table` parts, `Tabs`, `SegmentedControl` (toggle buttons), `DropdownMenu` and `Sheet` (slide-over panel), both on Radix for keyboard and screen-reader support.
 
-App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), `Brand` (logo slot and the GSS name), `ConnectionStatus` (the dot), `ProfileMenu`, `PageHeader`, `BackLink`.
+App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), `Brand` (logo slot and the GSS name), `ConnectionStatus` (the dot), `ProfileMenu`, `PageHeader`, `BackLink`, `CommodityPicker` (choose one, several or all commodities), `OrderBook` (bids and offers by commodity), `SelectedFacility`, `FacilityMap` (the only Mapbox code).
 
 ## Layout
 

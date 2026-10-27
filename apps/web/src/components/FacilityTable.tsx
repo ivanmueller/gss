@@ -1,7 +1,5 @@
 import type { Facility } from '../data/types';
-import { latestQuote, noQuoteText } from '../lib/facility';
-import { formatPrice, formatUtc } from '../lib/format';
-import { QuoteStatusBadge } from './QuoteStatusBadge';
+import { FacilityQuotes } from './FacilityQuotes';
 import { RoleLabel } from './RoleLabel';
 import { Card, CardDescription, CardHeader, CardTitle } from './ui/card';
 import {
@@ -16,11 +14,20 @@ import {
 
 interface FacilityTableProps {
   facilities: readonly Facility[];
-  selectedId: string;
+  commodities: readonly string[];
+  now: Date;
+  selectedId: string | null;
   onSelect: (id: string) => void;
 }
 
-export function FacilityTable({ facilities, selectedId, onSelect }: FacilityTableProps) {
+/** The facilities on the map, as a table, with their quotes in the chosen commodities. */
+export function FacilityTable({
+  facilities,
+  commodities,
+  now,
+  selectedId,
+  onSelect,
+}: FacilityTableProps) {
   return (
     <Card asChild>
       <section aria-labelledby="facilities-heading" className="overflow-hidden">
@@ -28,19 +35,17 @@ export function FacilityTable({ facilities, selectedId, onSelect }: FacilityTabl
           <CardTitle id="facilities-heading">Facilities</CardTitle>
           <CardDescription>{facilities.length} shown · synthetic</CardDescription>
         </CardHeader>
-        <Table className="min-w-[40rem]">
+        <Table className="min-w-[44rem]">
           <TableHeader>
             <tr>
               <TableHead>Facility</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Region</TableHead>
-              <TableHead>Latest quote</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead>Quotes</TableHead>
             </tr>
           </TableHeader>
           <TableBody>
             {facilities.map((facility) => {
-              const quote = latestQuote(facility);
               const selected = facility.id === selectedId;
               return (
                 <TableRow key={facility.id} selected={selected} className="align-top">
@@ -67,32 +72,15 @@ export function FacilityTable({ facilities, selectedId, onSelect }: FacilityTabl
                     {facility.region}, {facility.country}
                   </TableCell>
                   <TableCell>
-                    {quote ? (
-                      <>
-                        <span className="font-mono font-medium">{formatPrice(quote.price)}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          Quoted {formatUtc(quote.quotedAt)} · valid until{' '}
-                          {formatUtc(quote.validUntil)}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">{noQuoteText(facility)}</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {quote ? (
-                      <QuoteStatusBadge status={quote.status} />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    <FacilityQuotes facility={facility} commodities={commodities} now={now} />
                   </TableCell>
                 </TableRow>
               );
             })}
             {facilities.length === 0 && (
               <tr className="border-t">
-                <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">
-                  No facilities match this filter.
+                <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                  No facilities match these filters.
                 </TableCell>
               </tr>
             )}

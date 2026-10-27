@@ -1,4 +1,5 @@
 import * as MenuPrimitive from '@radix-ui/react-dropdown-menu';
+import { Check, Minus } from 'lucide-react';
 import type { ComponentProps } from 'react';
 
 import { cn } from '../../lib/utils';
@@ -41,6 +42,46 @@ export function DropdownMenuItem({
       className={cn(itemClass, className)}
       {...props}
     />
+  );
+}
+
+/**
+ * A tick box inside a menu, for choosing several things at once. It stays open when
+ * toggled; `checked="indeterminate"` shows a dash (some, not all).
+ */
+export function DropdownMenuCheckboxItem({
+  className,
+  children,
+  onSelect,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.CheckboxItem>) {
+  return (
+    <MenuPrimitive.CheckboxItem
+      data-slot="dropdown-menu-checkbox-item"
+      onSelect={(event) => {
+        event.preventDefault();
+        onSelect?.(event);
+      }}
+      className={cn(itemClass, 'pl-8', className)}
+      {...props}
+    >
+      <span
+        aria-hidden="true"
+        className="absolute left-2 flex size-4 items-center justify-center rounded-xs border border-input data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary"
+        data-state={
+          props.checked === 'indeterminate'
+            ? 'indeterminate'
+            : props.checked
+              ? 'checked'
+              : 'unchecked'
+        }
+      >
+        <MenuPrimitive.ItemIndicator className="flex items-center text-primary-foreground [&_svg]:size-3! [&_svg]:text-primary-foreground!">
+          {props.checked === 'indeterminate' ? <Minus /> : <Check />}
+        </MenuPrimitive.ItemIndicator>
+      </span>
+      {children}
+    </MenuPrimitive.CheckboxItem>
   );
 }
 

@@ -1,6 +1,6 @@
 import { formatBbox, type Bbox } from '@grain/domain';
 import { TriangleAlert } from 'lucide-react';
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 
 import { PageHeader } from '../components/PageHeader';
 import { RealDataNote } from '../components/RealDataNote';
@@ -10,8 +10,9 @@ import { Card } from '../components/ui/card';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import type { MapFacilities, MapFacility } from '../lib/api';
 import { canEditDirectory, countryName, facilityTypeLabel } from '../lib/directory';
-import { BASEMAPS, mapboxToken, type Basemap, type MapboxToken } from '../lib/mapbox';
+import { BASEMAPS, facilityPin, mapboxToken, type Basemap, type MapboxToken } from '../lib/mapbox';
 import { Link } from '../lib/router';
+import { useTheme } from '../lib/theme';
 import { useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from './CounterpartiesPage';
@@ -95,7 +96,8 @@ export function MapPage({
   const [refused, setRefused] = useState(false);
   const showMap = mapbox.status === 'ok' && !refused;
   const [view, setView] = useState<Bbox | null>(null);
-  const [basemap, setBasemap] = useState<Basemap>('streets');
+  const [basemap, setBasemap] = useState<Basemap>('map');
+  const [theme] = useTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Without a map, list every location of the organization.
@@ -106,8 +108,9 @@ export function MapPage({
     { keepPrevious: true },
   );
   const data = result.status === 'ok' ? result.data : null;
-  const facilities = data?.facilities ?? [];
+  const facilities = useMemo(() => data?.facilities ?? [], [data]);
   const selected = facilities.find((facility) => facility.id === selectedId) ?? null;
+  const pins = useMemo(() => facilities.map(facilityPin), [facilities]);
 
   return (
     <section aria-labelledby="map-heading" className="flex flex-col gap-4">
@@ -140,7 +143,8 @@ export function MapPage({
               <FacilityMap
                 token={mapbox.token}
                 basemap={basemap}
-                facilities={facilities}
+                theme={theme}
+                pins={pins}
                 selectedId={selectedId}
                 onViewChange={(bbox) => {
                   if (bbox) setView(bbox);

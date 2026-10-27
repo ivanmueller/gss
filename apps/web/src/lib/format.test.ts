@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatPrice, formatQuantityRange, formatUtc } from './format';
+import { formatPrice, formatQuantityRange, formatSignedPrice, formatUtc } from './format';
 
 describe('formatPrice', () => {
   it('shows currency, decimal amount and unit', () => {
@@ -36,5 +36,20 @@ describe('formatUtc', () => {
 describe('formatQuantityRange', () => {
   it('shows the range in metric tonnes', () => {
     expect(formatQuantityRange({ min: '21.000', max: '42.000' })).toBe('21.000–42.000 MT');
+  });
+});
+
+describe('formatSignedPrice', () => {
+  it.each([
+    ['22.00', 'CAD +22.00/MT'],
+    ['-15.00', 'CAD \u221215.00/MT'],
+    ['0.00', 'CAD 0.00/MT'],
+    ['-0.00', 'CAD 0.00/MT'],
+  ])('shows %s as %s', (amount, text) => {
+    expect(formatSignedPrice({ amount, currency: 'CAD', unit: 'MT' })).toBe(text);
+  });
+
+  it('refuses anything but a decimal string', () => {
+    expect(() => formatSignedPrice({ amount: '1e3', currency: 'CAD', unit: 'MT' })).toThrow();
   });
 });
