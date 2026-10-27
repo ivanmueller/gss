@@ -70,7 +70,7 @@ Application tables live in the private `app` schema, which the Supabase Data API
 ## Layout
 
 ```
-apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties); serves apps/web on staging
+apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search); serves apps/web on staging
 apps/web/            React + Vite + Tailwind web app (synthetic workspace; real counterparty directory)
 tests/e2e/           Playwright browser tests against the staging Worker config
 packages/domain/     shared validation used by web and API (counterparty import rows, PNG check, regions)
