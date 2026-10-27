@@ -13,3 +13,7 @@ test-results/
 !.env.example
 .dev.vars
 .dev.vars.*
+
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/

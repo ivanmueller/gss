@@ -13,22 +13,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Lets the workflow pass with a notice until the owner adds the Cloudflare secrets.
+  # Lets the workflow pass with a notice until the owner adds the secrets.
   preflight:
     runs-on: ubuntu-latest
     outputs:
       ready: ${{ steps.check.outputs.ready }}
+      database: ${{ steps.check.outputs.database }}
     steps:
       - id: check
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
         run: |
           if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; staging deploy skipped."
             echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "database=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::SUPABASE_STAGING_DB_URL is not set; staging database migrations skipped."
+            echo "database=false" >> "$GITHUB_OUTPUT"
           fi
 
   deploy:
@@ -49,6 +57,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm build
+      # Migrations go first so the Worker never runs against an older schema.
+      - uses: supabase/setup-cli@v1
+        if: needs.preflight.outputs.database == 'true'
+        with:
+          version: 2.122.0
+      - name: Apply database migrations
+        if: needs.preflight.outputs.database == 'true'
+        env:
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: supabase db push --db-url "$SUPABASE_STAGING_DB_URL"
       - name: Deploy Worker
         id: deploy
         env:

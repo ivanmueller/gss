@@ -30,6 +30,15 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.0
+      # Throwaway local Supabase: apply every migration from scratch, then run the
+      # pgTAP tests in supabase/tests.
+      - name: Database tests
+        run: |
+          supabase db start
+          supabase test db
       - name: Install Playwright Chromium
         run: pnpm --filter @grain/e2e exec playwright install --with-deps chromium
       # Browser tests against the built app served by the staging Worker config.

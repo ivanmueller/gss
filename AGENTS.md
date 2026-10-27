@@ -43,6 +43,12 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - `pnpm --filter @grain/web dev`: web app with hot reload at `http://localhost:5173`; `/api` is proxied to port 8787.
 - `pnpm preview:staging`: build, then serve web and API together as on staging.
 - `pnpm e2e`: build, then run the Playwright browser tests (CI runs them in the required `check` job).
+- `supabase db start` then `supabase test db`: apply migrations to a local Supabase and run the pgTAP tests (needs Docker; CI runs them in `check`).
+
+## Database rules
+- Every schema change is a new file in `supabase/migrations/`; never edit a migration that has reached `main`.
+- Application tables go in the private `app` schema. Each new table enables row level security, gets policies for `app_api` keyed on `app.current_user_id()` and organization membership, and is revoked from `public`, `anon`, `authenticated` and `service_role` before granting `app_api` only what it needs. New functions are revoked the same way.
+- Every new table or policy ships with pgTAP tests in `supabase/tests/database/`, including cross-organization denials.
 
 ## Completion definition
 Run and report lint, TypeScript typecheck, relevant unit/integration tests, security/RLS tests where needed and a staged end-to-end smoke test for user-visible changes. If test infrastructure does not exist yet, explicitly state that and create it in the current approved phase.

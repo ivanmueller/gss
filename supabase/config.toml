@@ -1,0 +1,10 @@
+# Supabase CLI settings for the local and CI database only. The hosted gss-staging
+# project is configured in the Supabase dashboard; migrations reach it from the
+# Deploy staging workflow (docs/DECISIONS.md, 2026-10-27).
+project_id = "gss"
+
+[api]
+# The Data API exposes only these schemas. Application tables live in the private
+# `app` schema, which is deliberately not listed.
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
