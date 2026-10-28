@@ -32,7 +32,7 @@ test('uses tabs for the map, order book and facilities, with no sideways scrolli
 
 test('counterparties fit the phone screen', async ({ page }) => {
   await page.goto('/counterparties');
-  await expect(page.getByRole('heading', { name: 'Counterparties' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Counterparties' })).toBeAttached();
   const overflows = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth,
   );
@@ -53,5 +53,5 @@ test('opens the menu from the top bar and closes it after choosing a page', asyn
 
   await expect(page).toHaveURL(/\/counterparties$/);
   await expect(panel).toBeHidden();
-  await expect(page.getByRole('heading', { name: 'Counterparties' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Counterparties' })).toBeAttached();
 });

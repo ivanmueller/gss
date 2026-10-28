@@ -27,6 +27,7 @@ function facility(overrides: Partial<FacilityAddress> = {}): FacilityAddress {
     region: 'SK',
     postalCode: 'S4P 3Y2',
     country: 'CA',
+    version: '2026-10-27T18:00:00.000000Z',
     ...overrides,
   };
 }
@@ -176,6 +177,7 @@ describe('matchFor', () => {
         confidence: '0.97',
         formattedAddress: '1 Synthetic Rd, Synthetic Town, SK S4P',
         regionMatches: true,
+        facilityVersion: '2026-10-27T18:00:00.000000Z',
         expiresAt: new Date(NOW.getTime() + MATCH_LIFETIME_MS).toISOString(),
       },
     });
@@ -221,6 +223,7 @@ describe('matchSigner', () => {
     precision: 'exact' as const,
     accuracyType: 'rooftop',
     confidence: '0.97',
+    facilityVersion: '2026-10-27T18:00:00.000000Z',
     expiresAt: '2026-10-27T19:00:00.000Z',
   };
 
@@ -234,6 +237,14 @@ describe('matchSigner', () => {
     expect(await signer.verify(ORG, { ...match, precision: 'approximate', signature })).toBe(false);
     expect(
       await signer.verify(ORG, { ...match, expiresAt: '2026-10-28T19:00:00.000Z', signature }),
+    ).toBe(false);
+    // A match is for the facility as it was looked up; a later version is another facility.
+    expect(
+      await signer.verify(ORG, {
+        ...match,
+        facilityVersion: '2026-10-27T18:30:00.000000Z',
+        signature,
+      }),
     ).toBe(false);
     expect(
       await signer.verify('00000000-0000-4000-8000-0000000000bb', { ...match, signature }),

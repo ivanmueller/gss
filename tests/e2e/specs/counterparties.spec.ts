@@ -232,6 +232,7 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
           precision: 'exact',
           accuracyType: 'rooftop',
           confidence: '1.00',
+          facilityVersion: '2026-10-28T00:00:00.000000Z',
           expiresAt: '2099-01-01T00:00:00.000Z',
           signature: '0'.repeat(64),
         },

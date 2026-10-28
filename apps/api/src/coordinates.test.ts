@@ -26,6 +26,7 @@ const MILLS: FacilityAddress = {
   region: 'SK',
   postalCode: 'S4P 3Y2',
   country: 'CA',
+  version: '2026-10-27T18:00:00.000000Z',
 };
 const NO_ADDRESS: FacilityAddress = {
   ...MILLS,
@@ -222,6 +223,7 @@ describe('POST /api/v1/facilities/coordinates', () => {
     ['a raised precision', { precision: 'exact', accuracyType: 'place' }],
     ['another facility', { facilityId: NO_ADDRESS.facilityId }],
     ['a later expiry', { expiresAt: '2099-01-01T00:00:00.000Z' }],
+    ['another facility version', { facilityVersion: '2026-10-27T18:30:00.000000Z' }],
   ])('refuses a match with %s', async (_what, change) => {
     const match = { ...(await signedMatch()), ...change };
     const res = await post('coordinates', { organizationId: ORG, matches: [match] });
@@ -248,6 +250,7 @@ describe('POST /api/v1/facilities/coordinates', () => {
       precision: 'exact' as const,
       accuracyType: 'rooftop',
       confidence: '0.97',
+      facilityVersion: '2026-10-27T18:00:00.000000Z',
       expiresAt: '2026-01-01T00:00:00.000Z',
     };
     const match = { ...old, signature: await signer.sign(ORG, old) };

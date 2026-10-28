@@ -35,6 +35,7 @@ function proposal(
       confidence: '0.97',
       formattedAddress: `${String(n)} Synthetic Rd, Synthetic Town, SK S4P`,
       regionMatches: true,
+      facilityVersion: '2026-10-27T18:00:00.000000Z',
       expiresAt: '2026-10-27T19:00:00.000Z',
       signature: String(n).repeat(64),
       ...match,

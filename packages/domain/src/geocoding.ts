@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { LOCATION_PRECISIONS, type LocationPrecision } from './directory';
+import { LOCATION_PRECISIONS, VERSION, type LocationPrecision } from './directory';
 
 // Finding coordinates for facilities from their addresses (docs/DECISIONS.md, geocoding
 // with Geocodio). Shared by the API, which looks addresses up and saves the chosen
@@ -32,6 +32,11 @@ export interface GeocodeMatch {
   formattedAddress: string;
   /** False when the result is in another province or state than the facility's. */
   regionMatches: boolean;
+  /**
+   * The facility's version when its address was looked up. A match is saved only while the
+   * facility is unchanged, so a result for an old address never lands on a corrected one.
+   */
+  facilityVersion: string;
   expiresAt: string;
   signature: string;
 }
@@ -73,6 +78,7 @@ export const saveCoordinatesRequestSchema = z.object({
         precision: z.enum(LOCATION_PRECISIONS),
         accuracyType: z.string().regex(/^[a-z_]{1,40}$/),
         confidence: z.string().regex(/^(0\.\d\d|1\.00)$/),
+        facilityVersion: z.string().regex(VERSION),
         expiresAt: z.iso.datetime(),
         signature: z.string().regex(/^[0-9a-f]{64}$/),
       }),
@@ -89,7 +95,10 @@ export const geocodeRequestSchema = z.object({ organizationId: z.uuid() });
 
 export interface SaveCoordinatesResult {
   saved: number;
-  /** Matches not saved because the facility has coordinates by now or is not the organization's. */
+  /**
+   * Matches not saved: the facility has coordinates by now, was changed since the lookup, its
+   * counterparty was archived, or it is not the organization's.
+   */
   skipped: number;
 }
 
@@ -102,6 +111,7 @@ export function signedMatchOf(facilityId: string, match: GeocodeMatch): SignedMa
     precision: match.precision,
     accuracyType: match.accuracyType,
     confidence: match.confidence,
+    facilityVersion: match.facilityVersion,
     expiresAt: match.expiresAt,
     signature: match.signature,
   };

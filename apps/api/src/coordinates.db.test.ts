@@ -1,4 +1,4 @@
-import type { SignedMatch } from '@grain/domain';
+import { VERSION, type SignedMatch } from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -24,7 +24,16 @@ const counterparties = { a: id(), b: id() };
 const facilities = { street: id(), town: id(), located: id(), other: id() };
 const as = (userId: string): RequestContext => ({ userId, requestId: id() });
 
-function match(facilityId: string): SignedMatch {
+/** The facility's version now, as the lookup would have signed it. */
+async function versionOf(facilityId: string): Promise<string> {
+  const [row] = await admin<{ version: string }[]>`
+    select to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as version
+    from app.facilities where id = ${facilityId}`;
+  if (!row) throw new Error('no such facility');
+  return row.version;
+}
+
+async function match(facilityId: string, facilityVersion?: string): Promise<SignedMatch> {
   return {
     facilityId,
     latitude: '52.133214',
@@ -32,6 +41,7 @@ function match(facilityId: string): SignedMatch {
     precision: 'exact',
     accuracyType: 'rooftop',
     confidence: '0.97',
+    facilityVersion: facilityVersion ?? (await versionOf(facilityId)),
     expiresAt: '2026-10-27T19:00:00.000Z',
     signature: '0'.repeat(64),
   };
@@ -109,6 +119,7 @@ describe('geocoding as app_api', () => {
         region: 'SK',
         postalCode: 'S4P 3Y2',
         country: 'CA',
+        version: expect.stringMatching(VERSION) as unknown,
       },
       expect.objectContaining({ facilityId: facilities.town, city: 'Synthetic City' }),
     ]);
@@ -117,18 +128,18 @@ describe('geocoding as app_api', () => {
   });
 
   it('saves nothing for a viewer', async () => {
-    expect(await db.saveCoordinates(as(users.victor), orgs.a, [match(facilities.street)])).toEqual(
-      [],
-    );
+    expect(
+      await db.saveCoordinates(as(users.victor), orgs.a, [await match(facilities.street)]),
+    ).toEqual([]);
     expect((await location(facilities.street))?.latitude).toBeNull();
   });
 
   it('saves for an editor only facilities of the organization that have no coordinates', async () => {
     const ctx = as(users.olivia);
     const saved = await db.saveCoordinates(ctx, orgs.a, [
-      match(facilities.street),
-      match(facilities.located),
-      match(facilities.other),
+      await match(facilities.street),
+      await match(facilities.located),
+      await match(facilities.other),
     ]);
 
     expect(saved).toEqual([facilities.street]);
@@ -154,9 +165,9 @@ describe('geocoding as app_api', () => {
   });
 
   it('does not save another organization’s facility even when asked under its id', async () => {
-    expect(await db.saveCoordinates(as(users.olivia), orgs.b, [match(facilities.other)])).toEqual(
-      [],
-    );
+    expect(
+      await db.saveCoordinates(as(users.olivia), orgs.b, [await match(facilities.other)]),
+    ).toEqual([]);
     expect((await location(facilities.other))?.latitude).toBeNull();
   });
 
@@ -167,5 +178,34 @@ describe('geocoding as app_api', () => {
       ['Synthetic Elevator', 'exact'],
     ]);
     expect(result.withoutCoordinates).toBe(1);
+  });
+
+  it('does not save a match for an address that was corrected after the lookup', async () => {
+    const lookedUp = await versionOf(facilities.town);
+    await admin`update app.facilities set address_line = '999 Different Synthetic Road'
+                where id = ${facilities.town}`;
+    expect(
+      await db.saveCoordinates(as(users.olivia), orgs.a, [await match(facilities.town, lookedUp)]),
+    ).toEqual([]);
+    expect((await location(facilities.town))?.latitude).toBeNull();
+
+    // Looked up again, the corrected address is saved.
+    expect(
+      await db.saveCoordinates(as(users.olivia), orgs.a, [await match(facilities.town)]),
+    ).toEqual([facilities.town]);
+  });
+
+  it('does not save for a facility whose counterparty is archived', async () => {
+    const late = id();
+    await admin`insert into app.facilities
+      (id, organization_id, counterparty_id, city, region, country, created_by)
+      values (${late}, ${orgs.a}, ${counterparties.a}, 'Synthetic Late Town', 'SK', 'CA', ${users.olivia})`;
+    await admin`update app.counterparties set archived_at = now() where id = ${counterparties.a}`;
+    try {
+      expect(await db.saveCoordinates(as(users.olivia), orgs.a, [await match(late)])).toEqual([]);
+      expect((await location(late))?.latitude).toBeNull();
+    } finally {
+      await admin`update app.counterparties set archived_at = null where id = ${counterparties.a}`;
+    }
   });
 });

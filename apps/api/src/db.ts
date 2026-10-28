@@ -322,13 +322,21 @@ async function editable(
   | { status: 'forbidden' }
   | { status: 'archived' }
 > {
-  const [row] = await tx<{ organization_id: string; archived: boolean; allowed: boolean }[]>`
-    select organization_id, archived_at is not null as archived,
-           app.can_edit_directory(organization_id) as allowed
+  const [row] = await tx<{ organization_id: string; allowed: boolean }[]>`
+    select organization_id, app.can_edit_directory(organization_id) as allowed
     from app.counterparties where id = ${counterpartyId}`;
   if (!row) return NOT_FOUND;
   if (!row.allowed) return { status: 'forbidden' };
-  if (row.archived && options.whenArchived !== true) return { status: 'archived' };
+  // Lock the counterparty for the rest of the transaction and read it again: archiving it
+  // and changing it or anything under it then happen one after the other, so a change
+  // never lands on a counterparty archived in the meantime. (Locking needs the update
+  // policy, which only editors pass, hence the unlocked read above for the answers.)
+  const [locked] = await tx<{ archived: boolean }[]>`
+    select archived_at is not null as archived
+    from app.counterparties where id = ${counterpartyId}
+    for no key update`;
+  if (!locked) return NOT_FOUND;
+  if (locked.archived && options.whenArchived !== true) return { status: 'archived' };
   return { status: 'ok', organizationId: row.organization_id };
 }
 
@@ -546,7 +554,8 @@ export function createDatabase(sql: postgres.Sql): Database {
           select f.id as "facilityId", f.counterparty_id as "counterpartyId",
                  c.legal_name as "legalName", f.name as "facilityName",
                  f.address_line as "addressLine", f.city, f.region,
-                 f.postal_code as "postalCode", f.country
+                 f.postal_code as "postalCode", f.country,
+                 to_char(f.updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.facilities f
           join app.counterparties c on c.id = f.counterparty_id
           where f.organization_id = ${organizationId} and f.latitude is null
@@ -567,9 +576,20 @@ export function createDatabase(sql: postgres.Sql): Database {
           precision: match.precision,
           accuracy_type: match.accuracyType,
           confidence: match.confidence,
+          version: match.facilityVersion,
         }));
-        // One statement for the whole batch. Row level security also refuses facilities
-        // that already have coordinates, so a saved location is never overwritten.
+        // Their counterparties are locked first, so archiving one waits for this save or
+        // this save sees it archived (as editable() does for every other change).
+        await tx`
+          select c.id from app.counterparties c
+          where c.id in (select f.counterparty_id from app.facilities f
+                          where f.id in ${tx(values.map((value) => value.id))})
+          order by c.id
+          for no key update`;
+        // One statement for the whole batch, saving only facilities that still have no
+        // coordinates, are unchanged since the lookup (the address looked up is the one
+        // saved against) and belong to a counterparty that is not archived. The database
+        // also refuses a geocoding result over existing coordinates.
         const rows = await tx<{ id: string }[]>`
           update app.facilities f
           set latitude = v.latitude, longitude = v.longitude, location_precision = v.precision,
@@ -577,9 +597,11 @@ export function createDatabase(sql: postgres.Sql): Database {
               geocoding_confidence = v.confidence
           from jsonb_to_recordset(${tx.json(values)}::jsonb) as v(
             id uuid, latitude numeric, longitude numeric, precision app.location_precision,
-            accuracy_type text, confidence numeric
-          )
+            accuracy_type text, confidence numeric, version text
+          ), app.counterparties c
           where f.id = v.id and f.organization_id = ${organizationId} and f.latitude is null
+            and to_char(f.updated_at at time zone 'UTC', ${VERSION_FORMAT}) = v.version
+            and c.id = f.counterparty_id and c.archived_at is null
           returning f.id
         `;
         return rows.map((row) => row.id);

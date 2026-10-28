@@ -33,6 +33,8 @@ export interface FacilityAddress {
   region: string | null;
   postalCode: string | null;
   country: string;
+  /** The facility's version (its last change time), signed into each match. */
+  version: string;
 }
 
 /** A Geocodio failure for the whole request; `refused` covers a bad key and a used-up allowance. */
@@ -154,13 +156,14 @@ export function matchFor(
       confidence: result.confidence.toFixed(2),
       formattedAddress: result.formattedAddress,
       regionMatches: facility.region === null || region === facility.region,
+      facilityVersion: facility.version,
       expiresAt: new Date(now.getTime() + MATCH_LIFETIME_MS).toISOString(),
     },
   };
 }
 
 // Matches are signed so that only what this API looked up can be saved as Geocodio's,
-// for that facility and organization, within the hour. The signing key is derived from
+// for that facility (as it was when looked up) and organization, within the hour. The signing key is derived from
 // the Geocodio key, so no second secret is needed; replacing that key voids unsaved matches.
 type Signed = Pick<
   SignedMatch,
@@ -170,13 +173,14 @@ type Signed = Pick<
   | 'precision'
   | 'accuracyType'
   | 'confidence'
+  | 'facilityVersion'
   | 'expiresAt'
 >;
 
 function signedText(organizationId: string, match: Signed) {
   return new TextEncoder().encode(
     [
-      'v1',
+      'v2',
       organizationId,
       match.facilityId,
       match.latitude,
@@ -184,6 +188,7 @@ function signedText(organizationId: string, match: Signed) {
       match.precision,
       match.accuracyType,
       match.confidence,
+      match.facilityVersion,
       match.expiresAt,
     ].join('\n'),
   );
