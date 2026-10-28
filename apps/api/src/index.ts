@@ -1,11 +1,13 @@
+import { choosePasswordSchema, MIN_PASSWORD_LENGTH } from '@grain/domain';
 import { Hono } from 'hono';
 
 import { requireUser } from './auth';
 import { counterpartyRoutes } from './counterparties';
 import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
+import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { memberRoutes } from './members';
-import { apiError, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
+import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
 export type { ApiEnv, DatabaseFactory } from './respond';
 
@@ -48,6 +50,7 @@ export function createApp(openDatabase: DatabaseFactory) {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        mustChangePassword: user.mustChangePassword,
         organizations: organizations.map((m) => ({
           id: m.organizationId,
           name: m.organizationName,
@@ -55,6 +58,47 @@ export function createApp(openDatabase: DatabaseFactory) {
         })),
       });
     });
+  });
+
+  // The person's own password, replacing the temporary one their login was made with.
+  app.post('/me/password', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const user = c.get('user');
+    if (!user.mustChangePassword) {
+      return apiError(c, 409, 'NOT_NEEDED', 'Your password is already your own.');
+    }
+    const key = secretKey(c.env);
+    if (key === null) {
+      return apiError(c, 503, 'LOGINS_NOT_CONFIGURED', 'Choosing a password is not set up yet.');
+    }
+    const body = await readJson(c, 2048);
+    if (!body.ok) return body.response;
+    const request = choosePasswordSchema.safeParse(body.value);
+    if (!request.success) {
+      return apiError(
+        c,
+        422,
+        'VALIDATION_FAILED',
+        `Choose a password of at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
+      );
+    }
+    try {
+      const result = await setOwnPassword(c.env, key, user.id, request.data.password);
+      return result === 'saved'
+        ? c.json({ saved: true })
+        : apiError(c, 422, 'WEAK_PASSWORD', 'Supabase refused this password. Choose a longer one.');
+    } catch (error) {
+      if (!(error instanceof LoginServiceError)) throw error;
+      console.error(
+        `Supabase Auth refused a password in request ${c.get('requestId')}: status=${String(error.status)}`,
+      );
+      return apiError(
+        c,
+        502,
+        'LOGIN_SERVICE_FAILED',
+        'The password could not be saved. Try again.',
+      );
+    }
   });
 
   app.route('/counterparties', counterpartyRoutes(openDatabase));

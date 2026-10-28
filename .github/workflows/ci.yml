@@ -62,8 +62,9 @@ jobs:
             # The staging Worker's Hyperdrive binding points at the local database in wrangler dev.
             echo "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=$APP_API_URL"
           } >> "$GITHUB_ENV"
-          printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\nDATABASE_URL=%s\n' \
-            "$API_URL" "$ANON_KEY" "$APP_API_URL" > apps/api/.dev.vars.staging
+          # SUPABASE_SECRET_KEY lets the Team page make logins (the local CLI's well-known key).
+          printf 'SUPABASE_URL=%s\nSUPABASE_PUBLISHABLE_KEY=%s\nDATABASE_URL=%s\nSUPABASE_SECRET_KEY=%s\n' \
+            "$API_URL" "$ANON_KEY" "$APP_API_URL" "$SERVICE_ROLE_KEY" > apps/api/.dev.vars.staging
       - run: pnpm build
       # Runs before app_api has a login: the suite checks migrations never grant one.
       - name: Database tests

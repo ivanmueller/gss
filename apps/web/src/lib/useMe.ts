@@ -9,7 +9,15 @@ export interface MeOrganization {
 export type MeState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ok'; name: string | null; organizations: MeOrganization[] }
+  | {
+      status: 'ok';
+      name: string | null;
+      /** No first name yet: the app asks for it before anything else. */
+      nameMissing: boolean;
+      /** Signed in with a temporary password: the app asks for their own first. */
+      mustChangePassword: boolean;
+      organizations: MeOrganization[];
+    }
   | { status: 'error' };
 
 function stringProperty(body: unknown, key: string): string | null {
@@ -39,8 +47,11 @@ function readOrganizations(body: unknown): MeOrganization[] {
   });
 }
 
-/** Asks the API who the signed-in user is, proving the server accepted the session. */
-export function useMe(accessToken: string | null): MeState {
+/**
+ * Asks the API who the signed-in user is, proving the server accepted the session. A new
+ * `version` asks again (after the person chose a password or gave their name).
+ */
+export function useMe(accessToken: string | null, version = 0): MeState {
   const [state, setState] = useState<MeState>({ status: accessToken ? 'loading' : 'idle' });
 
   useEffect(() => {
@@ -61,6 +72,11 @@ export function useMe(accessToken: string | null): MeState {
                   stringProperty(body, 'firstName'),
                   stringProperty(body, 'lastName'),
                 ),
+                nameMissing: stringProperty(body, 'firstName') === null,
+                mustChangePassword:
+                  typeof body === 'object' &&
+                  body !== null &&
+                  (body as Record<string, unknown>).mustChangePassword === true,
                 organizations: readOrganizations(body),
               }
             : { status: 'error' },
@@ -72,7 +88,7 @@ export function useMe(accessToken: string | null): MeState {
     return () => {
       controller.abort();
     };
-  }, [accessToken]);
+  }, [accessToken, version]);
 
   return state;
 }

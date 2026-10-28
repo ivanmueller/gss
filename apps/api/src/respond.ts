@@ -15,6 +15,8 @@ export interface ApiEnv {
     DATABASE_URL?: string;
     /** Geocodio API key (Worker secret) for looking facility addresses up. */
     GEOCODIO_API_KEY?: string;
+    /** Supabase secret key (Worker secret), only for creating logins and setting passwords. */
+    SUPABASE_SECRET_KEY?: string;
   };
   Variables: { user: AuthUser; requestId: string };
 }

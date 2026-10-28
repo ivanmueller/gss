@@ -11,6 +11,9 @@ export const E2E_USER = {
   firstName: 'Synthetic',
   lastName: 'Trader',
 };
+/** Prefix of the logins the Team page test makes; removed at the start of each run. */
+export const NEW_LOGIN_PREFIX = 'e2e-new-';
+
 export const E2E_ORG_NAME = 'Synthetic E2E Org';
 /** An organization the e2e user does not belong to, with one counterparty. */
 export const OTHER_ORG = {
@@ -57,6 +60,8 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
     await sql`delete from app.organization_members
       where user_id in (select id from auth.users where email = ${E2E_USER.email})`;
     await sql`delete from app.organizations where display_name in (${E2E_ORG_NAME}, ${OTHER_ORG.name})`;
+    // Logins the Team page test made in earlier runs.
+    await sql`delete from auth.users where email like 'e2e-new-%@example.test'`;
     await recreateAuthUser(request, url);
     await sql`with org as (
         insert into app.organizations (display_name) values (${E2E_ORG_NAME}) returning id

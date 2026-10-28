@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { generate } from 'otplib';
 
-import { E2E_USER, OTHER_ORG } from './supabase';
+import { E2E_USER, NEW_LOGIN_PREFIX, OTHER_ORG } from './supabase';
 
 async function accessToken(page: Page): Promise<string> {
   await page.goto('/');
@@ -37,6 +38,51 @@ test('the Team page lists the admin and explains adding someone without a login'
   await form.getByLabel('First name').fill('Synthetic');
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(me).toContainText('Synthetic');
+});
+
+test('an admin makes a login; the new person sets up their authenticator and own password', async ({
+  page,
+  browser,
+}) => {
+  const email = `${NEW_LOGIN_PREFIX}${String(Date.now())}@example.test`;
+  await page.goto('/team');
+  const add = page.getByRole('region', { name: 'Add a person' });
+  await add.getByLabel('First name').fill('Newbie');
+  await add.getByLabel('Last name').fill('Synthetic');
+  await add.getByLabel('Email').fill(email);
+  await add.getByLabel('Role').selectOption('viewer');
+  await add.getByRole('button', { name: 'Add to team' }).click();
+  const shown = add.getByRole('status');
+  await expect(shown).toContainText(`Newbie can now sign in as ${email}`);
+  const temporary = (await shown.locator('code').textContent())?.trim() ?? '';
+  expect(temporary).toMatch(/^[a-z2-9]{4}(-[a-z2-9]{4}){3}$/);
+  await expect(
+    page.getByRole('table', { name: 'Team members' }).getByRole('row').filter({ hasText: email }),
+  ).toContainText('Newbie Synthetic');
+
+  // The new person, in a browser of their own.
+  const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const them = await context.newPage();
+  await them.goto('/');
+  await them.getByLabel('Email').fill(email);
+  await them.getByLabel('Password').fill(temporary);
+  await them.getByRole('button', { name: 'Sign in' }).click();
+  await expect(them.getByRole('heading', { name: 'Set up your authenticator app' })).toBeVisible({
+    timeout: 15_000,
+  });
+  const secret = (await them.getByTestId('totp-secret').textContent())?.trim() ?? '';
+  await them.getByLabel(/6-digit code/).fill(await generate({ secret }));
+  await them.getByRole('button', { name: 'Confirm and continue' }).click();
+
+  await expect(them.getByRole('heading', { name: 'Choose your password' })).toBeVisible();
+  await them.getByLabel('New password').fill('a long synthetic phrase');
+  await them.getByLabel('The same again').fill('a long synthetic phrase');
+  await them.getByRole('button', { name: 'Save password' }).click();
+  // Names were given on the Team page, so the app opens straight away.
+  await expect(them.getByRole('navigation', { name: 'Main' })).toBeVisible();
+  await them.getByRole('button', { name: 'Account' }).click();
+  await expect(them.getByRole('menu')).toContainText('Signed in as Newbie S.');
+  await context.close();
 });
 
 test("another organization's team stays closed", async ({ page, request }) => {

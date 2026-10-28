@@ -13,6 +13,8 @@ export interface AuthUser {
   /** From the user's Supabase metadata (`first_name`, `last_name`); for display only. */
   firstName: string | null;
   lastName: string | null;
+  /** The login was made with a temporary password; the person chooses their own first. */
+  mustChangePassword: boolean;
 }
 
 export interface AuthEnv {
@@ -106,6 +108,13 @@ export const requireUser: MiddlewareHandler<AuthEnv> = async (c, next) => {
     email,
     firstName: namePart(body, 'first_name'),
     lastName: namePart(body, 'last_name'),
+    // app_metadata is set only with the secret key, never by the user themselves.
+    mustChangePassword:
+      typeof body === 'object' &&
+      body !== null &&
+      typeof (body as Record<string, unknown>).app_metadata === 'object' &&
+      ((body as { app_metadata: Record<string, unknown> | null }).app_metadata
+        ?.must_change_password ?? false) === true,
   });
   return next();
 };

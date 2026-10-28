@@ -1,6 +1,7 @@
 import { addMemberSchema, updateMemberSchema } from '@grain/domain';
 import { Hono } from 'hono';
 
+import { createLogin, LoginServiceError, secretKey, temporaryPassword } from './logins';
 import {
   apiError,
   isUuid,
@@ -29,7 +30,9 @@ export function memberRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
-  // Adds a person who already has a login (made in the Supabase dashboard).
+  // Adds a person to the team. Without a login yet, one is made with a temporary password,
+  // returned once for the admin to pass on in person; the person replaces it at first
+  // sign-in. Making logins needs the Worker secret SUPABASE_SECRET_KEY.
   routes.post('/', async (c) => {
     c.header('Cache-Control', 'no-store');
     const body = await readJson(c, MAX_BODY_BYTES);
@@ -39,20 +42,61 @@ export function memberRoutes(openDatabase: DatabaseFactory) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'Give an email address and a role.');
     }
     const { organizationId, email, role } = request.data;
+    const firstName = request.data.firstName ?? null;
+    const lastName = request.data.lastName ?? null;
     return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.addMember(ctx, organizationId, email, role);
+      // Admins only, before anything else; the database checks it again on every write.
+      if (!(await db.isOrgAdmin(ctx, organizationId))) {
+        return apiError(c, 403, 'FORBIDDEN', FORBIDDEN);
+      }
+      let result = await db.addMember(ctx, organizationId, email, role);
+      let password: string | null = null;
+      if (result.status === 'no_account') {
+        const key = secretKey(c.env);
+        if (key === null) {
+          return apiError(
+            c,
+            503,
+            'LOGINS_NOT_CONFIGURED',
+            'Making logins from the app is not set up yet: an admin adds the Supabase secret key in Cloudflare (README, “Sign-in”).',
+          );
+        }
+        if (firstName === null) {
+          return apiError(c, 422, 'NAME_REQUIRED', 'Give their first name: the app shows it.');
+        }
+        password = temporaryPassword();
+        try {
+          const created = await createLogin(c.env, key, { email, password, firstName, lastName });
+          // Made by someone else meanwhile: add that login, without a password to pass on.
+          if (created.status === 'exists') password = null;
+        } catch (error) {
+          if (!(error instanceof LoginServiceError)) throw error;
+          console.error(
+            `Supabase Auth refused making a login in request ${c.get('requestId')}: status=${String(error.status)}`,
+          );
+          return apiError(
+            c,
+            502,
+            'LOGIN_SERVICE_FAILED',
+            'Supabase did not make the login. Check the Supabase secret key in Cloudflare, or try again later.',
+          );
+        }
+        result = await db.addMember(ctx, organizationId, email, role);
+      }
       switch (result.status) {
         case 'added':
-          return c.json({ id: result.id }, 201);
+          // An existing login gets the names given here; a new one was made with them.
+          if (password === null && firstName !== null) {
+            await db.setMemberNames(ctx, organizationId, result.id, firstName, lastName);
+          }
+          return c.json(
+            { id: result.id, ...(password !== null && { temporaryPassword: password }) },
+            201,
+          );
         case 'forbidden':
           return apiError(c, 403, 'FORBIDDEN', FORBIDDEN);
         case 'no_account':
-          return apiError(
-            c,
-            404,
-            'NO_ACCOUNT',
-            'No one can sign in with this email yet. Create their login in Supabase first, then add them here.',
-          );
+          return apiError(c, 503, 'LOGIN_SERVICE_FAILED', 'The new login could not be found.');
         case 'already_member':
           return apiError(c, 409, 'ALREADY_MEMBER', 'This person is already on the team.');
       }

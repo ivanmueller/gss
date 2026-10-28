@@ -39,11 +39,16 @@ const name = z
   .refine((value) => !/\p{Cc}/u.test(value), 'has characters that cannot be shown')
   .transform((value) => (value === '' ? null : value));
 
-/** POST /api/v1/members: add a person who already has a login. */
+/**
+ * POST /api/v1/members: add a person to the team. Without a login yet, one is made (names
+ * then required: a first name at least) with a temporary password.
+ */
 export const addMemberSchema = z.object({
   organizationId: z.uuid(),
   email: z.string().trim().max(254).pipe(z.email()),
   role: z.enum(MEMBER_ROLES),
+  firstName: name.nullable().optional(),
+  lastName: name.nullable().optional(),
 });
 export type AddMemberRequest = z.infer<typeof addMemberSchema>;
 
@@ -81,3 +86,11 @@ export interface Member {
   /** The signed-in user's own membership. */
   isYou: boolean;
 }
+
+/** Shortest password a person may choose (the temporary one is replaced at first sign-in). */
+export const MIN_PASSWORD_LENGTH = 12;
+
+/** POST /api/v1/me/password: the person's own password, replacing the temporary one. */
+export const choosePasswordSchema = z.object({
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(72),
+});

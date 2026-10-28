@@ -46,41 +46,51 @@ describe('TeamPage', () => {
     expect(screen.queryByRole('button', { name: 'Suspend adam@example.test' })).toBeNull();
   });
 
-  it('adds a person, and explains how to create a login when there is none', async () => {
+  it('adds a person with names, and shows a new login’s temporary password once', async () => {
     const calls = mockApi({
       [LIST]: () => Response.json({ members: [ME] }),
-      'POST /members': (call) =>
-        (call.body as { email: string }).email === 'new@example.test'
-          ? Response.json({ id: 'm3' }, { status: 201 })
-          : Response.json(
-              { error: { code: 'NO_ACCOUNT', message: 'No one can sign in with this email yet.' } },
-              { status: 404 },
-            ),
+      'POST /members': () =>
+        Response.json({ id: 'm3', temporaryPassword: 'k7pq-mz3d-a9tw-x2fh' }, { status: 201 }),
     });
     render(<TeamPage session={SESSION} />);
     const form = await screen.findByRole('region', { name: 'Add a person' });
-
-    await userEvent.type(
-      within(form).getByLabelText('Email of their login'),
-      'missing@example.test',
-    );
-    await userEvent.click(within(form).getByRole('button', { name: 'Add to team' }));
-    expect(await within(form).findByRole('alert')).toHaveTextContent(
-      'Authentication → Users → Add user',
-    );
-
-    await userEvent.clear(within(form).getByLabelText('Email of their login'));
-    await userEvent.type(within(form).getByLabelText('Email of their login'), 'new@example.test');
+    await userEvent.type(within(form).getByLabelText('First name'), 'Ana');
+    await userEvent.type(within(form).getByLabelText('Last name'), 'Synthetic');
+    await userEvent.type(within(form).getByLabelText('Email'), 'ana@example.test');
     await userEvent.selectOptions(within(form).getByLabelText('Role'), 'trader');
     await userEvent.click(within(form).getByRole('button', { name: 'Add to team' }));
-    expect(await within(form).findByRole('status')).toHaveTextContent(
-      'new@example.test is on the team.',
-    );
-    expect(calls.filter((call) => call.method === 'POST').at(-1)?.body).toEqual({
+
+    const shown = await within(form).findByRole('status');
+    expect(shown).toHaveTextContent('Ana can now sign in as ana@example.test');
+    expect(shown).toHaveTextContent('k7pq-mz3d-a9tw-x2fh');
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
       organizationId: ORG.id,
-      email: 'new@example.test',
+      email: 'ana@example.test',
       role: 'trader',
+      firstName: 'Ana',
+      lastName: 'Synthetic',
     });
+  });
+
+  it('explains how to set up making logins when the key is missing', async () => {
+    mockApi({
+      [LIST]: () => Response.json({ members: [ME] }),
+      'POST /members': () =>
+        Response.json(
+          {
+            error: {
+              code: 'LOGINS_NOT_CONFIGURED',
+              message: 'Making logins from the app is not set up yet.',
+            },
+          },
+          { status: 503 },
+        ),
+    });
+    render(<TeamPage session={SESSION} />);
+    const form = await screen.findByRole('region', { name: 'Add a person' });
+    await userEvent.type(within(form).getByLabelText('Email'), 'ana@example.test');
+    await userEvent.click(within(form).getByRole('button', { name: 'Add to team' }));
+    expect(await within(form).findByRole('alert')).toHaveTextContent('SUPABASE_SECRET_KEY');
   });
 
   it('edits names and role, and suspends someone else', async () => {

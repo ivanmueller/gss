@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
+import { ChoosePassword, YourName } from './auth/FirstSignIn';
 import { AppShell, type NavSection } from './components/AppShell';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
@@ -42,7 +43,8 @@ function section(route: Route): NavSection | null {
 
 export function App({ account }: { account?: Account }) {
   const health = useApiHealth();
-  const me = useMe(account?.accessToken ?? null);
+  const [meVersion, setMeVersion] = useState(0);
+  const me = useMe(account?.accessToken ?? null, meVersion);
   const route = matchRoute(usePath());
   const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
   const redirectTo = route.page === 'redirect' ? route.to : null;
@@ -103,6 +105,30 @@ export function App({ account }: { account?: Account }) {
         </Notice>
       );
       break;
+  }
+
+  // After a first sign-in: the person's own password, then their name, before the app.
+  if (account && me.status === 'ok' && me.mustChangePassword) {
+    return (
+      <ChoosePassword
+        token={account.accessToken}
+        onDone={() => {
+          setMeVersion((current) => current + 1);
+        }}
+        onSignOut={account.signOut}
+      />
+    );
+  }
+  if (account?.saveName && me.status === 'ok' && me.nameMissing) {
+    return (
+      <YourName
+        saveName={account.saveName}
+        onDone={() => {
+          setMeVersion((current) => current + 1);
+        }}
+        onSignOut={account.signOut}
+      />
+    );
   }
 
   return (
