@@ -403,6 +403,49 @@ describe('contacts and locations as app_api', () => {
   });
 });
 
+describe('archiving while something under the counterparty is being changed', () => {
+  // Waits until a query of the API's connection is waiting for a lock.
+  async function untilWaitingForLock() {
+    const watcher = postgres(ADMIN_URL ?? '', { max: 1, onnotice: () => undefined });
+    try {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const [row] = await watcher<{ waiting: number }[]>`
+          select count(*)::int as waiting from pg_stat_activity
+          where usename = 'app_api' and wait_event_type = 'Lock'`;
+        if ((row?.waiting ?? 0) > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error('the change never waited for the lock');
+    } finally {
+      await watcher.end();
+    }
+  }
+
+  it('never lets a change land on a counterparty archived in the meantime', async () => {
+    const counterpartyId = await create('Synthetic Race');
+    const [first] = (await detail(counterpartyId)).contacts;
+    if (!first) throw new Error('fixture has no contact');
+
+    // Another session holds the counterparty while the contact edit starts, then archives
+    // it and commits. The edit must then see it archived, not save over it.
+    let pending: Promise<unknown> = Promise.resolve();
+    await admin.begin(async (tx) => {
+      await tx`select 1 from app.counterparties where id = ${counterpartyId} for update`;
+      pending = db.updateContact(as(users.olivia), counterpartyId, first.id, first.version, {
+        ...contact('Synthetic Grower'),
+        phone: '+1 306 555 0199',
+      });
+      await untilWaitingForLock();
+      await tx`update app.counterparties set archived_at = now() where id = ${counterpartyId}`;
+    });
+
+    expect(await pending).toEqual({ status: 'archived' });
+    const [row] = await admin<{ phone: string | null }[]>`
+      select phone from app.counterparty_contacts where id = ${first.id}`;
+    expect(row?.phone).toBeNull();
+  });
+});
+
 describe('the map by counterparty type', () => {
   it('shows only the locations of counterparties with the chosen type', async () => {
     await create('Synthetic Map Seller', {

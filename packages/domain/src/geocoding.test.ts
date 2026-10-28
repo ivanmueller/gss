@@ -10,6 +10,7 @@ const MATCH = {
   confidence: '0.97',
   formattedAddress: '1 Synthetic Rd, Synthetic Town, SK S4P',
   regionMatches: true,
+  facilityVersion: '2026-10-27T18:00:00.000000Z',
   expiresAt: '2026-10-27T19:00:00.000Z',
   signature: 'a'.repeat(64),
 };
@@ -28,6 +29,7 @@ describe('signedMatchOf', () => {
       precision: 'exact',
       accuracyType: 'rooftop',
       confidence: '0.97',
+      facilityVersion: '2026-10-27T18:00:00.000000Z',
       expiresAt: '2026-10-27T19:00:00.000Z',
       signature: 'a'.repeat(64),
     });
@@ -55,6 +57,8 @@ describe('saveCoordinatesRequestSchema', () => {
     ['a short signature', { signature: 'abc' }],
     ['an odd accuracy type', { accuracyType: 'Rooftop!' }],
     ['a bad expiry', { expiresAt: 'tomorrow' }],
+    ['no facility version', { facilityVersion: undefined }],
+    ['a facility version without microseconds', { facilityVersion: '2026-10-27T18:00:00.000Z' }],
     ['a bad facility id', { facilityId: 'f1' }],
   ])('refuses %s', (_what, change) => {
     expect(saveCoordinatesRequestSchema.safeParse(request([{ ...valid, ...change }])).success).toBe(
