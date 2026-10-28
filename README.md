@@ -39,9 +39,16 @@ pnpm e2e                        # build, then run the Playwright browser tests (
 
 ## Sign-in
 
-Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up: an administrator adds each user in the Supabase dashboard. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
+Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up.
 
-The profile menu (the icon at the top right) shows the user's first name and last initial, never the email. Set a user's name in the Supabase SQL editor:
+Adding a person (an admin of the organization):
+
+1. In Supabase: **Authentication → Users → Add user → Create new user**, with their email and a temporary password, and **Auto Confirm User** ticked. Give them the password in person or by phone.
+2. In the app: **Team → Add a person**, with the same email and a role. On the same page, admins set names, change roles, and suspend or reactivate people. An organization always keeps at least one active admin, and admins cannot change their own role.
+
+Without step 2, a login sees nothing. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
+
+The profile menu (the icon at the top right) shows the user's first name and last initial, never the email. Admins set names on the **Team** page; without the app, in the Supabase SQL editor:
 
 ```sql
 update auth.users

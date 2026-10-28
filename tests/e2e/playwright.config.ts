@@ -18,7 +18,13 @@ export default defineConfig({
     { name: 'setup', testMatch: ['auth.setup.ts'] },
     {
       name: 'desktop',
-      testMatch: ['desktop.spec.ts', 'routing.spec.ts', 'auth.spec.ts', 'counterparties.spec.ts'],
+      testMatch: [
+        'desktop.spec.ts',
+        'routing.spec.ts',
+        'auth.spec.ts',
+        'counterparties.spec.ts',
+        'team.spec.ts',
+      ],
       dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],

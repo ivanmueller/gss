@@ -366,7 +366,7 @@ describe('navigation', () => {
       within(planned)
         .getAllByRole('listitem')
         .map((item) => item.textContent),
-    ).toEqual(['Bids & offers', 'Scenarios', 'Team']);
+    ).toEqual(['Bids & offers', 'Scenarios']);
     expect(within(planned).queryByRole('link')).not.toBeInTheDocument();
   });
 
