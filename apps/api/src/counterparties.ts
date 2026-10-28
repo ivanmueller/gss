@@ -1,20 +1,104 @@
 import {
+  createContactSchema,
+  createCounterpartySchema,
+  createFacilitySchema,
   groupImportRows,
   importRequestSchema,
   inspectPng,
   MAX_LOGO_BYTES,
+  normalizeCountry,
+  parseContactFields,
+  parseCounterpartyFields,
+  parseDirectoryRecord,
+  parseFacilityFields,
   parseImportRow,
+  updateContactSchema,
+  updateCounterpartySchema,
+  updateFacilitySchema,
+  type CounterpartyType,
+  type FieldIssue,
   type ImportGroup,
   type ImportIssue,
   type ParsedImportRow,
 } from '@grain/domain';
 import { Hono } from 'hono';
 
-import { LIST_LIMIT } from './db';
-import { apiError, isUuid, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
+import { LIST_LIMIT, type Database, type RequestContext, type WriteResult } from './db';
+import {
+  apiError,
+  isUuid,
+  readJson,
+  withDatabase,
+  type ApiContext,
+  type ApiEnv,
+  type DatabaseFactory,
+} from './respond';
 
 /** Largest import request body accepted, in bytes. */
 export const MAX_IMPORT_BODY_BYTES = 10 * 1024 * 1024;
+/** Largest body of a form (add, edit) accepted, in bytes. */
+const MAX_FORM_BODY_BYTES = 64 * 1024;
+
+const FORBIDDEN_EDIT =
+  'Only operations and admin members of this organization can change counterparties.';
+
+type RecordKind = 'counterparty' | 'contact' | 'location';
+
+/** A schema refusal (zod's error, of which only the paths are used). */
+function malformed(c: ApiContext, error: { issues: { path: PropertyKey[] }[] }) {
+  return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.', {
+    fields: error.issues.slice(0, 20).map((issue) => issue.path.map(String).join('.')),
+  });
+}
+
+/** A form with problems: each one with its field, so the form can show it in place. */
+function invalid(c: ApiContext, issues: FieldIssue[]) {
+  return apiError(c, 422, 'VALIDATION_FAILED', 'Some fields need fixing.', { issues });
+}
+
+function refused(
+  c: ApiContext,
+  result: Exclude<WriteResult, { status: 'saved' }>,
+  what: RecordKind,
+) {
+  switch (result.status) {
+    case 'not_found':
+      return apiError(c, 404, 'NOT_FOUND', `No such ${what}.`);
+    case 'forbidden':
+      return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_EDIT);
+    case 'changed':
+      return apiError(
+        c,
+        409,
+        'RECORD_CHANGED',
+        `Someone changed this ${what} after you opened it. Reload the page to see their change, then make yours again.`,
+      );
+    case 'archived':
+      return apiError(
+        c,
+        409,
+        'ARCHIVED',
+        'This counterparty is archived. Restore it before changing it.',
+      );
+  }
+}
+
+/** After a change: the counterparty as it now is, with its contacts and locations. */
+async function savedDetail(
+  c: ApiContext,
+  db: Database,
+  ctx: RequestContext,
+  id: string,
+  result: WriteResult,
+  what: RecordKind,
+  status: 200 | 201 = 200,
+) {
+  if (result.status !== 'saved') return refused(c, result, what);
+  const counterparty = await db.getCounterparty(ctx, id);
+  return counterparty
+    ? c.json(counterparty, status)
+    : apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+}
 
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -36,12 +120,13 @@ interface ImportPlan {
 
 function planImport(
   rows: { line: number; values: Record<string, string | undefined> }[],
+  defaultTypes: readonly CounterpartyType[] | undefined,
 ): ImportPlan {
   const parsed: ParsedImportRow[] = [];
   const issues: ImportIssue[] = [];
   let emptyRows = 0;
   for (const row of rows) {
-    const result = parseImportRow(row.line, row.values);
+    const result = parseImportRow(row.line, row.values, defaultTypes ? { defaultTypes } : {});
     if (result.status === 'ok') parsed.push(result.row);
     else if (result.status === 'empty') emptyRows += 1;
     else issues.push(...result.issues);
@@ -91,8 +176,8 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         fields: request.error.issues.slice(0, 20).map((issue) => issue.path.join('.')),
       });
     }
-    const { organizationId, fileName, commit, rows } = request.data;
-    const plan = planImport(rows);
+    const { organizationId, fileName, commit, rows, defaultTypes } = request.data;
+    const plan = planImport(rows, defaultTypes);
 
     return withDatabase(c, openDatabase, async (db, ctx) => {
       if (!(await db.canEditDirectory(ctx, organizationId))) {
@@ -244,6 +329,164 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         height: check.height,
         bytes: check.png.byteLength,
       });
+    });
+  });
+
+  // One counterparty entered by hand, with an optional first contact and location (GT-020).
+  routes.post('/', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = createCounterpartySchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    const parsed = parseDirectoryRecord(request.data.values);
+    if (parsed.status === 'empty')
+      return invalid(c, [{ field: null, message: 'The form is empty.' }]);
+    if (parsed.status === 'invalid') return invalid(c, parsed.issues);
+    const { counterparty, contact, facility } = parsed.record;
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const created = await db.createCounterparty(ctx, request.data.organizationId, {
+        counterparty,
+        contacts: contact ? [contact] : [],
+        facilities: facility ? [facility] : [],
+      });
+      if (created.status === 'forbidden') return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_EDIT);
+      return c.json({ id: created.id }, 201);
+    });
+  });
+
+  routes.patch('/:id', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = updateCounterpartySchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    const parsed = parseCounterpartyFields(request.data.values);
+    if (parsed.status === 'invalid') return invalid(c, parsed.issues);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.updateCounterparty(ctx, id, request.data.version, parsed.value);
+      return savedDetail(c, db, ctx, id, result, 'counterparty');
+    });
+  });
+
+  // Archiving hides a counterparty from the list and the map; it is never deleted.
+  for (const [action, archived] of [
+    ['archive', true],
+    ['restore', false],
+  ] as const) {
+    routes.post(`/:id/${action}`, async (c) => {
+      c.header('Cache-Control', 'no-store');
+      const id = c.req.param('id');
+      if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+      return withDatabase(c, openDatabase, async (db, ctx) => {
+        const result = await db.setArchived(ctx, id, archived);
+        return savedDetail(c, db, ctx, id, result, 'counterparty');
+      });
+    });
+  }
+
+  routes.post('/:id/contacts', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = createContactSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    const parsed = parseContactFields(request.data.values);
+    if (parsed.status === 'invalid') return invalid(c, parsed.issues);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.addContact(ctx, id, parsed.value);
+      return savedDetail(c, db, ctx, id, result, 'counterparty', 201);
+    });
+  });
+
+  routes.patch('/:id/contacts/:contactId', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const { id, contactId } = c.req.param();
+    if (!isUuid(id) || !isUuid(contactId)) return apiError(c, 404, 'NOT_FOUND', 'No such contact.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = updateContactSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    const parsed = parseContactFields(request.data.values);
+    if (parsed.status === 'invalid') return invalid(c, parsed.issues);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.updateContact(ctx, id, contactId, request.data.version, parsed.value);
+      return savedDetail(c, db, ctx, id, result, 'contact');
+    });
+  });
+
+  routes.delete('/:id/contacts/:contactId', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const { id, contactId } = c.req.param();
+    if (!isUuid(id) || !isUuid(contactId)) return apiError(c, 404, 'NOT_FOUND', 'No such contact.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.removeContact(ctx, id, contactId);
+      return savedDetail(c, db, ctx, id, result, 'contact');
+    });
+  });
+
+  // A location's country defaults to its counterparty's, so the counterparty is read first.
+  routes.post('/:id/facilities', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = createFacilitySchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const counterparty = await db.getCounterparty(ctx, id);
+      if (!counterparty) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+      const parsed = parseFacilityFields(
+        request.data.values,
+        normalizeCountry(counterparty.primaryCountry) ?? 'CA',
+      );
+      if (parsed.status === 'invalid') return invalid(c, parsed.issues);
+      const result = await db.addFacility(ctx, id, parsed.value);
+      return savedDetail(c, db, ctx, id, result, 'counterparty', 201);
+    });
+  });
+
+  routes.patch('/:id/facilities/:facilityId', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const { id, facilityId } = c.req.param();
+    if (!isUuid(id) || !isUuid(facilityId))
+      return apiError(c, 404, 'NOT_FOUND', 'No such location.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = updateFacilitySchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const counterparty = await db.getCounterparty(ctx, id);
+      if (!counterparty) return apiError(c, 404, 'NOT_FOUND', 'No such location.');
+      const parsed = parseFacilityFields(
+        request.data.values,
+        normalizeCountry(counterparty.primaryCountry) ?? 'CA',
+      );
+      if (parsed.status === 'invalid') return invalid(c, parsed.issues);
+      const result = await db.updateFacility(
+        ctx,
+        id,
+        facilityId,
+        request.data.version,
+        parsed.value,
+      );
+      return savedDetail(c, db, ctx, id, result, 'location');
+    });
+  });
+
+  routes.delete('/:id/facilities/:facilityId', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const { id, facilityId } = c.req.param();
+    if (!isUuid(id) || !isUuid(facilityId))
+      return apiError(c, 404, 'NOT_FOUND', 'No such location.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.removeFacility(ctx, id, facilityId);
+      return savedDetail(c, db, ctx, id, result, 'location');
     });
   });
 

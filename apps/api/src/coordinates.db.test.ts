@@ -162,7 +162,7 @@ describe('geocoding as app_api', () => {
 
   it('shows the saved point on the map', async () => {
     const view = { west: -110, south: 49, east: -95, north: 60 };
-    const result = await db.facilitiesInBbox(as(users.victor), orgs.a, view);
+    const result = await db.facilitiesInBbox(as(users.victor), orgs.a, view, null);
     expect(result.facilities.map((f) => [f.name, f.locationPrecision])).toEqual([
       ['Synthetic Elevator', 'exact'],
     ]);

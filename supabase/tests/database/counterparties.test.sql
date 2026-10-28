@@ -98,11 +98,11 @@ select ok(
   'app_api cannot call the audit trigger function directly'
 );
 select ok(
-  not has_table_privilege('app_api', 'app.counterparties', 'update, delete, truncate')
-    and not has_table_privilege('app_api', 'app.counterparty_contacts', 'update, delete, truncate')
-    and not has_table_privilege('app_api', 'app.facilities', 'update, delete, truncate')
+  not has_table_privilege('app_api', 'app.counterparties', 'delete, truncate')
+    and not has_table_privilege('app_api', 'app.counterparty_contacts', 'truncate')
+    and not has_table_privilege('app_api', 'app.facilities', 'truncate')
     and not has_table_privilege('app_api', 'app.import_batches', 'update, delete, truncate'),
-  'app_api cannot update or delete directory records'
+  'app_api cannot delete counterparties, empty directory tables or change import records'
 );
 select ok(
   not has_table_privilege('app_api', 'app.counterparty_logos', 'delete, truncate'),
@@ -298,8 +298,9 @@ select throws_ok(
 );
 select throws_ok(
   $q$select pg_temp.api_exec('00000000-0000-4000-8000-0000000011aa', $$
-    update app.counterparties set legal_name = 'Renamed' where legal_name = 'Synthetic Prairie Mills'$$)$q$,
-  '42501', null, 'counterparties cannot be edited through the API role yet'
+    update app.counterparties set organization_id = '00000000-0000-4000-8000-0000000000bb'
+     where legal_name = 'Synthetic Prairie Mills'$$)$q$,
+  '42501', null, 'a counterparty cannot be moved to another organization through the API role'
 );
 select throws_ok(
   $q$select pg_temp.api_exec('00000000-0000-4000-8000-0000000022aa', 'delete from app.counterparties')$q$,

@@ -1,6 +1,7 @@
 import type {
   Bbox,
   ContactInput,
+  CounterpartyType,
   SignedMatch,
   CounterpartyInput,
   FacilityInput,
@@ -38,10 +39,14 @@ export interface CounterpartySummary {
   /** Provinces and states of the counterparty's facilities. */
   regions: string[];
   logoSha256: string | null;
+  /** When it was archived; archived counterparties are left off the map. */
+  archivedAt: string | null;
 }
 
 export interface Contact extends ContactInput {
   id: string;
+  /** Its last change time, sent back with an edit so a stale edit is refused (VERSION in @grain/domain). */
+  version: string;
 }
 
 export interface Facility {
@@ -56,13 +61,31 @@ export interface Facility {
   latitude: string | null;
   longitude: string | null;
   locationPrecision: LocationPrecision | null;
+  /** Where the coordinates came from: 'geocodio', 'manual' or 'file_import'. */
+  geocodingSource: string | null;
+  version: string;
 }
 
 export interface CounterpartyDetail extends CounterpartySummary {
   notes: string | null;
+  version: string;
   contacts: Contact[];
   facilities: Facility[];
 }
+
+/** The outcome of a change to a counterparty, its contacts or its locations. */
+export type WriteResult =
+  | { status: 'saved' }
+  /** The counterparty (or its contact or location) does not exist or is not visible. */
+  | { status: 'not_found' }
+  /** The user may read but not change the organization's directory. */
+  | { status: 'forbidden' }
+  /** The record changed after the version the user edited. */
+  | { status: 'changed' }
+  /** Archived counterparties are restored before they are changed. */
+  | { status: 'archived' };
+
+export type CreateResult = { status: 'created'; id: string } | { status: 'forbidden' };
 
 export interface Logo {
   data: Uint8Array;
@@ -127,10 +150,12 @@ export interface Database {
     organizationId: string | null,
   ) => Promise<CounterpartySummary[]>;
   getCounterparty: (ctx: RequestContext, id: string) => Promise<CounterpartyDetail | null>;
+  /** Located facilities in the box, of counterparties with the given type when one is given; archived counterparties are left out. */
   facilitiesInBbox: (
     ctx: RequestContext,
     organizationId: string | null,
     bbox: Bbox,
+    type: CounterpartyType | null,
   ) => Promise<MapFacilities>;
   /** The organization's facilities without coordinates, up to `limit` + 1, by counterparty. */
   facilitiesWithoutCoordinates: (
@@ -157,6 +182,55 @@ export interface Database {
   counterpartyKeys: (ctx: RequestContext, organizationId: string) => Promise<Set<string>>;
   /** Creates the batch and its counterparties in one transaction; returns the batch id. */
   importCounterparties: (ctx: RequestContext, batch: ImportBatchInput) => Promise<string>;
+  /** One counterparty entered by hand, with its first contact and location, in one transaction. */
+  createCounterparty: (
+    ctx: RequestContext,
+    organizationId: string,
+    record: NewCounterparty,
+  ) => Promise<CreateResult>;
+  updateCounterparty: (
+    ctx: RequestContext,
+    id: string,
+    version: string,
+    input: CounterpartyInput,
+  ) => Promise<WriteResult>;
+  /** Archives or restores a counterparty; doing what is already done changes nothing. */
+  setArchived: (ctx: RequestContext, id: string, archived: boolean) => Promise<WriteResult>;
+  addContact: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    input: ContactInput,
+  ) => Promise<WriteResult>;
+  updateContact: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    contactId: string,
+    version: string,
+    input: ContactInput,
+  ) => Promise<WriteResult>;
+  removeContact: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    contactId: string,
+  ) => Promise<WriteResult>;
+  addFacility: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    input: FacilityInput,
+  ) => Promise<WriteResult>;
+  /** Coordinates that change get the source 'manual'; unchanged ones keep theirs. */
+  updateFacility: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    facilityId: string,
+    version: string,
+    input: FacilityInput,
+  ) => Promise<WriteResult>;
+  removeFacility: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    facilityId: string,
+  ) => Promise<WriteResult>;
   close: () => Promise<void>;
 }
 
@@ -190,6 +264,7 @@ interface SummaryRow {
   facility_count: number;
   regions: string[];
   logo_sha256: string | null;
+  archived_at: Date | null;
 }
 
 function summary(row: SummaryRow): CounterpartySummary {
@@ -207,12 +282,100 @@ function summary(row: SummaryRow): CounterpartySummary {
     facilityCount: row.facility_count,
     regions: row.regions,
     logoSha256: row.logo_sha256,
+    archivedAt: row.archived_at?.toISOString() ?? null,
   };
 }
 
 /** Postgres array literal for a list of enum labels from a fixed set. */
 function enumArray(values: readonly string[]): string {
   return `{${values.join(',')}}`;
+}
+
+/**
+ * A record's version is its updated_at to the microsecond, in UTC, as text from Postgres;
+ * VERSION in @grain/domain checks its form. Versions are compared as text: postgres.js
+ * sends a timestamptz parameter through a JavaScript Date, which keeps only milliseconds.
+ */
+const VERSION_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"';
+
+/** Coordinates entered by hand or imported get that as their source; none, none. */
+function enteredSource(facility: FacilityInput, source: 'manual' | 'file_import'): string | null {
+  return facility.latitude === null ? null : source;
+}
+
+const SAVED = { status: 'saved' } as const;
+const NOT_FOUND = { status: 'not_found' } as const;
+const CHANGED = { status: 'changed' } as const;
+
+/**
+ * Whether the user may change this counterparty and what lies under it: it is visible, the
+ * user is an editor of its organization and, unless `whenArchived`, it is not archived.
+ * Row level security enforces the first two again on every write.
+ */
+async function editable(
+  tx: postgres.TransactionSql,
+  counterpartyId: string,
+  options: { whenArchived?: boolean } = {},
+): Promise<
+  | { status: 'ok'; organizationId: string }
+  | { status: 'not_found' }
+  | { status: 'forbidden' }
+  | { status: 'archived' }
+> {
+  const [row] = await tx<{ organization_id: string; archived: boolean; allowed: boolean }[]>`
+    select organization_id, archived_at is not null as archived,
+           app.can_edit_directory(organization_id) as allowed
+    from app.counterparties where id = ${counterpartyId}`;
+  if (!row) return NOT_FOUND;
+  if (!row.allowed) return { status: 'forbidden' };
+  if (row.archived && options.whenArchived !== true) return { status: 'archived' };
+  return { status: 'ok', organizationId: row.organization_id };
+}
+
+/** Whether a contact or facility of the counterparty exists (and is visible). */
+async function exists(
+  tx: postgres.TransactionSql,
+  table: 'counterparty_contacts' | 'facilities',
+  counterpartyId: string,
+  id: string,
+): Promise<boolean> {
+  const rows = await tx`
+    select 1 from ${tx(`app.${table}`)} where id = ${id} and counterparty_id = ${counterpartyId}`;
+  return rows.length === 1;
+}
+
+async function insertContact(
+  tx: postgres.TransactionSql,
+  organizationId: string,
+  counterpartyId: string,
+  contact: ContactInput,
+) {
+  await tx`
+    insert into app.counterparty_contacts
+      (organization_id, counterparty_id, name, role, email, phone, created_by)
+    values (${organizationId}, ${counterpartyId}, ${contact.name}, ${contact.role},
+            ${contact.email}, ${contact.phone}, app.current_user_id())
+  `;
+}
+
+async function insertFacility(
+  tx: postgres.TransactionSql,
+  organizationId: string,
+  counterpartyId: string,
+  facility: FacilityInput,
+) {
+  await tx`
+    insert into app.facilities
+      (organization_id, counterparty_id, name, facility_type, address_line, city, region,
+       postal_code, country, latitude, longitude, location_precision, geocoding_source,
+       created_by)
+    values (${organizationId}, ${counterpartyId}, ${facility.name},
+            ${facility.facilityType}::app.facility_type, ${facility.addressLine},
+            ${facility.city}, ${facility.region}, ${facility.postalCode}, ${facility.country},
+            ${facility.latitude}::numeric, ${facility.longitude}::numeric,
+            ${facility.locationPrecision}::app.location_precision,
+            ${enteredSource(facility, 'manual')}, app.current_user_id())
+  `;
 }
 
 /**
@@ -265,7 +428,7 @@ export function createDatabase(sql: postgres.Sql): Database {
     (select count(*)::int from app.facilities f where f.counterparty_id = c.id) as facility_count,
     to_jsonb(array(select distinct f.region::text from app.facilities f
                     where f.counterparty_id = c.id and f.region is not null order by 1)) as regions,
-    l.sha256 as logo_sha256
+    l.sha256 as logo_sha256, c.archived_at
   `;
 
   return {
@@ -311,15 +474,17 @@ export function createDatabase(sql: postgres.Sql): Database {
 
     getCounterparty(ctx, id) {
       return asUser(ctx, async (tx) => {
-        const [row] = await tx<(SummaryRow & { notes: string | null })[]>`
-          select ${summaryColumns(tx)}, c.notes
+        const [row] = await tx<(SummaryRow & { notes: string | null; version: string })[]>`
+          select ${summaryColumns(tx)}, c.notes,
+                 to_char(c.updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.counterparties c
           left join app.counterparty_logos l on l.counterparty_id = c.id
           where c.id = ${id}
         `;
         if (!row) return null;
         const contacts = await tx<Contact[]>`
-          select id, name, role, email, phone
+          select id, name, role, email, phone,
+                 to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.counterparty_contacts where counterparty_id = ${id}
           order by lower(name), id
         `;
@@ -327,23 +492,30 @@ export function createDatabase(sql: postgres.Sql): Database {
           select id, name, facility_type::text as "facilityType", address_line as "addressLine",
                  city, region, postal_code as "postalCode", country,
                  latitude::text as latitude, longitude::text as longitude,
-                 location_precision::text as "locationPrecision"
+                 location_precision::text as "locationPrecision",
+                 geocoding_source as "geocodingSource",
+                 to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.facilities where counterparty_id = ${id}
           order by country, region nulls last, city nulls last, id
         `;
         return {
           ...summary(row),
           notes: row.notes,
+          version: row.version,
           contacts: [...contacts],
           facilities: [...facilities],
         };
       });
     },
 
-    facilitiesInBbox(ctx, organizationId, bbox) {
+    facilitiesInBbox(ctx, organizationId, bbox, type) {
       return asUser(ctx, async (tx) => {
-        const inOrganization = () =>
-          organizationId === null ? tx`true` : tx`f.organization_id = ${organizationId}`;
+        // Facilities shown: of the organization, of a counterparty that is not archived
+        // and, when asked, has the type.
+        const shown = () => tx`
+          c.archived_at is null
+          and ${organizationId === null ? tx`true` : tx`f.organization_id = ${organizationId}`}
+          and ${type === null ? tx`true` : tx`${type}::app.counterparty_type = any (c.types)`}`;
         // app.location_in_bbox wraps PostGIS, which app_api cannot reach directly.
         const facilities = await tx<MapFacility[]>`
           select f.id, f.counterparty_id as "counterpartyId", c.legal_name as "legalName",
@@ -356,13 +528,14 @@ export function createDatabase(sql: postgres.Sql): Database {
           join app.counterparties c on c.id = f.counterparty_id
           where app.location_in_bbox(f.location, ${bbox.west}, ${bbox.south},
                                      ${bbox.east}, ${bbox.north})
-            and ${inOrganization()}
+            and ${shown()}
           order by lower(c.legal_name), c.id, lower(f.name), f.id
           limit ${MAP_LIMIT + 1}
         `;
         const [missing] = await tx<{ count: number }[]>`
           select count(*)::int as count from app.facilities f
-          where f.location is null and ${inOrganization()}`;
+          join app.counterparties c on c.id = f.counterparty_id
+          where f.location is null and ${shown()}`;
         return { facilities: [...facilities], withoutCoordinates: missing?.count ?? 0 };
       });
     },
@@ -377,6 +550,7 @@ export function createDatabase(sql: postgres.Sql): Database {
           from app.facilities f
           join app.counterparties c on c.id = f.counterparty_id
           where f.organization_id = ${organizationId} and f.latitude is null
+            and c.archived_at is null
           order by lower(c.legal_name), c.id, lower(f.name), f.id
           limit ${limit + 1}
         `;
@@ -510,7 +684,7 @@ export function createDatabase(sql: postgres.Sql): Database {
             latitude: f.latitude,
             longitude: f.longitude,
             location_precision: f.locationPrecision,
-            geocoding_source: f.latitude === null ? null : 'file_import',
+            geocoding_source: enteredSource(f, 'file_import'),
             created_by: ctx.userId,
           })),
         );
@@ -518,6 +692,164 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.facilities ${tx(part)}`;
         }
         return batchId;
+      });
+    },
+
+    createCounterparty(ctx, organizationId, record) {
+      return asUser(ctx, async (tx): Promise<CreateResult> => {
+        const [check] = await tx<{ allowed: boolean }[]>`
+          select app.can_edit_directory(${organizationId}) as allowed`;
+        if (check?.allowed !== true) return { status: 'forbidden' };
+        const c = record.counterparty;
+        const [created] = await tx<{ id: string }[]>`
+          insert into app.counterparties
+            (organization_id, legal_name, trading_name, types, primary_country,
+             verification_status, notes, source, created_by)
+          values (${organizationId}, ${c.legalName}, ${c.tradingName},
+                  ${enumArray(c.types)}::app.counterparty_type[], ${c.primaryCountry},
+                  ${c.verificationStatus}::app.verification_status, ${c.notes}, 'manual',
+                  app.current_user_id())
+          returning id
+        `;
+        if (!created) throw new Error('counterparty was not created');
+        for (const contact of record.contacts) {
+          await insertContact(tx, organizationId, created.id, contact);
+        }
+        for (const facility of record.facilities) {
+          await insertFacility(tx, organizationId, created.id, facility);
+        }
+        return { status: 'created', id: created.id };
+      });
+    },
+
+    updateCounterparty(ctx, id, version, input) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, id);
+        if (target.status !== 'ok') return target;
+        const rows = await tx`
+          update app.counterparties
+          set legal_name = ${input.legalName}, trading_name = ${input.tradingName},
+              types = ${enumArray(input.types)}::app.counterparty_type[],
+              primary_country = ${input.primaryCountry},
+              verification_status = ${input.verificationStatus}::app.verification_status,
+              notes = ${input.notes}
+          where id = ${id} and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
+          returning id
+        `;
+        return rows.length === 1 ? SAVED : CHANGED;
+      });
+    },
+
+    setArchived(ctx, id, archived) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, id, { whenArchived: true });
+        if (target.status !== 'ok') return target;
+        // Only a real change is written (and audited).
+        await tx`
+          update app.counterparties
+          set archived_at = ${archived ? tx`now()` : null}
+          where id = ${id} and (archived_at is null) = ${archived}
+        `;
+        return SAVED;
+      });
+    },
+
+    addContact(ctx, counterpartyId, input) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        await insertContact(tx, target.organizationId, counterpartyId, input);
+        return SAVED;
+      });
+    },
+
+    updateContact(ctx, counterpartyId, contactId, version, input) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        const rows = await tx`
+          update app.counterparty_contacts
+          set name = ${input.name}, role = ${input.role}, email = ${input.email},
+              phone = ${input.phone}
+          where id = ${contactId} and counterparty_id = ${counterpartyId}
+            and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
+          returning id
+        `;
+        if (rows.length === 1) return SAVED;
+        return (await exists(tx, 'counterparty_contacts', counterpartyId, contactId))
+          ? CHANGED
+          : NOT_FOUND;
+      });
+    },
+
+    removeContact(ctx, counterpartyId, contactId) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        const rows = await tx`
+          delete from app.counterparty_contacts
+          where id = ${contactId} and counterparty_id = ${counterpartyId}
+          returning id
+        `;
+        return rows.length === 1 ? SAVED : NOT_FOUND;
+      });
+    },
+
+    addFacility(ctx, counterpartyId, input) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        await insertFacility(tx, target.organizationId, counterpartyId, input);
+        return SAVED;
+      });
+    },
+
+    updateFacility(ctx, counterpartyId, facilityId, version, input) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        const latitude = input.latitude;
+        const longitude = input.longitude;
+        // On the right of SET, columns hold the values before the update.
+        // A fresh fragment for each use: postgres.js numbers a fragment's parameters once.
+        const sameSpot = () =>
+          tx`latitude = ${latitude}::numeric and longitude = ${longitude}::numeric`;
+        const rows = await tx`
+          update app.facilities
+          set name = ${input.name},
+              facility_type = ${input.facilityType}::app.facility_type,
+              address_line = ${input.addressLine}, city = ${input.city},
+              region = ${input.region}, postal_code = ${input.postalCode},
+              country = ${input.country},
+              latitude = ${latitude}::numeric, longitude = ${longitude}::numeric,
+              location_precision = ${input.locationPrecision}::app.location_precision,
+              geocoding_source = case
+                when ${latitude}::numeric is null then null
+                when ${sameSpot()} then geocoding_source
+                else 'manual' end,
+              geocoding_accuracy = case
+                when ${latitude}::numeric is not null and ${sameSpot()} then geocoding_accuracy end,
+              geocoding_confidence = case
+                when ${latitude}::numeric is not null and ${sameSpot()} then geocoding_confidence end
+          where id = ${facilityId} and counterparty_id = ${counterpartyId}
+            and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
+          returning id
+        `;
+        if (rows.length === 1) return SAVED;
+        return (await exists(tx, 'facilities', counterpartyId, facilityId)) ? CHANGED : NOT_FOUND;
+      });
+    },
+
+    removeFacility(ctx, counterpartyId, facilityId) {
+      return asUser(ctx, async (tx) => {
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        const rows = await tx`
+          delete from app.facilities
+          where id = ${facilityId} and counterparty_id = ${counterpartyId}
+          returning id
+        `;
+        return rows.length === 1 ? SAVED : NOT_FOUND;
       });
     },
 

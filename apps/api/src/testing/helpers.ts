@@ -36,7 +36,9 @@ type Mocked<T> = {
     : never;
 };
 
-/** A Database whose every method is a mock; reads return empty results by default. */
+const saved = () => Promise.resolve({ status: 'saved' } as const);
+
+/** A Database whose every method is a mock; reads return empty results and writes succeed by default. */
 export function fakeDatabase(): Mocked<Database> {
   return {
     memberships: vi.fn<Database['memberships']>(() =>
@@ -62,6 +64,17 @@ export function fakeDatabase(): Mocked<Database> {
     importCounterparties: vi.fn<Database['importCounterparties']>(() =>
       Promise.resolve('00000000-0000-4000-8000-0000000ba7c4'),
     ),
+    createCounterparty: vi.fn<Database['createCounterparty']>(() =>
+      Promise.resolve({ status: 'created', id: '00000000-0000-4000-8000-00000000c0de' }),
+    ),
+    updateCounterparty: vi.fn<Database['updateCounterparty']>(() => saved()),
+    setArchived: vi.fn<Database['setArchived']>(() => saved()),
+    addContact: vi.fn<Database['addContact']>(() => saved()),
+    updateContact: vi.fn<Database['updateContact']>(() => saved()),
+    removeContact: vi.fn<Database['removeContact']>(() => saved()),
+    addFacility: vi.fn<Database['addFacility']>(() => saved()),
+    updateFacility: vi.fn<Database['updateFacility']>(() => saved()),
+    removeFacility: vi.fn<Database['removeFacility']>(() => saved()),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
 }

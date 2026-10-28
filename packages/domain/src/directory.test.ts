@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createCounterpartySchema,
   groupImportRows,
   importRequestSchema,
+  parseContactFields,
+  parseCounterpartyFields,
+  parseDirectoryRecord,
+  parseFacilityFields,
   parseImportRow,
   suggestMapping,
+  updateCounterpartySchema,
+  updateFacilitySchema,
   type ImportRowValues,
   type ParsedImportRow,
 } from './directory';
@@ -74,7 +81,7 @@ describe('parseImportRow', () => {
         types: ['buyer', 'seller'],
         primaryCountry: 'CA',
         verificationStatus: 'verified',
-        notes: 'Prefers rail. Call mornings.',
+        notes: 'Prefers rail.\nCall mornings.',
       },
       contact: {
         name: 'Synthetic Merchandiser',
@@ -365,5 +372,177 @@ describe('long values', () => {
       status: 'invalid',
       issues: [{ line: 4, field: 'notes', message: 'is longer than 2000 characters' }],
     });
+  });
+});
+
+describe('buyers and sellers in an import', () => {
+  it('uses the chosen types for rows without one, and a row’s own type otherwise', () => {
+    const seller = parseImportRow(
+      2,
+      { legalName: 'Synthetic Grower', country: 'CA' },
+      { defaultTypes: ['seller'] },
+    );
+    expect(seller).toMatchObject({ status: 'ok', row: { counterparty: { types: ['seller'] } } });
+    const own = parseImportRow(
+      3,
+      { legalName: 'Synthetic Mill', country: 'CA', types: 'buyer' },
+      { defaultTypes: ['seller'] },
+    );
+    expect(own).toMatchObject({ status: 'ok', row: { counterparty: { types: ['buyer'] } } });
+  });
+
+  it('accepts the chosen types in the request, and only known types', () => {
+    const valid = {
+      organizationId: '00000000-0000-4000-8000-0000000000aa',
+      fileName: 'sellers.csv',
+      commit: false,
+      rows: [{ line: 2, values: { legalName: 'Synthetic Grower', country: 'CA' } }],
+    };
+    expect(importRequestSchema.safeParse({ ...valid, defaultTypes: ['seller'] }).success).toBe(
+      true,
+    );
+    expect(importRequestSchema.safeParse({ ...valid, defaultTypes: ['grower'] }).success).toBe(
+      false,
+    );
+    expect(importRequestSchema.safeParse({ ...valid, defaultTypes: [] }).success).toBe(false);
+  });
+
+  it('matches seller-side column names to the legal name', () => {
+    expect(suggestMapping(['Seller Name', 'Prov']).legalName).toBe('Seller Name');
+    expect(suggestMapping(['Grower', 'Country']).legalName).toBe('Grower');
+    expect(suggestMapping(['Farm Name']).legalName).toBe('Farm Name');
+  });
+});
+
+describe('notes', () => {
+  it('keep their line breaks, with at most one blank line between paragraphs', () => {
+    expect(
+      parseCounterpartyFields({
+        legalName: 'A',
+        country: 'CA',
+        types: 'buyer',
+        notes: '  First line  \r\n\r\n\r\nSecond   line\n',
+      }),
+    ).toMatchObject({ status: 'ok', value: { notes: 'First line\n\nSecond line' } });
+  });
+});
+
+describe('the add form (parseDirectoryRecord)', () => {
+  it('needs a type when none is chosen', () => {
+    expect(parseDirectoryRecord({ legalName: 'Synthetic Grower', country: 'CA' })).toEqual({
+      status: 'invalid',
+      issues: [
+        { field: 'types', message: 'choose at least one: buyer, seller, broker or carrier' },
+      ],
+    });
+  });
+
+  it('returns the counterparty with its first contact and location', () => {
+    expect(
+      parseDirectoryRecord({
+        legalName: 'Synthetic Grower',
+        country: 'CA',
+        types: 'seller',
+        contactName: 'Synthetic Farmer',
+        city: 'Synthetic Town',
+        region: 'SK',
+      }),
+    ).toMatchObject({
+      status: 'ok',
+      record: {
+        counterparty: { legalName: 'Synthetic Grower', types: ['seller'], primaryCountry: 'CA' },
+        contact: { name: 'Synthetic Farmer' },
+        facility: { city: 'Synthetic Town', region: 'SK', country: 'CA' },
+      },
+    });
+  });
+});
+
+describe('edit forms', () => {
+  it('check a counterparty’s details, including its types', () => {
+    expect(
+      parseCounterpartyFields({
+        legalName: ' Synthetic  Mill ',
+        country: 'USA',
+        types: 'seller,buyer',
+      }),
+    ).toEqual({
+      status: 'ok',
+      value: {
+        legalName: 'Synthetic Mill',
+        tradingName: null,
+        types: ['seller', 'buyer'],
+        primaryCountry: 'US',
+        verificationStatus: 'unverified',
+        notes: null,
+      },
+    });
+    expect(parseCounterpartyFields({ legalName: '', country: 'CA', types: '' })).toEqual({
+      status: 'invalid',
+      issues: [
+        { field: 'legalName', message: 'is required' },
+        { field: 'types', message: 'choose at least one: buyer, seller, broker or carrier' },
+      ],
+    });
+  });
+
+  it('need a contact’s name and check its email', () => {
+    expect(parseContactFields({})).toEqual({
+      status: 'invalid',
+      issues: [{ field: 'contactName', message: 'is required' }],
+    });
+    expect(parseContactFields({ contactName: 'A', contactEmail: 'nope' })).toEqual({
+      status: 'invalid',
+      issues: [{ field: 'contactEmail', message: '"nope" is not an email address' }],
+    });
+    expect(parseContactFields({ contactName: ' Synthetic  Contact ' })).toEqual({
+      status: 'ok',
+      value: { name: 'Synthetic Contact', role: null, email: null, phone: null },
+    });
+  });
+
+  it('need a location to say where it is, in the counterparty’s country unless given', () => {
+    expect(parseFacilityFields({ facilityType: 'elevator' }, 'CA')).toEqual({
+      status: 'invalid',
+      issues: [
+        {
+          field: null,
+          message:
+            'Give the location at least a name, an address, a city, a province or state, or coordinates.',
+        },
+      ],
+    });
+    expect(parseFacilityFields({ city: 'Synthetic Town', region: 'MB' }, 'CA')).toMatchObject({
+      status: 'ok',
+      value: { city: 'Synthetic Town', region: 'MB', country: 'CA', latitude: null },
+    });
+    expect(parseFacilityFields({ region: 'Manitoba', facilityCountry: 'US' }, 'CA')).toEqual({
+      status: 'invalid',
+      issues: [{ field: 'region', message: '"Manitoba" is not a province or state of US' }],
+    });
+  });
+
+  it('accept only their own fields and a version', () => {
+    const v = '2026-10-28T14:05:09.123456Z';
+    expect(
+      updateCounterpartySchema.safeParse({ version: v, values: { legalName: 'A' } }).success,
+    ).toBe(true);
+    expect(
+      updateCounterpartySchema.safeParse({ version: v, values: { contactName: 'A' } }).success,
+    ).toBe(false);
+    expect(updateCounterpartySchema.safeParse({ values: { legalName: 'A' } }).success).toBe(false);
+    expect(
+      updateCounterpartySchema.safeParse({ version: '2026-10-28', values: { legalName: 'A' } })
+        .success,
+    ).toBe(false);
+    expect(updateFacilitySchema.safeParse({ version: v, values: { legalName: 'A' } }).success).toBe(
+      false,
+    );
+    expect(
+      createCounterpartySchema.safeParse({
+        organizationId: '00000000-0000-4000-8000-0000000000aa',
+        values: { legalName: 'A', city: 'B' },
+      }).success,
+    ).toBe(true);
   });
 });
