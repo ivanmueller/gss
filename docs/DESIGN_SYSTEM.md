@@ -21,7 +21,7 @@ After a colour change, `pnpm --filter @grain/web test` checks that text still me
 
 ## Three layers
 
-1. **Palette** (`palette.css`): raw colours as ramps from 50 (lightest) to 950 (darkest), in OKLCH. Grey (pure neutral, no tint) for the light theme; slate (a cool blue-grey, matched to the owner's reference dashboard) for the night theme; blue, green, yellow, orange, red, teal and indigo (teal and indigo are not used by any role at the moment). Apart from slate, the values are Tailwind CSS v4's palette. No brand colour yet, and nothing depends on one.
+1. **Palette** (`palette.css`): raw colours as ramps from 50 (lightest) to 950 (darkest), in OKLCH. Grey (pure neutral, no tint) for the light theme; slate (a cool blue-grey, matched to the owner's reference dashboard) for the night theme; blue, green, yellow, orange, red, teal and indigo (teal and indigo are not used by any role at the moment); leaf and coral (soft green and red for bids and asks, from the owner's reference of 2026-10-28). Apart from slate, leaf and coral, the values are Tailwind CSS v4's palette. No brand colour yet, and nothing depends on one.
 2. **Themes** (`themes.css`): what each colour is *for*, once for the light theme (`:root`, white and neutral greys) and once for the night theme (`.dark`, slate: page `#252c36`, cards `#313842`, menu a step darker). Components only ever use these roles.
 3. **Scales and the Tailwind bridge** (`scales.css`): type, spacing, rounding and shadows, and the roles exposed as Tailwind classes (`bg-card`, `text-danger`, `rounded-card`, `shadow-md`). Tailwind's default colours, radii, shadows and font sizes are switched off, so only these values exist.
 
@@ -29,7 +29,7 @@ After a colour change, `pnpm --filter @grain/web test` checks that text still me
 
 Neutral: `background`/`foreground` (page and body text), `card` and `popover` (raised surfaces), `muted`/`muted-foreground` (quiet fills, secondary text), `accent` (hover and selection), `primary` and `secondary` (filled buttons), `border`, `input`, `ring` (keyboard focus), `sidebar-*`, `overlay`.
 
-Status and trading roles, each with five tokens: `<role>` (text, icons, dots), `<role>-subtle` (tinted background), `<role>-border`, `<role>-solid` (filled background) and `<role>-solid-foreground` (text on it).
+Status and trading roles, each with five tokens: `<role>` (text, icons, dots), `<role>-subtle` (tinted background), `<role>-border`, `<role>-solid` (filled background) and `<role>-solid-foreground` (text on it). `bid` and `offer` also have `<role>-accent`, the bright border of a hovered order-book box.
 
 | Role | Ramp | Use it for |
 |---|---|---|

@@ -2,6 +2,18 @@
 
 Issues are proposed identifiers. File them in the GitHub repository when available.
 
+## Where the build stands (2026-10-28)
+
+Ticket by ticket, with notes, in `docs/HANDOFF.md`. In short:
+
+| Phase | State |
+|---|---|
+| 0 — Repository and documentation baseline | Done, except Codex's recorded check that it reads `AGENTS.md`. The repository is public by the owner's choice (`docs/DECISIONS.md`), not private as GT-001 says. |
+| 1 — Infrastructure, auth and database | Done except commodity and grade tables (GT-015), an audit view (GT-016) and backups with a restore drill (GT-017; the free Supabase plan has none). One organization only, GSS, by the owner's decision: there is nothing to switch between, and the isolation tests stay. |
+| 2 — Counterparties, facilities, map and table | Done on the owner's real buyer data: directory with editing, import, logos, archive (GT-020), locations with Geocodio coordinates (GT-021), map search (GT-022), the Mapbox map in Counterparties (GT-023), fixtures (GT-025). The workspace's synchronized map, order book and table (GT-024) run on made-up data until quotes exist. Also built at the owner's request: the Team page (GT-013). |
+| 3 — Versioned quotes | Next, with the Bank of Canada FX connector (GT-052), pulled forward by the owner. Not started. |
+| 4–6 | Not started. The thin trade slice follows quotes. |
+
 # 13. Execution plan, ordered backlog and acceptance gates
 
 These are **release-readiness gates**, not calendar promises. Phase 0 and the minimum secure Phase 1 foundation are mandatory prerequisites. Thereafter, a thin end-to-end slice may implement the necessary **minimum** Phase 2–4 capabilities before all polish/import tasks finish. The complete phase acceptance gates must still pass before that phase is declared complete. See `docs/AI_CODING_SYSTEM.md` §8. Synthetic test records are permitted until validated market data is onboarded.
@@ -16,7 +28,7 @@ These are **release-readiness gates**, not calendar promises. Phase 0 and the mi
 
 **Tickets:** GT-010 scaffold React/Vite/Cloudflare Worker/Hono; GT-011 create separate Supabase projects; GT-012 implement auth/session and MFA; GT-013 organizations, memberships and role capabilities; GT-014 migration chain and least-privilege database access; GT-015 PostGIS, facility/commodity/counterparty schema; GT-016 audit infrastructure; GT-017 seeded fictional data, backups and restore runbook.
 
-**Gate:** Users can sign in and switch among only authorized organizations; unauthorized direct API requests fail; tenancy tests pass; migration setup works on a fresh database.
+**Gate:** Users can sign in and switch among only authorized organizations (one organization, GSS, by the owner's decision: signed-in users reach only it); unauthorized direct API requests fail; tenancy tests pass; migration setup works on a fresh database.
 
 ### Early cross-phase milestone — thin trade vertical slice (not a production release)
 
