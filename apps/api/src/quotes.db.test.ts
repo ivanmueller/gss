@@ -277,6 +277,56 @@ describe('bids and offers as app_api', () => {
     expect((await db.getQuote(as(users.tess), created.id))?.status).toBe('firm');
   });
 
+  // Codex's review of ivanmueller/gss#46: new terms based on revision 1 were saved over
+  // revision 2 when it was recorded while they waited for the quote's lock.
+  it('refuses new terms based on a revision replaced while they waited for the lock', async () => {
+    const created = await db.createQuote(as(users.tess), bid());
+    if (created.status !== 'created') throw new Error('not created');
+    let release: () => void = () => undefined;
+    let ready: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const locked = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    // Another session (its own connection) locks the quote and records revision 2, without
+    // committing yet.
+    const session = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+    const other = session.begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.tess}, true)`;
+      await tx`select 1 from app.quotes where id = ${created.id} for no key update`;
+      await tx`insert into app.quote_revisions
+          (organization_id, quote_id, revision_number, firmness, price, currency, price_unit,
+           delivery_basis, quantity_max_mt, quoted_at, valid_from, valid_until, source_type,
+           recorded_by, recorded_by_name)
+        values (${orgs.a}, ${created.id}, 1, 'firm', 740.00, 'USD', 'MT', 'delivered', 50,
+                now(), now(), now() + interval '2 days', 'phone', ${users.tess}, 'Tess Trader')`;
+      ready();
+      await held;
+    });
+    await locked;
+    const revising = db.reviseQuote(as(users.tess), created.id, 1, terms(), 'Tess Trader');
+    // Wait until the revision is blocked on the lock, then let the other session commit.
+    for (let tries = 0; ; tries += 1) {
+      // pg_locks, unlike other sessions' wait events, is readable without extra privileges.
+      const [waiting] = await admin<{ count: number }[]>`
+        select count(*)::int as count from pg_locks where not granted`;
+      if ((waiting?.count ?? 0) > 0) break;
+      if (tries > 200) throw new Error('the revision never waited for the lock');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    release();
+    await other;
+    await session.end();
+    expect(await revising).toEqual({ status: 'changed', currentRevision: 2 });
+    const quote = await db.getQuote(as(users.tess), created.id);
+    expect(quote?.revisions.map((r) => [r.revisionNumber, r.price])).toEqual([
+      [2, '740.00'],
+      [1, '725.00'],
+    ]);
+  });
+
   it('keeps a location with quotes from being removed', async () => {
     await expect(
       db.removeFacility(as(users.olivia), counterparties.buyer, facilities.buyer),

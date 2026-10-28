@@ -340,16 +340,19 @@ export function quoteQueries(asUser: AsUser): QuoteDatabase {
           from app.quotes where id = ${id}`;
         if (!quote) return { status: 'not_found' };
         if (!quote.allowed) return { status: 'forbidden' };
-        // Lock the quote, so revising and withdrawing it happen one after the other, then
-        // read its state again.
+        // Lock the quote, so revising and withdrawing it happen one after the other. Its
+        // state is read in a statement of its own once the lock is held: a statement that
+        // waits for a lock reads everything but the locked row as it was before waiting, so
+        // it would miss a revision recorded meanwhile (Codex's review of ivanmueller/gss#46).
+        const lock = await tx`select 1 from app.quotes where id = ${id} for no key update`;
+        if (lock.length === 0) return { status: 'not_found' };
         const [locked] = await tx<{ withdrawn: boolean; archived: boolean; current: number }[]>`
           select q.withdrawn_at is not null as withdrawn,
                  exists (select 1 from app.counterparties c
                           where c.id = q.counterparty_id and c.archived_at is not null) as archived,
                  (select max(r.revision_number) from app.quote_revisions r
                    where r.quote_id = q.id) as current
-          from app.quotes q where q.id = ${id}
-          for no key update of q`;
+          from app.quotes q where q.id = ${id}`;
         if (!locked) return { status: 'not_found' };
         if (locked.withdrawn) return { status: 'withdrawn' };
         if (locked.archived) return { status: 'archived' };
