@@ -26,7 +26,7 @@ export function CadPrice({
   if (!price) {
     return (
       <span className={cn('inline-flex flex-wrap items-center gap-x-1.5', className)}>
-        <span className="font-mono tabular-nums">{formatPrice(quote.price)}</span>
+        <span className="font-price tabular-nums">{formatPrice(quote.price)}</span>
         <span className="font-sans text-xs font-normal text-caution">no CAD/USD rate</span>
       </span>
     );
@@ -34,7 +34,7 @@ export function CadPrice({
   const text = formatPrice({ amount: price.cadDisplay, currency: 'CAD', unit: quote.price.unit });
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
-      <span className="font-mono tabular-nums">{text}</span>
+      <span className="font-price tabular-nums">{text}</span>
       {price.fx && (
         <span
           title={`Converted from ${conversionText(quote, price.fx)}`}

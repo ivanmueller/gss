@@ -38,14 +38,14 @@ Status and trading roles, each with five tokens: `<role>` (text, icons, dots), `
 | `caution` | yellow | Not yet reliable: indicative quotes, pending verification, synthetic data |
 | `warning` | orange | A likely problem to check before acting: low geocoding confidence, another province |
 | `danger` | red | Errors, server unreachable, destructive actions |
-| `bid` | green | Buyer bids |
-| `offer` | red | Seller offers, called asks in the order book |
+| `bid` | leaf (soft green) | Buyer bids |
+| `offer` | coral (soft red) | Seller offers, called asks in the order book |
 
-Severity rises from info to danger. Colour never carries meaning alone: statuses, bids and offers always show a word and usually an icon. Bids and asks follow the trading convention (green and red) and so share their ramps with `success` and `danger`; they always sit under a heading or carry the word "Bid" or "Ask", so they are never read as a status.
+Severity rises from info to danger. Colour never carries meaning alone: statuses, bids and offers always show a word and usually an icon. Bids and asks follow the trading convention (green and red), in the softer leaf green and coral of a reference the owner chose on 2026-10-28 (panel tints `#f5f8f2` and `#f7f2f1`, accents `#93bf72` and `#e26768`), with ramps of their own rather than `success` and `danger`'s. Each has an `-accent` step for a hovered box's border. They always sit under a heading or carry the word "Bid" or "Ask", so they are never read as a status.
 
 ## Scales
 
-- **Type:** IBM Plex Sans (interface) and IBM Plex Mono (prices, codes), open source (SIL OFL) and served with the app. Sizes `2xs` 11 (dense labels, such as the order book's column headings), `xs` 12, `sm` 14 (body), `base` 16, `lg` 18, `xl` 20, `2xl` 24 (page titles), `3xl` 30 px. Inputs use 16 px on phones so the browser does not zoom in.
+- **Type:** IBM Plex Sans (interface), Figtree (prices per tonne and spreads, `font-price`, with tabular figures; the owner's choice of 2026-10-28, an open lookalike of the font in their reference) and IBM Plex Mono (codes), all open source (SIL OFL) and served with the app. Sizes `2xs` 11 (dense labels, such as the order book's column headings), `xs` 12, `sm` 14 (body), `base` 16, `lg` 18, `xl` 20, `2xl` 24 (page titles), `3xl` 30 px. Inputs use 16 px on phones so the browser does not zoom in.
 - **Spacing:** a 4 px grid (`p-1` = 4 px, `p-4` = 16 px). Prefer 1, 1.5, 2, 3, 4, 6, 8, 12, 16.
 - **Rounding:** every radius is a multiple of `--radius-base` (8 px): `xs` 2, `sm` 4, `md` 6, `lg` 8, `xl` 12, `2xl` 16, `full`. Components use `rounded-control` (6), `rounded-badge` (4), `rounded-card` (12), `rounded-popover` (8), `rounded-dialog` (12).
 - **Shadows:** `shadow-xs` cards, inputs, outline buttons; `shadow-sm` raised on hover; `shadow-md` menus; `shadow-lg` drawers and dialogs. Opacity light theme 5 / 8 / 12 / 16 %, night theme 20 / 28 / 36 / 45 %.

@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Order book colours and price font
+
+- `docs/DESIGN_SYSTEM.md`: bids and asks in the owner's reference leaf green and coral, with their own ramps; Figtree for prices.
+
 ## 2026-10-28 — Authenticator link and WebP logos
 
 - `README.md`: **Open in authenticator app** when setting up sign-in on a phone; logos may also be WebP (saved as a PNG, like a JPG).
