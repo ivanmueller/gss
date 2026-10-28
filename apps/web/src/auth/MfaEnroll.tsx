@@ -1,3 +1,4 @@
+import { Smartphone } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../components/ui/button';
@@ -9,6 +10,13 @@ interface PendingFactor {
   id: string;
   qrCode: string;
   secret: string;
+  /** The otpauth:// setup link, which authenticator apps open directly; null if unusable. */
+  uri: string | null;
+}
+
+/** Only an authenticator setup link is used as a link, never anything else Supabase sends. */
+export function setupLink(uri: string | undefined): string | null {
+  return uri !== undefined && /^otpauth:\/\/totp\/[^\s]+$/i.test(uri) ? uri : null;
 }
 
 /** Supabase returns the QR code as an SVG, sometimes already as a data URL. */
@@ -43,7 +51,12 @@ export function MfaEnroll({ auth, onSignOut }: { auth: AuthClient; onSignOut: ()
         setError('Could not start authenticator setup. Sign out and try again.');
         return;
       }
-      setFactor({ id: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });
+      setFactor({
+        id: data.id,
+        qrCode: data.totp.qr_code,
+        secret: data.totp.secret,
+        uri: setupLink(data.totp.uri),
+      });
     })();
   }, [auth]);
 
@@ -64,6 +77,21 @@ export function MfaEnroll({ auth, onSignOut }: { auth: AuthClient; onSignOut: ()
         <FieldError message={error} />
         {factor && (
           <>
+            {factor.uri && (
+              <div className="flex flex-col gap-1.5">
+                <Button asChild className="w-full">
+                  <a href={factor.uri}>
+                    <Smartphone aria-hidden="true" />
+                    Open in authenticator app
+                  </a>
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  On this phone: tap to add GSS to your authenticator app, save it there, then come
+                  back here for the 6-digit code. Install an authenticator app first if you have
+                  none. On a computer, scan the code below with your phone.
+                </p>
+              </div>
+            )}
             <img
               src={qrSource(factor.qrCode)}
               alt="QR code for your authenticator app"

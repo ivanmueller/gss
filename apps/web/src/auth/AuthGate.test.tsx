@@ -51,7 +51,11 @@ function fakeAuth(initial: Partial<FakeState> = {}) {
       enroll: vi.fn(() =>
         ok({
           id: 'factor-new',
-          totp: { qr_code: 'data:image/svg+xml;utf-8,<svg/>', secret: 'SYNTHETICSECRET' },
+          totp: {
+            qr_code: 'data:image/svg+xml;utf-8,<svg/>',
+            secret: 'SYNTHETICSECRET',
+            uri: 'otpauth://totp/GSS:alice@example.test?secret=SYNTHETICSECRET&issuer=GSS',
+          },
         }),
       ),
       unenroll: vi.fn(() => ok({})),
@@ -184,6 +188,10 @@ describe('AuthGate', () => {
       await screen.findByRole('img', { name: 'QR code for your authenticator app' }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('totp-secret')).toHaveTextContent('SYNTHETICSECRET');
+    expect(screen.getByRole('link', { name: 'Open in authenticator app' })).toHaveAttribute(
+      'href',
+      'otpauth://totp/GSS:alice@example.test?secret=SYNTHETICSECRET&issuer=GSS',
+    );
     expect(mock.mfa.unenroll).toHaveBeenCalledWith({ factorId: 'factor-stale' });
     expect(mock.mfa.enroll).toHaveBeenCalledTimes(1);
 

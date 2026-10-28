@@ -1,8 +1,8 @@
 import { inspectPng, MAX_LOGO_DIMENSION } from '@grain/domain';
 
 // Logos are stored and served as PNG only (the API checks and rebuilds every PNG, which
-// keeps uploaded files from carrying anything but an image). A JPG, or a PNG too large to
-// store, is redrawn in the browser and saved as a PNG instead.
+// keeps uploaded files from carrying anything but an image). A JPG or WebP, or a PNG too
+// large to store, is redrawn in the browser and saved as a PNG instead.
 
 /** Longest side of a redrawn logo, in pixels; plenty for a logo, and keeps it small. */
 export const REDRAWN_LOGO_SIZE = 512;
@@ -10,7 +10,7 @@ export const REDRAWN_LOGO_SIZE = 512;
 export type LogoResult =
   { ok: true; png: Uint8Array<ArrayBuffer> } | { ok: false; message: string };
 
-const NOT_AN_IMAGE = 'The file is not a PNG or JPG image. Choose a PNG or JPG file.';
+const NOT_AN_IMAGE = 'The file is not a PNG, JPG or WebP image. Choose one of those.';
 
 async function redraw(file: Blob): Promise<Uint8Array<ArrayBuffer> | null> {
   let bitmap: ImageBitmap;
@@ -33,12 +33,13 @@ async function redraw(file: Blob): Promise<Uint8Array<ArrayBuffer> | null> {
   return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
 }
 
-/** The logo to upload, as a PNG the API accepts, from a PNG or JPG file. */
+/** The logo to upload, as a PNG the API accepts, from a PNG, JPG or WebP file. */
 export async function logoAsPng(file: File): Promise<LogoResult> {
   const name = file.name.toLowerCase();
   const isPng = file.type === 'image/png' || name.endsWith('.png');
   const isJpeg = file.type === 'image/jpeg' || /\.jpe?g$/.test(name);
-  if (!isPng && !isJpeg) return { ok: false, message: NOT_AN_IMAGE };
+  const isWebp = file.type === 'image/webp' || name.endsWith('.webp');
+  if (!isPng && !isJpeg && !isWebp) return { ok: false, message: NOT_AN_IMAGE };
 
   if (isPng) {
     const bytes = new Uint8Array(await file.arrayBuffer());

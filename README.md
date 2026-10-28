@@ -41,7 +41,7 @@ pnpm e2e                        # build, then run the Playwright browser tests (
 
 Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up.
 
-Adding a person (admins): **Team → Add a person** with their first and last name, email and role. The app makes their login and shows a temporary password once; give it to them in person or by phone. At their first sign-in they set up their authenticator app and choose their own password. A login made earlier in Supabase is added the same way (it keeps its password). Admins also change names and roles and suspend or reactivate people there; there is always at least one active admin, and admins cannot change their own role. Anyone who signs in without a name is asked for it first.
+Adding a person (admins): **Team → Add a person** with their first and last name, email and role. The app makes their login and shows a temporary password once; give it to them in person or by phone. At their first sign-in they set up their authenticator app (on a phone, **Open in authenticator app** adds GSS to it without scanning; on a computer they scan the QR code) and choose their own password. A login made earlier in Supabase is added the same way (it keeps its password). Admins also change names and roles and suspend or reactivate people there; there is always at least one active admin, and admins cannot change their own role. Anyone who signs in without a name is asked for it first.
 
 Making logins needs the Supabase secret key on the staging Worker (only for making logins and setting passwords; data still goes through row level security):
 
@@ -78,7 +78,7 @@ Operations and admin members can:
 
 - **Add counterparty:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
 - **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped.
-- On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG or JPG logo (a JPG is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
+- On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 
 ## Map
 

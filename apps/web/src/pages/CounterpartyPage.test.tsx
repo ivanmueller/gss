@@ -126,7 +126,7 @@ describe('CounterpartyPage', () => {
     );
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The file is not a PNG or JPG image.',
+      'The file is not a PNG, JPG or WebP image.',
     );
     expect(calls.some((call) => call.method === 'PUT')).toBe(false);
   });
@@ -376,7 +376,7 @@ describe('CounterpartyPage editing', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Edit details' }));
     expect(screen.getByLabelText('Change logo')).toHaveAttribute(
       'accept',
-      'image/png,image/jpeg,.png,.jpg,.jpeg',
+      'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp',
     );
   });
 });

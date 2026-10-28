@@ -44,6 +44,15 @@ describe('logoAsPng', () => {
     expect(sizes).toEqual([[REDRAWN_LOGO_SIZE, REDRAWN_LOGO_SIZE / 2]]);
   });
 
+  it('redraws a WebP as a PNG too', async () => {
+    const { sizes } = fakeCanvas(300, 300);
+    const result = await logoAsPng(
+      new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], 'logo.webp', { type: 'image/webp' }),
+    );
+    expect(result).toEqual({ ok: true, png: PNG });
+    expect(sizes).toEqual([[300, 300]]);
+  });
+
   it('refuses other files, HTML included', async () => {
     for (const file of [
       new File(['<p>hi</p>'], 'logo.html', { type: 'text/html' }),
@@ -51,7 +60,7 @@ describe('logoAsPng', () => {
     ]) {
       expect(await logoAsPng(file)).toEqual({
         ok: false,
-        message: 'The file is not a PNG or JPG image. Choose a PNG or JPG file.',
+        message: 'The file is not a PNG, JPG or WebP image. Choose one of those.',
       });
     }
   });
