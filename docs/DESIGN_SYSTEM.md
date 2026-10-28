@@ -45,7 +45,7 @@ Severity rises from info to danger. Colour never carries meaning alone: statuses
 
 ## Scales
 
-- **Type:** IBM Plex Sans (interface), Figtree (prices per tonne and spreads, `font-price`, with tabular figures; the owner's choice of 2026-10-28, an open lookalike of the font in their reference) and IBM Plex Mono (codes), all open source (SIL OFL) and served with the app. Sizes `2xs` 11 (dense labels, such as the order book's column headings), `xs` 12, `sm` 14 (body), `base` 16, `lg` 18, `xl` 20, `2xl` 24 (page titles), `3xl` 30 px. Inputs use 16 px on phones so the browser does not zoom in.
+- **Type:** IBM Plex Sans (interface), Figtree (prices per tonne and spreads, `font-price`, with tabular figures, semibold in the order book; the owner's choice of 2026-10-28, an open lookalike of the font in their reference) and IBM Plex Mono (codes), all open source (SIL OFL) and served with the app. Sizes `2xs` 11 (dense labels, such as the order book's column headings), `xs` 12, `sm` 14 (body), `base` 16, `lg` 18, `xl` 20, `2xl` 24 (page titles), `3xl` 30 px. Inputs use 16 px on phones so the browser does not zoom in.
 - **Spacing:** a 4 px grid (`p-1` = 4 px, `p-4` = 16 px). Prefer 1, 1.5, 2, 3, 4, 6, 8, 12, 16.
 - **Rounding:** every radius is a multiple of `--radius-base` (8 px): `xs` 2, `sm` 4, `md` 6, `lg` 8, `xl` 12, `2xl` 16, `full`. Components use `rounded-control` (6), `rounded-badge` (4), `rounded-card` (12), `rounded-popover` (8), `rounded-dialog` (12).
 - **Shadows:** `shadow-xs` cards, inputs, outline buttons; `shadow-sm` raised on hover; `shadow-md` menus; `shadow-lg` drawers and dialogs. Opacity light theme 5 / 8 / 12 / 16 %, night theme 20 / 28 / 36 / 45 %.
