@@ -51,8 +51,9 @@ export function formatSignedPrice(price: { amount: string; currency: string; uni
   return `${price.currency} ${formatSignedAmount(price.amount)}/${price.unit}`;
 }
 
-export function formatQuantityRange(range: { min: string; max: string }): string {
-  return `${range.min}–${range.max} MT`;
+/** "21.000–42.000 MT", or "Up to 42.000 MT" without a minimum. */
+export function formatQuantityRange(range: { min: string | null; max: string }): string {
+  return range.min === null ? `Up to ${range.max} MT` : `${range.min}–${range.max} MT`;
 }
 
 /** "21.000" → "21", "42.500" → "42.5": a decimal string without trailing zeros, as text. */
@@ -61,7 +62,14 @@ function trimZeros(text: string): string {
   return text.includes('.') ? text.replace(/\.?0+$/, '') : text;
 }
 
-/** "21–84 MT": the short form for tight spaces such as the order book. */
-export function formatQuantityShort(range: { min: string; max: string }): string {
-  return `${trimZeros(range.min)}–${trimZeros(range.max)} MT`;
+/** "21–84 MT", or "≤84 MT" without a minimum: the short form for tight spaces such as the order book. */
+export function formatQuantityShort(range: { min: string | null; max: string }): string {
+  return range.min === null
+    ? `≤${trimZeros(range.max)} MT`
+    : `${trimZeros(range.min)}–${trimZeros(range.max)} MT`;
+}
+
+/** "MN, US", or just "MN" when the country is not known. */
+export function formatPlace(region: string, country: string): string {
+  return [region, country].filter((part) => part !== '').join(', ');
 }

@@ -43,6 +43,36 @@ function facilityWith(name: string, quote: Partial<Quote> & Pick<Quote, 'side' |
 }
 
 describe('order book', () => {
+  it('leaves prices not per tonne out of the per-tonne book, never comparing units', () => {
+    const books = buildOrderBooks(
+      [
+        facilityWith('Per bushel', {
+          side: 'OFFER',
+          price: { amount: '15.25', currency: 'CAD', unit: 'BU' },
+        }),
+        facilityWith('Per short ton', {
+          side: 'BID',
+          price: { amount: '700.00', currency: 'USD', unit: 'ST' },
+        }),
+        facilityWith('Per tonne', {
+          side: 'BID',
+          price: { amount: '850.00', currency: 'CAD', unit: 'MT' },
+        }),
+      ],
+      ['Flaxseed'],
+      null,
+      NOW,
+    );
+    const [flax] = books;
+    expect(ladder(flax?.bids ?? [])).toEqual(['Per tonne 850.00']);
+    expect(flax?.asks).toEqual([]);
+    expect(left(flax?.outOfBook ?? [])).toEqual([
+      'Per bushel UNIT_NOT_MT 15.25',
+      'Per short ton UNIT_NOT_MT no CAD price',
+    ]);
+    expect(flax?.spread).toEqual({ status: 'missing', side: 'ask' });
+  });
+
   it('puts the golden fixture USD bid in CAD at 1.36, beside the CAD asks', () => {
     const flax = book('Flaxseed');
     expect(flax.grade).toBe('No. 1 CW');

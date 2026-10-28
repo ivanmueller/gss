@@ -41,7 +41,7 @@ function quote(
     price: { amount: fields.amount, currency: fields.currency, unit: 'MT' },
     deliveryBasis: fields.deliveryBasis,
     status: fields.status,
-    sourceType: 'manual',
+    source: 'Manual entry',
     revision: 1,
     quotedAt: fields.quotedAt,
     validUntil: fields.validUntil,

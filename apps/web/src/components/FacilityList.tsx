@@ -1,3 +1,4 @@
+import { formatPlace } from '../lib/format';
 import type { Facility, FxRate } from '../data/types';
 import { cn } from '../lib/utils';
 import { FacilityQuotes } from './FacilityQuotes';
@@ -57,9 +58,7 @@ export function FacilityList({
                       {facility.roles.map((role) => (
                         <RoleLabel key={role} role={role} />
                       ))}
-                      <span>
-                        {facility.region}, {facility.country}
-                      </span>
+                      <span>{formatPlace(facility.region, facility.country)}</span>
                     </span>
                     <FacilityQuotes
                       facility={facility}

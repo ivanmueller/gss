@@ -1,12 +1,22 @@
 import { X } from 'lucide-react';
 
 import type { Facility, FxRate, Quote } from '../data/types';
-import { formatQuantityRange, formatUtc } from '../lib/format';
+import { formatPlace, formatQuantityRange, formatUtc } from '../lib/format';
 import { cadPrice, displayStatus, isLive } from '../lib/orderBook';
+import { Link } from '../lib/router';
 import { CadPrice, conversionText } from './CadPrice';
 import { QuoteStatusBadge } from './QuoteStatusBadge';
 import { RoleLabel } from './RoleLabel';
 import { Button } from './ui/button';
+
+/** "2026-11-01 to 2026-11-30", "From 2026-11-01", or "Not stated". */
+function deliveryWindow(quote: Quote): string {
+  const { start, end } = quote.deliveryWindow;
+  if (start && end) return `${start} to ${end}`;
+  if (start) return `From ${start}`;
+  if (end) return `By ${end}`;
+  return 'Not stated';
+}
 
 function QuoteDetails({ quote, fx, now }: { quote: Quote; fx: FxRate | null; now: Date }) {
   const isAsk = quote.side === 'OFFER';
@@ -35,18 +45,26 @@ function QuoteDetails({ quote, fx, now }: { quote: Quote; fx: FxRate | null; now
         <dt className="text-muted-foreground">Commodity</dt>
         <dd>{quote.commodity}</dd>
         <dt className="text-muted-foreground">Grade</dt>
-        <dd>{quote.grade}</dd>
+        <dd>{quote.grade || 'Not stated'}</dd>
         <dt className="text-muted-foreground">Delivery basis</dt>
         <dd>{quote.deliveryBasis}</dd>
         <dt className="text-muted-foreground">Delivery window</dt>
-        <dd>
-          {quote.deliveryWindow.start} to {quote.deliveryWindow.end}
-        </dd>
+        <dd>{deliveryWindow(quote)}</dd>
         <dt className="text-muted-foreground">Quantity</dt>
         <dd className="tabular-nums">{formatQuantityRange(quote.quantityMt)}</dd>
         <dt className="text-muted-foreground">Source</dt>
-        <dd>Manual entry · revision {quote.revision}</dd>
+        <dd>
+          {quote.source} · revision {quote.revision}
+        </dd>
       </dl>
+      {quote.href && (
+        <Link
+          href={quote.href}
+          className="mt-2 inline-block text-xs font-medium underline underline-offset-4"
+        >
+          Open this {isAsk ? 'offer' : 'bid'} and its history
+        </Link>
+      )}
       {!(quote.status === 'firm' && isLive(quote, now)) && (
         <p className="mt-2 text-xs text-muted-foreground">
           Not executable: only a firm, current quote can be acted on.
@@ -86,7 +104,13 @@ export function SelectedFacility({
             Selected
           </p>
           <h3 id="selected-facility-heading" className="text-base font-semibold">
-            {facility.name}
+            {facility.href ? (
+              <Link href={facility.href} className="underline-offset-4 hover:underline">
+                {facility.name}
+              </Link>
+            ) : (
+              facility.name
+            )}
           </h3>
         </div>
         <Button variant="ghost" size="icon-sm" onClick={onClose}>
@@ -103,10 +127,12 @@ export function SelectedFacility({
         </dd>
         <dt className="text-muted-foreground">Location</dt>
         <dd>
-          {facility.region}, {facility.country} ·{' '}
-          {facility.locationPrecision === 'approximate'
-            ? 'approximate (municipality level)'
-            : 'exact'}
+          {formatPlace(facility.region, facility.country)} ·{' '}
+          {facility.locationPrecision === null
+            ? 'no coordinates, so not on the map'
+            : facility.locationPrecision === 'approximate'
+              ? 'approximate (municipality level)'
+              : 'exact'}
         </dd>
         <dt className="text-muted-foreground">Trades</dt>
         <dd>{facility.commodities.join(', ')}</dd>

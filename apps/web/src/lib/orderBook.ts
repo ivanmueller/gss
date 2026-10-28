@@ -26,8 +26,12 @@ export interface BookQuote {
 export interface OutOfBook {
   facility: Facility;
   quote: Quote;
-  /** Expired, withdrawn, superseded or past valid-until; or a USD quote without a rate. */
-  reason: 'NOT_LIVE' | 'FX_MISSING';
+  /**
+   * Expired, withdrawn, superseded or past valid-until; a price not per metric tonne (the
+   * book is per tonne, and converting needs a factor not built yet); or a USD quote without
+   * a rate.
+   */
+  reason: 'NOT_LIVE' | 'UNIT_NOT_MT' | 'FX_MISSING';
   /** Its price in CAD for display, when it can be converted. */
   cadDisplay: string | null;
 }
@@ -146,6 +150,12 @@ export function buildOrderBooks(
         const price = cadPrice(entry.quote, fx);
         if (!isLive(entry.quote, now)) {
           outOfBook.push({ ...entry, reason: 'NOT_LIVE', cadDisplay: price?.cadDisplay ?? null });
+        } else if (entry.quote.price.unit !== 'MT') {
+          outOfBook.push({
+            ...entry,
+            reason: 'UNIT_NOT_MT',
+            cadDisplay: price?.cadDisplay ?? null,
+          });
         } else if (!price) {
           outOfBook.push({ ...entry, reason: 'FX_MISSING', cadDisplay: null });
         } else {

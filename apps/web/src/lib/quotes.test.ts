@@ -61,7 +61,16 @@ describe('quote helpers', () => {
     expect(quotePlace({ facility: null })).toBeNull();
     expect(
       quotePlace({
-        facility: { id: 'f', name: null, city: 'Synthetic', region: null, country: 'US' },
+        facility: {
+          id: 'f',
+          name: null,
+          city: 'Synthetic',
+          region: null,
+          country: 'US',
+          latitude: null,
+          longitude: null,
+          locationPrecision: null,
+        },
       }),
     ).toBe('Synthetic, United States');
   });

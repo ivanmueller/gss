@@ -150,6 +150,7 @@ function Ladder({ book, ...selection }: { book: CommodityBook } & Selection) {
 function CommoditySection({ book, ...selection }: { book: CommodityBook } & Selection) {
   const live = book.asks.length + book.bids.length;
   const noRate = book.outOfBook.some((entry) => entry.reason === 'FX_MISSING');
+  const otherUnit = book.outOfBook.some((entry) => entry.reason === 'UNIT_NOT_MT');
   return (
     <details open className="group border-b last:border-b-0">
       <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
@@ -184,6 +185,13 @@ function CommoditySection({ book, ...selection }: { book: CommodityBook } & Sele
         <p className="flex items-start gap-1.5 px-4 pb-3 text-xs text-caution">
           <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
           USD quotes are left out of the book: there is no CAD/USD rate to convert them.
+        </p>
+      )}
+      {otherUnit && (
+        <p className="flex items-start gap-1.5 px-4 pb-3 text-xs text-caution">
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+          Prices per bushel, short ton or hundredweight are left out of the book, which is per
+          tonne: converting them needs a conversion factor that is not set up yet.
         </p>
       )}
     </details>

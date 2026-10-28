@@ -430,6 +430,10 @@ export interface QuoteSummary {
     city: string | null;
     region: string | null;
     country: string;
+    /** WGS84 degrees as text, as stored; null when the location has no coordinates yet. */
+    latitude: string | null;
+    longitude: string | null;
+    locationPrecision: 'exact' | 'approximate' | null;
   } | null;
   status: QuoteStatus;
   withdrawnAt: string | null;

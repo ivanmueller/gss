@@ -105,7 +105,16 @@ describe('bids and offers as app_api', () => {
       status: 'firm',
       commodity: { code: 'flaxseed', name: 'Flaxseed' },
       counterparty: { id: counterparties.buyer, legalName: 'Synthetic Buyer', archived: false },
-      facility: { id: facilities.buyer, name: 'Synthetic Mill', region: 'MN', country: 'US' },
+      // Without coordinates the workspace lists it but puts no pin on the map.
+      facility: {
+        id: facilities.buyer,
+        name: 'Synthetic Mill',
+        region: 'MN',
+        country: 'US',
+        latitude: null,
+        longitude: null,
+        locationPrecision: null,
+      },
       withdrawnAt: null,
       current: {
         revisionNumber: 1,
@@ -329,6 +338,26 @@ describe('bids and offers as app_api', () => {
       [2, '740.00'],
       [1, '725.00'],
     ]);
+  });
+
+  it('gives a located quote its coordinates as text, for the workspace map', async () => {
+    await admin`update app.facilities set latitude = 52.133214, longitude = -106.670046,
+                  location_precision = 'exact', geocoding_source = 'manual'
+                where id = ${facilities.seller}`;
+    const created = await db.createQuote(as(users.tess), {
+      ...bid({
+        counterpartyId: counterparties.seller,
+        facilityId: facilities.seller,
+        side: 'offer',
+      }),
+      terms: terms({ currency: 'CAD', price: '810.00' }),
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    expect((await db.getQuote(as(users.victor), created.id))?.facility).toMatchObject({
+      latitude: '52.133214',
+      longitude: '-106.670046',
+      locationPrecision: 'exact',
+    });
   });
 
   it('keeps a location with quotes from being removed', async () => {

@@ -97,10 +97,13 @@ test('turns demo data off and on with the switch above Dark mode', async ({ page
   await expect(demo).toHaveAttribute('aria-checked', 'false');
   await page.keyboard.press('Escape');
 
-  // Off: no tag, and the workspace says there are no asks or bids rather than showing any.
+  // Off: no tag and no made-up facilities or prices; the workspace shows GSS's own live bids
+  // and offers, which another test may be entering meanwhile, so only their absence of demo
+  // data is checked here (counterparties.spec.ts checks a real offer reaching the book).
   await expect(demoTag(page)).toHaveCount(0);
-  await expect(book).toContainText('No asks or bids yet.');
-  await expect(page.getByRole('table')).toContainText('No facilities with asks or bids yet.');
+  await expect(book).not.toContainText('Demo Seller');
+  await expect(book).not.toContainText('Demo Buyer');
+  await expect(page.getByRole('table')).not.toContainText('Demo Seller');
 
   await page.getByRole('button', { name: 'Account' }).click();
   await page.getByRole('menuitemcheckbox', { name: 'Demo data' }).click();

@@ -130,6 +130,9 @@ interface QuoteRow extends RevisionRow {
   city: string | null;
   region: string | null;
   country: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  location_precision: 'exact' | 'approximate' | null;
   withdrawn_at: Date | null;
   withdrawn_by_name: string | null;
   created_at: Date;
@@ -194,6 +197,9 @@ function summary(row: QuoteRow): QuoteSummary {
             city: row.city,
             region: row.region,
             country: row.country ?? '',
+            latitude: row.latitude,
+            longitude: row.longitude,
+            locationPrecision: row.location_precision,
           },
     // The database's clock decides what has expired, the same for every quote in an answer.
     status: quoteStatus(
@@ -236,6 +242,8 @@ export function quoteQueries(asUser: AsUser): QuoteDatabase {
     select q.id, q.side::text as side, q.commodity_code, cm.display_name as commodity_name,
            q.counterparty_id, c.legal_name, c.trading_name, c.archived_at is not null as archived,
            q.facility_id, f.name as facility_name, f.city, f.region, f.country,
+           f.latitude::text as latitude, f.longitude::text as longitude,
+           f.location_precision::text as location_precision,
            q.withdrawn_at, q.withdrawn_by_name, q.created_at, now() as as_of,
            ${revisionColumns(tx)}
     from app.quotes q
