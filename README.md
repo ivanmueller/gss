@@ -71,7 +71,7 @@ Operations and admin members can:
 
 - **Add counterparty:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
 - **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped.
-- On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG logo (up to 512 KB). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
+- On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG or JPG logo (a JPG is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 
 ## Map
 

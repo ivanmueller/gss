@@ -103,7 +103,7 @@ describe('CounterpartyPage', () => {
     });
     render(<CounterpartyPage session={SESSION} id={ID} />);
 
-    const input = await screen.findByLabelText('Upload PNG logo');
+    const input = await screen.findByLabelText('Upload logo');
     await userEvent.upload(input, new File([PNG], 'logo.png', { type: 'image/png' }));
 
     expect(await screen.findByText('Logo saved.')).toBeInTheDocument();
@@ -119,7 +119,7 @@ describe('CounterpartyPage', () => {
     const calls = mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
 
-    const input = await screen.findByLabelText('Upload PNG logo');
+    const input = await screen.findByLabelText('Upload logo');
     await userEvent.upload(
       input,
       new File(['<svg xmlns="http://www.w3.org/2000/svg"></svg>'], 'logo.png', {
@@ -127,7 +127,9 @@ describe('CounterpartyPage', () => {
       }),
     );
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The file is not a PNG image.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The file is not a PNG or JPG image.',
+    );
     expect(calls.some((call) => call.method === 'PUT')).toBe(false);
   });
 
@@ -140,7 +142,7 @@ describe('CounterpartyPage', () => {
       />,
     );
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
-    expect(screen.queryByLabelText('Upload PNG logo')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
   });
 
   it('shows where a location’s coordinates came from', async () => {
@@ -342,7 +344,7 @@ describe('CounterpartyPage editing', () => {
     expect(await screen.findByText(/on 2026-10-28 10:00 UTC/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Upload PNG logo')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
     expect(await screen.findByRole('button', { name: 'Edit details' })).toBeInTheDocument();
@@ -365,5 +367,18 @@ describe('CounterpartyPage editing', () => {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: /^(Edit|Remove) / })).not.toBeInTheDocument();
+  });
+
+  it('changes an existing logo under Edit details, not at the top', async () => {
+    mockApi({ [`GET ${PATH}`]: () => Response.json({ ...DETAIL, logoSha256: 'b'.repeat(64) }) });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
+    expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
+    expect(screen.queryByText(/PNG only/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+    expect(screen.getByLabelText('Change logo')).toHaveAttribute(
+      'accept',
+      'image/png,image/jpeg,.png,.jpg,.jpeg',
+    );
   });
 });
