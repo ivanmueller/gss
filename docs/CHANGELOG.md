@@ -1,5 +1,18 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Documents brought in line with what is built
+
+The owner asked whether every document was up to date. Updated:
+
+- `README.md` and `AGENTS.md`: the status lines (the Team page, counterparty editing, the map view); `AGENTS.md` also records that the platform only ever serves GSS staff.
+- `MASTER_PROJECT_SPECIFICATION.md` and `docs/PRODUCT.md`: "multi-tenant onboarding (data model should accommodate future tenancy)" replaced by the owner's decision that only GSS ever uses the platform.
+- `docs/DATA_MODEL.md` and the specification: one organization row, GSS.
+- `docs/API.md`: 404s described without other organizations.
+- `docs/ARCHITECTURE.md`: the staging Worker's secrets and what each may do.
+- `docs/HANDOFF.md`: ivanmueller/gss#39, the people and secrets on staging, the map and geocoding checks the owner confirmed.
+
+Engineering rules that speak of "tenant isolation" (`AGENTS.md` rule 4, `docs/ACCEPTANCE_TESTS.md`, `docs/ARCHITECTURE.md`) are unchanged: they describe how the database keeps out anyone who is not active GSS staff, and their tests stay (decision of 2026-10-27).
+
 ## 2026-10-28 — Logins from the Team page
 
 - `README.md`: adding a person from the app, and the Supabase secret key on the Worker.

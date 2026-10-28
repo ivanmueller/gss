@@ -35,7 +35,7 @@ Approved product intent and user experience boundaries; refer to `../MASTER_PROJ
 - Fully automated legal/compliance determinations, customs filing, or phytosanitary certification.
 - Complex rail tariff/routing modeling, dispatch, live truck tracking, and freight tendering.
 - Production-grade cash risk engine, derivative hedge booking, AI price prediction, or autonomous negotiation.
-- Multi-tenant customer onboarding and public marketplace checkout (data model should accommodate future tenancy).
+- Use by any company other than GSS: the platform only ever serves GSS staff (owner's decision, 2026-10-27 and 2026-10-28, `docs/DECISIONS.md`). No public marketplace checkout.
 
 ## 1.4 Planned next releases
 

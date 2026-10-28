@@ -8,7 +8,7 @@ All tenant-owned tables contain `organization_id uuid not null`, with foreign ke
 
 | Table | Essential additional fields / notes |
 |---|---|
-| `organizations` | display_name, brand_settings JSONB, active; initial one tenant |
+| `organizations` | display_name, brand_settings JSONB, active; one row, GSS (its staff are its members) |
 | `organization_members` | user_id FK to auth.users, role, status, joined_at, unique(organization_id,user_id) |
 | `counterparties` | legal_name, trading_name, types[], primary_country, verification_status, risk_flags |
 | `counterparty_contacts` | counterparty_id, name, role, email, phone, confidential scope |
