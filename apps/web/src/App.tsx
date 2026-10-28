@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
 import { ChoosePassword, YourName } from './auth/FirstSignIn';
+import { notePasswordChanged } from './auth/passwordNotice';
 import { AppShell, type NavSection } from './components/AppShell';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
@@ -112,8 +113,10 @@ export function App({ account }: { account?: Account }) {
     return (
       <ChoosePassword
         token={account.accessToken}
+        // Supabase signs the person out when the password is set; they sign in again with it.
         onDone={() => {
-          setMeVersion((current) => current + 1);
+          notePasswordChanged();
+          account.signOut();
         }}
         onSignOut={account.signOut}
       />
