@@ -208,6 +208,15 @@ export interface Database {
   counterpartyKeys: (ctx: RequestContext, organizationId: string) => Promise<Set<string>>;
   /** Creates the batch and its counterparties in one transaction; returns the batch id. */
   importCounterparties: (ctx: RequestContext, batch: ImportBatchInput) => Promise<string>;
+  isOrgAdmin: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
+  /** Sets a member's names (null removes one); false when not allowed or not a member. */
+  setMemberNames: (
+    ctx: RequestContext,
+    organizationId: string,
+    memberId: string,
+    firstName: string | null,
+    lastName: string | null,
+  ) => Promise<boolean>;
   /** The organization's members for its admins; null when the user is not one. */
   listMembers: (ctx: RequestContext, organizationId: string) => Promise<Member[] | null>;
   addMember: (
@@ -755,6 +764,23 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.facilities ${tx(part)}`;
         }
         return batchId;
+      });
+    },
+
+    isOrgAdmin(ctx, organizationId) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${organizationId}) as allowed`;
+        return row?.allowed === true;
+      });
+    },
+
+    setMemberNames(ctx, organizationId, memberId, firstName, lastName) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ saved: boolean }[]>`
+          select app.set_member_name(${organizationId}, ${memberId}, ${firstName}, ${lastName})
+            as saved`;
+        return row?.saved === true;
       });
     },
 

@@ -58,6 +58,7 @@ describe('GET /api/v1/me', () => {
       email: 'alice@example.test',
       firstName: 'Alice',
       lastName: 'Synthetic',
+      mustChangePassword: false,
       organizations: [{ id: 'org-a', name: 'Synthetic Org A', role: 'trader' }],
     });
     expect(fetchMock).toHaveBeenCalledWith('https://example-project.supabase.co/auth/v1/user', {

@@ -41,12 +41,12 @@ pnpm e2e                        # build, then run the Playwright browser tests (
 
 Email and password through Supabase Auth, plus a required authenticator-app code (TOTP). There is no self sign-up.
 
-Adding a person (an admin of the organization):
+Adding a person (admins): **Team → Add a person** with their first and last name, email and role. The app makes their login and shows a temporary password once; give it to them in person or by phone. At their first sign-in they set up their authenticator app and choose their own password. A login made earlier in Supabase is added the same way (it keeps its password). Admins also change names and roles and suspend or reactivate people there; there is always at least one active admin, and admins cannot change their own role. Anyone who signs in without a name is asked for it first.
 
-1. In Supabase: **Authentication → Users → Add user → Create new user**, with their email and a temporary password, and **Auto Confirm User** ticked. Give them the password in person or by phone.
-2. In the app: **Team → Add a person**, with the same email and a role. On the same page, admins set names, change roles, and suspend or reactivate people. An organization always keeps at least one active admin, and admins cannot change their own role.
+Making logins needs the Supabase secret key on the staging Worker (only for making logins and setting passwords; data still goes through row level security):
 
-Without step 2, a login sees nothing. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
+1. In Supabase (**Project Settings → API Keys → Secret keys**): create a secret key named "GSS app" and copy it (it starts with `sb_secret_`).
+2. In Cloudflare (**Workers & Pages → grain-trading-api-staging → Settings → Variables and Secrets → Add**): type **Secret**, name `SUPABASE_SECRET_KEY`, paste the key, **Deploy**.
 
 The profile menu (the icon at the top right) shows the user's first name and last initial, never the email. Admins set names on the **Team** page; without the app, in the Supabase SQL editor:
 

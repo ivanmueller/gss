@@ -284,7 +284,5 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
   expect(intoOther.status()).toBe(403);
 
   await page.goto(`/counterparties/${OTHER_ORG.counterpartyId}`);
-  await expect(page.getByRole('alert')).toHaveText(
-    'This counterparty does not exist or is not in your organization.',
-  );
+  await expect(page.getByRole('alert')).toHaveText('This counterparty does not exist.');
 });

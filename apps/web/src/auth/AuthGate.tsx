@@ -11,6 +11,8 @@ export interface Account {
   /** Supabase access token at assurance level aal2, sent to the API as a bearer token. */
   accessToken: string;
   signOut: () => void;
+  /** Saves the signed-in person's own first and last name; returns an error message or null. */
+  saveName?: (firstName: string, lastName: string | null) => Promise<string | null>;
 }
 
 type Stage =
@@ -72,6 +74,17 @@ export function AuthGate({
     };
   }, [auth, evaluate]);
 
+  // A person's own names live in their Supabase user metadata, which they may change.
+  const saveName = useCallback(
+    async (firstName: string, lastName: string | null) => {
+      const { error } = await auth.updateUser({
+        data: { first_name: firstName, last_name: lastName },
+      });
+      return error ? 'Your name could not be saved. Try again.' : null;
+    },
+    [auth],
+  );
+
   const signOut = useCallback(() => {
     void auth.signOut();
   }, [auth]);
@@ -90,6 +103,6 @@ export function AuthGate({
     case 'challenge':
       return <MfaChallenge auth={auth} factorId={stage.factorId} onSignOut={signOut} />;
     case 'ready':
-      return children({ email: stage.email, accessToken: stage.accessToken, signOut });
+      return children({ email: stage.email, accessToken: stage.accessToken, signOut, saveName });
   }
 }

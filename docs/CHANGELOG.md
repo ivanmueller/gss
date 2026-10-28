@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Logins from the Team page
+
+- `README.md`: adding a person from the app, and the Supabase secret key on the Worker.
+- `docs/API.md`: `POST /api/v1/members` making logins, `POST /api/v1/me/password`.
+- `docs/DECISIONS.md`: the owner's choices (admin as the top role, temporary passwords, names at first sign-in).
+
 ## 2026-10-28 — Member management
 
 - `README.md`: adding a person (login in Supabase, then **Team → Add a person**).

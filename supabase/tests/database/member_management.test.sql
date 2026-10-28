@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(38);
+select plan(40);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: adam (org_admin), olivia (operations), victor (viewer). Org B: bob (org_admin),
@@ -262,6 +262,18 @@ select is(
 select is(
   (select raw_user_meta_data::text from auth.users where id = '00000000-0000-4000-8000-00000000ae00'),
   '{"other": "kept", "first_name": "New"}', 'setting names keeps the login''s other details'
+);
+
+-- (That setting names moves the membership's version is checked in members.db.test.ts:
+-- within this one transaction every timestamp is the same.)
+select is(
+  pg_temp.api_changed('00000000-0000-4000-8000-0000000011aa',
+    $$update app.organization_members set role = role where id = '00000000-0000-4000-8000-00000000a0a3'$$),
+  1, 'an update that changes nothing runs'
+);
+select is(
+  (select count(*)::int from app.audit_events where changed_fields = '{}' or (action = 'update' and changed_fields is null)),
+  0, 'and, like every update that changes nothing, it is not audited'
 );
 
 -- Audit trail ----------------------------------------------------------------------------

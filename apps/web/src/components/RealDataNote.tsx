@@ -7,7 +7,7 @@ export function RealDataNote({ organization }: { organization: string }) {
   return (
     <Callout icon={Lock}>
       <p>
-        <strong>Your organization’s records.</strong> Only members of {organization} can see them.
+        <strong>Real records, not demo data.</strong> Only {organization} staff can see them.
         Nothing here is a price or a quote.
       </p>
     </Callout>

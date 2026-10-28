@@ -39,8 +39,7 @@ export const MAX_IMPORT_BODY_BYTES = 10 * 1024 * 1024;
 /** Largest body of a form (add, edit) accepted, in bytes. */
 const MAX_FORM_BODY_BYTES = 64 * 1024;
 
-const FORBIDDEN_EDIT =
-  'Only operations and admin members of this organization can change counterparties.';
+const FORBIDDEN_EDIT = 'Only operations and admin members can change counterparties.';
 
 type RecordKind = 'counterparty' | 'contact' | 'location';
 
@@ -185,7 +184,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           c,
           403,
           'FORBIDDEN',
-          'Only operations and admin members of this organization can import counterparties.',
+          'Only operations and admin members can import counterparties.',
         );
       }
       const existing = await db.counterpartyKeys(ctx, organizationId);
@@ -316,12 +315,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       if (saved.status === 'not_found')
         return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
       if (saved.status === 'forbidden') {
-        return apiError(
-          c,
-          403,
-          'FORBIDDEN',
-          'Only operations and admin members of this organization can change logos.',
-        );
+        return apiError(c, 403, 'FORBIDDEN', 'Only operations and admin members can change logos.');
       }
       return c.json({
         sha256: saved.sha256,

@@ -124,7 +124,7 @@ describe('CounterpartiesPage', () => {
       <CounterpartiesPage session={{ ...SESSION, organization: { ...ORG, role: 'viewer' } }} />,
     );
     expect(
-      await screen.findByText('An operations or admin member of your organization can add them.'),
+      await screen.findByText('An operations or admin member can add them.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Import spreadsheet' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Add counterparty' })).not.toBeInTheDocument();

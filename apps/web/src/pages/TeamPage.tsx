@@ -65,27 +65,41 @@ function RoleSelect({
   );
 }
 
-/** Adds a person who already has a login to the organization. */
+/** Adds a person to the team, making their login with a temporary password when needed. */
 function AddMember({ session, onAdded }: { session: DirectorySession; onAdded: () => void }) {
   const baseId = useId();
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<MemberRole>('viewer');
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [result, setResult] = useState<
-    { kind: 'added'; email: string } | { kind: 'error'; code: string; message: string } | null
+    | { kind: 'added'; name: string; email: string; temporaryPassword: string | null }
+    | { kind: 'error'; code: string; message: string }
+    | null
   >(null);
 
   async function submit(event: SyntheticEvent) {
     event.preventDefault();
     setBusy(true);
     setResult(null);
+    setCopied(false);
     try {
-      await sendJson('/members', session.token, 'POST', {
-        organizationId: session.organization.id,
-        email,
-        role,
+      const added = await sendJson<{ id: string; temporaryPassword?: string }>(
+        '/members',
+        session.token,
+        'POST',
+        { organizationId: session.organization.id, email, role, firstName, lastName },
+      );
+      setResult({
+        kind: 'added',
+        name: firstName.trim() || email.trim(),
+        email: email.trim(),
+        temporaryPassword: added.temporaryPassword ?? null,
       });
-      setResult({ kind: 'added', email: email.trim() });
+      setFirstName('');
+      setLastName('');
       setEmail('');
       onAdded();
     } catch (error) {
@@ -99,20 +113,52 @@ function AddMember({ session, onAdded }: { session: DirectorySession; onAdded: (
     }
   }
 
+  const field = (suffix: string) => `${baseId}-${suffix}`;
   return (
     <Card asChild>
-      <section aria-labelledby={`${baseId}-heading`}>
+      <section aria-labelledby={field('heading')}>
         <CardHeader>
-          <CardTitle id={`${baseId}-heading`}>Add a person</CardTitle>
+          <CardTitle id={field('heading')}>Add a person</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 text-sm">
-          <form onSubmit={(event) => void submit(event)} className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-60 flex-1 flex-col gap-1.5">
-              <label htmlFor={`${baseId}-email`} className="font-medium">
-                Email of their login
+          <form
+            onSubmit={(event) => void submit(event)}
+            className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1.5fr_11rem_auto]"
+          >
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={field('first')} className="font-medium">
+                First name
               </label>
               <Input
-                id={`${baseId}-email`}
+                id={field('first')}
+                autoComplete="off"
+                maxLength={100}
+                value={firstName}
+                onChange={(event) => {
+                  setFirstName(event.target.value);
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={field('last')} className="font-medium">
+                Last name
+              </label>
+              <Input
+                id={field('last')}
+                autoComplete="off"
+                maxLength={100}
+                value={lastName}
+                onChange={(event) => {
+                  setLastName(event.target.value);
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={field('email')} className="font-medium">
+                Email
+              </label>
+              <Input
+                id={field('email')}
                 type="email"
                 autoComplete="off"
                 required
@@ -122,42 +168,79 @@ function AddMember({ session, onAdded }: { session: DirectorySession; onAdded: (
                 }}
               />
             </div>
-            <div className="flex w-44 flex-col gap-1.5">
-              <label htmlFor={`${baseId}-role`} className="font-medium">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={field('role')} className="font-medium">
                 Role
               </label>
-              <RoleSelect id={`${baseId}-role`} value={role} onChange={setRole} />
+              <RoleSelect id={field('role')} value={role} onChange={setRole} />
             </div>
             <Button type="submit" disabled={busy || email.trim() === ''}>
               <UserPlus aria-hidden="true" />
               {busy ? 'Adding…' : 'Add to team'}
             </Button>
           </form>
-          {result?.kind === 'added' && (
+          {result?.kind === 'added' && result.temporaryPassword !== null && (
+            <div
+              role="status"
+              className="flex flex-col gap-2 rounded-control border border-success-border bg-success-subtle p-3"
+            >
+              <p>
+                <strong>{result.name}</strong> can now sign in as {result.email}. Their temporary
+                password, shown only now:
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="rounded-control border bg-background px-2 py-1 font-mono text-base">
+                  {result.temporaryPassword}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void navigator.clipboard
+                      .writeText(result.temporaryPassword ?? '')
+                      .then(() => {
+                        setCopied(true);
+                      })
+                      .catch(() => undefined);
+                  }}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Give it to them in person or by phone, not by email. At their first sign-in they set
+                up their authenticator app and choose their own password.
+              </p>
+            </div>
+          )}
+          {result?.kind === 'added' && result.temporaryPassword === null && (
             <p role="status" className="text-success">
-              {result.email} is on the team. They sign in with their email and password, and set up
-              their authenticator app the first time.
+              {result.email} is on the team. They sign in with the password they already have.
             </p>
           )}
           {result?.kind === 'error' && (
             <div role="alert" className="text-danger">
               <p>{result.message}</p>
-              {result.code === 'NO_ACCOUNT' && (
+              {result.code === 'LOGINS_NOT_CONFIGURED' && (
                 <ol className="mt-1 list-decimal pl-5 text-foreground">
                   <li>
-                    In Supabase: Authentication → Users → Add user → Create new user. Enter their
-                    email and a temporary password, tick “Auto Confirm User”, and create.
+                    In Supabase: Project Settings → API Keys → Secret keys. Create a secret key
+                    named “GSS app” and copy it (it starts with sb_secret_).
                   </li>
-                  <li>Give them the password in person or by phone, not by email.</li>
-                  <li>Come back here and add them.</li>
+                  <li>
+                    In Cloudflare: Workers &amp; Pages → grain-trading-api-staging → Settings →
+                    Variables and Secrets → Add. Type Secret, name SUPABASE_SECRET_KEY, paste the
+                    key, Deploy.
+                  </li>
+                  <li>Come back here and add the person again.</li>
                 </ol>
               )}
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            People sign in with a login an admin creates in Supabase (there is no self sign-up).
-            Adding them here gives them access to {session.organization.name} with the role you
-            choose.
+            Without a login yet, one is made for them with a temporary password. With one already
+            (for example made in Supabase), they are added with it, and the names given here are
+            set.
           </p>
         </CardContent>
       </section>

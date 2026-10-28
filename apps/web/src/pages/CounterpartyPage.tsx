@@ -380,7 +380,7 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
       {resource.status === 'error' && (
         <p role="alert" className="text-sm text-danger">
           {resource.error.status === 404
-            ? 'This counterparty does not exist or is not in your organization.'
+            ? 'This counterparty does not exist.'
             : `Could not load the counterparty: ${resource.error.message}`}
         </p>
       )}

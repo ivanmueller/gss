@@ -304,7 +304,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
           <p className="text-muted-foreground">
             {editor
               ? 'Add one by hand or import your spreadsheet.'
-              : 'An operations or admin member of your organization can add them.'}
+              : 'An operations or admin member can add them.'}
           </p>
         </Card>
       )}

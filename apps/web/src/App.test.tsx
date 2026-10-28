@@ -164,7 +164,7 @@ describe('signed-in user', () => {
     );
 
     // The directory's notice appears once the API has answered /me.
-    expect(await screen.findByText(/not a member of an organization yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/You don’t have access yet/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Account' }));
     expect(within(screen.getByRole('menu')).getByText('Signed in')).toBeInTheDocument();
     expect(screen.queryByText(/example\.test/)).not.toBeInTheDocument();
@@ -321,9 +321,7 @@ describe('navigation', () => {
     expect(within(nav).getByRole('link', { name: 'Workspace' })).not.toHaveAttribute(
       'aria-current',
     );
-    expect(
-      screen.getByText('Sign in to see your organization’s counterparties.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Sign in to see the counterparties.')).toBeInTheDocument();
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
 
     // The map is a view of the Counterparties page, not a menu entry of its own.

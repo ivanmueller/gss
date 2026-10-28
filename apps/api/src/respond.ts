@@ -15,6 +15,8 @@ export interface ApiEnv {
     DATABASE_URL?: string;
     /** Geocodio API key (Worker secret) for looking facility addresses up. */
     GEOCODIO_API_KEY?: string;
+    /** Supabase secret key (Worker secret), only for creating logins and setting passwords. */
+    SUPABASE_SECRET_KEY?: string;
   };
   Variables: { user: AuthUser; requestId: string };
 }
@@ -115,7 +117,7 @@ function databaseFailure(c: ApiContext, error: unknown) {
       c,
       409,
       'LAST_ADMIN',
-      'The organization needs at least one active admin. Make someone else an admin first.',
+      'There must always be at least one active admin. Make someone else an admin first.',
     );
   }
   if (pg?.code === '23505' && pg.constraint === 'counterparties_name_unique') {

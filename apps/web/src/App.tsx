@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
+import { ChoosePassword, YourName } from './auth/FirstSignIn';
 import { AppShell, type NavSection } from './components/AppShell';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
@@ -42,7 +43,8 @@ function section(route: Route): NavSection | null {
 
 export function App({ account }: { account?: Account }) {
   const health = useApiHealth();
-  const me = useMe(account?.accessToken ?? null);
+  const [meVersion, setMeVersion] = useState(0);
+  const me = useMe(account?.accessToken ?? null, meVersion);
   const route = matchRoute(usePath());
   const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
   const redirectTo = route.page === 'redirect' ? route.to : null;
@@ -52,20 +54,14 @@ export function App({ account }: { account?: Account }) {
     if (redirectTo !== null) redirect(redirectTo);
   }, [redirectTo]);
 
-  // Pages with the organization's records need a signed-in member of an organization.
+  // Pages with GSS's records need a signed-in, active member.
   function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
-    if (!account) return <Notice>Sign in to see your organization’s counterparties.</Notice>;
+    if (!account) return <Notice>Sign in to see the counterparties.</Notice>;
     if (me.status === 'error')
-      return (
-        <Notice>Your organization’s records appear once the server confirms your session.</Notice>
-      );
+      return <Notice>The records appear once the server confirms your session.</Notice>;
     if (organization === undefined) return <Notice>Loading…</Notice>;
     if (organization === null) {
-      return (
-        <Notice>
-          You are not a member of an organization yet. Ask an administrator to add you.
-        </Notice>
-      );
+      return <Notice>You don’t have access yet. Ask an admin to add you on the Team page.</Notice>;
     }
     return render({ token: account.accessToken, organization });
   }
@@ -109,6 +105,30 @@ export function App({ account }: { account?: Account }) {
         </Notice>
       );
       break;
+  }
+
+  // After a first sign-in: the person's own password, then their name, before the app.
+  if (account && me.status === 'ok' && me.mustChangePassword) {
+    return (
+      <ChoosePassword
+        token={account.accessToken}
+        onDone={() => {
+          setMeVersion((current) => current + 1);
+        }}
+        onSignOut={account.signOut}
+      />
+    );
+  }
+  if (account?.saveName && me.status === 'ok' && me.nameMissing) {
+    return (
+      <YourName
+        saveName={account.saveName}
+        onDone={() => {
+          setMeVersion((current) => current + 1);
+        }}
+        onSignOut={account.signOut}
+      />
+    );
   }
 
   return (
