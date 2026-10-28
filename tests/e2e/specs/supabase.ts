@@ -43,6 +43,17 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
   const url = env('E2E_SUPABASE_URL');
   const sql = postgres(env('E2E_DATABASE_URL'), { max: 1, onnotice: () => undefined });
   try {
+    // Bids and offers are never deleted (their revisions are history, kept by the database
+    // even from its owner), so a database where an earlier run entered some cannot be
+    // reset by this setup: start from a fresh local database instead.
+    const [kept] = await sql<{ count: number }[]>`
+      select count(*)::int as count from app.quotes where organization_id in
+        (select id from app.organizations where display_name in (${E2E_ORG_NAME}, ${OTHER_ORG.name}))`;
+    if ((kept?.count ?? 0) > 0) {
+      throw new Error(
+        'An earlier browser test run left bids and offers, which are never deleted. Reset the local database first: supabase db reset',
+      );
+    }
     // App tables reference auth.users and the organization, so remove the previous
     // run's rows first. Deletes are audited, so the audit trail goes after the records.
     for (const table of [

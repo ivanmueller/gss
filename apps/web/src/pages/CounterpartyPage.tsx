@@ -10,6 +10,7 @@ import { useState, type ChangeEvent, type SyntheticEvent, type ReactNode } from 
 
 import { BackLink } from '../components/BackLink';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import { CounterpartyQuotes } from '../components/CounterpartyQuotes';
 import {
   CompanyFields,
   ContactFields,
@@ -825,6 +826,11 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                   )}
                 </section>
               </Card>
+
+              <CounterpartyQuotes
+                session={session}
+                counterparty={{ id: detail.id, types: detail.types, archived }}
+              />
             </>
           );
         })()}

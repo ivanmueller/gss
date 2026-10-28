@@ -13,6 +13,12 @@ describe('matchRoute', () => {
     expect(matchRoute('/')).toEqual({ page: 'workspace' });
     expect(matchRoute('/counterparties/')).toEqual({ page: 'counterparties' });
     expect(matchRoute('/team')).toEqual({ page: 'team' });
+    expect(matchRoute('/quotes/')).toEqual({ page: 'quotes' });
+    expect(matchRoute('/quotes/new')).toEqual({ page: 'new-quote' });
+    expect(matchRoute('/quotes/00000000-0000-4000-8000-00000000a001')).toEqual({
+      page: 'quote',
+      id: '00000000-0000-4000-8000-00000000a001',
+    });
     expect(matchRoute('/counterparties/new')).toEqual({ page: 'new-counterparty' });
     expect(matchRoute('/counterparties/import')).toEqual({ page: 'import' });
     expect(matchRoute('/counterparties/coordinates')).toEqual({ page: 'coordinates' });
@@ -32,6 +38,7 @@ describe('matchRoute', () => {
 
   it('treats anything else as not found', () => {
     expect(matchRoute('/counterparties/not-an-id')).toEqual({ page: 'not-found' });
+    expect(matchRoute('/quotes/not-an-id')).toEqual({ page: 'not-found' });
     expect(matchRoute('/admin')).toEqual({ page: 'not-found' });
   });
 });

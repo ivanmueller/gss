@@ -57,6 +57,9 @@ export type Route =
   | { page: 'import' }
   | { page: 'counterparty'; id: string }
   | { page: 'team' }
+  | { page: 'quotes' }
+  | { page: 'new-quote' }
+  | { page: 'quote'; id: string }
   /** An old address that now lives elsewhere. */
   | { page: 'redirect'; to: string }
   | { page: 'not-found' };
@@ -75,6 +78,10 @@ export function matchRoute(path: string): Route {
   if (trimmed === '/counterparties/coordinates') return { page: 'coordinates' };
   const match = /^\/counterparties\/([0-9a-f-]{36})$/i.exec(trimmed);
   if (match?.[1]) return { page: 'counterparty', id: match[1] };
+  if (trimmed === '/quotes') return { page: 'quotes' };
+  if (trimmed === '/quotes/new') return { page: 'new-quote' };
+  const quote = /^\/quotes\/([0-9a-f-]{36})$/i.exec(trimmed);
+  if (quote?.[1]) return { page: 'quote', id: quote[1] };
   return { page: 'not-found' };
 }
 

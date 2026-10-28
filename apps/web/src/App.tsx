@@ -12,6 +12,9 @@ import { CounterpartiesPage, type DirectorySession } from './pages/Counterpartie
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { ImportPage } from './pages/ImportPage';
 import { NewCounterpartyPage } from './pages/NewCounterpartyPage';
+import { NewQuotePage } from './pages/NewQuotePage';
+import { QuotePage } from './pages/QuotePage';
+import { QuotesPage } from './pages/QuotesPage';
 import { TeamPage } from './pages/TeamPage';
 import { Workspace } from './pages/Workspace';
 
@@ -36,6 +39,10 @@ function section(route: Route): NavSection | null {
       return 'counterparties';
     case 'team':
       return 'team';
+    case 'quotes':
+    case 'new-quote':
+    case 'quote':
+      return 'quotes';
     case 'redirect':
     case 'not-found':
       return null;
@@ -86,6 +93,15 @@ export function App({ account }: { account?: Account }) {
       break;
     case 'team':
       page = directory((session) => <TeamPage session={session} />);
+      break;
+    case 'quotes':
+      page = directory((session) => <QuotesPage session={session} />);
+      break;
+    case 'new-quote':
+      page = directory((session) => <NewQuotePage session={session} />);
+      break;
+    case 'quote':
+      page = directory((session) => <QuotePage key={route.id} session={session} id={route.id} />);
       break;
     case 'redirect':
       page = null;

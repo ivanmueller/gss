@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CounterpartyDetail } from '../lib/api';
-import { mockApi, ORG, PNG, SESSION } from '../test/api';
+import { mockApi as mockBaseApi, ORG, PNG, SESSION } from '../test/api';
+import { BID } from '../test/quotes';
 import { CounterpartyPage } from './CounterpartyPage';
 
 const ID = '00000000-0000-4000-8000-00000000c001';
@@ -53,11 +54,71 @@ const DETAIL: CounterpartyDetail = {
   ],
 };
 
+/** The page's API, with no bids or offers for the counterparty unless a test says otherwise. */
+function mockApi(handlers: Parameters<typeof mockBaseApi>[0]) {
+  return mockBaseApi({
+    [`GET /quotes?counterparty_id=${ID}`]: () => Response.json({ quotes: [], truncated: false }),
+    ...handlers,
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('CounterpartyPage', () => {
+  it('lists its bids and offers and offers a new bid or offer to traders', async () => {
+    const calls = mockApi({
+      [`GET /counterparties/${ID}`]: () => Response.json(DETAIL),
+      [`GET /quotes?counterparty_id=${ID}`]: () =>
+        Response.json({
+          quotes: [{ ...BID, counterparty: { ...BID.counterparty, id: ID } }],
+          truncated: false,
+        }),
+      [`GET /quotes?counterparty_id=${ID}&status=all`]: () =>
+        Response.json({ quotes: [], truncated: false }),
+    });
+    render(
+      <CounterpartyPage
+        session={{ ...SESSION, organization: { ...ORG, role: 'trader' } }}
+        id={ID}
+      />,
+    );
+    const quotes = await screen.findByRole('region', { name: 'Bids and offers (1)' });
+    const table = within(quotes).getByRole('table', {
+      name: 'Bids and offers of this counterparty',
+    });
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent(
+      'BidFlaxseedNo. 1 CWUSD 730.50/MT',
+    );
+    // A buyer and seller can both bid and offer.
+    expect(within(quotes).getByRole('link', { name: 'New bid' })).toHaveAttribute(
+      'href',
+      `/quotes/new?counterparty=${ID}&side=bid`,
+    );
+    expect(within(quotes).getByRole('link', { name: 'New offer' })).toHaveAttribute(
+      'href',
+      `/quotes/new?counterparty=${ID}&side=offer`,
+    );
+    await userEvent.click(within(quotes).getByLabelText('Include withdrawn and expired'));
+    expect(await within(quotes).findByText('No bids or offers recorded.')).toBeInTheDocument();
+    expect(calls.map((call) => call.path)).toContain(`/quotes?counterparty_id=${ID}&status=all`);
+  });
+
+  it('offers no new bids or offers to members who may not enter them', async () => {
+    mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
+    render(
+      <CounterpartyPage
+        session={{ ...SESSION, organization: { ...ORG, role: 'operations' } }}
+        id={ID}
+      />,
+    );
+    const quotes = await screen.findByRole('region', { name: 'Bids and offers (0)' });
+    expect(quotes).toHaveTextContent('No live bids or offers.');
+    expect(within(quotes).queryByRole('link', { name: 'New bid' })).toBeNull();
+    expect(within(quotes).queryByRole('link', { name: 'New offer' })).toBeNull();
+  });
+
   it('shows the counterparty, its contacts and its locations', async () => {
     mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
@@ -196,7 +257,9 @@ describe('CounterpartyPage editing', () => {
         notes: 'Synthetic record.',
       },
     });
-    expect(calls.filter((call) => call.method === 'GET')).toHaveLength(2);
+    expect(
+      calls.filter((call) => call.method === 'GET' && call.path.startsWith('/counterparties')),
+    ).toHaveLength(2);
     expect(screen.getByRole('status')).toHaveTextContent('Details saved.');
   });
 
@@ -250,7 +313,9 @@ describe('CounterpartyPage editing', () => {
     });
     await userEvent.click(within(form).getByRole('button', { name: 'Load the latest version' }));
     await waitFor(() => {
-      expect(calls.filter((call) => call.method === 'GET')).toHaveLength(2);
+      expect(
+        calls.filter((call) => call.method === 'GET' && call.path.startsWith('/counterparties')),
+      ).toHaveLength(2);
     });
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
   });

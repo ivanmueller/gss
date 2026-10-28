@@ -46,7 +46,7 @@ export function FormIssues({ issues }: { issues: readonly FieldIssue[] }) {
   );
 }
 
-function Field({
+export function Field({
   id,
   label,
   required,
@@ -81,7 +81,7 @@ function Field({
 }
 
 /** The props that connect a control to its label and its error. */
-function controlProps(id: string, error: string | undefined) {
+export function controlProps(id: string, error: string | undefined) {
   return {
     id,
     'aria-invalid': error ? true : undefined,

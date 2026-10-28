@@ -7,6 +7,7 @@ import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { memberRoutes } from './members';
+import { commodityRoutes, quoteRoutes } from './quotes';
 import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
 export type { ApiEnv, DatabaseFactory } from './respond';
@@ -104,6 +105,8 @@ export function createApp(openDatabase: DatabaseFactory) {
   app.route('/counterparties', counterpartyRoutes(openDatabase));
   app.route('/facilities', facilityRoutes(openDatabase));
   app.route('/members', memberRoutes(openDatabase));
+  app.route('/quotes', quoteRoutes(openDatabase));
+  app.route('/commodities', commodityRoutes(openDatabase));
 
   return app;
 }
