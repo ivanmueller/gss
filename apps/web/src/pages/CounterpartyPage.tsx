@@ -20,7 +20,6 @@ import {
   type FieldsProps,
   type FormValues,
 } from '../components/DirectoryFields';
-import { RealDataNote } from '../components/RealDataNote';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Callout } from '../components/ui/callout';
@@ -381,7 +380,6 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
   return (
     <section aria-labelledby="counterparty-heading" className="flex flex-col gap-4">
       <BackLink href="/counterparties">All counterparties</BackLink>
-      <RealDataNote organization={organization.name} />
 
       {resource.status === 'loading' && <p className="text-sm text-muted-foreground">Loading…</p>}
       {resource.status === 'error' && (
