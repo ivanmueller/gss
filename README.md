@@ -65,23 +65,29 @@ The opening page shows a commodity picker and a seller/buyer filter above the ma
 
 ## Counterparties
 
-Signed-in members see their organization's counterparties under **Counterparties**, as a table or by logo. Operations and admin members can import a CSV spreadsheet (in Excel: Save As → "CSV UTF-8 (Comma delimited)"), match its columns, review the result and import; companies already in the list are skipped. They can also upload a PNG logo (up to 512 KB) on a counterparty's page. Real records go only into the database, never into Git.
+Signed-in members see their organization's buyers and sellers under **Counterparties**, as a table, by logo or on a map, with **All / Buyers / Sellers** to show one side. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
+
+Operations and admin members can:
+
+- **Add counterparty:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
+- **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped.
+- On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG logo (up to 512 KB). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 
 ## Map
 
-**Map** shows the organization's counterparty locations on a Mapbox map (Mapbox GL JS, `docs/DECISIONS.md`), as street map or satellite: filled pins are exact locations, hollow pins approximate ones (such as a town). Clicking a pin shows the location; the list under the map links to each counterparty. Locations without coordinates cannot be shown, and the page says how many there are.
+**Counterparties → Map** shows the organization's counterparty locations on a Mapbox map (Mapbox GL JS, `docs/DECISIONS.md`), as street map or satellite: buyers green, sellers red, both (or brokers and carriers) blue; filled pins are exact locations, hollow pins approximate ones (such as a town). Clicking a pin shows the location; the list under the map links to each counterparty. Locations without coordinates cannot be shown, and the page says how many there are. Old links to `/map` open this view.
 
 The map needs a Mapbox **public** token, built into the web app when staging deploys. It is not a secret (every visitor's browser receives it), so Mapbox limits where it works; it is still kept out of Git so it can be replaced. Never use a secret token (`sk.`): the build refuses one.
 
 1. In Mapbox (account.mapbox.com → **Tokens** → **Create a token**): name it, keep only the public scopes, and under URL restrictions add `https://grain-trading-api-staging.ivan-mueller02.workers.dev`. Create it and copy the token (it starts with `pk.`).
 2. In GitHub (**Settings → Secrets and variables → Actions → New repository secret**): name `MAPBOX_PUBLIC_TOKEN`, paste the token, **Add secret**.
-3. Run **Actions → Deploy staging → Run workflow** (or merge any change), then open **Map** on staging.
+3. Run **Actions → Deploy staging → Run workflow** (or merge any change), then open **Counterparties → Map** on staging.
 
 Without the token, the page lists the locations and explains what is missing. To replace the token, update the secret and deploy again.
 
 ### Finding coordinates
 
-Operations and admin members can turn addresses into map points: **Map → Find coordinates from addresses → Look up addresses**. The app sends only the addresses of locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio, shows what it found as exact or approximate, and saves only the results you leave ticked. Results in another province or state, or with low confidence, start unticked. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
+Operations and admin members can turn addresses into map points: **Counterparties → Map → Find coordinates from addresses → Look up addresses**. The app sends only the addresses of locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio, shows what it found as exact or approximate, and saves only the results you leave ticked. Results in another province or state, or with low confidence, start unticked. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
 
 The lookup needs a Geocodio API key, kept as a secret of the staging Worker in Cloudflare (the server does the lookups, so the key never reaches a browser):
 

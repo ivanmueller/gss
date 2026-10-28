@@ -66,18 +66,23 @@ describe('GET /api/v1/facilities', () => {
       withoutCoordinates: 2,
     });
     const requestId = res.headers.get('x-request-id');
-    expect(db.facilitiesInBbox).toHaveBeenCalledWith({ userId: USER_ID, requestId }, null, {
-      west: -110,
-      south: 49,
-      east: -95,
-      north: 60,
-    });
+    expect(db.facilitiesInBbox).toHaveBeenCalledWith(
+      { userId: USER_ID, requestId },
+      null,
+      { west: -110, south: 49, east: -95, north: 60 },
+      null,
+    );
     expect(db.close).toHaveBeenCalledTimes(1);
   });
 
   it('filters by organization and refuses a malformed organization id', async () => {
     await request(`?bbox=${PRAIRIES}&organization_id=${ORG}`);
-    expect(db.facilitiesInBbox).toHaveBeenCalledWith(expect.anything(), ORG, expect.anything());
+    expect(db.facilitiesInBbox).toHaveBeenCalledWith(
+      expect.anything(),
+      ORG,
+      expect.anything(),
+      null,
+    );
 
     openDatabase.mockClear();
     const res = await request(`?bbox=${PRAIRIES}&organization_id=org-a`);
@@ -94,6 +99,21 @@ describe('GET /api/v1/facilities', () => {
     const res = await request(query);
     expect(res.status).toBe(422);
     expect(await res.json()).toMatchObject({ error: { code: 'VALIDATION_FAILED' } });
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('filters by counterparty type and refuses an unknown type', async () => {
+    await request(`?bbox=${PRAIRIES}&type=seller`);
+    expect(db.facilitiesInBbox).toHaveBeenCalledWith(
+      expect.anything(),
+      null,
+      expect.anything(),
+      'seller',
+    );
+
+    openDatabase.mockClear();
+    const res = await request(`?bbox=${PRAIRIES}&type=grower`);
+    expect(res.status).toBe(422);
     expect(openDatabase).not.toHaveBeenCalled();
   });
 

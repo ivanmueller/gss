@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { Link, matchRoute, usePath } from './router';
+import { Link, matchRoute, setSearchParams, usePath, useSearch } from './router';
 
 afterEach(() => {
   window.history.replaceState(null, '', '/');
@@ -11,13 +11,21 @@ afterEach(() => {
 describe('matchRoute', () => {
   it('knows the app pages', () => {
     expect(matchRoute('/')).toEqual({ page: 'workspace' });
-    expect(matchRoute('/map')).toEqual({ page: 'map' });
-    expect(matchRoute('/map/coordinates')).toEqual({ page: 'coordinates' });
     expect(matchRoute('/counterparties/')).toEqual({ page: 'counterparties' });
+    expect(matchRoute('/counterparties/new')).toEqual({ page: 'new-counterparty' });
     expect(matchRoute('/counterparties/import')).toEqual({ page: 'import' });
+    expect(matchRoute('/counterparties/coordinates')).toEqual({ page: 'coordinates' });
     expect(matchRoute('/counterparties/00000000-0000-4000-8000-00000000c001')).toEqual({
       page: 'counterparty',
       id: '00000000-0000-4000-8000-00000000c001',
+    });
+  });
+
+  it('sends the old map addresses to the counterparties page', () => {
+    expect(matchRoute('/map')).toEqual({ page: 'redirect', to: '/counterparties?view=map' });
+    expect(matchRoute('/map/coordinates/')).toEqual({
+      page: 'redirect',
+      to: '/counterparties/coordinates',
     });
   });
 
@@ -42,5 +50,23 @@ describe('Link', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Counterparties' }));
     expect(screen.getByText('at /counterparties')).toBeInTheDocument();
     expect(window.location.pathname).toBe('/counterparties');
+  });
+});
+
+function Query() {
+  return <p>query {useSearch() || '(none)'}</p>;
+}
+
+describe('setSearchParams', () => {
+  it('changes the query in place, without a new history entry', () => {
+    window.history.replaceState(null, '', '/counterparties?view=table&q=a');
+    const entries = window.history.length;
+    render(<Query />);
+    act(() => {
+      setSearchParams({ view: 'map', q: null, type: 'seller' });
+    });
+    expect(screen.getByText('query ?view=map&type=seller')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/counterparties');
+    expect(window.history.length).toBe(entries);
   });
 });

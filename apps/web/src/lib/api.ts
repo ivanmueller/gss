@@ -1,4 +1,4 @@
-import type { ImportIssue } from '@grain/domain';
+import type { FieldIssue, ImportIssue } from '@grain/domain';
 
 // Types of the API's responses (apps/api/src/db.ts and counterparties.ts).
 
@@ -16,6 +16,8 @@ export interface CounterpartySummary {
   facilityCount: number;
   regions: string[];
   logoSha256: string | null;
+  /** When it was archived (ISO 8601), or null. */
+  archivedAt: string | null;
 }
 
 export interface Contact {
@@ -24,6 +26,8 @@ export interface Contact {
   role: string | null;
   email: string | null;
   phone: string | null;
+  /** Sent back with an edit; the API refuses an edit of a version that has changed. */
+  version: string;
 }
 
 export interface Facility {
@@ -38,10 +42,14 @@ export interface Facility {
   latitude: string | null;
   longitude: string | null;
   locationPrecision: string | null;
+  /** Where the coordinates came from: 'geocodio', 'manual' or 'file_import'. */
+  geocodingSource: string | null;
+  version: string;
 }
 
 export interface CounterpartyDetail extends CounterpartySummary {
   notes: string | null;
+  version: string;
   contacts: Contact[];
   facilities: Facility[];
 }
@@ -155,4 +163,29 @@ export async function apiFetch(
 export async function apiJson<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   const res = await apiFetch(path, token, init);
   return (await res.json()) as T;
+}
+
+/** Sends a JSON body (or none) with the given method and returns the JSON answer. */
+export function sendJson<T>(
+  path: string,
+  token: string,
+  method: 'POST' | 'PATCH' | 'DELETE',
+  body?: unknown,
+): Promise<T> {
+  return apiJson<T>(path, token, {
+    method,
+    ...(body !== undefined && {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  });
+}
+
+/** The field problems in a 422 answer to a form, if any. */
+export function fieldIssues(error: unknown): FieldIssue[] {
+  if (!(error instanceof ApiError) || typeof error.body !== 'object' || error.body === null) {
+    return [];
+  }
+  const issues: unknown = (error.body as { issues?: unknown }).issues;
+  return Array.isArray(issues) ? (issues as FieldIssue[]) : [];
 }

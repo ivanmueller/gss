@@ -78,7 +78,7 @@ const names = (result: Awaited<ReturnType<Database['facilitiesInBbox']>>) =>
 
 describe('the map search as app_api', () => {
   it('returns the organization’s located facilities in the box, by counterparty and name', async () => {
-    const result = await db.facilitiesInBbox(as(users.olivia), null, PRAIRIES);
+    const result = await db.facilitiesInBbox(as(users.olivia), null, PRAIRIES, null);
     // Every field of the first facility but its generated id; the key fields of the others.
     expect(result.facilities).toMatchObject([
       {
@@ -111,34 +111,34 @@ describe('the map search as app_api', () => {
 
   it('includes points on the edge of the box and nothing beyond it', async () => {
     const justNorth = { ...PRAIRIES, south: 49.000001 };
-    expect(names(await db.facilitiesInBbox(as(users.olivia), null, justNorth))).not.toContain(
+    expect(names(await db.facilitiesInBbox(as(users.olivia), null, justNorth, null))).not.toContain(
       'Synthetic Border Terminal',
     );
     // A box whose south-west corner is the terminal.
     const corner = { west: -97, south: 49, east: -96.999999, north: 49.000001 };
-    expect(names(await db.facilitiesInBbox(as(users.olivia), null, corner))).toEqual([
+    expect(names(await db.facilitiesInBbox(as(users.olivia), null, corner, null))).toEqual([
       'Synthetic Border Terminal',
     ]);
-    expect(names(await db.facilitiesInBbox(as(users.olivia), null, WORLD))).toHaveLength(4);
+    expect(names(await db.facilitiesInBbox(as(users.olivia), null, WORLD, null))).toHaveLength(4);
   });
 
   it('hides one organization’s facilities from another', async () => {
-    const bob = await db.facilitiesInBbox(as(users.bob), null, WORLD);
+    const bob = await db.facilitiesInBbox(as(users.bob), null, WORLD, null);
     expect(names(bob)).toEqual(['Synthetic B Elevator']);
     expect(bob.withoutCoordinates).toBe(1);
 
-    expect(await db.facilitiesInBbox(as(users.bob), orgs.a, WORLD)).toEqual({
+    expect(await db.facilitiesInBbox(as(users.bob), orgs.a, WORLD, null)).toEqual({
       facilities: [],
       withoutCoordinates: 0,
     });
-    expect(await db.facilitiesInBbox(as(users.olivia), orgs.b, WORLD)).toEqual({
+    expect(await db.facilitiesInBbox(as(users.olivia), orgs.b, WORLD, null)).toEqual({
       facilities: [],
       withoutCoordinates: 0,
     });
   });
 
   it('shows nothing to a suspended member', async () => {
-    expect(await db.facilitiesInBbox(as(users.sam), null, WORLD)).toEqual({
+    expect(await db.facilitiesInBbox(as(users.sam), null, WORLD, null)).toEqual({
       facilities: [],
       withoutCoordinates: 0,
     });

@@ -35,6 +35,31 @@ export function apiError(
   return c.json({ error: { code, message }, ...extra }, status);
 }
 
+/** The request body as JSON, or the error response to send. */
+export async function readJson(
+  c: ApiContext,
+  maxBytes: number,
+): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> {
+  const declared = c.req.header('content-length');
+  const tooLarge = () => ({
+    ok: false as const,
+    response: apiError(c, 413, 'PAYLOAD_TOO_LARGE', 'The request is too large.'),
+  });
+  if (declared !== undefined && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+    return tooLarge();
+  }
+  const text = await c.req.text();
+  if (text.length > maxBytes) return tooLarge();
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    return {
+      ok: false,
+      response: apiError(c, 422, 'VALIDATION_FAILED', 'The request body is not JSON.'),
+    };
+  }
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string): boolean {
@@ -84,6 +109,14 @@ function databaseFailure(c: ApiContext, error: unknown) {
   }
   if (pg?.code === '23505' && pg.constraint.startsWith('import_batches_')) {
     return apiError(c, 409, 'ALREADY_IMPORTED', 'This file has already been imported.');
+  }
+  if (pg?.code === '23505' && pg.constraint === 'counterparties_name_unique') {
+    return apiError(
+      c,
+      409,
+      'DUPLICATE_NAME',
+      'A counterparty with this legal name is already in the list for this country.',
+    );
   }
   if (pg?.code === '23505') {
     return apiError(c, 409, 'CONFLICT', 'The records changed while saving. Try again.');

@@ -129,6 +129,8 @@ const GRAPHIC_PAIRS: [string, string][] = [
   ['bid', 'map-water'],
   ['offer', 'map-land'],
   ['offer', 'map-water'],
+  ['info', 'map-land'],
+  ['info', 'map-water'],
 ];
 
 describe('colour tokens', () => {

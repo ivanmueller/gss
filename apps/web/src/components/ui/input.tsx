@@ -14,3 +14,14 @@ export function Input({ className, ...props }: ComponentProps<'input'>) {
 export function Select({ className, ...props }: ComponentProps<'select'>) {
   return <select data-slot="select" className={cn(fieldClass, 'px-2', className)} {...props} />;
 }
+
+/** Several lines of text, styled like Input. */
+export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
+  return (
+    <textarea
+      data-slot="textarea"
+      className={cn(fieldClass, 'h-auto min-h-20 py-2', className)}
+      {...props}
+    />
+  );
+}

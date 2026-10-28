@@ -1,4 +1,5 @@
 import {
+  COUNTERPARTY_TYPES,
   GEOCODE_LIMIT,
   geocodeRequestSchema,
   parseBbox,
@@ -13,6 +14,7 @@ import { GeocoderError, matchSigner, proposeCoordinates } from './geocoding';
 import {
   apiError,
   isUuid,
+  readJson,
   withDatabase,
   type ApiContext,
   type ApiEnv,
@@ -21,31 +23,6 @@ import {
 
 /** Largest request body for saving coordinates (1,000 matches of about 400 bytes). */
 const MAX_SAVE_BODY_BYTES = 1024 * 1024;
-
-/** The request body as JSON, or the error response to send. */
-async function readJson(
-  c: ApiContext,
-  maxBytes: number,
-): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> {
-  const declared = c.req.header('content-length');
-  const tooLarge = () => ({
-    ok: false as const,
-    response: apiError(c, 413, 'PAYLOAD_TOO_LARGE', 'The request is too large.'),
-  });
-  if (declared !== undefined && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
-    return tooLarge();
-  }
-  const text = await c.req.text();
-  if (text.length > maxBytes) return tooLarge();
-  try {
-    return { ok: true, value: JSON.parse(text) as unknown };
-  } catch {
-    return {
-      ok: false,
-      response: apiError(c, 422, 'VALIDATION_FAILED', 'The request body is not JSON.'),
-    };
-  }
-}
 
 const FORBIDDEN_MESSAGE =
   'Only operations and admin members of this organization can find and save coordinates.';
@@ -83,13 +60,24 @@ function geocoderFailure(c: ApiContext, error: GeocoderError) {
 export function facilityRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
 
-  // The located facilities inside a map view (GT-022). Quote filters (side, commodity,
-  // as_of in docs/API.md) arrive with quotes.
+  // The located facilities inside a map view (GT-022), optionally only those of buyers,
+  // sellers, brokers or carriers. Quote filters (side, commodity, as_of in docs/API.md)
+  // arrive with quotes.
   routes.get('/', async (c) => {
     c.header('Cache-Control', 'no-store');
     const organizationId = c.req.query('organization_id') ?? null;
     if (organizationId !== null && !isUuid(organizationId)) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'organization_id must be a UUID.');
+    }
+    const typeText = c.req.query('type') ?? null;
+    const type = COUNTERPARTY_TYPES.find((known) => known === typeText) ?? null;
+    if (typeText !== null && type === null) {
+      return apiError(
+        c,
+        422,
+        'VALIDATION_FAILED',
+        'type must be buyer, seller, broker or carrier.',
+      );
     }
     const bbox = parseBbox(c.req.query('bbox') ?? '');
     if (!bbox) {
@@ -101,7 +89,7 @@ export function facilityRoutes(openDatabase: DatabaseFactory) {
       );
     }
     return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.facilitiesInBbox(ctx, organizationId, bbox);
+      const result = await db.facilitiesInBbox(ctx, organizationId, bbox, type);
       return c.json({
         facilities: result.facilities.slice(0, MAP_LIMIT),
         truncated: result.facilities.length > MAP_LIMIT,

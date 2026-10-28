@@ -100,7 +100,7 @@ describe('CoordinatesPage', () => {
     });
     expect(screen.getByRole('link', { name: 'See them on the map' })).toHaveAttribute(
       'href',
-      '/map',
+      '/counterparties?view=map',
     );
   });
 

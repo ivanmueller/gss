@@ -141,7 +141,7 @@ function Found({
   );
 }
 
-/** /map/coordinates: look addresses up with Geocodio, review, and save the chosen points. */
+/** /counterparties/coordinates: look addresses up with Geocodio, review, and save the chosen points. */
 export function CoordinatesPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
   const [step, setStep] = useState<Step>({ kind: 'start', busy: false, error: null });
@@ -149,7 +149,7 @@ export function CoordinatesPage({ session }: { session: DirectorySession }) {
   const header = (
     <PageHeader
       id="coordinates-heading"
-      back={<BackLink href="/map">Map</BackLink>}
+      back={<BackLink href="/counterparties?view=map">Counterparties map</BackLink>}
       title="Find coordinates"
       description={
         <>
@@ -296,7 +296,7 @@ export function CoordinatesPage({ session }: { session: DirectorySession }) {
         </p>
         <div className="flex flex-wrap gap-2">
           <Button asChild>
-            <Link href="/map">See them on the map</Link>
+            <Link href="/counterparties?view=map">See them on the map</Link>
           </Button>
           {truncated && (
             <Button variant="outline" onClick={() => void lookUp()}>

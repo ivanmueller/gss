@@ -1,24 +1,22 @@
-import { formatBbox, type Bbox } from '@grain/domain';
+import { formatBbox, type Bbox, type CounterpartyType } from '@grain/domain';
 import { TriangleAlert } from 'lucide-react';
 import { lazy, Suspense, useMemo, useState } from 'react';
 
-import { PageHeader } from '../components/PageHeader';
-import { RealDataNote } from '../components/RealDataNote';
-import { Button } from '../components/ui/button';
-import { Callout } from '../components/ui/callout';
-import { Card } from '../components/ui/card';
-import { SegmentedControl } from '../components/ui/segmented-control';
 import type { MapFacilities, MapFacility } from '../lib/api';
-import { canEditDirectory, countryName, facilityTypeLabel } from '../lib/directory';
+import { canEditDirectory, countryName, facilityTypeLabel, typeLabel } from '../lib/directory';
 import { BASEMAPS, facilityPin, mapboxToken, type Basemap, type MapboxToken } from '../lib/mapbox';
 import { Link } from '../lib/router';
 import { useTheme } from '../lib/theme';
 import { useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
-import type { DirectorySession } from './CounterpartiesPage';
+import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { Button } from './ui/button';
+import { Callout } from './ui/callout';
+import { Card } from './ui/card';
+import { SegmentedControl } from './ui/segmented-control';
 
 // Mapbox GL JS is large, so it is fetched only when a map is shown.
-const FacilityMap = lazy(() => import('../components/FacilityMap'));
+const FacilityMap = lazy(() => import('./FacilityMap'));
 
 const WORLD: Bbox = { west: -180, south: -90, east: 180, north: 90 };
 /** Locations listed under the map; the map itself shows them all. */
@@ -46,26 +44,37 @@ function PrecisionNote({ precision }: { precision: MapFacility['locationPrecisio
   );
 }
 
-/** Matches the pins in FacilityMap, which look the same in both themes. */
+/** Whose pins are which colour, and filled or hollow; matches the pins in FacilityMap. */
 function Legend() {
+  const tones = [
+    ['Buyer', 'border-bid bg-bid'],
+    ['Seller', 'border-offer bg-offer'],
+    ['Buyer and seller, broker or carrier', 'border-info bg-info'],
+  ] as const;
   return (
-    <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1.5">
+    <ul
+      aria-label="Map legend"
+      className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
+    >
+      {tones.map(([label, colour]) => (
+        <li key={label} className="flex items-center gap-1.5">
+          <span aria-hidden="true" className={cn('size-3 rounded-full border-2', colour)} />
+          {label}
+        </li>
+      ))}
+      <li className="flex items-center gap-1.5">
         <span
           aria-hidden="true"
-          className="size-3 rounded-full border-2 border-bid-solid bg-bid-solid"
+          className="size-3 rounded-full border-2 border-muted-foreground bg-background"
         />
-        Exact location
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span
-          aria-hidden="true"
-          className="size-3 rounded-full border-2 border-bid-solid bg-white"
-        />
-        Approximate location
-      </span>
-    </p>
+        Hollow: approximate location (e.g. the town)
+      </li>
+    </ul>
   );
+}
+
+function whose(facility: MapFacility): string {
+  return facility.counterpartyTypes.map(typeLabel).join(', ');
 }
 
 function SetupNote({ token }: { token: Exclude<MapboxToken['status'], 'ok'> | 'refused' }) {
@@ -84,12 +93,20 @@ function SetupNote({ token }: { token: Exclude<MapboxToken['status'], 'ok'> | 'r
   );
 }
 
-/** /map: the organization's counterparty locations on a Mapbox map, with a list. */
-export function MapPage({
+/**
+ * The Counterparties page's map view: the organization's counterparty locations on a Mapbox
+ * map, with a list. `type` shows only buyers' or sellers' locations; `only` (counterparty ids)
+ * narrows it to the counterparties a search found. Archived counterparties are never shown.
+ */
+export function CounterpartyMap({
   session,
+  type,
+  only,
   mapbox = mapboxToken(),
 }: {
   session: DirectorySession;
+  type: CounterpartyType | null;
+  only: ReadonlySet<string> | null;
   mapbox?: MapboxToken;
 }) {
   const { token, organization } = session;
@@ -103,24 +120,25 @@ export function MapPage({
   // Without a map, list every location of the organization.
   const box = showMap ? view : WORLD;
   const [result] = useApiResource<MapFacilities>(
-    box ? `/facilities?organization_id=${organization.id}&bbox=${formatBbox(box)}` : null,
+    box
+      ? `/facilities?organization_id=${organization.id}&bbox=${formatBbox(box)}${type ? `&type=${type}` : ''}`
+      : null,
     token,
     { keepPrevious: true },
   );
   const data = result.status === 'ok' ? result.data : null;
-  const facilities = useMemo(() => data?.facilities ?? [], [data]);
+  const facilities = useMemo(
+    () =>
+      (data?.facilities ?? []).filter(
+        (facility) => only === null || only.has(facility.counterpartyId),
+      ),
+    [data, only],
+  );
   const selected = facilities.find((facility) => facility.id === selectedId) ?? null;
   const pins = useMemo(() => facilities.map(facilityPin), [facilities]);
 
   return (
-    <section aria-labelledby="map-heading" className="flex flex-col gap-4">
-      <PageHeader
-        id="map-heading"
-        title="Map"
-        description={`Locations of ${organization.name}’s counterparties.`}
-      />
-      <RealDataNote organization={organization.name} />
-
+    <div className="flex flex-col gap-4">
       {mapbox.status !== 'ok' && <SetupNote token={mapbox.status} />}
       {mapbox.status === 'ok' && refused && <SetupNote token="refused" />}
 
@@ -169,7 +187,7 @@ export function MapPage({
               {selected.legalName}
             </Link>
             <span>
-              {facilityLabel(selected)} · {place(selected)}
+              {whose(selected)} · {facilityLabel(selected)} · {place(selected)}
             </span>
             <span className="text-muted-foreground">
               <PrecisionNote precision={selected.locationPrecision} /> · {selected.latitude},{' '}
@@ -185,8 +203,8 @@ export function MapPage({
         {data && (
           <>
             {showMap
-              ? `${count(data.facilities.length, 'location', 'locations')} in view.`
-              : `${count(data.facilities.length, 'location has', 'locations have')} coordinates.`}
+              ? `${count(facilities.length, 'location', 'locations')} in view.`
+              : `${count(facilities.length, 'location has', 'locations have')} coordinates.`}
             {data.truncated &&
               ` Only the first ${count(data.facilities.length, 'is', 'are')} shown; zoom in to see the rest.`}
             {data.withoutCoordinates > 0 &&
@@ -196,7 +214,7 @@ export function MapPage({
       </p>
       {data && data.withoutCoordinates > 0 && canEditDirectory(organization.role) && (
         <Button asChild className="w-fit">
-          <Link href="/map/coordinates">Find coordinates from addresses</Link>
+          <Link href="/counterparties/coordinates">Find coordinates from addresses</Link>
         </Button>
       )}
 
@@ -221,7 +239,7 @@ export function MapPage({
                   {facility.legalName}
                 </Link>
                 <span className="text-xs text-muted-foreground">
-                  {facilityLabel(facility)} · {place(facility)} ·{' '}
+                  {whose(facility)} · {facilityLabel(facility)} · {place(facility)} ·{' '}
                   <PrecisionNote precision={facility.locationPrecision} />
                 </span>
               </li>
@@ -235,6 +253,6 @@ export function MapPage({
           </ul>
         </Card>
       )}
-    </section>
+    </div>
   );
 }

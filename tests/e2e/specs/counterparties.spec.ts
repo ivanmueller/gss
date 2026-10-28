@@ -70,9 +70,14 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page.getByText('Already in the list; skipped')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Import 0 new counterparties' })).toBeDisabled();
 
-  // The map page. CI builds without a Mapbox token, so it lists the locations instead, and
-  // none of the imported ones has coordinates.
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Map' }).click();
+  // The map view of the Counterparties page. CI builds without a Mapbox token, so it lists
+  // the locations instead, and none of the imported ones has coordinates.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Counterparties' })
+    .click();
+  await page.getByRole('tab', { name: 'Map' }).click();
+  await expect(page).toHaveURL(/\/counterparties\?view=map$/);
   await expect(page.getByText(/The map is not set up yet/)).toBeVisible();
   await expect(
     page.getByText(
@@ -85,6 +90,85 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page.getByRole('heading', { name: 'Find coordinates' })).toBeVisible();
   await page.getByRole('button', { name: 'Look up addresses' }).click();
   await expect(page.getByRole('alert')).toContainText('Finding coordinates is not set up');
+
+  expect(errors).toEqual([]);
+});
+
+test('adds a seller by hand, edits it, and archives and restores it', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  await page.goto('/counterparties');
+  await page.getByRole('link', { name: 'Add counterparty' }).click();
+  const company = page.getByRole('region', { name: 'Company' });
+  await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
+  await company.getByRole('checkbox', { name: 'Seller' }).check();
+  await company.getByLabel('Country (required)').selectOption('CA');
+  await page.getByRole('region', { name: 'Contact' }).getByLabel('Name').fill('Synthetic Farmer');
+  const location = page.getByRole('region', { name: 'Location' });
+  await location.getByLabel('City or town').fill('Synthetic Town');
+  await location.getByLabel('Province or territory').selectOption('SK');
+  await page.getByRole('button', { name: 'Add counterparty' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
+  await expect(page.getByText('Entered by hand')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
+    'Synthetic Farmer',
+  );
+
+  // Correct the details and the location.
+  await page.getByRole('button', { name: 'Edit details' }).click();
+  await page
+    .getByRole('form', { name: 'Edit details' })
+    .getByLabel('Trading name')
+    .fill('Hand Grower');
+  await page.getByRole('button', { name: 'Save details' }).click();
+  await expect(page.getByText('Trading as Hand Grower')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit Synthetic Town' }).click();
+  const edit = page.getByRole('form', { name: 'Edit Synthetic Town' });
+  await edit.getByLabel('Latitude').fill('52.133214');
+  await edit.getByLabel('Longitude').fill('-106.670046');
+  await edit.getByLabel('Precision').selectOption('exact');
+  await page.getByRole('button', { name: 'Save location' }).click();
+  await expect(page.getByRole('region', { name: 'Locations (1)' })).toContainText(
+    '52.133214, -106.670046 · exact location · entered by hand',
+  );
+
+  // Remove the contact, after a confirmation.
+  await page.getByRole('button', { name: 'Remove Synthetic Farmer' }).click();
+  await page
+    .getByRole('group', { name: 'Remove Synthetic Farmer' })
+    .getByRole('button', { name: 'Remove' })
+    .click();
+  await expect(page.getByRole('region', { name: 'Contacts (0)' })).toBeVisible();
+
+  // Sellers only.
+  await page.getByRole('link', { name: 'All counterparties' }).click();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Sellers' }).click();
+  const table = page.getByRole('table', { name: 'Counterparties' });
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
+  await expect(table.getByRole('link', { name: 'Synthetic Mills' })).toHaveCount(0);
+
+  // Archive: off the list until shown, then restored.
+  await table.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
+  await page.getByRole('button', { name: 'Archive' }).click();
+  await page
+    .getByRole('group', { name: 'Archive this counterparty' })
+    .getByRole('button', { name: 'Archive' })
+    .click();
+  await expect(page.getByText(/cannot be changed until it is restored/)).toBeVisible();
+  await page.getByRole('link', { name: 'All counterparties' }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'Show archived (1)' }).check();
+  await page.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(page.getByRole('button', { name: 'Edit details' })).toBeVisible();
+
+  // The old map address opens the map view.
+  await page.goto('/map');
+  await expect(page).toHaveURL(/\/counterparties\?view=map$/);
+  await expect(page.getByRole('tab', { name: 'Map', selected: true })).toBeVisible();
 
   expect(errors).toEqual([]);
 });
@@ -164,6 +248,28 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
     data: PNG,
   });
   expect(upload.status()).toBe(404);
+
+  // Adding to, editing, archiving and removing from another organization's directory.
+  const version = '2026-10-28T00:00:00.000000Z';
+  const add = await request.post('/api/v1/counterparties', {
+    headers,
+    data: {
+      organizationId: OTHER_ORG.id,
+      values: { legalName: 'Synthetic Intruder', country: 'US', types: 'buyer' },
+    },
+  });
+  expect(add.status()).toBe(403);
+  const writes = [
+    request.patch(one, {
+      headers,
+      data: { version, values: { legalName: 'Hijacked', country: 'US', types: 'buyer' } },
+    }),
+    request.post(`${one}/archive`, { headers }),
+    request.post(`${one}/contacts`, { headers, data: { values: { contactName: 'Intruder' } } }),
+    request.post(`${one}/facilities`, { headers, data: { values: { city: 'Elsewhere' } } }),
+    request.delete(`${one}/facilities/${OTHER_ORG.counterpartyId}`, { headers }),
+  ];
+  for (const write of await Promise.all(writes)) expect(write.status()).toBe(404);
 
   const intoOther = await request.post('/api/v1/counterparties/import', {
     headers,

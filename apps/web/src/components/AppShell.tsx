@@ -4,7 +4,6 @@ import {
   Calculator,
   CircleAlert,
   LayoutDashboard,
-  MapIcon,
   Menu,
   Users,
   type LucideIcon,
@@ -21,7 +20,7 @@ import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
-export type NavSection = 'workspace' | 'map' | 'counterparties';
+export type NavSection = 'workspace' | 'counterparties';
 
 interface NavItem {
   id: NavSection;
@@ -33,7 +32,6 @@ interface NavItem {
 /** The left menu. Add a page here to give it a place in the menu. */
 const NAV: readonly NavItem[] = [
   { id: 'workspace', href: '/', label: 'Workspace', Icon: LayoutDashboard },
-  { id: 'map', href: '/map', label: 'Map', Icon: MapIcon },
   { id: 'counterparties', href: '/counterparties', label: 'Counterparties', Icon: Building2 },
 ];
 

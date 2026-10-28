@@ -4,6 +4,7 @@ import {
   MAX_RAW_VALUE_LENGTH,
   parseImportRow,
   suggestMapping,
+  type CounterpartyType,
   type ImportFieldId,
   type ImportIssue,
 } from '@grain/domain';
@@ -18,6 +19,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { FileButton } from '../components/ui/file-button';
 import { Select } from '../components/ui/input';
+import { SegmentedControl } from '../components/ui/segmented-control';
 import {
   Table,
   TableBody,
@@ -44,17 +46,25 @@ interface Sheet {
 
 type Mapping = Partial<Record<ImportFieldId, string>>;
 
+/** Who the rows without a type are: a file of buyers or a file of sellers. */
+type FileSide = Extract<CounterpartyType, 'buyer' | 'seller'>;
+
+/** A file, how its columns fill the fields, and who the rows without a type are. */
+interface Plan {
+  sheet: Sheet;
+  mapping: Mapping;
+  side: FileSide;
+}
+
 type Step =
   | { kind: 'choose'; error: string | null }
-  | { kind: 'map'; sheet: Sheet; mapping: Mapping; error: string | null; busy: boolean }
-  | {
+  | ({ kind: 'map'; error: string | null; busy: boolean } & Plan)
+  | ({
       kind: 'review';
-      sheet: Sheet;
-      mapping: Mapping;
       result: ImportResult;
       error: string | null;
       busy: boolean;
-    }
+    } & Plan)
   | { kind: 'done'; result: ImportResult };
 
 const FIELD_LABELS = Object.fromEntries(
@@ -132,6 +142,35 @@ function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) 
   );
 }
 
+/** The file's columns that fill no field, so the user can see what is left out. */
+function UnusedColumns({ sheet, mapping }: { sheet: Sheet; mapping: Mapping }) {
+  const used = new Set(Object.values(mapping));
+  const unused = sheet.headers.filter((header) => !used.has(header));
+  if (unused.length === 0) {
+    return <p className="text-sm text-muted-foreground">Every column in your file is used.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <p>
+        <strong>
+          {unused.length === 1
+            ? '1 column in your file is not used:'
+            : `${String(unused.length)} columns in your file are not used:`}
+        </strong>{' '}
+        if one of them holds a field above under another name, choose it for that field. Columns
+        left unused are not imported.
+      </p>
+      <ul aria-label="Columns not used" className="flex flex-wrap gap-1.5">
+        {unused.map((header) => (
+          <li key={header} className="rounded-badge border bg-muted px-2 py-0.5 text-xs">
+            {header}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ColumnMapping({
   sheet,
   mapping,
@@ -143,6 +182,13 @@ function ColumnMapping({
 }) {
   const baseId = useId();
   const sample = sheet.records[0] ?? {};
+  // Which field each column already fills, to say so in the other fields' lists.
+  const usedBy = new Map(
+    (Object.entries(mapping) as [ImportFieldId, string][]).map(([field, header]) => [
+      header,
+      FIELD_LABELS[field],
+    ]),
+  );
   return (
     <Card asChild>
       <fieldset>
@@ -175,16 +221,23 @@ function ColumnMapping({
                   }}
                 >
                   <option value="">— not in my file —</option>
-                  {sheet.headers.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
+                  {sheet.headers.map((name) => {
+                    const other = usedBy.get(name);
+                    return (
+                      <option key={name} value={name}>
+                        {other && other !== field.label ? `${name} (used for ${other})` : name}
+                      </option>
+                    );
+                  })}
                 </Select>
                 <span className="truncate text-xs text-muted-foreground">
-                  {header !== undefined && (sample[header] ?? '') !== ''
-                    ? `e.g. ${sample[header] ?? ''}`
-                    : ''}
+                  {header === undefined
+                    ? field.required
+                      ? 'Choose the column that holds this.'
+                      : ''
+                    : (sample[header] ?? '') !== ''
+                      ? `e.g. ${sample[header] ?? ''}`
+                      : ''}
                 </span>
               </div>
             );
@@ -205,7 +258,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
     const issues: ImportIssue[] = [];
     let valid = 0;
     for (const row of mappedRows(step.sheet, step.mapping)) {
-      const result = parseImportRow(row.line, row.values);
+      const result = parseImportRow(row.line, row.values, { defaultTypes: [step.side] });
       if (result.status === 'invalid') issues.push(...result.issues);
       if (result.status === 'ok') valid += 1;
     }
@@ -230,6 +283,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
         kind: 'map',
         sheet,
         mapping: suggestMapping(sheet.headers),
+        side: 'buyer',
         error: null,
         busy: false,
       });
@@ -241,12 +295,13 @@ export function ImportPage({ session }: { session: DirectorySession }) {
     }
   }
 
-  async function send(sheet: Sheet, mapping: Mapping, commit: boolean): Promise<ImportResult> {
+  async function send({ sheet, mapping, side }: Plan, commit: boolean): Promise<ImportResult> {
     const path = '/counterparties/import';
     const body = JSON.stringify({
       organizationId: organization.id,
       fileName: sheet.fileName.slice(0, 200),
       commit,
+      defaultTypes: [side],
       rows: mappedRows(sheet, mapping),
     });
     return apiJson<ImportResult>(path, token, {
@@ -256,23 +311,27 @@ export function ImportPage({ session }: { session: DirectorySession }) {
     });
   }
 
-  async function review(sheet: Sheet, mapping: Mapping) {
-    setStep({ kind: 'map', sheet, mapping, error: null, busy: true });
+  async function review(plan: Plan) {
+    setStep({ kind: 'map', ...plan, error: null, busy: true });
     try {
-      const result = await send(sheet, mapping, false);
-      setStep({ kind: 'review', sheet, mapping, result, error: null, busy: false });
+      const result = await send(plan, false);
+      setStep({ kind: 'review', ...plan, result, error: null, busy: false });
     } catch (error) {
-      setStep({ kind: 'map', sheet, mapping, error: messageOf(error), busy: false });
+      setStep({ kind: 'map', ...plan, error: messageOf(error), busy: false });
     }
   }
 
-  async function commit(sheet: Sheet, mapping: Mapping, result: ImportResult) {
-    setStep({ kind: 'review', sheet, mapping, result, error: null, busy: true });
+  async function commit(plan: Plan, result: ImportResult) {
+    setStep({ kind: 'review', ...plan, result, error: null, busy: true });
     try {
-      setStep({ kind: 'done', result: await send(sheet, mapping, true) });
+      setStep({ kind: 'done', result: await send(plan, true) });
     } catch (error) {
-      setStep({ kind: 'review', sheet, mapping, result, error: messageOf(error), busy: false });
+      setStep({ kind: 'review', ...plan, result, error: messageOf(error), busy: false });
     }
+  }
+
+  function planOf(current: Plan): Plan {
+    return { sheet: current.sheet, mapping: current.mapping, side: current.side };
   }
 
   const missingRequired =
@@ -288,9 +347,10 @@ export function ImportPage({ session }: { session: DirectorySession }) {
         title="Import counterparties from a spreadsheet"
         description={
           <>
-            Into {organization.name}. In Excel, use File → Save As → “CSV UTF-8 (Comma delimited)”.
-            One row per company or per location; rows with the same legal name and country become
-            one counterparty. Companies already in the list are skipped, not changed.
+            Buyers or sellers, into {organization.name}. In Excel, use File → Save As → “CSV UTF-8
+            (Comma delimited)”. One row per company or per location; rows with the same legal name
+            and country become one counterparty. Your columns can have any names: you choose which
+            column fills which field. Companies already in the list are skipped, not changed.
           </>
         }
       />
@@ -318,8 +378,32 @@ export function ImportPage({ session }: { session: DirectorySession }) {
         <>
           <p className="text-sm">
             <strong>{step.sheet.fileName}</strong>: {step.sheet.records.length} rows,{' '}
-            {step.sheet.headers.length} columns. Check how your columns match the fields below.
+            {step.sheet.headers.length} columns. Columns whose names we recognised are already
+            chosen. For each field, check the column, or choose the one that holds it when your file
+            names it differently.
           </p>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span aria-hidden="true" className="font-medium">
+              {step.mapping.types
+                ? 'Rows with an empty type are:'
+                : 'The companies in this file are:'}
+            </span>
+            <SegmentedControl
+              label={
+                step.mapping.types
+                  ? 'Rows with an empty type are'
+                  : 'The companies in this file are'
+              }
+              options={[
+                { value: 'buyer', label: 'Buyers' },
+                { value: 'seller', label: 'Sellers' },
+              ]}
+              value={step.side}
+              onChange={(side) => {
+                setStep({ ...step, side, error: null });
+              }}
+            />
+          </div>
           <ColumnMapping
             sheet={step.sheet}
             mapping={step.mapping}
@@ -327,6 +411,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
               setStep({ ...step, mapping, error: null });
             }}
           />
+          <UnusedColumns sheet={step.sheet} mapping={step.mapping} />
           {missingRequired.length > 0 ? (
             <p role="status" className="text-sm text-danger">
               Choose a column for {missingRequired.map((field) => field.label).join(' and ')}.
@@ -350,7 +435,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={missingRequired.length > 0 || step.busy}
-              onClick={() => void review(step.sheet, step.mapping)}
+              onClick={() => void review(planOf(step))}
             >
               {step.busy ? 'Checking…' : 'Review import'}
             </Button>
@@ -383,7 +468,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
                 step.result.issues.length > 0 ||
                 step.result.summary.newCounterparties === 0
               }
-              onClick={() => void commit(step.sheet, step.mapping, step.result)}
+              onClick={() => void commit(planOf(step), step.result)}
             >
               {step.busy
                 ? 'Importing…'
@@ -393,13 +478,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
               variant="outline"
               disabled={step.busy}
               onClick={() => {
-                setStep({
-                  kind: 'map',
-                  sheet: step.sheet,
-                  mapping: step.mapping,
-                  error: null,
-                  busy: false,
-                });
+                setStep({ kind: 'map', ...planOf(step), error: null, busy: false });
               }}
             >
               Back to columns

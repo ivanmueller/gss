@@ -1,5 +1,6 @@
 -- Saving geocoded coordinates: column privileges, who may fill in a missing location,
--- that existing coordinates are never overwritten, the new constraints and the audit trail.
+-- that a geocoding result never overwrites existing coordinates, the new constraints and the
+-- audit trail. Correcting a location by hand: counterparty_editing.test.sql.
 -- Runs in one transaction that is rolled back. All fixtures are synthetic.
 begin;
 create extension if not exists pgtap with schema extensions;
@@ -82,24 +83,19 @@ select ok(
   'app_api can update the location columns of a facility'
 );
 select ok(
-  not has_column_privilege('app_api', 'app.facilities', 'name', 'update')
-    and not has_column_privilege('app_api', 'app.facilities', 'address_line', 'update')
-    and not has_column_privilege('app_api', 'app.facilities', 'city', 'update')
-    and not has_column_privilege('app_api', 'app.facilities', 'region', 'update')
-    and not has_column_privilege('app_api', 'app.facilities', 'country', 'update')
-    and not has_column_privilege('app_api', 'app.facilities', 'organization_id', 'update')
+  not has_column_privilege('app_api', 'app.facilities', 'organization_id', 'update')
     and not has_column_privilege('app_api', 'app.facilities', 'counterparty_id', 'update')
     and not has_column_privilege('app_api', 'app.facilities', 'created_by', 'update'),
-  'app_api cannot change a facility''s address, organization or counterparty'
+  'app_api cannot move a facility to another organization or counterparty'
 );
 select ok(
-  not has_table_privilege('app_api', 'app.facilities', 'delete, truncate'),
-  'app_api still cannot delete facilities'
+  not has_table_privilege('app_api', 'app.facilities', 'truncate'),
+  'app_api cannot empty the facilities table'
 );
 select throws_ok(
   format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011aa',
-    $$update app.facilities set city = 'Elsewhere' where id = '00000000-0000-4000-8000-000000000f1a'$$),
-  '42501', null, 'an editor cannot change a facility''s address through app_api'
+    $$update app.facilities set organization_id = '00000000-0000-4000-8000-0000000000bb' where id = '00000000-0000-4000-8000-000000000f1a'$$),
+  '42501', null, 'an editor cannot move a facility to another organization through app_api'
 );
 
 -- Who may fill in a missing location ------------------------------------------------
@@ -133,9 +129,10 @@ select is(
   '(52.133214,-106.670046,exact,geocodio,rooftop,0.97)',
   'the saved location keeps its source, accuracy type and confidence'
 );
-select is(
-  pg_temp.api_changed('00000000-0000-4000-8000-0000000011aa', pg_temp.save_location('00000000-0000-4000-8000-000000000f2a')),
-  0, 'existing coordinates are never overwritten'
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011aa',
+    pg_temp.save_location('00000000-0000-4000-8000-000000000f2a')),
+  '23514', null, 'a geocoding result never overwrites existing coordinates'
 );
 select is(
   (select row(latitude, longitude, location_precision)::text from app.facilities where id = '00000000-0000-4000-8000-000000000f2a'),

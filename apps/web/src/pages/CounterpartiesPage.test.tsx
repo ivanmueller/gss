@@ -21,6 +21,7 @@ function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
     facilityCount: 3,
     regions: ['MB', 'SK'],
     logoSha256: null,
+    archivedAt: null,
     ...overrides,
   };
 }
@@ -46,6 +47,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.history.replaceState(null, '', '/');
 });
 
 describe('CounterpartiesPage', () => {
@@ -103,13 +105,19 @@ describe('CounterpartiesPage', () => {
     expect(within(grid).getByText('ND · United States')).toBeInTheDocument();
   });
 
-  it('offers the import to editors only', async () => {
+  it('offers adding and importing to editors only', async () => {
     mockApi({ [LIST]: () => Response.json({ counterparties: [], truncated: false }) });
     const { unmount } = render(<CounterpartiesPage session={SESSION} />);
-    expect(await screen.findByText('Import your spreadsheet to add them.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Add one by hand or import your spreadsheet.'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Import spreadsheet' })).toHaveAttribute(
       'href',
       '/counterparties/import',
+    );
+    expect(screen.getByRole('link', { name: 'Add counterparty' })).toHaveAttribute(
+      'href',
+      '/counterparties/new',
     );
     unmount();
 
@@ -117,11 +125,10 @@ describe('CounterpartiesPage', () => {
       <CounterpartiesPage session={{ ...SESSION, organization: { ...ORG, role: 'viewer' } }} />,
     );
     expect(
-      await screen.findByText(
-        'An operations or admin member of your organization can import them.',
-      ),
+      await screen.findByText('An operations or admin member of your organization can add them.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Import spreadsheet' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Add counterparty' })).not.toBeInTheDocument();
   });
 
   it('says when the list cannot be loaded', async () => {
@@ -134,5 +141,69 @@ describe('CounterpartiesPage', () => {
     });
     render(<CounterpartiesPage session={SESSION} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('The database is unavailable.');
+  });
+
+  it('shows only buyers or only sellers, and keeps the choice in the address', async () => {
+    const seller = summary({
+      id: '00000000-0000-4000-8000-00000000c003',
+      legalName: 'Synthetic Grower',
+      types: ['seller'],
+    });
+    mockApi({
+      [LIST]: () => Response.json({ counterparties: [...items, seller], truncated: false }),
+    });
+    window.history.replaceState(null, '', '/counterparties');
+    render(<CounterpartiesPage session={SESSION} />);
+
+    const show = await screen.findByRole('group', { name: 'Show' });
+    await userEvent.click(within(show).getByRole('button', { name: 'Sellers' }));
+    expect(window.location.search).toBe('?type=seller');
+    expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Grower' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Synthetic Prairie Mills' })).not.toBeInTheDocument();
+
+    await userEvent.click(within(show).getByRole('button', { name: 'Buyers' }));
+    expect(screen.getByText('2 of 3 shown')).toBeInTheDocument();
+    await userEvent.click(within(show).getByRole('button', { name: 'All' }));
+    expect(window.location.search).toBe('');
+    expect(screen.getByText('3 of 3 shown')).toBeInTheDocument();
+  });
+
+  it('leaves archived counterparties out unless asked', async () => {
+    const archived = summary({
+      id: '00000000-0000-4000-8000-00000000c004',
+      legalName: 'Synthetic Closed Mill',
+      archivedAt: '2026-10-28T10:00:00.000Z',
+    });
+    mockApi({
+      [LIST]: () => Response.json({ counterparties: [...items, archived], truncated: false }),
+    });
+    render(<CounterpartiesPage session={SESSION} />);
+
+    expect(await screen.findByText('2 of 3 shown')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Synthetic Closed Mill' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Show archived (1)' }));
+    const row = screen.getByRole('link', { name: 'Synthetic Closed Mill' }).closest('tr');
+    expect(row).toHaveTextContent('Archived');
+  });
+
+  it('shows the locations on the map view, which the address can open directly', async () => {
+    const world = `GET /facilities?organization_id=${ORG.id}&bbox=-180.000000,-90.000000,180.000000,90.000000`;
+    const calls = mockApi({
+      [LIST]: () => Response.json({ counterparties: items, truncated: false }),
+      [`${world}&type=buyer`]: () =>
+        Response.json({ facilities: [], truncated: false, withoutCoordinates: 2 }),
+    });
+    window.history.replaceState(null, '', '/counterparties?view=map&type=buyer');
+    render(<CounterpartiesPage session={SESSION} />);
+
+    expect(await screen.findByRole('tab', { name: 'Map', selected: true })).toBeInTheDocument();
+    // Tests build without a Mapbox token, so the view lists the locations instead.
+    expect(await screen.findByText(/2 locations have no coordinates yet/)).toBeInTheDocument();
+    expect(calls.some((call) => call.path.endsWith('&type=buyer'))).toBe(true);
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Table' }));
+    expect(window.location.search).toBe('?type=buyer');
+    expect(screen.getByRole('table', { name: 'Counterparties' })).toBeInTheDocument();
   });
 });

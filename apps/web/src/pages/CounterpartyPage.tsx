@@ -1,16 +1,44 @@
-import { inspectPng, MAX_LOGO_DIMENSION } from '@grain/domain';
-import { ImageUp } from 'lucide-react';
-import { useState, type ChangeEvent, type ReactNode } from 'react';
+import {
+  inspectPng,
+  MAX_LOGO_DIMENSION,
+  normalizeCountry,
+  parseContactFields,
+  parseCounterpartyFields,
+  parseFacilityFields,
+  type FieldIssue,
+} from '@grain/domain';
+import { Archive, ArchiveRestore, ImageUp, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useState, type ChangeEvent, type SyntheticEvent, type ReactNode } from 'react';
 
 import { BackLink } from '../components/BackLink';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import {
+  CompanyFields,
+  ContactFields,
+  FormIssues,
+  LocationFields,
+  type FieldsProps,
+  type FormValues,
+} from '../components/DirectoryFields';
 import { RealDataNote } from '../components/RealDataNote';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Callout } from '../components/ui/callout';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { FileButton } from '../components/ui/file-button';
 import { VerificationBadge } from '../components/VerificationBadge';
-import { apiFetch, ApiError, type CounterpartyDetail, type Facility } from '../lib/api';
+import {
+  apiFetch,
+  ApiError,
+  fieldIssues,
+  sendJson,
+  type Contact,
+  type CounterpartyDetail,
+  type Facility,
+} from '../lib/api';
 import {
   canEditDirectory,
+  coordinatesSourceLabel,
   countryName,
   facilityTypeLabel,
   sourceLabel,
@@ -113,11 +141,242 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** /counterparties/:id: one counterparty with its contacts and locations. */
+// Form values from what the API returned, for the edit forms.
+function companyValues(detail: CounterpartyDetail): FormValues {
+  return {
+    legalName: detail.legalName,
+    tradingName: detail.tradingName ?? '',
+    types: detail.types.join(','),
+    country: detail.primaryCountry,
+    verificationStatus: detail.verificationStatus,
+    notes: detail.notes ?? '',
+  };
+}
+
+function contactValues(contact: Contact | null): FormValues {
+  return {
+    contactName: contact?.name ?? '',
+    contactRole: contact?.role ?? '',
+    contactEmail: contact?.email ?? '',
+    contactPhone: contact?.phone ?? '',
+  };
+}
+
+function locationValues(facility: Facility | null, country: string): FormValues {
+  return {
+    facilityName: facility?.name ?? '',
+    facilityType: facility?.facilityType ?? '',
+    addressLine: facility?.addressLine ?? '',
+    city: facility?.city ?? '',
+    region: facility?.region ?? '',
+    postalCode: facility?.postalCode ?? '',
+    facilityCountry: facility?.country ?? country,
+    latitude: facility?.latitude ?? '',
+    longitude: facility?.longitude ?? '',
+    locationPrecision: facility?.locationPrecision ?? '',
+  };
+}
+
+type Check = (values: FormValues) => FieldIssue[];
+
+/**
+ * A form that checks its values with the same rules as the API, sends them, and on success
+ * reports back so the page reloads. A record someone else changed meanwhile is never
+ * overwritten: the API refuses it, and the form offers to load the latest version.
+ */
+function EditForm({
+  label,
+  initial,
+  check,
+  save,
+  submitLabel,
+  onSaved,
+  onCancel,
+  onReload,
+  children,
+}: {
+  label: string;
+  initial: FormValues;
+  check: Check;
+  save: (values: FormValues) => Promise<unknown>;
+  submitLabel: string;
+  onSaved: () => void;
+  onCancel: () => void;
+  onReload: () => void;
+  children: (fields: FieldsProps) => ReactNode;
+}) {
+  const [values, setValues] = useState(initial);
+  const [issues, setIssues] = useState<FieldIssue[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
+
+  async function submit(event: SyntheticEvent) {
+    event.preventDefault();
+    setError(null);
+    const problems = check(values);
+    setIssues(problems);
+    if (problems.length > 0) return;
+    setBusy(true);
+    try {
+      await save(values);
+      onSaved();
+    } catch (failure) {
+      setIssues(fieldIssues(failure));
+      setError({
+        message: failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
+        stale: failure instanceof ApiError && failure.code === 'RECORD_CHANGED',
+      });
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      aria-label={label}
+      noValidate
+      onSubmit={(event) => void submit(event)}
+      className="flex flex-col gap-4 border-b bg-muted/40 px-4 py-4 last:border-b-0"
+    >
+      {children({
+        values,
+        issues,
+        disabled: busy,
+        onChange: (changes) => {
+          setValues((current) => ({ ...current, ...changes }));
+        },
+      })}
+      <FormIssues issues={issues} />
+      {error && issues.length === 0 && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
+          <span>{error.message}</span>
+          {error.stale && (
+            <Button size="sm" variant="outline" onClick={onReload}>
+              Load the latest version
+            </Button>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" size="sm" disabled={busy}>
+          {busy ? 'Saving…' : submitLabel}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** "Remove …?" with a confirm and a cancel button, in place of the item's actions. */
+function ConfirmRemove({
+  what,
+  onConfirm,
+  onCancel,
+}: {
+  what: string;
+  onConfirm: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div role="group" aria-label={`Remove ${what}`} className="flex flex-col gap-2 text-sm">
+      <p>
+        Remove <strong>{what}</strong>? This cannot be undone here; the audit trail keeps who
+        removed it and when.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            onConfirm().catch((failure: unknown) => {
+              setError(
+                failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
+              );
+              setBusy(false);
+            });
+          }}
+        >
+          {busy ? 'Removing…' : 'Remove'}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onCancel}>
+          Keep it
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className="text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+type Editing =
+  | { kind: 'details' }
+  | { kind: 'contact'; id: string | null }
+  | { kind: 'location'; id: string | null }
+  | { kind: 'remove-contact'; id: string }
+  | { kind: 'remove-location'; id: string }
+  | { kind: 'archive' }
+  | null;
+
+/** The problems a form check found; none when it passed. */
+const issuesOf = (result: { status: 'ok' } | { status: 'invalid'; issues: FieldIssue[] }) =>
+  result.status === 'invalid' ? result.issues : [];
+
+function locationName(facility: Facility): string {
+  return (
+    facility.name ?? facilityTypeLabel(facility.facilityType) ?? facility.city ?? 'this location'
+  );
+}
+
+/** /counterparties/:id: one counterparty with its contacts and locations; editors change them here. */
 export function CounterpartyPage({ session, id }: { session: DirectorySession; id: string }) {
   const { token, organization } = session;
   const [resource, reload] = useApiResource<CounterpartyDetail>(`/counterparties/${id}`, token);
+  const [editing, setEditing] = useState<Editing>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
   const editor = canEditDirectory(organization.role);
+  const path = `/counterparties/${id}`;
+
+  function done(message: string) {
+    setEditing(null);
+    setNotice(message);
+    reload();
+  }
+
+  function start(next: Editing) {
+    setNotice(null);
+    setEditing(next);
+  }
+
+  function reloadAndClose() {
+    setEditing(null);
+    setNotice(null);
+    reload();
+  }
+
+  async function setArchived(archived: boolean) {
+    setArchiving(true);
+    setArchiveError(null);
+    try {
+      await sendJson(`${path}/${archived ? 'archive' : 'restore'}`, token, 'POST');
+      done(archived ? 'Archived.' : 'Restored.');
+    } catch (failure) {
+      setArchiveError(
+        failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
+      );
+    } finally {
+      setArchiving(false);
+    }
+  }
 
   return (
     <section aria-labelledby="counterparty-heading" className="flex flex-col gap-4">
@@ -132,125 +391,446 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
             : `Could not load the counterparty: ${resource.error.message}`}
         </p>
       )}
-      {resource.status === 'ok' && (
-        <>
-          <Card className="flex flex-wrap items-start gap-4 p-4">
-            <CounterpartyLogo
-              counterpartyId={resource.data.id}
-              name={resource.data.legalName}
-              sha256={resource.data.logoSha256}
-              token={token}
-              size="lg"
-            />
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <h1 id="counterparty-heading" className="text-2xl font-semibold tracking-tight">
-                {resource.data.legalName}
-              </h1>
-              {resource.data.tradingName && (
-                <p className="text-sm text-muted-foreground">
-                  Trading as {resource.data.tradingName}
+      {resource.status === 'ok' &&
+        (() => {
+          const detail = resource.data;
+          const archived = detail.archivedAt !== null;
+          const canChange = editor && !archived;
+          const country = normalizeCountry(detail.primaryCountry) ?? 'CA';
+          return (
+            <>
+              <p role="status" className="sr-only">
+                {notice}
+              </p>
+              {archived && (
+                <Callout variant="warning" icon={Archive}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p>
+                      <strong>Archived</strong> on {formatUtc(detail.archivedAt ?? '')}. It is left
+                      off the list and the map, and cannot be changed until it is restored.
+                    </p>
+                    {editor && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={archiving}
+                        onClick={() => void setArchived(false)}
+                      >
+                        <ArchiveRestore aria-hidden="true" />
+                        Restore
+                      </Button>
+                    )}
+                  </div>
+                </Callout>
+              )}
+              {archiveError && (
+                <p role="alert" className="text-sm text-danger">
+                  {archiveError}
                 </p>
               )}
-              <VerificationBadge status={resource.data.verificationStatus} />
-              {editor && (
-                <LogoUpload counterpartyId={resource.data.id} token={token} onUploaded={reload} />
-              )}
-            </div>
-          </Card>
 
-          <Card asChild>
-            <dl className="grid grid-cols-1 gap-4 p-4 text-sm sm:grid-cols-2">
-              <Field label="Type">{resource.data.types.map(typeLabel).join(', ')}</Field>
-              <Field label="Country">{countryName(resource.data.primaryCountry)}</Field>
-              <Field label="Source">{sourceLabel(resource.data.source)}</Field>
-              <Field label="Added">{formatUtc(resource.data.createdAt)}</Field>
-              {resource.data.notes && (
-                <div className="sm:col-span-2">
-                  <Field label="Notes">{resource.data.notes}</Field>
+              <Card className="flex flex-wrap items-start gap-4 p-4">
+                <CounterpartyLogo
+                  counterpartyId={detail.id}
+                  name={detail.legalName}
+                  sha256={detail.logoSha256}
+                  token={token}
+                  size="lg"
+                />
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                  <h1 id="counterparty-heading" className="text-2xl font-semibold tracking-tight">
+                    {detail.legalName}
+                  </h1>
+                  {detail.tradingName && (
+                    <p className="text-sm text-muted-foreground">Trading as {detail.tradingName}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5">
+                    <VerificationBadge status={detail.verificationStatus} />
+                    {archived && <Badge>Archived</Badge>}
+                  </div>
+                  {canChange && (
+                    <LogoUpload counterpartyId={detail.id} token={token} onUploaded={reload} />
+                  )}
                 </div>
-              )}
-            </dl>
-          </Card>
+                {canChange && editing?.kind !== 'archive' && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        start({ kind: 'details' });
+                      }}
+                    >
+                      <Pencil aria-hidden="true" />
+                      Edit details
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        start({ kind: 'archive' });
+                      }}
+                    >
+                      <Archive aria-hidden="true" />
+                      Archive
+                    </Button>
+                  </div>
+                )}
+                {canChange && editing?.kind === 'archive' && (
+                  <div
+                    role="group"
+                    aria-label="Archive this counterparty"
+                    className="flex w-full flex-col gap-2 rounded-control border bg-muted/40 p-3 text-sm"
+                  >
+                    <p>
+                      Archive <strong>{detail.legalName}</strong>? It leaves the list and the map,
+                      and nothing about it is deleted. You can restore it at any time.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" disabled={archiving} onClick={() => void setArchived(true)}>
+                        {archiving ? 'Archiving…' : 'Archive'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditing(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
 
-          <Card asChild>
-            <section aria-labelledby="contacts-heading">
-              <CardHeader>
-                <CardTitle id="contacts-heading">
-                  Contacts ({resource.data.contacts.length})
-                </CardTitle>
-              </CardHeader>
-              {resource.data.contacts.length === 0 ? (
-                <p className="px-4 py-4 text-sm text-muted-foreground">No contacts recorded.</p>
+              {editing?.kind === 'details' ? (
+                <Card className="overflow-hidden">
+                  <EditForm
+                    label="Edit details"
+                    initial={companyValues(detail)}
+                    check={(values) => issuesOf(parseCounterpartyFields(values))}
+                    save={(values) =>
+                      sendJson(path, token, 'PATCH', { version: detail.version, values })
+                    }
+                    submitLabel="Save details"
+                    onSaved={() => {
+                      done('Details saved.');
+                    }}
+                    onCancel={() => {
+                      setEditing(null);
+                    }}
+                    onReload={reloadAndClose}
+                  >
+                    {(fields) => <CompanyFields {...fields} />}
+                  </EditForm>
+                </Card>
               ) : (
-                <ul className="divide-y text-sm">
-                  {resource.data.contacts.map((contact) => (
-                    <li key={contact.id} className="flex flex-col gap-0.5 px-4 py-3">
-                      <span className="font-medium">{contact.name}</span>
-                      {contact.role && (
-                        <span className="text-muted-foreground">{contact.role}</span>
-                      )}
-                      {contact.email && (
-                        <a
-                          href={`mailto:${contact.email}`}
-                          className="w-fit underline underline-offset-4"
-                        >
-                          {contact.email}
-                        </a>
-                      )}
-                      {contact.phone && (
-                        <a
-                          href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
-                          className="w-fit underline underline-offset-4"
-                        >
-                          {contact.phone}
-                        </a>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <Card asChild>
+                  <dl className="grid grid-cols-1 gap-4 p-4 text-sm sm:grid-cols-2">
+                    <Field label="Type">{detail.types.map(typeLabel).join(', ')}</Field>
+                    <Field label="Country">{countryName(detail.primaryCountry)}</Field>
+                    <Field label="Source">{sourceLabel(detail.source)}</Field>
+                    <Field label="Added">{formatUtc(detail.createdAt)}</Field>
+                    {detail.notes && (
+                      <div className="sm:col-span-2">
+                        <Field label="Notes">
+                          <span className="whitespace-pre-line">{detail.notes}</span>
+                        </Field>
+                      </div>
+                    )}
+                  </dl>
+                </Card>
               )}
-            </section>
-          </Card>
 
-          <Card asChild>
-            <section aria-labelledby="locations-heading">
-              <CardHeader>
-                <CardTitle id="locations-heading">
-                  Locations ({resource.data.facilities.length})
-                </CardTitle>
-              </CardHeader>
-              {resource.data.facilities.length === 0 ? (
-                <p className="px-4 py-4 text-sm text-muted-foreground">No locations recorded.</p>
-              ) : (
-                <ul className="divide-y text-sm">
-                  {resource.data.facilities.map((facility) => (
-                    <li key={facility.id} className="flex flex-col gap-0.5 px-4 py-3">
-                      <span className="font-medium">
-                        {facility.name ?? facilityTypeLabel(facility.facilityType) ?? 'Location'}
-                        {facility.name && facility.facilityType && (
-                          <span className="font-normal text-muted-foreground">
-                            {' '}
-                            · {facilityTypeLabel(facility.facilityType)}
-                          </span>
-                        )}
-                      </span>
-                      <span>{address(facility)}</span>
-                      {facility.latitude && facility.longitude && (
-                        <span className="text-xs text-muted-foreground">
-                          {facility.latitude}, {facility.longitude} ·{' '}
-                          {facility.locationPrecision === 'exact'
-                            ? 'exact location'
-                            : 'approximate location'}
-                        </span>
+              <Card asChild>
+                <section aria-labelledby="contacts-heading">
+                  <CardHeader>
+                    <CardTitle id="contacts-heading">Contacts ({detail.contacts.length})</CardTitle>
+                    {canChange && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          start({ kind: 'contact', id: null });
+                        }}
+                      >
+                        <Plus aria-hidden="true" />
+                        Add contact
+                      </Button>
+                    )}
+                  </CardHeader>
+                  {editing?.kind === 'contact' && editing.id === null && (
+                    <EditForm
+                      label="New contact"
+                      initial={contactValues(null)}
+                      check={(values) => issuesOf(parseContactFields(values))}
+                      save={(values) => sendJson(`${path}/contacts`, token, 'POST', { values })}
+                      submitLabel="Add contact"
+                      onSaved={() => {
+                        done('Contact added.');
+                      }}
+                      onCancel={() => {
+                        setEditing(null);
+                      }}
+                      onReload={reloadAndClose}
+                    >
+                      {(fields) => <ContactFields {...fields} required />}
+                    </EditForm>
+                  )}
+                  {detail.contacts.length === 0 ? (
+                    <p className="px-4 py-4 text-sm text-muted-foreground">No contacts recorded.</p>
+                  ) : (
+                    <ul className="divide-y text-sm">
+                      {detail.contacts.map((contact) =>
+                        editing?.kind === 'contact' && editing.id === contact.id ? (
+                          <li key={contact.id}>
+                            <EditForm
+                              label={`Edit ${contact.name}`}
+                              initial={contactValues(contact)}
+                              check={(values) => issuesOf(parseContactFields(values))}
+                              save={(values) =>
+                                sendJson(`${path}/contacts/${contact.id}`, token, 'PATCH', {
+                                  version: contact.version,
+                                  values,
+                                })
+                              }
+                              submitLabel="Save contact"
+                              onSaved={() => {
+                                done('Contact saved.');
+                              }}
+                              onCancel={() => {
+                                setEditing(null);
+                              }}
+                              onReload={reloadAndClose}
+                            >
+                              {(fields) => <ContactFields {...fields} required />}
+                            </EditForm>
+                          </li>
+                        ) : (
+                          <li
+                            key={contact.id}
+                            className="flex flex-wrap items-start justify-between gap-3 px-4 py-3"
+                          >
+                            <div className="flex min-w-0 flex-col gap-0.5">
+                              <span className="font-medium">{contact.name}</span>
+                              {contact.role && (
+                                <span className="text-muted-foreground">{contact.role}</span>
+                              )}
+                              {contact.email && (
+                                <a
+                                  href={`mailto:${contact.email}`}
+                                  className="w-fit underline underline-offset-4"
+                                >
+                                  {contact.email}
+                                </a>
+                              )}
+                              {contact.phone && (
+                                <a
+                                  href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
+                                  className="w-fit underline underline-offset-4"
+                                >
+                                  {contact.phone}
+                                </a>
+                              )}
+                            </div>
+                            {canChange &&
+                              (editing?.kind === 'remove-contact' && editing.id === contact.id ? (
+                                <ConfirmRemove
+                                  what={contact.name}
+                                  onConfirm={async () => {
+                                    await sendJson(
+                                      `${path}/contacts/${contact.id}`,
+                                      token,
+                                      'DELETE',
+                                    );
+                                    done('Contact removed.');
+                                  }}
+                                  onCancel={() => {
+                                    setEditing(null);
+                                  }}
+                                />
+                              ) : (
+                                <ItemActions
+                                  name={contact.name}
+                                  onEdit={() => {
+                                    start({ kind: 'contact', id: contact.id });
+                                  }}
+                                  onRemove={() => {
+                                    start({ kind: 'remove-contact', id: contact.id });
+                                  }}
+                                />
+                              ))}
+                          </li>
+                        ),
                       )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </Card>
-        </>
-      )}
+                    </ul>
+                  )}
+                </section>
+              </Card>
+
+              <Card asChild>
+                <section aria-labelledby="locations-heading">
+                  <CardHeader>
+                    <CardTitle id="locations-heading">
+                      Locations ({detail.facilities.length})
+                    </CardTitle>
+                    {canChange && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          start({ kind: 'location', id: null });
+                        }}
+                      >
+                        <Plus aria-hidden="true" />
+                        Add location
+                      </Button>
+                    )}
+                  </CardHeader>
+                  {editing?.kind === 'location' && editing.id === null && (
+                    <EditForm
+                      label="New location"
+                      initial={locationValues(null, country)}
+                      check={(values) => issuesOf(parseFacilityFields(values, country))}
+                      save={(values) => sendJson(`${path}/facilities`, token, 'POST', { values })}
+                      submitLabel="Add location"
+                      onSaved={() => {
+                        done('Location added.');
+                      }}
+                      onCancel={() => {
+                        setEditing(null);
+                      }}
+                      onReload={reloadAndClose}
+                    >
+                      {(fields) => <LocationFields {...fields} />}
+                    </EditForm>
+                  )}
+                  {detail.facilities.length === 0 ? (
+                    <p className="px-4 py-4 text-sm text-muted-foreground">
+                      No locations recorded.
+                    </p>
+                  ) : (
+                    <ul className="divide-y text-sm">
+                      {detail.facilities.map((facility) =>
+                        editing?.kind === 'location' && editing.id === facility.id ? (
+                          <li key={facility.id}>
+                            <EditForm
+                              label={`Edit ${locationName(facility)}`}
+                              initial={locationValues(facility, country)}
+                              check={(values) => issuesOf(parseFacilityFields(values, country))}
+                              save={(values) =>
+                                sendJson(`${path}/facilities/${facility.id}`, token, 'PATCH', {
+                                  version: facility.version,
+                                  values,
+                                })
+                              }
+                              submitLabel="Save location"
+                              onSaved={() => {
+                                done('Location saved.');
+                              }}
+                              onCancel={() => {
+                                setEditing(null);
+                              }}
+                              onReload={reloadAndClose}
+                            >
+                              {(fields) => <LocationFields {...fields} />}
+                            </EditForm>
+                          </li>
+                        ) : (
+                          <li
+                            key={facility.id}
+                            className="flex flex-wrap items-start justify-between gap-3 px-4 py-3"
+                          >
+                            <div className="flex min-w-0 flex-col gap-0.5">
+                              <span className="font-medium">
+                                {facility.name ??
+                                  facilityTypeLabel(facility.facilityType) ??
+                                  'Location'}
+                                {facility.name && facility.facilityType && (
+                                  <span className="font-normal text-muted-foreground">
+                                    {' '}
+                                    · {facilityTypeLabel(facility.facilityType)}
+                                  </span>
+                                )}
+                              </span>
+                              <span>{address(facility)}</span>
+                              {facility.latitude && facility.longitude ? (
+                                <span className="text-xs text-muted-foreground">
+                                  {facility.latitude}, {facility.longitude} ·{' '}
+                                  {facility.locationPrecision === 'exact'
+                                    ? 'exact location'
+                                    : 'approximate location'}
+                                  {coordinatesSourceLabel(facility.geocodingSource) &&
+                                    ` · ${coordinatesSourceLabel(facility.geocodingSource) ?? ''}`}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  No coordinates yet
+                                </span>
+                              )}
+                            </div>
+                            {canChange &&
+                              (editing?.kind === 'remove-location' && editing.id === facility.id ? (
+                                <ConfirmRemove
+                                  what={locationName(facility)}
+                                  onConfirm={async () => {
+                                    await sendJson(
+                                      `${path}/facilities/${facility.id}`,
+                                      token,
+                                      'DELETE',
+                                    );
+                                    done('Location removed.');
+                                  }}
+                                  onCancel={() => {
+                                    setEditing(null);
+                                  }}
+                                />
+                              ) : (
+                                <ItemActions
+                                  name={locationName(facility)}
+                                  onEdit={() => {
+                                    start({ kind: 'location', id: facility.id });
+                                  }}
+                                  onRemove={() => {
+                                    start({ kind: 'remove-location', id: facility.id });
+                                  }}
+                                />
+                              ))}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  )}
+                </section>
+              </Card>
+            </>
+          );
+        })()}
     </section>
+  );
+}
+
+/** Edit and Remove for one contact or location, named for screen readers. */
+function ItemActions({
+  name,
+  onEdit,
+  onRemove,
+}: {
+  name: string;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex gap-1">
+      <Button size="sm" variant="ghost" aria-label={`Edit ${name}`} onClick={onEdit}>
+        <Pencil aria-hidden="true" />
+        Edit
+      </Button>
+      <Button size="sm" variant="ghost" aria-label={`Remove ${name}`} onClick={onRemove}>
+        <Trash2 aria-hidden="true" />
+        Remove
+      </Button>
+    </div>
   );
 }

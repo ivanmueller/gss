@@ -1,5 +1,17 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Counterparty editing, buyers and sellers, the map in Counterparties
+
+Documents updated for counterparty editing (owner's request; see `docs/DECISIONS.md`, 2026-10-28):
+
+- `README.md`: the Counterparties section (add by hand, edit, archive, the import's column choice and buyers/sellers choice) and the map as a view of Counterparties.
+- `docs/API.md`: the new endpoints, the `type` filter on `GET /facilities`, `defaultTypes` on the import, and the error codes of edits.
+- `docs/DATA_MODEL.md`: migration `20261028010000_counterparty_editing.sql`.
+- `docs/PRODUCT.md`: the counterparty routes; `/map` and `/map/coordinates` now forward to Counterparties.
+- `docs/DESIGN_SYSTEM.md`: pin colours for buyers, sellers and both; the new components.
+- `docs/DECISIONS.md`: the owner's choices of 2026-10-28.
+- `AGENTS.md`: the status line.
+
 ## 2026-10-27 — Documents brought up to date with the owner's decisions
 
 The owner asked for every project file to match the decisions and changes merged on 27 October (ivanmueller/gss#23 to ivanmueller/gss#29). Updated:

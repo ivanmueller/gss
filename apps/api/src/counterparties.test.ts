@@ -11,6 +11,9 @@ const app = createApp(openDatabase);
 
 const ORG = '00000000-0000-4000-8000-0000000000aa';
 const COUNTERPARTY = '00000000-0000-4000-8000-00000000c0aa';
+const CONTACT = '00000000-0000-4000-8000-0000000c01aa';
+const FACILITY = '00000000-0000-4000-8000-000000000f1a';
+const VERSION = '2026-10-28T14:05:09.123456Z';
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}` };
 // A valid 1x1 PNG.
 const PNG = Uint8Array.from(
@@ -35,6 +38,7 @@ function summary(name: string): CounterpartySummary {
     facilityCount: 1,
     regions: ['ND'],
     logoSha256: null,
+    archivedAt: null,
   };
 }
 
@@ -67,6 +71,16 @@ describe('authentication', () => {
     ['GET', `/${COUNTERPARTY}/logo`],
     ['PUT', `/${COUNTERPARTY}/logo`],
     ['POST', '/import'],
+    ['POST', ''],
+    ['PATCH', `/${COUNTERPARTY}`],
+    ['POST', `/${COUNTERPARTY}/archive`],
+    ['POST', `/${COUNTERPARTY}/restore`],
+    ['POST', `/${COUNTERPARTY}/contacts`],
+    ['PATCH', `/${COUNTERPARTY}/contacts/${CONTACT}`],
+    ['DELETE', `/${COUNTERPARTY}/contacts/${CONTACT}`],
+    ['POST', `/${COUNTERPARTY}/facilities`],
+    ['PATCH', `/${COUNTERPARTY}/facilities/${FACILITY}`],
+    ['DELETE', `/${COUNTERPARTY}/facilities/${FACILITY}`],
   ])('%s %s requires sign-in', async (method, path) => {
     const res = await request(path, { method });
     expect(res.status).toBe(401);
@@ -134,7 +148,13 @@ describe('GET /api/v1/counterparties/:id', () => {
   });
 
   it('returns the counterparty with its contacts and facilities', async () => {
-    const detail = { ...summary('Synthetic Buyer LLC'), notes: null, contacts: [], facilities: [] };
+    const detail = {
+      ...summary('Synthetic Buyer LLC'),
+      notes: null,
+      version: VERSION,
+      contacts: [],
+      facilities: [],
+    };
     db.getCounterparty.mockResolvedValueOnce(detail);
     const res = await request(`/${COUNTERPARTY}`, { headers: AUTH });
     expect(res.status).toBe(200);
@@ -452,5 +472,325 @@ describe('POST /api/v1/counterparties/import', () => {
     const res = await postImport(body, { 'Content-Length': String(10 * 1024 * 1024 + 1) });
     expect(res.status).toBe(413);
     expect(openDatabase).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
+  it('uses the chosen types for rows without one', async () => {
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'sellers.csv',
+      commit: true,
+      defaultTypes: ['seller'],
+      rows: [
+        { line: 2, values: { legalName: 'Synthetic Grower', country: 'CA' } },
+        { line: 3, values: { legalName: 'Synthetic Mill', country: 'CA', types: 'buyer' } },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const batch = db.importCounterparties.mock.calls[0]?.[1];
+    expect(batch?.counterparties.map((item) => item.counterparty.types)).toEqual([
+      ['seller'],
+      ['buyer'],
+    ]);
+  });
+});
+
+function detail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...summary('Synthetic Buyer LLC'),
+    notes: null,
+    version: VERSION,
+    contacts: [],
+    facilities: [],
+    ...overrides,
+  };
+}
+
+function send(method: string, path: string, body?: unknown) {
+  return request(path, {
+    method,
+    headers: { ...AUTH, 'Content-Type': 'application/json' },
+    ...(body !== undefined && { body: typeof body === 'string' ? body : JSON.stringify(body) }),
+  });
+}
+
+describe('POST /api/v1/counterparties (add by hand)', () => {
+  const values = {
+    legalName: ' Synthetic  Grower ',
+    country: 'Canada',
+    types: 'seller',
+    contactName: 'Synthetic Farmer',
+    city: 'Synthetic Town',
+    region: 'Saskatchewan',
+  };
+
+  it('creates the counterparty with its first contact and location, as the verified user', async () => {
+    const res = await send('POST', '', { organizationId: ORG, values });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ id: '00000000-0000-4000-8000-00000000c0de' });
+    expect(db.createCounterparty).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      ORG,
+      {
+        counterparty: expect.objectContaining({
+          legalName: 'Synthetic Grower',
+          primaryCountry: 'CA',
+          types: ['seller'],
+        }) as unknown,
+        contacts: [expect.objectContaining({ name: 'Synthetic Farmer' }) as unknown],
+        facilities: [
+          expect.objectContaining({
+            city: 'Synthetic Town',
+            region: 'SK',
+            country: 'CA',
+          }) as unknown,
+        ],
+      },
+    );
+  });
+
+  it('takes a location with only the country the form filled in as no location', async () => {
+    const res = await send('POST', '', {
+      organizationId: ORG,
+      values: {
+        legalName: 'Synthetic Grower',
+        country: 'CA',
+        types: 'seller',
+        facilityCountry: 'CA',
+      },
+    });
+    expect(res.status).toBe(201);
+    expect(db.createCounterparty).toHaveBeenCalledWith(
+      expect.anything(),
+      ORG,
+      expect.objectContaining({ contacts: [], facilities: [] }),
+    );
+  });
+
+  it('returns each problem with its field, without opening the database', async () => {
+    const res = await send('POST', '', {
+      organizationId: ORG,
+      values: { legalName: 'Synthetic Grower', country: 'Mexico' },
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'VALIDATION_FAILED' },
+      issues: [
+        { field: 'country', message: '"Mexico" is not Canada or the United States' },
+        { field: 'types', message: 'choose at least one: buyer, seller, broker or carrier' },
+      ],
+    });
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('refuses a reader who cannot edit', async () => {
+    db.createCounterparty.mockResolvedValueOnce({ status: 'forbidden' });
+    const res = await send('POST', '', { organizationId: ORG, values });
+    expect(res.status).toBe(403);
+  });
+
+  it('says when the name is already in the list', async () => {
+    db.createCounterparty.mockRejectedValueOnce(
+      Object.assign(new Error('duplicate key'), {
+        code: '23505',
+        constraint_name: 'counterparties_name_unique',
+      }),
+    );
+    const res = await send('POST', '', { organizationId: ORG, values });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'DUPLICATE_NAME' } });
+  });
+
+  it.each([
+    ['not JSON', '{'],
+    ['an unknown field', { organizationId: ORG, values: { password: 'x' } }],
+    ['a malformed organization', { organizationId: 'org-a', values }],
+  ])('refuses %s without opening the database', async (_, payload) => {
+    const res = await send('POST', '', payload);
+    expect(res.status).toBe(422);
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH /api/v1/counterparties/:id', () => {
+  const values = { legalName: 'Synthetic Renamed', country: 'US', types: 'buyer,seller' };
+
+  it('saves the details for the version the user saw and returns the counterparty', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail({ legalName: 'Synthetic Renamed' }));
+    const res = await send('PATCH', `/${COUNTERPARTY}`, { version: VERSION, values });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ legalName: 'Synthetic Renamed' });
+    expect(db.updateCounterparty).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      COUNTERPARTY,
+      VERSION,
+      expect.objectContaining({ legalName: 'Synthetic Renamed', types: ['buyer', 'seller'] }),
+    );
+  });
+
+  it.each([
+    ['not_found', 404, 'NOT_FOUND'],
+    ['forbidden', 403, 'FORBIDDEN'],
+    ['changed', 409, 'RECORD_CHANGED'],
+    ['archived', 409, 'ARCHIVED'],
+  ] as const)('answers %s with %i %s', async (status, code, errorCode) => {
+    db.updateCounterparty.mockResolvedValueOnce({ status });
+    const res = await send('PATCH', `/${COUNTERPARTY}`, { version: VERSION, values });
+    expect(res.status).toBe(code);
+    expect(await res.json()).toMatchObject({ error: { code: errorCode } });
+    expect(db.getCounterparty).not.toHaveBeenCalled();
+  });
+
+  it('needs a version and only the counterparty’s own fields', async () => {
+    expect((await send('PATCH', `/${COUNTERPARTY}`, { values })).status).toBe(422);
+    expect(
+      (
+        await send('PATCH', `/${COUNTERPARTY}`, {
+          version: VERSION,
+          values: { ...values, city: 'Elsewhere' },
+        })
+      ).status,
+    ).toBe(422);
+    expect((await send('PATCH', '/not-a-uuid', { version: VERSION, values })).status).toBe(404);
+    expect(openDatabase).not.toHaveBeenCalled();
+  });
+
+  it('does not retry an edit when the connection is lost', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    db.updateCounterparty.mockRejectedValueOnce(
+      Object.assign(new Error('write CONNECTION_CLOSED'), { code: 'CONNECTION_CLOSED' }),
+    );
+    const res = await send('PATCH', `/${COUNTERPARTY}`, { version: VERSION, values });
+    vi.restoreAllMocks();
+    expect(res.status).toBe(503);
+    expect(db.updateCounterparty).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('archiving', () => {
+  it.each([
+    ['archive', true],
+    ['restore', false],
+  ])('POST /:id/%s', async (action, archived) => {
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    const res = await send('POST', `/${COUNTERPARTY}/${action}`);
+    expect(res.status).toBe(200);
+    expect(db.setArchived).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, archived);
+  });
+
+  it('refuses a reader who cannot edit', async () => {
+    db.setArchived.mockResolvedValueOnce({ status: 'forbidden' });
+    expect((await send('POST', `/${COUNTERPARTY}/archive`)).status).toBe(403);
+  });
+});
+
+describe('contacts', () => {
+  it('adds a contact and returns the counterparty', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    const res = await send('POST', `/${COUNTERPARTY}/contacts`, {
+      values: { contactName: 'Synthetic Ana', contactEmail: 'ana@example.test' },
+    });
+    expect(res.status).toBe(201);
+    expect(db.addContact).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, {
+      name: 'Synthetic Ana',
+      role: null,
+      email: 'ana@example.test',
+      phone: null,
+    });
+  });
+
+  it('needs a name', async () => {
+    const res = await send('POST', `/${COUNTERPARTY}/contacts`, { values: {} });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      issues: [{ field: 'contactName', message: 'is required' }],
+    });
+  });
+
+  it('corrects a contact for its version and refuses a stale one', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    const path = `/${COUNTERPARTY}/contacts/${CONTACT}`;
+    const body = { version: VERSION, values: { contactName: 'Synthetic Ana' } };
+    expect((await send('PATCH', path, body)).status).toBe(200);
+    expect(db.updateContact).toHaveBeenCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      CONTACT,
+      VERSION,
+      expect.objectContaining({ name: 'Synthetic Ana' }),
+    );
+    db.updateContact.mockResolvedValueOnce({ status: 'changed' });
+    const stale = await send('PATCH', path, body);
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: { code: 'RECORD_CHANGED' } });
+  });
+
+  it('removes a contact, or answers 404 for one that is not there', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    expect((await send('DELETE', `/${COUNTERPARTY}/contacts/${CONTACT}`)).status).toBe(200);
+    expect(db.removeContact).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, CONTACT);
+    db.removeContact.mockResolvedValueOnce({ status: 'not_found' });
+    expect((await send('DELETE', `/${COUNTERPARTY}/contacts/${CONTACT}`)).status).toBe(404);
+    expect((await send('DELETE', `/${COUNTERPARTY}/contacts/nope`)).status).toBe(404);
+  });
+});
+
+describe('locations', () => {
+  it('puts a new location in the counterparty’s country unless it names its own', async () => {
+    db.getCounterparty.mockResolvedValue(detail({ primaryCountry: 'US' }));
+    const res = await send('POST', `/${COUNTERPARTY}/facilities`, {
+      values: { city: 'Synthetic Falls', region: 'ND' },
+    });
+    expect(res.status).toBe(201);
+    expect(db.addFacility).toHaveBeenCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      expect.objectContaining({ city: 'Synthetic Falls', region: 'ND', country: 'US' }),
+    );
+  });
+
+  it('answers 404 when the counterparty is not visible, before saving', async () => {
+    const res = await send('POST', `/${COUNTERPARTY}/facilities`, {
+      values: { city: 'Synthetic Falls' },
+    });
+    expect(res.status).toBe(404);
+    expect(db.addFacility).not.toHaveBeenCalled();
+  });
+
+  it('returns problems with their fields', async () => {
+    db.getCounterparty.mockResolvedValue(detail({ primaryCountry: 'CA' }));
+    const res = await send('PATCH', `/${COUNTERPARTY}/facilities/${FACILITY}`, {
+      version: VERSION,
+      values: { city: 'Synthetic Town', postalCode: '12345' },
+    });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      issues: [{ field: 'postalCode', message: '"12345" is not a postal code like S4P 3Y2' }],
+    });
+    expect(db.updateFacility).not.toHaveBeenCalled();
+  });
+
+  it('corrects and removes a location', async () => {
+    db.getCounterparty.mockResolvedValue(detail({ primaryCountry: 'CA' }));
+    const path = `/${COUNTERPARTY}/facilities/${FACILITY}`;
+    const res = await send('PATCH', path, {
+      version: VERSION,
+      values: { city: 'Synthetic Town', latitude: '52.1', longitude: '-106.6' },
+    });
+    expect(res.status).toBe(200);
+    expect(db.updateFacility).toHaveBeenCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      FACILITY,
+      VERSION,
+      expect.objectContaining({
+        latitude: '52.100000',
+        longitude: '-106.600000',
+        locationPrecision: 'approximate',
+      }),
+    );
+    expect((await send('DELETE', path)).status).toBe(200);
+    expect(db.removeFacility).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, FACILITY);
   });
 });

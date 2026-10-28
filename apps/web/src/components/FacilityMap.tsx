@@ -56,6 +56,8 @@ function pinPaint(colours: MapColours): {
     ['get', 'tone'],
     'offer',
     colours.offer,
+    'mixed',
+    colours.mixed,
     colours.bid,
   ];
   return {

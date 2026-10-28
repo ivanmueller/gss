@@ -51,6 +51,13 @@ export const IMPORT_FIELDS = [
       'company name',
       'buyer',
       'buyer name',
+      'seller',
+      'seller name',
+      'supplier',
+      'supplier name',
+      'grower',
+      'producer',
+      'farm name',
       'name',
       'customer',
       'account',
@@ -66,7 +73,7 @@ export const IMPORT_FIELDS = [
     id: 'country',
     label: 'Country',
     required: true,
-    headers: ['country', 'buyer country', 'company country'],
+    headers: ['country', 'buyer country', 'seller country', 'company country'],
   },
   {
     id: 'types',
@@ -171,7 +178,23 @@ export type ImportFieldId = (typeof IMPORT_FIELDS)[number]['id'];
 export type ImportRowValues = Partial<Record<ImportFieldId, string>>;
 
 const FIELD_IDS = IMPORT_FIELDS.map((field) => field.id) as [ImportFieldId, ...ImportFieldId[]];
-const FACILITY_FIELDS: ImportFieldId[] = [
+
+/** The fields of each part of a directory record: the company, one contact, one location. */
+export const COUNTERPARTY_FIELD_IDS = [
+  'legalName',
+  'tradingName',
+  'country',
+  'types',
+  'verificationStatus',
+  'notes',
+] as const satisfies readonly ImportFieldId[];
+export const CONTACT_FIELD_IDS = [
+  'contactName',
+  'contactRole',
+  'contactEmail',
+  'contactPhone',
+] as const satisfies readonly ImportFieldId[];
+export const FACILITY_FIELD_IDS = [
   'facilityName',
   'facilityType',
   'addressLine',
@@ -182,13 +205,14 @@ const FACILITY_FIELDS: ImportFieldId[] = [
   'latitude',
   'longitude',
   'locationPrecision',
-];
-const CONTACT_FIELDS: ImportFieldId[] = [
-  'contactName',
-  'contactRole',
-  'contactEmail',
-  'contactPhone',
-];
+] as const satisfies readonly ImportFieldId[];
+
+export type CounterpartyFieldId = (typeof COUNTERPARTY_FIELD_IDS)[number];
+export type ContactFieldId = (typeof CONTACT_FIELD_IDS)[number];
+export type FacilityFieldId = (typeof FACILITY_FIELD_IDS)[number];
+
+const fieldValues = <T extends ImportFieldId>(ids: readonly T[]) =>
+  z.partialRecord(z.enum(ids as unknown as [T, ...T[]]), z.string().max(MAX_RAW_VALUE_LENGTH));
 
 /** The request body of POST /api/v1/counterparties/import. Rows are already mapped to fields. */
 export const importRequestSchema = z.object({
@@ -200,17 +224,47 @@ export const importRequestSchema = z.object({
     .max(200)
     .regex(/^[^\p{Cc}]+$/u),
   commit: z.boolean(),
+  /** Types for rows whose type is empty or not in the file; buyer when left out. */
+  defaultTypes: z.array(z.enum(COUNTERPARTY_TYPES)).min(1).max(4).optional(),
   rows: z
     .array(
       z.object({
         line: z.number().int().min(1).max(1_000_000),
-        values: z.partialRecord(z.enum(FIELD_IDS), z.string().max(MAX_RAW_VALUE_LENGTH)),
+        values: fieldValues(FIELD_IDS),
       }),
     )
     .min(1)
     .max(MAX_IMPORT_ROWS),
 });
 export type ImportRequest = z.infer<typeof importRequestSchema>;
+
+/** POST /api/v1/counterparties: one counterparty entered by hand, with an optional first contact and location. */
+export const createCounterpartySchema = z.object({
+  organizationId: z.uuid(),
+  values: fieldValues(FIELD_IDS),
+});
+
+/**
+ * The version a record had when its form was opened: its last change time to the
+ * microsecond, in UTC, as the API sent it (e.g. 2026-10-28T14:05:09.123456Z). A save is
+ * refused when the record has changed since, so no one's edit is lost unseen.
+ */
+export const VERSION = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+const version = z.string().regex(VERSION);
+
+/** PATCH /api/v1/counterparties/{id}. */
+export const updateCounterpartySchema = z.object({
+  version,
+  values: fieldValues(COUNTERPARTY_FIELD_IDS),
+});
+/** POST /api/v1/counterparties/{id}/contacts. */
+export const createContactSchema = z.object({ values: fieldValues(CONTACT_FIELD_IDS) });
+/** PATCH /api/v1/counterparties/{id}/contacts/{contactId}. */
+export const updateContactSchema = z.object({ version, values: fieldValues(CONTACT_FIELD_IDS) });
+/** POST /api/v1/counterparties/{id}/facilities. */
+export const createFacilitySchema = z.object({ values: fieldValues(FACILITY_FIELD_IDS) });
+/** PATCH /api/v1/counterparties/{id}/facilities/{facilityId}. */
+export const updateFacilitySchema = z.object({ version, values: fieldValues(FACILITY_FIELD_IDS) });
 
 export interface CounterpartyInput {
   legalName: string;
@@ -242,17 +296,25 @@ export interface FacilityInput {
   locationPrecision: LocationPrecision | null;
 }
 
-export interface ImportIssue {
-  line: number;
+/** A problem with one field of a form or spreadsheet row; field null for the record as a whole. */
+export interface FieldIssue {
   field: ImportFieldId | null;
   message: string;
 }
 
-export interface ParsedImportRow {
+export interface ImportIssue extends FieldIssue {
   line: number;
+}
+
+/** A counterparty with at most one contact and one location: a spreadsheet row or the add form. */
+export interface DirectoryRecord {
   counterparty: CounterpartyInput;
   contact: ContactInput | null;
   facility: FacilityInput | null;
+}
+
+export interface ParsedImportRow extends DirectoryRecord {
+  line: number;
 }
 
 export type ParseRowResult =
@@ -260,9 +322,23 @@ export type ParseRowResult =
   | { status: 'empty' }
   | { status: 'invalid'; issues: ImportIssue[] };
 
+export type ParseResult<T> =
+  { status: 'ok'; value: T } | { status: 'invalid'; issues: FieldIssue[] };
+
 /** Trim and collapse runs of whitespace; empty becomes null. */
 function clean(value: string | undefined): string | null {
   const text = (value ?? '').replace(/\s+/g, ' ').trim();
+  return text === '' ? null : text;
+}
+
+/** Like clean, but keeps single line breaks (notes); blank lines between paragraphs become one. */
+function cleanLines(value: string | undefined): string | null {
+  const text = (value ?? '')
+    .split(/\r\n?|\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   return text === '' ? null : text;
 }
 
@@ -320,44 +396,62 @@ function postalCode(country: CountryCode, value: string): string | null {
   return US_ZIP.test(upper) ? upper : null;
 }
 
-/**
- * Validates and normalizes one mapped spreadsheet row. Every problem in the row is
- * reported, each with its field, so the preview can show them all at once.
- */
-export function parseImportRow(line: number, values: ImportRowValues): ParseRowResult {
-  const v = (field: ImportFieldId) => clean(values[field]);
-  if (FIELD_IDS.every((field) => v(field) === null)) return { status: 'empty' };
+/** Reads the values of one form or row, collecting every problem with its field. */
+class FieldReader {
+  readonly issues: FieldIssue[] = [];
 
-  const issues: ImportIssue[] = [];
-  const issue = (field: ImportFieldId | null, message: string) =>
-    issues.push({ line, field, message });
-  const label = (field: ImportFieldId, value: string | null): string | null => {
-    if (value !== null && value.length > LABEL_MAX) {
-      issue(field, `is longer than ${String(LABEL_MAX)} characters`);
-      return null;
-    }
-    return value;
-  };
+  constructor(private readonly values: ImportRowValues) {}
 
-  for (const field of FIELD_IDS) {
-    if ((values[field]?.length ?? 0) > MAX_IMPORT_VALUE_LENGTH) {
-      issue(field, `is longer than ${String(MAX_IMPORT_VALUE_LENGTH)} characters`);
+  /** The cleaned value, or null when empty. */
+  value(field: ImportFieldId): string | null {
+    return clean(this.values[field]);
+  }
+
+  raw(field: ImportFieldId): string | undefined {
+    return this.values[field];
+  }
+
+  issue(field: ImportFieldId | null, message: string): void {
+    this.issues.push({ field, message });
+  }
+
+  /** Reports values longer than the import limit, which are refused rather than cut. */
+  checkLengths(fields: readonly ImportFieldId[]): void {
+    for (const field of fields) {
+      if ((this.values[field]?.length ?? 0) > MAX_IMPORT_VALUE_LENGTH) {
+        this.issue(field, `is longer than ${String(MAX_IMPORT_VALUE_LENGTH)} characters`);
+      }
     }
   }
 
-  const legalName = label('legalName', v('legalName'));
-  if (v('legalName') === null) issue('legalName', 'is required');
+  /** A name-like value of at most LABEL_MAX characters. */
+  label(field: ImportFieldId): string | null {
+    const value = this.value(field);
+    if (value !== null && value.length > LABEL_MAX) {
+      this.issue(field, `is longer than ${String(LABEL_MAX)} characters`);
+      return null;
+    }
+    return value;
+  }
+}
 
-  const countryText = v('country');
+function readCounterparty(
+  r: FieldReader,
+  defaultTypes: readonly CounterpartyType[] | undefined,
+): CounterpartyInput | null {
+  const legalName = r.label('legalName');
+  if (r.value('legalName') === null) r.issue('legalName', 'is required');
+
+  const countryText = r.value('country');
   const country = countryText === null ? null : normalizeCountry(countryText);
-  if (countryText === null) issue('country', 'is required');
+  if (countryText === null) r.issue('country', 'is required');
   else if (country === null)
-    issue('country', `"${countryText}" is not Canada or the United States`);
+    r.issue('country', `"${countryText}" is not Canada or the United States`);
 
-  const tradingName = label('tradingName', v('tradingName'));
+  const tradingName = r.label('tradingName');
 
-  const typesText = v('types');
-  let types: CounterpartyType[] = ['buyer'];
+  const typesText = r.value('types');
+  let types: CounterpartyType[] = [...(defaultTypes ?? [])];
   if (typesText !== null) {
     const parts = typesText
       .split(/[;,/|]/)
@@ -365,149 +459,248 @@ export function parseImportRow(line: number, values: ImportRowValues): ParseRowR
       .filter(Boolean);
     const parsed = parts.map((part) => oneOf(COUNTERPARTY_TYPES, part));
     if (parsed.some((type) => type === null)) {
-      issue('types', `"${typesText}" must be buyer, seller, broker or carrier`);
+      r.issue('types', `"${typesText}" must be buyer, seller, broker or carrier`);
     } else {
       types = [...new Set(parsed as CounterpartyType[])];
     }
+  } else if (types.length === 0) {
+    r.issue('types', 'choose at least one: buyer, seller, broker or carrier');
   }
 
-  const statusText = v('verificationStatus');
+  const statusText = r.value('verificationStatus');
   let verificationStatus: VerificationStatus = 'unverified';
   if (statusText !== null) {
     const status = oneOf(VERIFICATION_STATUSES, statusText);
     if (status === null)
-      issue('verificationStatus', `"${statusText}" must be unverified, pending or verified`);
+      r.issue('verificationStatus', `"${statusText}" must be unverified, pending or verified`);
     else verificationStatus = status;
   }
 
-  const notes = clean((values.notes ?? '').replace(/\r\n?/g, '\n'));
+  const notes = cleanLines(r.raw('notes'));
 
-  // Contact: only when some contact column has a value.
-  let contact: ContactInput | null = null;
-  if (CONTACT_FIELDS.some((field) => v(field) !== null)) {
-    const name = label('contactName', v('contactName'));
-    const email = v('contactEmail');
-    const phone = v('contactPhone')?.replace(/\s*(ext\.?|extension)\s*/i, ' x') ?? null;
-    if (v('contactName') === null)
-      issue('contactName', 'is required when other contact details are given');
-    if (email !== null && (email.length > 254 || !EMAIL.test(email)))
-      issue('contactEmail', `"${email}" is not an email address`);
-    if (phone !== null && !PHONE.test(phone))
-      issue('contactPhone', `"${phone}" is not a phone number`);
-    if (name !== null)
-      contact = { name, role: label('contactRole', v('contactRole')), email, phone };
+  if (legalName === null || country === null || types.length === 0) return null;
+  return { legalName, tradingName, types, primaryCountry: country, verificationStatus, notes };
+}
+
+/** A contact, or null when no contact field has a value. */
+function readContact(r: FieldReader): ContactInput | null {
+  if (!CONTACT_FIELD_IDS.some((field) => r.value(field) !== null)) return null;
+  const name = r.label('contactName');
+  const email = r.value('contactEmail');
+  const phone = r.value('contactPhone')?.replace(/\s*(ext\.?|extension)\s*/i, ' x') ?? null;
+  if (r.value('contactName') === null)
+    r.issue('contactName', 'is required when other contact details are given');
+  if (email !== null && (email.length > 254 || !EMAIL.test(email)))
+    r.issue('contactEmail', `"${email}" is not an email address`);
+  if (phone !== null && !PHONE.test(phone))
+    r.issue('contactPhone', `"${phone}" is not a phone number`);
+  return name === null ? null : { name, role: r.label('contactRole'), email, phone };
+}
+
+/**
+ * A location, or null when no location field has a value. Its country is the location's own
+ * or, when not given, `fallbackCountry` (the counterparty's).
+ */
+function readFacility(r: FieldReader, fallbackCountry: CountryCode | null): FacilityInput | null {
+  if (!FACILITY_FIELD_IDS.some((field) => r.value(field) !== null)) return null;
+
+  const facilityCountryText = r.value('facilityCountry');
+  const facilityCountry =
+    facilityCountryText === null ? fallbackCountry : normalizeCountry(facilityCountryText);
+  if (facilityCountryText !== null && facilityCountry === null) {
+    r.issue('facilityCountry', `"${facilityCountryText}" is not Canada or the United States`);
   }
 
-  // Facility: only when some location column has a value.
-  let facility: FacilityInput | null = null;
-  if (FACILITY_FIELDS.some((field) => v(field) !== null)) {
-    const facilityCountryText = v('facilityCountry');
-    const facilityCountry =
-      facilityCountryText === null ? country : normalizeCountry(facilityCountryText);
-    if (facilityCountryText !== null && facilityCountry === null) {
-      issue('facilityCountry', `"${facilityCountryText}" is not Canada or the United States`);
-    }
+  const typeText = r.value('facilityType');
+  const facilityType =
+    typeText === null ? null : (FACILITY_TYPE_ALIASES[typeText.toLowerCase()] ?? null);
+  if (typeText !== null && facilityType === null) {
+    r.issue(
+      'facilityType',
+      `"${typeText}" is not a known location type (${Object.values(FACILITY_TYPE_LABELS).join(', ')})`,
+    );
+  }
 
-    const typeText = v('facilityType');
-    const facilityType =
-      typeText === null ? null : (FACILITY_TYPE_ALIASES[typeText.toLowerCase()] ?? null);
-    if (typeText !== null && facilityType === null) {
-      issue(
-        'facilityType',
-        `"${typeText}" is not a known location type (${Object.values(FACILITY_TYPE_LABELS).join(', ')})`,
+  const addressLine = r.value('addressLine');
+  if (addressLine !== null && addressLine.length > 300)
+    r.issue('addressLine', 'is longer than 300 characters');
+
+  const regionText = r.value('region');
+  let region: string | null = null;
+  if (regionText !== null && facilityCountry !== null) {
+    region = normalizeRegion(facilityCountry, regionText);
+    if (region === null)
+      r.issue('region', `"${regionText}" is not a province or state of ${facilityCountry}`);
+  }
+
+  const postalText = r.value('postalCode');
+  let postal: string | null = null;
+  if (postalText !== null && facilityCountry !== null) {
+    postal = postalCode(facilityCountry, postalText);
+    if (postal === null) {
+      r.issue(
+        'postalCode',
+        facilityCountry === 'CA'
+          ? `"${postalText}" is not a postal code like S4P 3Y2`
+          : `"${postalText}" is not a 5-digit ZIP code (spreadsheets sometimes drop a leading zero)`,
       );
     }
-
-    const addressLine = v('addressLine');
-    if (addressLine !== null && addressLine.length > 300)
-      issue('addressLine', 'is longer than 300 characters');
-
-    const regionText = v('region');
-    let region: string | null = null;
-    if (regionText !== null && facilityCountry !== null) {
-      region = normalizeRegion(facilityCountry, regionText);
-      if (region === null)
-        issue('region', `"${regionText}" is not a province or state of ${facilityCountry}`);
-    }
-
-    const postalText = v('postalCode');
-    let postal: string | null = null;
-    if (postalText !== null && facilityCountry !== null) {
-      postal = postalCode(facilityCountry, postalText);
-      if (postal === null) {
-        issue(
-          'postalCode',
-          facilityCountry === 'CA'
-            ? `"${postalText}" is not a postal code like S4P 3Y2`
-            : `"${postalText}" is not a 5-digit ZIP code (spreadsheets sometimes drop a leading zero)`,
-        );
-      }
-    }
-
-    const latText = v('latitude');
-    const lngText = v('longitude');
-    const latitude = latText === null ? null : degrees(latText, 90);
-    const longitude = lngText === null ? null : degrees(lngText, 180);
-    if (latText !== null && latitude === null)
-      issue('latitude', `"${latText}" is not a latitude between -90 and 90`);
-    if (lngText !== null && longitude === null)
-      issue('longitude', `"${lngText}" is not a longitude between -180 and 180`);
-    if ((latText === null) !== (lngText === null)) {
-      issue(
-        latText === null ? 'latitude' : 'longitude',
-        'latitude and longitude must be given together',
-      );
-    }
-
-    const precisionText = v('locationPrecision');
-    let locationPrecision: LocationPrecision | null =
-      latText !== null && lngText !== null ? 'approximate' : null;
-    if (precisionText !== null) {
-      const precision =
-        precisionText.toLowerCase() === 'approx'
-          ? 'approximate'
-          : oneOf(LOCATION_PRECISIONS, precisionText);
-      if (precision === null)
-        issue('locationPrecision', `"${precisionText}" must be exact or approximate`);
-      else if (latText === null) issue('locationPrecision', 'needs a latitude and longitude');
-      else locationPrecision = precision;
-    }
-
-    if (facilityCountry !== null) {
-      facility = {
-        name: label('facilityName', v('facilityName')),
-        facilityType,
-        addressLine,
-        city: label('city', v('city')),
-        region,
-        postalCode: postal,
-        country: facilityCountry,
-        latitude,
-        longitude,
-        locationPrecision,
-      };
-    }
   }
 
-  if (issues.length > 0 || legalName === null || country === null) {
-    return { status: 'invalid', issues };
+  const latText = r.value('latitude');
+  const lngText = r.value('longitude');
+  const latitude = latText === null ? null : degrees(latText, 90);
+  const longitude = lngText === null ? null : degrees(lngText, 180);
+  if (latText !== null && latitude === null)
+    r.issue('latitude', `"${latText}" is not a latitude between -90 and 90`);
+  if (lngText !== null && longitude === null)
+    r.issue('longitude', `"${lngText}" is not a longitude between -180 and 180`);
+  if ((latText === null) !== (lngText === null)) {
+    r.issue(
+      latText === null ? 'latitude' : 'longitude',
+      'latitude and longitude must be given together',
+    );
   }
+
+  const precisionText = r.value('locationPrecision');
+  let locationPrecision: LocationPrecision | null =
+    latText !== null && lngText !== null ? 'approximate' : null;
+  if (precisionText !== null) {
+    const precision =
+      precisionText.toLowerCase() === 'approx'
+        ? 'approximate'
+        : oneOf(LOCATION_PRECISIONS, precisionText);
+    if (precision === null)
+      r.issue('locationPrecision', `"${precisionText}" must be exact or approximate`);
+    else if (latText === null) r.issue('locationPrecision', 'needs a latitude and longitude');
+    else locationPrecision = precision;
+  }
+
+  if (facilityCountry === null) return null;
   return {
-    status: 'ok',
-    row: {
-      line,
-      counterparty: {
-        legalName,
-        tradingName,
-        types,
-        primaryCountry: country,
-        verificationStatus,
-        notes,
-      },
-      contact,
-      facility,
-    },
+    name: r.label('facilityName'),
+    facilityType,
+    addressLine,
+    city: r.label('city'),
+    region,
+    postalCode: postal,
+    country: facilityCountry,
+    latitude,
+    longitude,
+    locationPrecision,
   };
+}
+
+/**
+ * Validates and normalizes a counterparty with at most one contact and one location, as a
+ * spreadsheet row or the add form gives them. Every problem is reported, each with its
+ * field, so they can all be shown at once. Without a type, `defaultTypes` are used; with
+ * none, a type is required.
+ */
+export function parseDirectoryRecord(
+  values: ImportRowValues,
+  options: { defaultTypes?: readonly CounterpartyType[] } = {},
+):
+  | { status: 'ok'; record: DirectoryRecord }
+  | { status: 'empty' }
+  | { status: 'invalid'; issues: FieldIssue[] } {
+  const r = new FieldReader(values);
+  if (FIELD_IDS.every((field) => r.value(field) === null)) return { status: 'empty' };
+  r.checkLengths(FIELD_IDS);
+  const counterparty = readCounterparty(r, options.defaultTypes);
+  const contact = readContact(r);
+  const countryText = r.value('country');
+  const facility = readFacility(r, countryText === null ? null : normalizeCountry(countryText));
+  if (r.issues.length > 0 || counterparty === null) return { status: 'invalid', issues: r.issues };
+  return { status: 'ok', record: { counterparty, contact, facility } };
+}
+
+/** Validates one mapped spreadsheet row; rows without a type are buyers unless `defaultTypes` says otherwise. */
+export function parseImportRow(
+  line: number,
+  values: ImportRowValues,
+  options: { defaultTypes?: readonly CounterpartyType[] } = {},
+): ParseRowResult {
+  const result = parseDirectoryRecord(values, {
+    defaultTypes: options.defaultTypes ?? ['buyer'],
+  });
+  if (result.status === 'empty') return result;
+  if (result.status === 'invalid') {
+    return { status: 'invalid', issues: result.issues.map((issue) => ({ line, ...issue })) };
+  }
+  return { status: 'ok', row: { line, ...result.record } };
+}
+
+/** A counterparty's own details from its edit form. A type is required. */
+export function parseCounterpartyFields(values: ImportRowValues): ParseResult<CounterpartyInput> {
+  const r = new FieldReader(values);
+  r.checkLengths(COUNTERPARTY_FIELD_IDS);
+  const counterparty = readCounterparty(r, undefined);
+  return r.issues.length > 0 || counterparty === null
+    ? { status: 'invalid', issues: r.issues }
+    : { status: 'ok', value: counterparty };
+}
+
+/** One contact from its form. A name is required. */
+export function parseContactFields(values: ImportRowValues): ParseResult<ContactInput> {
+  const r = new FieldReader(values);
+  r.checkLengths(CONTACT_FIELD_IDS);
+  const contact = readContact(r);
+  if (contact === null && r.issues.length === 0) r.issue('contactName', 'is required');
+  return r.issues.length > 0 || contact === null
+    ? { status: 'invalid', issues: r.issues }
+    : { status: 'ok', value: contact };
+}
+
+/** Fields of a location that say where it is; a type or country alone does not. */
+const WHERE_FIELDS: readonly FacilityFieldId[] = [
+  'facilityName',
+  'addressLine',
+  'city',
+  'region',
+  'postalCode',
+  'latitude',
+  'longitude',
+];
+const WHERE_MESSAGE =
+  'Give the location at least a name, an address, a city, a province or state, or coordinates.';
+
+/**
+ * The add form: a counterparty with an optional first contact and location. A type is
+ * required. The location's country is filled in for the user, so a country alone is no
+ * location; anything more needs to say where it is, as parseFacilityFields requires.
+ */
+export function parseNewCounterparty(
+  values: ImportRowValues,
+): ReturnType<typeof parseDirectoryRecord> {
+  const given = (field: ImportFieldId) => clean(values[field]) !== null;
+  const location = FACILITY_FIELD_IDS.some((field) => field !== 'facilityCountry' && given(field));
+  const own = location
+    ? values
+    : Object.fromEntries(Object.entries(values).filter(([field]) => field !== 'facilityCountry'));
+  const result = parseDirectoryRecord(own);
+  if (!location || WHERE_FIELDS.some(given)) return result;
+  const issue: FieldIssue = { field: null, message: WHERE_MESSAGE };
+  return result.status === 'invalid'
+    ? { status: 'invalid', issues: [...result.issues, issue] }
+    : { status: 'invalid', issues: [issue] };
+}
+
+/**
+ * One location from its form. Without a country of its own it is in `counterpartyCountry`.
+ * It needs at least a name, address, city, province or state, postal code or coordinates.
+ */
+export function parseFacilityFields(
+  values: ImportRowValues,
+  counterpartyCountry: CountryCode,
+): ParseResult<FacilityInput> {
+  const r = new FieldReader(values);
+  r.checkLengths(FACILITY_FIELD_IDS);
+  if (!WHERE_FIELDS.some((field) => r.value(field) !== null)) r.issue(null, WHERE_MESSAGE);
+  const facility = readFacility(r, counterpartyCountry);
+  return r.issues.length > 0 || facility === null
+    ? { status: 'invalid', issues: r.issues }
+    : { status: 'ok', value: facility };
 }
 
 /** Matches the database's unique key: organization, country and legal name ignoring case. */
