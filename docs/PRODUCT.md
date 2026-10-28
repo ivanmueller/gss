@@ -88,9 +88,11 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 | `/quotes` | Quote management | Search, filters, create, revision history, import/export |
 | `/scenarios/new` | Trade builder | Seller offer, buyer bid, quantity, FX, freight, fees, validation and margin |
 | `/scenarios/:id` | Saved assessment | Input snapshot, calculation version, audit/revisions, export |
-| `/counterparties` | Relationship management | Contacts, facilities, role, status, communication log |
-| `/map` (implemented) | The organization's counterparty locations on a Mapbox map, with a list | Street or satellite map, pan and zoom, select a pin |
-| `/map/coordinates` (implemented) | Find coordinates for locations without them (Geocodio), review, save | Look up addresses, tick or untick each result, save; operations and admin only |
+| `/counterparties` (implemented, without the communication log) | Relationship management: buyers and sellers as a table, logos or a map | Search, All / Buyers / Sellers, show archived; Add counterparty and Import spreadsheet for operations and admin |
+| `/counterparties?view=map` (implemented) | The organization's counterparty locations on a Mapbox map, with a list; replaces the former `/map` page (owner's request, 2026-10-28) | Street or satellite map, pan and zoom, select a pin; buyers green, sellers red, both blue |
+| `/counterparties/new` (implemented) | Add one counterparty by hand with the import's fields | Company, optional first contact and location |
+| `/counterparties/:id` (implemented) | One counterparty | Edit details, archive and restore; add, edit and remove contacts and locations; logo (operations and admin) |
+| `/counterparties/coordinates` (implemented) | Find coordinates for locations without them (Geocodio), review, save | Look up addresses, tick or untick each result, save; operations and admin only |
 | `/admin` | Organization control | Users, roles, data sources, settings, audit views |
 
 ### Workspace layout
