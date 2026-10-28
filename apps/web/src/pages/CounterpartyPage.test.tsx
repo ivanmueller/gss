@@ -168,7 +168,12 @@ describe('CounterpartyPage', () => {
     const input = await screen.findByLabelText('Upload logo');
     await userEvent.upload(input, new File([PNG], 'logo.png', { type: 'image/png' }));
 
-    expect(await screen.findByText('Logo saved.')).toBeInTheDocument();
+    // Looked up afresh each time: once the reload has the logo, the note under the upload
+    // button gives way to the same note beside the logo, so an element found first can be
+    // gone a moment later although the words never leave the page (deploy run #45).
+    await waitFor(() => {
+      expect(screen.getByText('Logo saved.')).toBeInTheDocument();
+    });
     const put = calls.find((call) => call.method === 'PUT');
     expect(put?.headers.get('Content-Type')).toBe('image/png');
     expect(put?.body).toEqual(PNG);
