@@ -1,5 +1,15 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Documents brought up to date again
+
+The owner asked for every document to be current. Updated:
+
+- `docs/BUILD_PLAN.md`: a "Where the build stands" table by phase; the Phase 1 gate notes one organization only.
+- `docs/DECISIONS.md`: the day's smaller choices (PNG, JPG or WebP logos; Open in authenticator app; leaf and coral order book; Figtree for prices; the counterparties toolbar), and notes on the earlier entries they replace.
+- `docs/PRODUCT.md`: sign-in, the Team page's add form, logo formats, the counterparties toolbar and the order book's colours and font.
+- `docs/DESIGN_SYSTEM.md`: the leaf and coral ramps and the `-accent` tokens.
+- `docs/HANDOFF.md`: ivanmueller/gss#43 and #44, the status line, logins made from the app, the tests of #41–#44.
+
 ## 2026-10-28 — Order book colours and price font
 
 - `docs/DESIGN_SYSTEM.md`: bids and asks in the owner's reference leaf green and coral, with their own ramps; Figtree for prices.
