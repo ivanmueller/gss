@@ -14,6 +14,7 @@ import type {
 import postgres from 'postgres';
 
 import type { FacilityAddress } from './geocoding';
+import { quoteQueries, type QuoteDatabase } from './quotes-db';
 
 export interface Membership {
   organizationId: string;
@@ -168,7 +169,7 @@ export const LIST_LIMIT = 5000;
 export const MAP_LIMIT = 5000;
 
 /** What the API reads from and writes to Postgres. Every call runs as the given, already verified user. */
-export interface Database {
+export interface Database extends QuoteDatabase {
   memberships: (userId: string) => Promise<Membership[]>;
   canEditDirectory: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   listCounterparties: (
@@ -490,6 +491,8 @@ export function createDatabase(sql: postgres.Sql): Database {
   `;
 
   return {
+    ...quoteQueries(asUser),
+
     async memberships(userId) {
       const rows = await sql.begin(async (tx) => {
         await tx`select set_config('app.user_id', ${userId}, true)`;

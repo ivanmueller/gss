@@ -1,5 +1,13 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Bids and offers
+
+- `docs/DECISIONS.md`: bids and offers with a full revision history, linked to a counterparty (who enters them, revisions never changed, withdrawn is final, the terms recorded, commodities, what is not in this slice).
+- `docs/DATA_MODEL.md`: migration `20261028040000_quotes.sql`.
+- `docs/API.md`: `/api/v1/commodities` and `/api/v1/quotes`, and `LOCATION_HAS_QUOTES`.
+- `docs/PRODUCT.md`: the `/quotes` pages and the counterparty page's bids and offers.
+- `README.md`: reset the local database before running the browser tests again.
+
 ## 2026-10-28 — Documents brought up to date again
 
 The owner asked for every document to be current. Updated:

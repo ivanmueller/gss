@@ -286,3 +286,102 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
   await page.goto(`/counterparties/${OTHER_ORG.counterpartyId}`);
   await expect(page.getByRole('alert')).toHaveText('This counterparty does not exist.');
 });
+
+// Runs after the tests above in this file, which leave the seller "Synthetic Hand Grower"
+// with a location in Synthetic Town. Bids and offers are never deleted, so a second local
+// run needs a fresh database (supabase.ts says so).
+test('enters an offer, records new terms, and withdraws it, keeping the history', async ({
+  page,
+  request,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  await page.goto('/counterparties');
+  await page.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
+  const section = page.getByRole('region', { name: 'Bids and offers (0)' });
+  await expect(section).toContainText('No live bids or offers.');
+  // A seller offers; it does not bid.
+  await expect(section.getByRole('link', { name: 'New bid' })).toHaveCount(0);
+  await section.getByRole('link', { name: 'New offer' }).click();
+
+  await expect(page.getByRole('heading', { name: 'New offer' })).toBeVisible();
+  await expect(page.getByLabel('Counterparty (required)')).toHaveValue(/[0-9a-f-]{36}/);
+  await page.getByLabel('Location', { exact: true }).selectOption({ label: 'Synthetic Town, SK' });
+  await page.getByLabel('Commodity (required)').selectOption({ label: 'Flaxseed' });
+  await page.getByLabel('Price (required)').fill('820.00');
+  await page.getByLabel('Currency (required)').selectOption('CAD');
+  await page.getByLabel('Firm or indicative (required)').selectOption('firm');
+  await page.getByLabel('Grade or quality').fill('No. 1 CW');
+  await page.getByLabel('Available quantity (MT) (required)').fill('42');
+  await page.getByLabel('Delivery basis (required)').selectOption('fob');
+  await page.getByLabel('Valid until (required)').fill('2099-10-30T16:00');
+  await page.getByLabel('Source (required)').selectOption('phone');
+  await page.getByRole('button', { name: 'Save offer' }).click();
+
+  await expect(page.getByRole('heading', { name: /Offer · Flaxseed/ })).toBeVisible();
+  const current = page.getByRole('region', { name: 'Current terms' });
+  await expect(current).toContainText('CAD 820.00/MT');
+  await expect(current).toContainText('Revision 1');
+  await expect(current).toContainText('by Synthetic Trader');
+
+  // New terms are a new revision; the first terms stay in the history.
+  await page.getByRole('button', { name: 'Record new terms' }).click();
+  await page.getByLabel('Price (required)').fill('815.50');
+  await page.getByRole('button', { name: 'Save new terms' }).click();
+  await expect(page.getByText('New terms saved.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current terms' })).toContainText('CAD 815.50/MT');
+  const history = page.getByRole('table', { name: 'Revision history' });
+  await expect(history.getByRole('row')).toHaveCount(3);
+  await expect(history.getByRole('row').nth(2)).toContainText('CAD 820.00/MT');
+  await expect(history.getByRole('row').nth(2)).toContainText('Superseded');
+
+  // The live list shows it until it is withdrawn; then only with the historical filter.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Bids & offers' })
+    .click();
+  const list = page.getByRole('table', { name: 'Bids and offers' });
+  await expect(list).toContainText('CAD 815.50/MT');
+  await list.getByRole('link', { name: 'Flaxseed' }).click();
+  await page.getByRole('button', { name: 'Withdraw' }).click();
+  await page
+    .getByRole('group', { name: 'Withdraw this quote' })
+    .getByRole('button', { name: 'Withdraw' })
+    .click();
+  await expect(page.getByText(/is never live again/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record new terms' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'All bids and offers' }).click();
+  await expect(page.getByText('No live bids or offers here.')).toBeVisible();
+  await page.getByLabel('Include withdrawn and expired').check();
+  await expect(page.getByRole('table', { name: 'Bids and offers' })).toContainText('Withdrawn');
+
+  // Another organization's counterparty cannot be quoted for, and its quotes stay hidden.
+  const headers = { Authorization: `Bearer ${await accessToken(page)}` };
+  const intrude = await request.post('/api/v1/quotes', {
+    headers,
+    data: {
+      organizationId: OTHER_ORG.id,
+      counterpartyId: OTHER_ORG.counterpartyId,
+      side: 'bid',
+      commodity: 'flaxseed',
+      values: {
+        firmness: 'firm',
+        price: '1.00',
+        currency: 'USD',
+        priceUnit: 'MT',
+        deliveryBasis: 'delivered',
+        quantityMax: '1',
+        validUntil: '2099-01-01T00:00:00Z',
+        sourceType: 'phone',
+      },
+    },
+  });
+  expect(intrude.status()).toBe(403);
+  const other = await request.get(`/api/v1/quotes?organization_id=${OTHER_ORG.id}&status=all`, {
+    headers,
+  });
+  expect(await other.json()).toEqual({ quotes: [], truncated: false });
+
+  expect(errors).toEqual([]);
+});

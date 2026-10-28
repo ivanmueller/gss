@@ -82,6 +82,15 @@ export function fakeDatabase(): Mocked<Database> {
     addFacility: vi.fn<Database['addFacility']>(() => saved()),
     updateFacility: vi.fn<Database['updateFacility']>(() => saved()),
     removeFacility: vi.fn<Database['removeFacility']>(() => saved()),
+    listCommodities: vi.fn<Database['listCommodities']>(() => Promise.resolve([])),
+    canEnterQuotes: vi.fn<Database['canEnterQuotes']>(() => Promise.resolve(true)),
+    listQuotes: vi.fn<Database['listQuotes']>(() => Promise.resolve([])),
+    getQuote: vi.fn<Database['getQuote']>(() => Promise.resolve(null)),
+    createQuote: vi.fn<Database['createQuote']>(() =>
+      Promise.resolve({ status: 'created', id: '00000000-0000-4000-8000-00000000a001' }),
+    ),
+    reviseQuote: vi.fn<Database['reviseQuote']>(() => saved()),
+    withdrawQuote: vi.fn<Database['withdrawQuote']>(() => saved()),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
 }

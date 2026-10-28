@@ -120,6 +120,17 @@ function databaseFailure(c: ApiContext, error: unknown) {
       'There must always be at least one active admin. Make someone else an admin first.',
     );
   }
+  if (pg?.code === 'GS002') {
+    return apiError(c, 409, 'WITHDRAWN', 'This quote was withdrawn. Enter a new one instead.');
+  }
+  if (pg?.code === '23503' && pg.constraint === 'quotes_facility_fkey') {
+    return apiError(
+      c,
+      409,
+      'LOCATION_HAS_QUOTES',
+      'This location has bids or offers, which keep their history. It cannot be removed.',
+    );
+  }
   if (pg?.code === '23505' && pg.constraint === 'counterparties_name_unique') {
     return apiError(
       c,

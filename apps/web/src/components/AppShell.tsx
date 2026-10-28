@@ -20,7 +20,7 @@ import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
-export type NavSection = 'workspace' | 'counterparties' | 'team';
+export type NavSection = 'workspace' | 'counterparties' | 'quotes' | 'team';
 
 interface NavItem {
   id: NavSection;
@@ -33,12 +33,12 @@ interface NavItem {
 const NAV: readonly NavItem[] = [
   { id: 'workspace', href: '/', label: 'Workspace', Icon: LayoutDashboard },
   { id: 'counterparties', href: '/counterparties', label: 'Counterparties', Icon: Building2 },
+  { id: 'quotes', href: '/quotes', label: 'Bids & offers', Icon: ArrowLeftRight },
   { id: 'team', href: '/team', label: 'Team', Icon: Users },
 ];
 
 /** Planned pages, shown greyed out so the menu's shape is clear; none of them exists yet. */
 const PLANNED: readonly { label: string; Icon: LucideIcon }[] = [
-  { label: 'Bids & offers', Icon: ArrowLeftRight },
   { label: 'Scenarios', Icon: Calculator },
 ];
 

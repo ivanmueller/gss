@@ -25,9 +25,9 @@ export const MEMBER_ROLE_LABELS: Record<MemberRole, string> = {
 export const MEMBER_ROLE_DESCRIPTIONS: Record<MemberRole, string> = {
   viewer: 'Sees the counterparties and the map.',
   analyst: 'Sees everything; will build trade scenarios once they exist.',
-  trader: 'Sees everything; will enter bids and offers once they exist.',
+  trader: 'Sees everything; enters, revises and withdraws bids and offers.',
   operations: 'Also adds, edits and archives counterparties and finds coordinates.',
-  org_admin: 'Everything operations can do, and manages the team.',
+  org_admin: 'Everything operations and traders can do, and manages the team.',
 };
 
 /** A first or last name: trimmed, 1 to 100 characters, no control characters; empty is none. */

@@ -1,6 +1,7 @@
 import { Ban, CircleCheck, CircleDashed, History, TimerOff } from 'lucide-react';
 
-import type { QuoteStatus } from '../data/types';
+import type { RevisionStatus as QuoteStatus } from '@grain/domain';
+
 import { Badge, type BadgeVariant } from './ui/badge';
 
 // Only a firm quote is green; indicative is caution, and the rest are greyed out.

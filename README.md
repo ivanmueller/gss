@@ -35,7 +35,7 @@ pnpm preview:staging            # build, then serve web + API together as on sta
 pnpm e2e                        # build, then run the Playwright browser tests (desktop and phone)
 ```
 
-`pnpm e2e` needs Chromium for Playwright 1.63.0 (`pnpm --filter @grain/e2e exec playwright install chromium`, once) and a local Supabase with its sign-in service: `supabase start`, then set the variables listed in `.env.example` from `supabase status -o env` and write `apps/api/.dev.vars.staging`. CI does exactly this in `.github/workflows/ci.yml`.
+`pnpm e2e` needs Chromium for Playwright 1.63.0 (`pnpm --filter @grain/e2e exec playwright install chromium`, once) and a local Supabase with its sign-in service: `supabase start`, then set the variables listed in `.env.example` from `supabase status -o env` and write `apps/api/.dev.vars.staging`. CI does exactly this in `.github/workflows/ci.yml`. Bids and offers entered by a run are never deleted, so before running `pnpm e2e` again on the same local database, reset it with `supabase db reset`.
 
 ## Sign-in
 
