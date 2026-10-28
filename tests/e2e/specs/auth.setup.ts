@@ -23,6 +23,10 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
     timeout: 15_000,
   });
   await expect(page.getByRole('img', { name: 'QR code for your authenticator app' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open in authenticator app' })).toHaveAttribute(
+    'href',
+    /^otpauth:\/\/totp\//,
+  );
   const secret = (await page.getByTestId('totp-secret').textContent())?.trim() ?? '';
   expect(secret).not.toBe('');
 

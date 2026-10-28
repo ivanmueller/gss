@@ -46,7 +46,7 @@ import { logoAsPng } from '../lib/logoImage';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
 
-/** Uploads a PNG or JPG logo (a JPG is saved as a PNG). */
+/** Uploads a PNG, JPG or WebP logo (JPG and WebP are saved as PNG). */
 function LogoUpload({
   counterpartyId,
   token,
@@ -94,7 +94,7 @@ function LogoUpload({
   return (
     <div className="flex flex-col gap-1 text-sm">
       <FileButton
-        accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+        accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
         size="sm"
         disabled={state.kind === 'saving'}
         onChange={(event) => void upload(event)}

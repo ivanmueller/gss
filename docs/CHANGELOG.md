@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Authenticator link and WebP logos
+
+- `README.md`: **Open in authenticator app** when setting up sign-in on a phone; logos may also be WebP (saved as a PNG, like a JPG).
+
 ## 2026-10-28 — Documents brought in line with what is built
 
 The owner asked whether every document was up to date. Updated:
