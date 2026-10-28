@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react';
 
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyMap } from '../components/CounterpartyMap';
-import { PageHeader } from '../components/PageHeader';
 import { RealDataNote } from '../components/RealDataNote';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -223,29 +222,26 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
 
   return (
     <section aria-labelledby="counterparties-heading" className="flex flex-col gap-4">
-      <PageHeader
-        id="counterparties-heading"
-        title="Counterparties"
-        description={`Buyers, sellers, brokers and carriers of ${organization.name}.`}
-        actions={
-          editor && (
-            <>
-              <Button asChild variant="outline">
-                <Link href="/counterparties/import">
-                  <FileUp aria-hidden="true" />
-                  Import spreadsheet
-                </Link>
-              </Button>
-              <Button asChild>
-                <Link href="/counterparties/new">
-                  <Plus aria-hidden="true" />
-                  Add counterparty
-                </Link>
-              </Button>
-            </>
-          )
-        }
-      />
+      {/* No visible title (owner's request, 2026-10-28); the menu already says where you are. */}
+      <h1 id="counterparties-heading" className="sr-only">
+        Counterparties
+      </h1>
+      {editor && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button asChild variant="outline">
+            <Link href="/counterparties/import">
+              <FileUp aria-hidden="true" />
+              Import spreadsheet
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/counterparties/new">
+              <Plus aria-hidden="true" />
+              Add counterparty
+            </Link>
+          </Button>
+        </div>
+      )}
       <RealDataNote organization={organization.name} />
 
       {list.status === 'loading' && (
