@@ -56,6 +56,8 @@ export interface MapColours {
   labelHalo: string;
   bid: string;
   offer: string;
+  /** Counterparties that both buy and sell, or neither (brokers, carriers). */
+  mixed: string;
   /** Inside an approximate (hollow) pin. */
   hollow: string;
   /** The ring around the chosen pin. */
@@ -71,6 +73,7 @@ const TOKENS: Record<keyof MapColours, string> = {
   labelHalo: '--map-label-halo',
   bid: '--bid',
   offer: '--offer',
+  mixed: '--info',
   hollow: '--background',
   selected: '--foreground',
 };
@@ -85,6 +88,7 @@ const FALLBACK: MapColours = {
   labelHalo: '#ffffff',
   bid: '#008236',
   offer: '#c10007',
+  mixed: '#155dfc',
   hollow: '#ffffff',
   selected: '#0a0a0a',
 };
@@ -131,9 +135,10 @@ export function mapPaint(layer: StyleLayer, colours: MapColours): [string, strin
   return [];
 }
 
-export type PinTone = 'bid' | 'offer';
+/** A buyer's (bid), a seller's (offer), or one that is both or neither (mixed). */
+export type PinTone = 'bid' | 'offer' | 'mixed';
 
-/** One pin: where it is, whether it is a buyer's (bid) or seller's (offer), filled or hollow. */
+/** One pin: where it is, whose it is (its tone), filled or hollow. */
 export interface MapPin {
   id: string;
   latitude: number;
@@ -164,15 +169,22 @@ export function pinFeatures(pins: readonly MapPin[]): PinFeatureCollection {
   };
 }
 
-/** A directory location as a pin: buyers in the bid colour, seller-only counterparties in the offer colour. */
+/** Whose a directory location is: a buyer's, a seller's, or one that is both or neither. */
+export function counterpartyTone(types: readonly string[]): PinTone {
+  const buyer = types.includes('buyer');
+  const seller = types.includes('seller');
+  if (buyer && !seller) return 'bid';
+  if (seller && !buyer) return 'offer';
+  return 'mixed';
+}
+
+/** A directory location as a pin: buyers in the bid colour, sellers in the offer colour. */
 export function facilityPin(facility: MapFacility): MapPin {
-  const sellerOnly =
-    facility.counterpartyTypes.includes('seller') && !facility.counterpartyTypes.includes('buyer');
   return {
     id: facility.id,
     latitude: Number(facility.latitude),
     longitude: Number(facility.longitude),
-    tone: sellerOnly ? 'offer' : 'bid',
+    tone: counterpartyTone(facility.counterpartyTypes),
     hollow: facility.locationPrecision === 'approximate',
   };
 }

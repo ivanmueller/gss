@@ -64,11 +64,13 @@ describe('map pins', () => {
     });
   });
 
-  it('colours seller-only counterparties as offers and fills exact locations', () => {
+  it('colours buyers as bids, sellers as offers, both or neither apart; fills exact locations', () => {
     expect(
       facilityPin({ ...FACILITY, counterpartyTypes: ['seller'], locationPrecision: 'exact' }),
     ).toMatchObject({ tone: 'offer', hollow: false });
-    expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'seller'] }).tone).toBe('bid');
+    expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'seller'] }).tone).toBe('mixed');
+    expect(facilityPin({ ...FACILITY, counterpartyTypes: ['broker'] }).tone).toBe('mixed');
+    expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'broker'] }).tone).toBe('bid');
   });
 });
 
@@ -89,6 +91,7 @@ const COLOURS: MapColours = {
   labelHalo: '#ffffff',
   bid: '#4f39f6',
   offer: '#00786f',
+  mixed: '#155dfc',
   hollow: '#ffffff',
   selected: '#0a0a0a',
 };

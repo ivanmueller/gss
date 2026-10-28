@@ -1,15 +1,15 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
 import { AppShell, type NavSection } from './components/AppShell';
-import { Link, matchRoute, usePath, type Route } from './lib/router';
+import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { useMe } from './lib/useMe';
 import { CoordinatesPage } from './pages/CoordinatesPage';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { ImportPage } from './pages/ImportPage';
-import { MapPage } from './pages/MapPage';
+import { NewCounterpartyPage } from './pages/NewCounterpartyPage';
 import { Workspace } from './pages/Workspace';
 
 function Notice({ children }: { children: ReactNode }) {
@@ -25,13 +25,13 @@ function section(route: Route): NavSection | null {
   switch (route.page) {
     case 'workspace':
       return 'workspace';
-    case 'map':
-    case 'coordinates':
-      return 'map';
     case 'counterparties':
+    case 'new-counterparty':
     case 'import':
+    case 'coordinates':
     case 'counterparty':
       return 'counterparties';
+    case 'redirect':
     case 'not-found':
       return null;
   }
@@ -42,6 +42,12 @@ export function App({ account }: { account?: Account }) {
   const me = useMe(account?.accessToken ?? null);
   const route = matchRoute(usePath());
   const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
+  const redirectTo = route.page === 'redirect' ? route.to : null;
+
+  // Old addresses (the map page before it moved into Counterparties) keep working.
+  useEffect(() => {
+    if (redirectTo !== null) redirect(redirectTo);
+  }, [redirectTo]);
 
   // Pages with the organization's records need a signed-in member of an organization.
   function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
@@ -66,17 +72,20 @@ export function App({ account }: { account?: Account }) {
     case 'workspace':
       page = <Workspace />;
       break;
-    case 'map':
-      page = directory((session) => <MapPage session={session} />);
-      break;
     case 'coordinates':
       page = directory((session) => <CoordinatesPage session={session} />);
       break;
     case 'counterparties':
       page = directory((session) => <CounterpartiesPage session={session} />);
       break;
+    case 'new-counterparty':
+      page = directory((session) => <NewCounterpartyPage session={session} />);
+      break;
     case 'import':
       page = directory((session) => <ImportPage session={session} />);
+      break;
+    case 'redirect':
+      page = null;
       break;
     case 'counterparty':
       page = directory((session) => (

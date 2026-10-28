@@ -19,27 +19,58 @@ export function navigate(to: string) {
   window.dispatchEvent(new Event(NAVIGATE));
 }
 
+/** Like navigate, but replaces the current entry, so Back skips it (old addresses, view options). */
+export function redirect(to: string) {
+  window.history.replaceState(null, '', to);
+  window.dispatchEvent(new Event(NAVIGATE));
+}
+
 /** The current path, e.g. "/counterparties". */
 export function usePath(): string {
   return useSyncExternalStore(subscribe, () => window.location.pathname);
 }
 
+/** The current query string, e.g. "?view=map". */
+export function useSearch(): string {
+  return useSyncExternalStore(subscribe, () => window.location.search);
+}
+
+/**
+ * Sets (or, with null, removes) query parameters of the current address without a new history
+ * entry, so a view or filter survives a reload and can be shared as a link.
+ */
+export function setSearchParams(changes: Record<string, string | null>) {
+  const params = new URLSearchParams(window.location.search);
+  for (const [name, value] of Object.entries(changes)) {
+    if (value === null) params.delete(name);
+    else params.set(name, value);
+  }
+  const query = params.toString();
+  redirect(`${window.location.pathname}${query ? `?${query}` : ''}`);
+}
+
 export type Route =
   | { page: 'workspace' }
-  | { page: 'map' }
   | { page: 'coordinates' }
   | { page: 'counterparties' }
+  | { page: 'new-counterparty' }
   | { page: 'import' }
   | { page: 'counterparty'; id: string }
+  /** An old address that now lives elsewhere. */
+  | { page: 'redirect'; to: string }
   | { page: 'not-found' };
 
 export function matchRoute(path: string): Route {
   const trimmed = path.replace(/\/+$/, '') || '/';
   if (trimmed === '/') return { page: 'workspace' };
-  if (trimmed === '/map') return { page: 'map' };
-  if (trimmed === '/map/coordinates') return { page: 'coordinates' };
+  // The map moved into Counterparties (owner's request, 2026-10-28).
+  if (trimmed === '/map') return { page: 'redirect', to: '/counterparties?view=map' };
+  if (trimmed === '/map/coordinates')
+    return { page: 'redirect', to: '/counterparties/coordinates' };
   if (trimmed === '/counterparties') return { page: 'counterparties' };
+  if (trimmed === '/counterparties/new') return { page: 'new-counterparty' };
   if (trimmed === '/counterparties/import') return { page: 'import' };
+  if (trimmed === '/counterparties/coordinates') return { page: 'coordinates' };
   const match = /^\/counterparties\/([0-9a-f-]{36})$/i.exec(trimmed);
   if (match?.[1]) return { page: 'counterparty', id: match[1] };
   return { page: 'not-found' };

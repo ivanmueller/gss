@@ -9,6 +9,7 @@ import {
   parseDirectoryRecord,
   parseFacilityFields,
   parseImportRow,
+  parseNewCounterparty,
   suggestMapping,
   updateCounterpartySchema,
   updateFacilitySchema,
@@ -544,5 +545,37 @@ describe('edit forms', () => {
         values: { legalName: 'A', city: 'B' },
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('the add form (parseNewCounterparty)', () => {
+  const company = { legalName: 'Synthetic Grower', country: 'CA', types: 'seller' };
+
+  it('ignores a location that has only the country filled in for the user', () => {
+    expect(parseNewCounterparty({ ...company, facilityCountry: 'CA' })).toMatchObject({
+      status: 'ok',
+      record: { facility: null },
+    });
+  });
+
+  it('needs a location with anything more to say where it is', () => {
+    expect(
+      parseNewCounterparty({ ...company, facilityCountry: 'CA', facilityType: 'farm' }),
+    ).toEqual({
+      status: 'invalid',
+      issues: [
+        {
+          field: null,
+          message:
+            'Give the location at least a name, an address, a city, a province or state, or coordinates.',
+        },
+      ],
+    });
+    expect(
+      parseNewCounterparty({ ...company, facilityCountry: 'US', city: 'Synthetic Falls' }),
+    ).toMatchObject({
+      status: 'ok',
+      record: { facility: { country: 'US', city: 'Synthetic Falls' } },
+    });
   });
 });

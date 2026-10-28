@@ -662,6 +662,29 @@ const WHERE_FIELDS: readonly FacilityFieldId[] = [
   'latitude',
   'longitude',
 ];
+const WHERE_MESSAGE =
+  'Give the location at least a name, an address, a city, a province or state, or coordinates.';
+
+/**
+ * The add form: a counterparty with an optional first contact and location. A type is
+ * required. The location's country is filled in for the user, so a country alone is no
+ * location; anything more needs to say where it is, as parseFacilityFields requires.
+ */
+export function parseNewCounterparty(
+  values: ImportRowValues,
+): ReturnType<typeof parseDirectoryRecord> {
+  const given = (field: ImportFieldId) => clean(values[field]) !== null;
+  const location = FACILITY_FIELD_IDS.some((field) => field !== 'facilityCountry' && given(field));
+  const own = location
+    ? values
+    : Object.fromEntries(Object.entries(values).filter(([field]) => field !== 'facilityCountry'));
+  const result = parseDirectoryRecord(own);
+  if (!location || WHERE_FIELDS.some(given)) return result;
+  const issue: FieldIssue = { field: null, message: WHERE_MESSAGE };
+  return result.status === 'invalid'
+    ? { status: 'invalid', issues: [...result.issues, issue] }
+    : { status: 'invalid', issues: [issue] };
+}
 
 /**
  * One location from its form. Without a country of its own it is in `counterpartyCountry`.
@@ -673,12 +696,7 @@ export function parseFacilityFields(
 ): ParseResult<FacilityInput> {
   const r = new FieldReader(values);
   r.checkLengths(FACILITY_FIELD_IDS);
-  if (!WHERE_FIELDS.some((field) => r.value(field) !== null)) {
-    r.issue(
-      null,
-      'Give the location at least a name, an address, a city, a province or state, or coordinates.',
-    );
-  }
+  if (!WHERE_FIELDS.some((field) => r.value(field) !== null)) r.issue(null, WHERE_MESSAGE);
   const facility = readFacility(r, counterpartyCountry);
   return r.issues.length > 0 || facility === null
     ? { status: 'invalid', issues: r.issues }

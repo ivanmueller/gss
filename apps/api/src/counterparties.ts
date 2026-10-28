@@ -9,9 +9,9 @@ import {
   normalizeCountry,
   parseContactFields,
   parseCounterpartyFields,
-  parseDirectoryRecord,
   parseFacilityFields,
   parseImportRow,
+  parseNewCounterparty,
   updateContactSchema,
   updateCounterpartySchema,
   updateFacilitySchema,
@@ -339,7 +339,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     if (!body.ok) return body.response;
     const request = createCounterpartySchema.safeParse(body.value);
     if (!request.success) return malformed(c, request.error);
-    const parsed = parseDirectoryRecord(request.data.values);
+    const parsed = parseNewCounterparty(request.data.values);
     if (parsed.status === 'empty')
       return invalid(c, [{ field: null, message: 'The form is empty.' }]);
     if (parsed.status === 'invalid') return invalid(c, parsed.issues);

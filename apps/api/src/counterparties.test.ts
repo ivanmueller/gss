@@ -550,6 +550,24 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
     );
   });
 
+  it('takes a location with only the country the form filled in as no location', async () => {
+    const res = await send('POST', '', {
+      organizationId: ORG,
+      values: {
+        legalName: 'Synthetic Grower',
+        country: 'CA',
+        types: 'seller',
+        facilityCountry: 'CA',
+      },
+    });
+    expect(res.status).toBe(201);
+    expect(db.createCounterparty).toHaveBeenCalledWith(
+      expect.anything(),
+      ORG,
+      expect.objectContaining({ contacts: [], facilities: [] }),
+    );
+  });
+
   it('returns each problem with its field, without opening the database', async () => {
     const res = await send('POST', '', {
       organizationId: ORG,

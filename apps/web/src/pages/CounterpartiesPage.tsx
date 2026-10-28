@@ -1,12 +1,15 @@
-import { FileUp, Search } from 'lucide-react';
-import { useState } from 'react';
+import { FileUp, Plus, Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import { CounterpartyMap } from '../components/CounterpartyMap';
 import { PageHeader } from '../components/PageHeader';
 import { RealDataNote } from '../components/RealDataNote';
+import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
+import { SegmentedControl } from '../components/ui/segmented-control';
 import {
   Table,
   TableBody,
@@ -21,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { VerificationBadge } from '../components/VerificationBadge';
 import type { CounterpartyList, CounterpartySummary } from '../lib/api';
 import { canEditDirectory, countryName, typeLabel } from '../lib/directory';
-import { Link } from '../lib/router';
+import { Link, setSearchParams, useSearch } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import type { MeOrganization } from '../lib/useMe';
@@ -34,12 +37,21 @@ export interface DirectorySession {
   organization: MeOrganization;
 }
 
+const VIEWS = ['table', 'logos', 'map'] as const;
+type View = (typeof VIEWS)[number];
+/** Buyers or sellers only; brokers and carriers show under All. */
+type Side = 'all' | 'buyer' | 'seller';
+
 function matches(counterparty: CounterpartySummary, query: string): boolean {
   const wanted = query.trim().toLowerCase();
   if (wanted === '') return true;
   return [counterparty.legalName, counterparty.tradingName ?? '', ...counterparty.regions].some(
     (text) => text.toLowerCase().includes(wanted),
   );
+}
+
+function ArchivedBadge({ counterparty }: { counterparty: CounterpartySummary }) {
+  return counterparty.archivedAt ? <Badge className="ml-2">Archived</Badge> : null;
 }
 
 function place(counterparty: CounterpartySummary): string {
@@ -81,6 +93,7 @@ function CounterpartyTable({ items, token }: { items: CounterpartySummary[]; tok
                     <Link href={`/counterparties/${counterparty.id}`} className={nameLink}>
                       {counterparty.legalName}
                     </Link>
+                    <ArchivedBadge counterparty={counterparty} />
                     {counterparty.tradingName && (
                       <span className="block text-xs font-normal text-muted-foreground">
                         {counterparty.tradingName}
@@ -118,12 +131,15 @@ function CounterpartyStack({ items, token }: { items: CounterpartySummary[]; tok
               token={token}
             />
             <span className="flex min-w-0 flex-col gap-1">
-              <Link
-                href={`/counterparties/${counterparty.id}`}
-                className={`${nameLink} font-medium`}
-              >
-                {counterparty.legalName}
-              </Link>
+              <span>
+                <Link
+                  href={`/counterparties/${counterparty.id}`}
+                  className={`${nameLink} font-medium`}
+                >
+                  {counterparty.legalName}
+                </Link>
+                <ArchivedBadge counterparty={counterparty} />
+              </span>
               <span className="text-xs text-muted-foreground">
                 {counterparty.types.map(typeLabel).join(', ')} · {place(counterparty)}
               </span>
@@ -167,7 +183,7 @@ function LogoGrid({ items, token }: { items: CounterpartySummary[]; token: strin
   );
 }
 
-/** /counterparties: the organization's directory as a table or as logos. */
+/** /counterparties: the organization's buyers and sellers as a table, logos or a map. */
 export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
   const [list] = useApiResource<CounterpartyList>(
@@ -175,11 +191,35 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
     token,
   );
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const editor = canEditDirectory(organization.role);
   const wide = useMediaQuery(WIDE_QUERY, true);
 
-  const all = list.status === 'ok' ? list.data.counterparties : [];
-  const shown = all.filter((counterparty) => matches(counterparty, query));
+  // The view and the buyer/seller filter live in the address (?view=map&type=seller), so a
+  // reload or a shared link keeps them.
+  const params = new URLSearchParams(useSearch());
+  const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'table';
+  const typeParam = params.get('type');
+  const side: Side = typeParam === 'buyer' || typeParam === 'seller' ? typeParam : 'all';
+
+  const all = useMemo(() => (list.status === 'ok' ? list.data.counterparties : []), [list]);
+  const archivedCount = all.filter((counterparty) => counterparty.archivedAt !== null).length;
+  const shown = all.filter(
+    (counterparty) =>
+      (showArchived || counterparty.archivedAt === null) &&
+      (side === 'all' || counterparty.types.includes(side)) &&
+      matches(counterparty, query),
+  );
+  // The map narrows to what the search finds; without a search it shows every location.
+  const searched = useMemo(
+    () =>
+      query.trim() === ''
+        ? null
+        : new Set(
+            all.filter((counterparty) => matches(counterparty, query)).map((item) => item.id),
+          ),
+    [all, query],
+  );
 
   return (
     <section aria-labelledby="counterparties-heading" className="flex flex-col gap-4">
@@ -189,12 +229,20 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
         description={`Buyers, sellers, brokers and carriers of ${organization.name}.`}
         actions={
           editor && (
-            <Button asChild>
-              <Link href="/counterparties/import">
-                <FileUp aria-hidden="true" />
-                Import spreadsheet
-              </Link>
-            </Button>
+            <>
+              <Button asChild variant="outline">
+                <Link href="/counterparties/import">
+                  <FileUp aria-hidden="true" />
+                  Import spreadsheet
+                </Link>
+              </Button>
+              <Button asChild>
+                <Link href="/counterparties/new">
+                  <Plus aria-hidden="true" />
+                  Add counterparty
+                </Link>
+              </Button>
+            </>
           )
         }
       />
@@ -213,38 +261,73 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
           <p className="font-medium">No counterparties yet.</p>
           <p className="text-muted-foreground">
             {editor
-              ? 'Import your spreadsheet to add them.'
-              : 'An operations or admin member of your organization can import them.'}
+              ? 'Add one by hand or import your spreadsheet.'
+              : 'An operations or admin member of your organization can add them.'}
           </p>
         </Card>
       )}
       {list.status === 'ok' && all.length > 0 && (
         <>
-          <label className="relative block w-full max-w-sm">
-            <span className="sr-only">Search counterparties</span>
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="relative block w-full max-w-sm">
+              <span className="sr-only">Search counterparties</span>
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                type="search"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                }}
+                placeholder="Search by name, province or state"
+                className="pl-9"
+              />
+            </label>
+            <SegmentedControl
+              label="Show"
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'buyer', label: 'Buyers' },
+                { value: 'seller', label: 'Sellers' },
+              ]}
+              value={side}
+              onChange={(next) => {
+                setSearchParams({ type: next === 'all' ? null : next });
               }}
-              placeholder="Search by name, province or state"
-              className="pl-9"
             />
-          </label>
-          <p className="text-xs text-muted-foreground" aria-live="polite">
-            {shown.length} of {all.length} shown
-            {list.data.truncated && ' · the list is cut at 5,000; search to narrow it'}
-          </p>
-          <Tabs defaultValue="table">
+            {archivedCount > 0 && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={showArchived}
+                  onChange={(event) => {
+                    setShowArchived(event.target.checked);
+                  }}
+                />
+                Show archived ({archivedCount})
+              </label>
+            )}
+          </div>
+          <Tabs
+            value={view}
+            onValueChange={(next) => {
+              setSearchParams({ view: next === 'table' ? null : next });
+            }}
+          >
             <TabsList aria-label="Counterparty view">
               <TabsTrigger value="table">{wide ? 'Table' : 'List'}</TabsTrigger>
               <TabsTrigger value="logos">Logos</TabsTrigger>
+              <TabsTrigger value="map">Map</TabsTrigger>
             </TabsList>
+            {view !== 'map' && (
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {shown.length} of {all.length} shown
+                {list.data.truncated && ' · the list is cut at 5,000; search to narrow it'}
+              </p>
+            )}
             <TabsContent value="table">
               {wide ? (
                 <CounterpartyTable items={shown} token={token} />
@@ -254,6 +337,13 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
             </TabsContent>
             <TabsContent value="logos">
               <LogoGrid items={shown} token={token} />
+            </TabsContent>
+            <TabsContent value="map">
+              <CounterpartyMap
+                session={session}
+                type={side === 'all' ? null : side}
+                only={searched}
+              />
             </TabsContent>
           </Tabs>
         </>

@@ -65,6 +65,30 @@ afterEach(() => {
 });
 
 describe('ImportPage', () => {
+  it('imports a file of sellers and lists the columns that are not used', async () => {
+    const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
+    render(<ImportPage session={SESSION} />);
+    await chooseFile(
+      ['Grower,Country,Bushels,Notes', 'Synthetic Grower,Canada,5000,Synthetic', ''].join('\n'),
+    );
+
+    expect(await screen.findByLabelText('Legal name (required)')).toHaveValue('Grower');
+    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent('Bushels');
+    expect(screen.getByText(/1 column in your file is not used/)).toBeInTheDocument();
+
+    const side = screen.getByRole('group', { name: 'The companies in this file are' });
+    await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
+    // Choosing the column for a field takes it off the unused list.
+    await userEvent.selectOptions(screen.getByLabelText('Counterparty type'), 'Bushels');
+    expect(screen.getByText('Every column in your file is used.')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Rows with an empty type are' })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Counterparty type'), '');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
+    const review = calls.find((call) => call.method === 'POST');
+    expect(review?.body).toMatchObject({ defaultTypes: ['seller'] });
+  });
+
   it('matches columns, reviews with the server and imports', async () => {
     const calls = mockApi({
       'POST /counterparties/import': (call) => {
@@ -91,6 +115,7 @@ describe('ImportPage', () => {
       organizationId: ORG.id,
       fileName: 'buyers.csv',
       commit: false,
+      defaultTypes: ['buyer'],
       rows: [
         {
           line: 2,

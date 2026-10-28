@@ -326,19 +326,37 @@ describe('navigation', () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
 
-    await userEvent.click(within(nav).getByRole('link', { name: 'Map' }));
-    expect(window.location.pathname).toBe('/map');
-    expect(within(nav).getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
-    expect(
-      screen.getByText('Sign in to see your organization’s counterparties.'),
-    ).toBeInTheDocument();
+    // The map is a view of the Counterparties page, not a menu entry of its own.
+    expect(within(nav).queryByRole('link', { name: 'Map' })).not.toBeInTheDocument();
   });
 
   it('keeps the menu entry lit on the pages below it', () => {
-    window.history.replaceState(null, '', '/map/coordinates');
+    window.history.replaceState(null, '', '/counterparties/coordinates');
     render(<App />);
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getByRole('link', { name: 'Map' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Counterparties' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('sends the old map addresses to the counterparties map', async () => {
+    window.history.replaceState(null, '', '/map');
+    render(<App />);
+    await waitFor(() => {
+      expect(window.location.pathname + window.location.search).toBe('/counterparties?view=map');
+    });
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Counterparties' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    window.history.replaceState(null, '', '/map/coordinates');
+    render(<App />);
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/counterparties/coordinates');
+    });
   });
 
   it('shows planned pages as not built, not as links', () => {
