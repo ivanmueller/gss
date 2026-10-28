@@ -50,7 +50,7 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   );
   await expect(page.getByRole('region', { name: 'Locations (2)' })).toBeVisible();
   await page
-    .getByLabel('Upload PNG logo')
+    .getByLabel('Upload logo')
     .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: PNG });
   await expect(page.getByText('Logo saved.')).toBeVisible();
   await expect(page.getByRole('img', { name: 'Synthetic Mills logo' })).toBeVisible();

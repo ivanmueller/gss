@@ -1,6 +1,4 @@
 import {
-  inspectPng,
-  MAX_LOGO_DIMENSION,
   normalizeCountry,
   parseContactFields,
   parseCounterpartyFields,
@@ -44,22 +42,20 @@ import {
   typeLabel,
 } from '../lib/directory';
 import { formatUtc } from '../lib/format';
+import { logoAsPng } from '../lib/logoImage';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
 
-const PNG_PROBLEMS = {
-  TOO_LARGE: 'The logo must be 512 KB or smaller.',
-  NOT_PNG: 'The file is not a PNG image. Export the logo as PNG and try again.',
-  BAD_DIMENSIONS: `The logo must be at most ${String(MAX_LOGO_DIMENSION)} pixels wide and high.`,
-} as const;
-
+/** Uploads a PNG or JPG logo (a JPG is saved as a PNG). */
 function LogoUpload({
   counterpartyId,
   token,
+  label,
   onUploaded,
 }: {
   counterpartyId: string;
   token: string;
+  label: string;
   onUploaded: () => void;
 }) {
   const [state, setState] = useState<
@@ -72,13 +68,13 @@ function LogoUpload({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const check = await inspectPng(bytes);
-    if (!check.ok) {
-      setState({ kind: 'error', message: PNG_PROBLEMS[check.reason] });
+    setState({ kind: 'saving' });
+    const logo = await logoAsPng(file);
+    if (!logo.ok) {
+      setState({ kind: 'error', message: logo.message });
       return;
     }
-    setState({ kind: 'saving' });
+    const bytes = logo.png;
     try {
       await apiFetch(`/counterparties/${counterpartyId}/logo`, token, {
         method: 'PUT',
@@ -98,15 +94,14 @@ function LogoUpload({
   return (
     <div className="flex flex-col gap-1 text-sm">
       <FileButton
-        accept="image/png"
+        accept="image/png,image/jpeg,.png,.jpg,.jpeg"
         size="sm"
         disabled={state.kind === 'saving'}
         onChange={(event) => void upload(event)}
       >
         <ImageUp aria-hidden="true" />
-        {state.kind === 'saving' ? 'Uploading…' : 'Upload PNG logo'}
+        {state.kind === 'saving' ? 'Uploading…' : label}
       </FileButton>
-      <p className="text-xs text-muted-foreground">PNG only, up to 512 KB.</p>
       {state.kind === 'saved' && (
         <p role="status" className="text-xs text-success">
           Logo saved.
@@ -446,8 +441,14 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                     <VerificationBadge status={detail.verificationStatus} />
                     {archived && <Badge>Archived</Badge>}
                   </div>
-                  {canChange && (
-                    <LogoUpload counterpartyId={detail.id} token={token} onUploaded={reload} />
+                  {/* With a logo already, it is changed under Edit details. */}
+                  {canChange && detail.logoSha256 === null && (
+                    <LogoUpload
+                      counterpartyId={detail.id}
+                      token={token}
+                      label="Upload logo"
+                      onUploaded={reload}
+                    />
                   )}
                 </div>
                 {canChange && editing?.kind !== 'archive' && (
@@ -504,6 +505,16 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
 
               {editing?.kind === 'details' ? (
                 <Card className="overflow-hidden">
+                  {detail.logoSha256 !== null && (
+                    <div className="border-b bg-muted/40 px-4 pt-4 pb-3">
+                      <LogoUpload
+                        counterpartyId={detail.id}
+                        token={token}
+                        label="Change logo"
+                        onUploaded={reload}
+                      />
+                    </div>
+                  )}
                   <EditForm
                     label="Edit details"
                     initial={companyValues(detail)}
