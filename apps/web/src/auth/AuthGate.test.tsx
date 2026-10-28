@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AuthClient } from '../lib/supabase';
+import { notePasswordChanged } from './passwordNotice';
 import { AuthGate } from './AuthGate';
 import { WRONG_CODE } from './CodeForm';
 
@@ -97,6 +98,19 @@ describe('AuthGate', () => {
       password: 'synthetic-password',
     });
     expect(screen.queryByText(/app for/)).not.toBeInTheDocument();
+  });
+
+  it('says why after choosing a new password, once', async () => {
+    notePasswordChanged();
+    const { auth } = fakeAuth();
+    const { unmount } = renderGate(auth);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Your new password is saved. Sign in with it.',
+    );
+    unmount();
+    renderGate(auth);
+    await screen.findByRole('heading', { name: 'Sign in' });
+    expect(screen.queryByText(/new password is saved/)).not.toBeInTheDocument();
   });
 
   it('shows one generic message when sign-in fails', async () => {

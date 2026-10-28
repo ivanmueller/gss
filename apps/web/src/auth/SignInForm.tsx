@@ -1,11 +1,16 @@
-import { type SyntheticEvent, useState } from 'react';
+import { type SyntheticEvent, useEffect, useState } from 'react';
 
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import type { AuthClient } from '../lib/supabase';
 import { AuthCard, FieldError, fieldClass } from './AuthCard';
+import { clearPasswordChangedNote, hasPasswordChangedNote } from './passwordNotice';
 
 export function SignInForm({ auth }: { auth: AuthClient }) {
+  const [passwordChanged] = useState(hasPasswordChangedNote);
+  useEffect(() => {
+    clearPasswordChangedNote();
+  }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -23,6 +28,11 @@ export function SignInForm({ auth }: { auth: AuthClient }) {
 
   return (
     <AuthCard title="Sign in">
+      {passwordChanged && (
+        <p role="status" className="mb-4 text-sm text-success">
+          Your new password is saved. Sign in with it.
+        </p>
+      )}
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <label className={fieldClass}>
           Email

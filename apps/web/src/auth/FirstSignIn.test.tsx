@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { mockApi } from '../test/api';
 import { ChoosePassword, YourName } from './FirstSignIn';
+import { clearPasswordChangedNote, hasPasswordChangedNote } from './passwordNotice';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -65,21 +66,14 @@ describe('the app after a first sign-in', () => {
     organizations: [{ id: 'org-a', name: 'GSS', role: 'viewer' }],
   };
 
-  it('asks for a new password first, then the name, then shows the app', async () => {
-    let me: Record<string, unknown> = { ...ME, mustChangePassword: true };
+  it('asks for a new password first, then signs out so the person signs in with it', async () => {
     mockApi({
-      'GET /me': () => Response.json(me),
+      'GET /me': () => Response.json({ ...ME, mustChangePassword: true }),
       'GET /health': () => Response.json({ status: 'ok', service: 'api' }),
-      'POST /me/password': () => {
-        me = { ...me, mustChangePassword: false };
-        return Response.json({ saved: true });
-      },
+      'POST /me/password': () => Response.json({ saved: true }),
     });
-    const saveName = vi.fn(() => {
-      me = { ...me, firstName: 'Ana' };
-      return Promise.resolve(null);
-    });
-    render(<App account={{ email: null, accessToken: 't', signOut: vi.fn(), saveName }} />);
+    const signOut = vi.fn();
+    render(<App account={{ email: null, accessToken: 't', signOut, saveName: vi.fn() }} />);
 
     expect(
       await screen.findByRole('heading', { name: 'Choose your password' }),
@@ -87,6 +81,24 @@ describe('the app after a first sign-in', () => {
     await userEvent.type(screen.getByLabelText('New password'), 'a long synthetic phrase');
     await userEvent.type(screen.getByLabelText('The same again'), 'a long synthetic phrase');
     await userEvent.click(screen.getByRole('button', { name: 'Save password' }));
+    await waitFor(() => {
+      expect(signOut).toHaveBeenCalled();
+    });
+    expect(hasPasswordChangedNote()).toBe(true);
+    clearPasswordChangedNote();
+  });
+
+  it('asks for a missing name before the app', async () => {
+    let me: Record<string, unknown> = { ...ME, mustChangePassword: false };
+    mockApi({
+      'GET /me': () => Response.json(me),
+      'GET /health': () => Response.json({ status: 'ok', service: 'api' }),
+    });
+    const saveName = vi.fn(() => {
+      me = { ...me, firstName: 'Ana' };
+      return Promise.resolve(null);
+    });
+    render(<App account={{ email: null, accessToken: 't', signOut: vi.fn(), saveName }} />);
 
     expect(await screen.findByRole('heading', { name: 'Your name' })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('First name'), 'Ana');

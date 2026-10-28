@@ -17,9 +17,7 @@ async function accessToken(page: Page): Promise<string> {
   });
 }
 
-test('the Team page lists the admin and explains adding someone without a login', async ({
-  page,
-}) => {
+test('the Team page lists the admin and needs a first name for a new login', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Team' }).click();
   const table = page.getByRole('table', { name: 'Team members' });
@@ -28,9 +26,9 @@ test('the Team page lists the admin and explains adding someone without a login'
   await expect(me).toContainText('Admin');
 
   const add = page.getByRole('region', { name: 'Add a person' });
-  await add.getByLabel('Email of their login').fill('nobody-synthetic@example.test');
+  await add.getByLabel('Email').fill(`${NEW_LOGIN_PREFIX}nameless@example.test`);
   await add.getByRole('button', { name: 'Add to team' }).click();
-  await expect(add.getByRole('alert')).toContainText('Authentication → Users → Add user');
+  await expect(add.getByRole('alert')).toContainText('Give their first name');
 
   await me.getByRole('button', { name: `Edit ${E2E_USER.email}` }).click();
   const form = page.getByRole('form', { name: `Edit ${E2E_USER.email}` });
@@ -44,6 +42,7 @@ test('an admin makes a login; the new person sets up their authenticator and own
   page,
   browser,
 }) => {
+  test.setTimeout(90_000);
   const email = `${NEW_LOGIN_PREFIX}${String(Date.now())}@example.test`;
   await page.goto('/team');
   const add = page.getByRole('region', { name: 'Add a person' });
@@ -78,7 +77,19 @@ test('an admin makes a login; the new person sets up their authenticator and own
   await them.getByLabel('New password').fill('a long synthetic phrase');
   await them.getByLabel('The same again').fill('a long synthetic phrase');
   await them.getByRole('button', { name: 'Save password' }).click();
-  // Names were given on the Team page, so the app opens straight away.
+
+  // Setting the password signs them out everywhere; they sign in again with it.
+  await expect(them.getByText('Your new password is saved. Sign in with it.')).toBeVisible();
+  await them.getByLabel('Email').fill(email);
+  await them.getByLabel('Password').fill('a long synthetic phrase');
+  await them.getByRole('button', { name: 'Sign in' }).click();
+  await expect(them.getByLabel(/6-digit code/)).toBeVisible({ timeout: 15_000 });
+  // A fresh 30-second window, so the code differs from the one used to enrol.
+  await them.waitForTimeout(30_000 - (Date.now() % 30_000) + 1_000);
+  await them.getByLabel(/6-digit code/).fill(await generate({ secret }));
+  await them.getByRole('button', { name: 'Verify' }).click();
+
+  // Names were given on the Team page, so the app opens without asking for them.
   await expect(them.getByRole('navigation', { name: 'Main' })).toBeVisible();
   await them.getByRole('button', { name: 'Account' }).click();
   await expect(them.getByRole('menu')).toContainText('Signed in as Newbie S.');
