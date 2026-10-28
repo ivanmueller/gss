@@ -9,10 +9,11 @@ Ticket by ticket, with notes, in `docs/HANDOFF.md`. In short:
 | Phase | State |
 |---|---|
 | 0 — Repository and documentation baseline | Done, except Codex's recorded check that it reads `AGENTS.md`. The repository is public by the owner's choice (`docs/DECISIONS.md`), not private as GT-001 says. |
-| 1 — Infrastructure, auth and database | Done except commodity and grade tables (GT-015), an audit view (GT-016) and backups with a restore drill (GT-017; the free Supabase plan has none). One organization only, GSS, by the owner's decision: there is nothing to switch between, and the isolation tests stay. |
-| 2 — Counterparties, facilities, map and table | Done on the owner's real buyer data: directory with editing, import, logos, archive (GT-020), locations with Geocodio coordinates (GT-021), map search (GT-022), the Mapbox map in Counterparties (GT-023), fixtures (GT-025). The workspace's synchronized map, order book and table (GT-024) run on made-up data until quotes exist. Also built at the owner's request: the Team page (GT-013). |
-| 3 — Versioned quotes | Next, with the Bank of Canada FX connector (GT-052), pulled forward by the owner. Not started. |
-| 4–6 | Not started. The thin trade slice follows quotes. |
+| 1 — Infrastructure, auth and database | Done except grade tables (GT-015; commodities exist since bids and offers), an audit view (GT-016) and backups with a restore drill (GT-017; the free Supabase plan has none). One organization only, GSS, by the owner's decision: there is nothing to switch between, and the isolation tests stay. |
+| 2 — Counterparties, facilities, map and table | Done on the owner's real buyer data: directory with editing, import, logos, archive (GT-020), locations with Geocodio coordinates (GT-021), map search (GT-022), the Mapbox map in Counterparties (GT-023), fixtures (GT-025). The workspace's synchronized map, order book and table (GT-024) run on GSS's live bids and offers, or on made-up data while Demo data is on. Also built at the owner's request: the Team page (GT-013). |
+| 3 — Versioned quotes | Mostly done: quote and revision tables (GT-030), entering, revising, withdrawing and expiry (GT-031), validation (GT-032), live quotes in a list, on counterparty pages and in the workspace (GT-033), provenance and audit (GT-034). Not started: quote import from files (GT-035). The gate's "never mislabeled firm or actionable" holds for status; actionability comes with Phase 4. |
+| 5 (pulled forward) — Bank of Canada FX connector (GT-052) | Next, so USD bids reach the order book. |
+| 4, 5 (rest), 6 | Not started. The thin trade slice follows the FX connector. |
 
 # 13. Execution plan, ordered backlog and acceptance gates
 

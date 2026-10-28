@@ -11,7 +11,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - Shared domain/validation packages and a pure TypeScript trading-engine package using **decimal**, never JS float, for monetary arithmetic.
 - Mapbox GL JS with Mapbox map tiles (owner's decision, `docs/DECISIONS.md`); keep Mapbox calls in one map component so the provider can be changed later.
 - Geocoding with Geocodio's free plan, from the Worker only, with every result reviewed before saving (owner's decision, `docs/DECISIONS.md`).
-- FX: the Bank of Canada's daily USD/CAD rate, fetched once a day by the Worker and stored per day with its source, stale after four days (owner's decision, `docs/DECISIONS.md`). Not built yet: GT-052, together with bids and offers.
+- FX: the Bank of Canada's daily USD/CAD rate, fetched once a day by the Worker and stored per day with its source, stale after four days (owner's decision, `docs/DECISIONS.md`). Not built yet (GT-052, next): until it is, USD bids and offers stay out of the workspace's order book.
 - Python is out of scope until analytics or optimization justifies it.
 
 ## Always follow

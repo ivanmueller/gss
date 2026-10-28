@@ -5,9 +5,10 @@ Canadian–U.S. physical grain trading operations platform. The repository has t
 - sign-in with an authenticator code, and a **Team** page where admins add people (the app makes their login), set names and roles, and suspend or reactivate them;
 - the counterparty directory of buyers and sellers: added by hand or from a spreadsheet, edited, archived, with logos;
 - its Mapbox map view, with coordinates looked up through Geocodio;
-- a trading workspace (map and order book) that runs on made-up demo data until bids and offers are built.
+- **Bids & offers**: real bids and offers linked to counterparties, with a revision history that is never edited;
+- a trading workspace (map and order book in CAD) showing those live bids and offers, or made-up demo data while the Demo data switch is on.
 
-No real quotes, FX connector, trading engine or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
+No FX connector (so USD prices are not yet in the order book), trading engine, saved scenarios or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
 
 1. Read `MASTER_PROJECT_SPECIFICATION.md` for product and technical requirements.
 2. Read `docs/BUILD_PLAN.md` for staged work and its early end-to-end demonstration path.
@@ -63,12 +64,13 @@ The same menu holds the **Demo data** and **Dark mode** switches (see "Workspace
 
 ## Workspace
 
-The opening page shows a commodity picker and a seller/buyer filter above the map. Beside the map is an order book; the facility list is below.
+The opening page shows a commodity picker and a seller/buyer filter above the map. Beside the map is an order book; the facility list is below. They show GSS's live bids and offers (firm or indicative, not expired, not withdrawn), fetched again every minute and whenever the page is shown again, so a bid entered or withdrawn elsewhere appears without reloading.
 
 - **Order book:** for each commodity, sellers' asks in red boxes on the left and buyers' bids in green boxes on the right, best first, all in CAD per tonne. The gross spread (best bid minus best ask, before freight and basis) is in each commodity's heading. A dashed circle marks an indicative price; "FX" marks a price converted from USD.
 - **Hiding the book:** the arrow tab on its left edge slides it away and back.
-- **Demo data:** no real bids or offers exist yet, so the workspace shows made-up sellers, buyers and prices only while **Demo data** is on (profile icon → Demo data). It is off until turned on, and the browser remembers the choice. While it is on, a yellow "Demo" tag sits beside GSS. The demo converts USD at the golden fixture's 1.360000, labelled synthetic.
-- **Real exchange rate:** real quotes will use the Bank of Canada's daily rate, not built yet (`docs/DECISIONS.md`).
+- **Map pins:** one per location quoted at that has coordinates (buyers green, sellers coral, hollow when approximate). Quotes without a location, or at one without coordinates, are in the book and the table only.
+- **Left out of the book, with a note:** USD prices, until the Bank of Canada daily rate is built (`docs/DECISIONS.md`), and prices per bushel, short ton or hundredweight, which need a conversion factor not set up yet. Both stay in the facility table, as quoted. Nothing is converted at a made-up rate.
+- **Demo data:** profile icon → **Demo data** shows made-up sellers, buyers and prices instead (never mixed with real ones). It is off until turned on, and the browser remembers the choice. While it is on, a yellow "Demo" tag sits beside GSS. The demo converts USD at the golden fixture's 1.360000, labelled synthetic.
 
 ## Counterparties
 
@@ -79,6 +81,18 @@ Operations and admin members can:
 - **Add counterparty:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
 - **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped.
 - On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
+
+## Bids and offers
+
+**Bids & offers** lists GSS's live bids and offers (tick **Include withdrawn and expired** for the rest), filtered by Bids or Offers and commodity. Each counterparty's page lists its own, with **New bid** / **New offer**.
+
+Traders and admins can:
+
+- **New bid or offer:** choose a bid (from a buyer or broker) or an offer (from a seller or broker), the counterparty, optionally one of its locations, and the commodity; then the terms: price as quoted (CAD or USD, per tonne, short ton, bushel or hundredweight), firm or indicative, grade, quantity, delivery basis and window, quoted and valid-until times (typed in local time, shown in UTC), source and notes.
+- **Record new terms:** a change of price, quantity or timing is saved as a new revision; earlier revisions are kept and never edited. If someone recorded newer terms after you opened the quote, your save is refused and you can load them.
+- **Withdraw:** for good; the quote stays readable with its history. A new price is entered as a new quote.
+
+A quote past its valid-until time shows as expired. A location with quotes cannot be removed from its counterparty. The commodity list (20 grains, oilseeds and pulses) is set in the database; ask for others to be added.
 
 ## Map
 
@@ -124,10 +138,10 @@ Application tables live in the private `app` schema, which the Supabase Data API
 ## Layout
 
 ```
-apps/api/            Hono API on Cloudflare Workers (health, /me, counterparties, map search, geocoding); serves apps/web on staging
-apps/web/            React + Vite + Tailwind web app (workspace on demo data; real counterparty directory and map); design tokens in src/styles, shared components in src/components/ui (docs/DESIGN_SYSTEM.md)
+apps/api/            Hono API on Cloudflare Workers (health, /me, members, counterparties, map search, geocoding, commodities, quotes); serves apps/web on staging
+apps/web/            React + Vite + Tailwind web app (workspace on live bids and offers or demo data; counterparties, map, bids and offers, team); design tokens in src/styles, shared components in src/components/ui (docs/DESIGN_SYSTEM.md)
 tests/e2e/           Playwright browser tests against the staging Worker config
-packages/domain/     shared code for web and API: validation (counterparty import rows, PNG check, regions) and exact money arithmetic (spreads, USD→CAD, rounding)
+packages/domain/     shared code for web and API: validation (counterparty import rows, bid and offer terms, members, PNG check, regions), quote status, and exact money arithmetic (spreads, USD→CAD, rounding)
 supabase/            database migrations, pgTAP tests and local CLI config
 docs/                specification sections, AI coding system, decisions, handoff, changelog
 .github/             CI workflow, Dependabot, issue and PR templates
