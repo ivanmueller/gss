@@ -219,3 +219,10 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Times:** entered in the person's local time, stored and shown in UTC (the 2026-10-27 entry above).
 - **Not in this slice:** the workspace's map and order book still show made-up data only (wiring real quotes into them is next, with the Bank of Canada rate, GT-052); quote import from files (GT-035); FX conversion of USD quotes.
 
+**2026-10-28 — The workspace shows GSS's live bids and offers (owner's request).** The owner asked for bids entered under Bids & offers to reach the workspace's order book. Choices:
+- **Live records with demo data off:** the map, order book and facility table show GSS's live (firm or indicative, not expired, not withdrawn) bids and offers. With the profile menu's Demo data on they show the made-up data instead; the two are never mixed.
+- **Kept in step:** the workspace fetches the live list on opening, again every minute (as a quote's valid-until time passes) and whenever the page is shown again, so a bid entered, revised or withdrawn on another page or by a colleague reaches the book without reloading.
+- **Where a quote sits:** at the location it was entered for; a quote without one is grouped under its counterparty. Only locations with coordinates get a map pin (buyers green, sellers coral, approximate hollow); the others stay in the book and the table. The book's place line shows the location's province or state, or the basis place written on the quote.
+- **CAD per tonne only in the book:** the book compares prices in CAD per metric tonne. A USD price is not converted until the Bank of Canada rate exists (GT-052): it is listed in the table as quoted, marked "no CAD/USD rate", with a note in the book. A price per bushel, short ton or hundredweight is listed the same way with its own note, since converting it needs a conversion factor not set up yet (docs/TRADING_RULES.md §5.3). Nothing is priced at zero or at a made-up rate.
+- **Commodities:** the picker offers the commodities that have live quotes, all chosen until the person chooses.
+

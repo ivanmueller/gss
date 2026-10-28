@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Live bids and offers in the workspace
+
+- `docs/DECISIONS.md`: the workspace on GSS's live bids and offers (kept in step, where each sits, CAD per tonne only in the book).
+- `docs/PRODUCT.md`: the workspace paragraph.
+- `docs/API.md`: a quote's location carries its coordinates.
+
 ## 2026-10-28 — Bids and offers
 
 - `docs/DECISIONS.md`: bids and offers with a full revision history, linked to a counterparty (who enters them, revisions never changed, withdrawn is final, the terms recorded, commodities, what is not in this slice).

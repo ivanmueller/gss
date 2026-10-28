@@ -54,6 +54,7 @@ describe('formatUtc', () => {
 describe('formatQuantityRange', () => {
   it('shows the range in metric tonnes', () => {
     expect(formatQuantityRange({ min: '21.000', max: '42.000' })).toBe('21.000–42.000 MT');
+    expect(formatQuantityRange({ min: null, max: '42.000' })).toBe('Up to 42.000 MT');
   });
 });
 
@@ -69,6 +70,7 @@ describe('formatQuantityShort', () => {
 
   it('refuses a quantity that is not a decimal string', () => {
     expect(() => formatQuantityShort({ min: '2e1', max: '84' })).toThrow(/Not a decimal/);
+    expect(formatQuantityShort({ min: null, max: '84.500' })).toBe('≤84.5 MT');
   });
 });
 

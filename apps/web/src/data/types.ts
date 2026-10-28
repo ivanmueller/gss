@@ -1,11 +1,13 @@
-// Provisional view types for the GT-010 shell. They are not the shared domain
-// contract; that is agreed and moved to packages/domain before quote work starts.
+// The workspace's view of facilities and their quotes: the made-up demo data, or GSS's real
+// bids and offers turned into this shape (lib/workspaceQuotes.ts). The shared quote contract
+// is in packages/domain (quotes.ts).
 
 export type FacilityRole = 'seller' | 'buyer';
 export type QuoteSide = 'OFFER' | 'BID';
 export type QuoteStatus = 'indicative' | 'firm' | 'withdrawn' | 'expired' | 'superseded';
 export type Currency = 'CAD' | 'USD';
-export type PriceUnit = 'MT';
+/** Per metric tonne, short ton, bushel or hundredweight, as quoted. */
+export type PriceUnit = 'MT' | 'ST' | 'BU' | 'CWT';
 
 export interface Price {
   /** Decimal string, e.g. "725.00". Never a JavaScript number. */
@@ -30,15 +32,18 @@ export interface Quote {
   price: Price;
   deliveryBasis: string;
   status: QuoteStatus;
-  sourceType: 'manual';
+  /** Where it came from, in words, e.g. "Phone call". */
+  source: string;
   revision: number;
+  /** The quote's own page, for real bids and offers. */
+  href?: string;
   /** UTC ISO 8601 timestamps. */
   quotedAt: string;
   validUntil: string;
-  /** ISO dates. */
-  deliveryWindow: { start: string; end: string };
-  /** Decimal strings in metric tonnes. */
-  quantityMt: { min: string; max: string };
+  /** ISO dates; null when not stated. */
+  deliveryWindow: { start: string | null; end: string | null };
+  /** Decimal strings in metric tonnes; no minimum is null. */
+  quantityMt: { min: string | null; max: string };
 }
 
 export interface Facility {
@@ -46,11 +51,13 @@ export interface Facility {
   name: string;
   roles: readonly FacilityRole[];
   region: string;
-  country: 'CA' | 'US';
-  /** WGS84 degrees, for the map. */
-  latitude: number;
-  longitude: number;
-  locationPrecision: 'approximate' | 'exact';
+  country: string;
+  /** WGS84 degrees, for the map; null when there are no coordinates, so no pin. */
+  latitude: number | null;
+  longitude: number | null;
+  locationPrecision: 'approximate' | 'exact' | null;
+  /** The counterparty's page, for real bids and offers. */
+  href?: string;
   /** What the facility buys or sells, whether or not it has a quote right now. */
   commodities: readonly string[];
   /** Newest first. */

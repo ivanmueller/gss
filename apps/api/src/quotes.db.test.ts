@@ -105,7 +105,16 @@ describe('bids and offers as app_api', () => {
       status: 'firm',
       commodity: { code: 'flaxseed', name: 'Flaxseed' },
       counterparty: { id: counterparties.buyer, legalName: 'Synthetic Buyer', archived: false },
-      facility: { id: facilities.buyer, name: 'Synthetic Mill', region: 'MN', country: 'US' },
+      // Without coordinates the workspace lists it but puts no pin on the map.
+      facility: {
+        id: facilities.buyer,
+        name: 'Synthetic Mill',
+        region: 'MN',
+        country: 'US',
+        latitude: null,
+        longitude: null,
+        locationPrecision: null,
+      },
       withdrawnAt: null,
       current: {
         revisionNumber: 1,
@@ -283,18 +292,19 @@ describe('bids and offers as app_api', () => {
     const created = await db.createQuote(as(users.tess), bid());
     if (created.status !== 'created') throw new Error('not created');
     let release: () => void = () => undefined;
-    let ready: () => void = () => undefined;
+    let ready: (pid: number) => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const locked = new Promise<void>((resolve) => {
+    const locked = new Promise<number>((resolve) => {
       ready = resolve;
     });
     // Another session (its own connection) locks the quote and records revision 2, without
     // committing yet.
     const session = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
     const other = session.begin(async (tx) => {
-      await tx`select set_config('app.user_id', ${users.tess}, true)`;
+      const [me] = await tx<{ pid: number }[]>`
+        select pg_backend_pid() as pid, set_config('app.user_id', ${users.tess}, true)`;
       await tx`select 1 from app.quotes where id = ${created.id} for no key update`;
       await tx`insert into app.quote_revisions
           (organization_id, quote_id, revision_number, firmness, price, currency, price_unit,
@@ -302,16 +312,19 @@ describe('bids and offers as app_api', () => {
            recorded_by, recorded_by_name)
         values (${orgs.a}, ${created.id}, 1, 'firm', 740.00, 'USD', 'MT', 'delivered', 50,
                 now(), now(), now() + interval '2 days', 'phone', ${users.tess}, 'Tess Trader')`;
-      ready();
+      ready(me?.pid ?? 0);
       await held;
     });
-    await locked;
+    const holder = await locked;
     const revising = db.reviseQuote(as(users.tess), created.id, 1, terms(), 'Tess Trader');
-    // Wait until the revision is blocked on the lock, then let the other session commit.
+    // Wait until an app_api session (the revision; no other app_api session touches this
+    // quote) is blocked by exactly the session holding the lock, then let that one commit.
+    // Process ids, user names and pg_blocking_pids need no extra privileges, unlike other
+    // sessions' wait events.
     for (let tries = 0; ; tries += 1) {
-      // pg_locks, unlike other sessions' wait events, is readable without extra privileges.
       const [waiting] = await admin<{ count: number }[]>`
-        select count(*)::int as count from pg_locks where not granted`;
+        select count(*)::int as count from pg_stat_activity
+        where usename = 'app_api' and ${holder}::int = any (pg_blocking_pids(pid))`;
       if ((waiting?.count ?? 0) > 0) break;
       if (tries > 200) throw new Error('the revision never waited for the lock');
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -325,6 +338,26 @@ describe('bids and offers as app_api', () => {
       [2, '740.00'],
       [1, '725.00'],
     ]);
+  });
+
+  it('gives a located quote its coordinates as text, for the workspace map', async () => {
+    await admin`update app.facilities set latitude = 52.133214, longitude = -106.670046,
+                  location_precision = 'exact', geocoding_source = 'manual'
+                where id = ${facilities.seller}`;
+    const created = await db.createQuote(as(users.tess), {
+      ...bid({
+        counterpartyId: counterparties.seller,
+        facilityId: facilities.seller,
+        side: 'offer',
+      }),
+      terms: terms({ currency: 'CAD', price: '810.00' }),
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    expect((await db.getQuote(as(users.victor), created.id))?.facility).toMatchObject({
+      latitude: '52.133214',
+      longitude: '-106.670046',
+      locationPrecision: 'exact',
+    });
   });
 
   it('keeps a location with quotes from being removed', async () => {

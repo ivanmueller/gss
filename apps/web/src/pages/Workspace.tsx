@@ -14,8 +14,12 @@ import { useDemoData } from '../lib/demo';
 import { mapboxToken, type MapboxToken, type MapPin } from '../lib/mapbox';
 import { buildOrderBooks } from '../lib/orderBook';
 import { useTheme } from '../lib/theme';
+import { useApiResource } from '../lib/useApiResource';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import { cn } from '../lib/utils';
+import { quotedCommodities, quotesToFacilities } from '../lib/workspaceQuotes';
+import type { DirectorySession } from './CounterpartiesPage';
+import type { QuoteListResponse } from './QuotesPage';
 
 // Mapbox GL JS is large, so it is fetched only when a map is shown.
 const FacilityMap = lazy(() => import('../components/FacilityMap'));
@@ -35,15 +39,21 @@ const ROLES: readonly { value: RoleFilter; label: string }[] = [
   { value: 'buyer', label: 'Buyers' },
 ];
 
-/** Buyers in the bid colour, sellers in the ask colour; approximate locations hollow. */
-function pinOf(facility: Facility): MapPin {
-  return {
-    id: facility.id,
-    latitude: facility.latitude,
-    longitude: facility.longitude,
-    tone: facility.roles.includes('buyer') ? 'bid' : 'offer',
-    hollow: facility.locationPrecision === 'approximate',
-  };
+/**
+ * Buyers in the bid colour, sellers in the ask colour; approximate locations hollow. A
+ * location without coordinates gets no pin; it stays in the order book and the table.
+ */
+function pinsOf(facility: Facility): MapPin[] {
+  if (facility.latitude === null || facility.longitude === null) return [];
+  return [
+    {
+      id: facility.id,
+      latitude: facility.latitude,
+      longitude: facility.longitude,
+      tone: facility.roles.includes('buyer') ? 'bid' : 'offer',
+      hollow: facility.locationPrecision !== 'exact',
+    },
+  ];
 }
 
 function Legend() {
@@ -82,10 +92,20 @@ function MapUnavailable({ refused }: { refused: boolean }) {
 
 /**
  * The trading workspace: the chosen commodities' sellers and buyers on the map, the order
- * book of their asks and bids in CAD, and the facility list. Until bids and offers are built
- * it shows made-up data (with the golden fixture's CAD/USD rate) only while demo data is on.
+ * book of their asks and bids in CAD, and the facility list. It shows GSS's live bids and
+ * offers, fetched again every minute and when the page is shown again; with demo data on
+ * (profile menu) it shows made-up data instead, with the golden fixture's CAD/USD rate.
+ * Real USD quotes wait for a real rate (the Bank of Canada's, not built yet): they are left
+ * out of the book with a note, never converted at a made-up rate.
  */
-export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) {
+export function Workspace({
+  mapbox = mapboxToken(),
+  session = null,
+}: {
+  mapbox?: MapboxToken;
+  /** The signed-in member, whose organization's bids and offers are shown. */
+  session?: DirectorySession | null;
+}) {
   const isDesktop = useMediaQuery(DESKTOP_QUERY, true);
   const overlay = useMediaQuery(OVERLAY_QUERY, true);
   const [theme] = useTheme();
@@ -100,17 +120,67 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
       window.clearInterval(timer);
     };
   }, []);
-  const [commodities, setCommodities] = useState<string[]>([...SYNTHETIC_COMMODITIES]);
+  // The commodities chosen in the picker; null until the person chooses, meaning all.
+  const [picked, setPicked] = useState<string[] | null>(null);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
   // Over the map, the order book can be tucked away to the right to see the whole map.
   const [bookOpen, setBookOpen] = useState(true);
-  // Until bids and offers are built, the only prices are the made-up ones shown with demo
-  // data on (profile menu); with it off the workspace is empty, which is the truth.
+  // Made-up prices only with demo data on (profile menu); otherwise GSS's own, never mixed.
   const [demo] = useDemoData();
-  const facilities = demo ? SYNTHETIC_FACILITIES : NO_FACILITIES;
+  const real = !demo && session !== null;
+  const token = session?.token ?? '';
+  const [live, reloadLive] = useApiResource<QuoteListResponse>(
+    real ? `/quotes?organization_id=${session.organization.id}` : null,
+    token,
+  );
+  const [commodityList] = useApiResource<{ commodities: { code: string; name: string }[] }>(
+    real ? '/commodities' : null,
+    token,
+  );
+  // New, revised, withdrawn and expired quotes reach the book without a reload of the page.
+  useEffect(() => {
+    if (!real) return;
+    const timer = window.setInterval(reloadLive, 60_000);
+    const onShow = () => {
+      if (document.visibilityState === 'visible') reloadLive();
+    };
+    document.addEventListener('visibilitychange', onShow);
+    window.addEventListener('focus', onShow);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onShow);
+      window.removeEventListener('focus', onShow);
+    };
+  }, [real, reloadLive]);
+  const realFacilities = useMemo(
+    () =>
+      // An answer without a list (a proxy's error page, say) shows nothing rather than failing.
+      live.status === 'ok' && Array.isArray(live.data.quotes)
+        ? quotesToFacilities(live.data.quotes)
+        : NO_FACILITIES,
+    [live],
+  );
+  const facilities = demo ? SYNTHETIC_FACILITIES : realFacilities;
+  // The demo's made-up rate converts only made-up prices; real USD prices have no rate yet.
   const fx = demo ? SYNTHETIC_FX : null;
+  const available = useMemo(
+    () =>
+      demo
+        ? [...SYNTHETIC_COMMODITIES]
+        : quotedCommodities(
+            realFacilities,
+            commodityList.status === 'ok' && Array.isArray(commodityList.data.commodities)
+              ? commodityList.data.commodities.map((c) => c.name)
+              : [],
+          ),
+    [demo, realFacilities, commodityList],
+  );
+  const commodities = useMemo(
+    () => (picked === null ? available : available.filter((name) => picked.includes(name))),
+    [picked, available],
+  );
 
   const visible = useMemo(
     () =>
@@ -121,10 +191,10 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
       ),
     [facilities, commodities, roleFilter],
   );
-  const pins = useMemo(() => visible.map(pinOf), [visible]);
+  const pins = useMemo(() => visible.flatMap(pinsOf), [visible]);
   const books = useMemo(
-    () => (demo ? buildOrderBooks(facilities, commodities, fx, now) : []),
-    [demo, facilities, commodities, fx, now],
+    () => buildOrderBooks(facilities, commodities, fx, now),
+    [facilities, commodities, fx, now],
   );
   // A facility hidden by the filters is no longer selected.
   const selected = visible.find((facility) => facility.id === selectedId) ?? null;
@@ -168,22 +238,36 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
     </div>
   );
 
+  // What to say when there is nothing to show from real data: loading, a failure, or none yet.
+  const realState =
+    real && live.status === 'loading'
+      ? { short: 'Loading bids and offers…', long: <>Loading bids and offers…</> }
+      : real && live.status === 'error'
+        ? {
+            short: `Could not load bids and offers: ${live.error.message}`,
+            long: <>Could not load bids and offers: {live.error.message}</>,
+          }
+        : {
+            short: 'No facilities with asks or bids yet.',
+            long: (
+              <>
+                <span className="block font-medium text-foreground">No asks or bids yet.</span>
+                Enter them under Bids &amp; offers. Turn on Demo data in the profile menu to try the
+                workspace with made-up prices.
+              </>
+            ),
+          };
   const facilityProps = {
     facilities: visible,
     commodities,
     fx,
-    ...(demo ? {} : { emptyText: 'No facilities with asks or bids yet.' }),
+    ...(demo ? {} : { emptyText: realState.short }),
     ...selection,
   };
   const bookProps = {
     books,
     selected: selectedBlock,
-    empty: demo ? undefined : (
-      <>
-        <span className="block font-medium text-foreground">No asks or bids yet.</span>
-        Turn on Demo data in the profile menu to try the workspace with made-up prices.
-      </>
-    ),
+    empty: demo || available.length > 0 ? undefined : realState.long,
     ...selection,
   };
 
@@ -194,11 +278,7 @@ export function Workspace({ mapbox = mapboxToken() }: { mapbox?: MapboxToken }) 
         Workspace
       </h1>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <CommodityPicker
-          commodities={SYNTHETIC_COMMODITIES}
-          chosen={commodities}
-          onChange={setCommodities}
-        />
+        <CommodityPicker commodities={available} chosen={commodities} onChange={setPicked} />
         <SegmentedControl
           label="Show facilities"
           options={ROLES}

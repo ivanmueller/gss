@@ -1,3 +1,4 @@
+import { formatPlace } from '../lib/format';
 import type { Facility, FxRate } from '../data/types';
 import { FacilityQuotes } from './FacilityQuotes';
 import { RoleLabel } from './RoleLabel';
@@ -74,9 +75,7 @@ export function FacilityTable({
                       ))}
                     </span>
                   </TableCell>
-                  <TableCell>
-                    {facility.region}, {facility.country}
-                  </TableCell>
+                  <TableCell>{formatPlace(facility.region, facility.country)}</TableCell>
                   <TableCell>
                     <FacilityQuotes
                       facility={facility}

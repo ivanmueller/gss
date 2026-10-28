@@ -336,6 +336,17 @@ test('enters an offer, records new terms, and withdraws it, keeping the history'
   await expect(history.getByRole('row').nth(2)).toContainText('CAD 820.00/MT');
   await expect(history.getByRole('row').nth(2)).toContainText('Superseded');
 
+  // It reaches the workspace's order book (demo data is off in this file), at its CAD price
+  // per tonne.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Workspace' })
+    .click();
+  const workspaceBook = page.getByRole('complementary', { name: 'Order book' });
+  await expect(
+    workspaceBook.getByRole('button', { name: /^Ask: Synthetic Hand Grower, CAD 815\.50\/MT/ }),
+  ).toBeVisible();
+
   // The live list shows it until it is withdrawn; then only with the historical filter.
   await page
     .getByRole('navigation', { name: 'Main' })
@@ -355,6 +366,14 @@ test('enters an offer, records new terms, and withdraws it, keeping the history'
   await expect(page.getByText('No live bids or offers here.')).toBeVisible();
   await page.getByLabel('Include withdrawn and expired').check();
   await expect(page.getByRole('table', { name: 'Bids and offers' })).toContainText('Withdrawn');
+
+  // Withdrawn, it leaves the workspace's order book.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Workspace' })
+    .click();
+  await expect(page.getByRole('complementary', { name: 'Order book' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Ask: Synthetic Hand Grower/ })).toHaveCount(0);
 
   // Another organization's counterparty cannot be quoted for, and its quotes stay hidden.
   const headers = { Authorization: `Bearer ${await accessToken(page)}` };

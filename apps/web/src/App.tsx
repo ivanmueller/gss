@@ -77,7 +77,12 @@ export function App({ account }: { account?: Account }) {
   let page: ReactNode;
   switch (route.page) {
     case 'workspace':
-      page = <Workspace />;
+      // Real bids and offers need an active member; until then it waits (or shows demo data).
+      page = (
+        <Workspace
+          session={account && organization ? { token: account.accessToken, organization } : null}
+        />
+      );
       break;
     case 'coordinates':
       page = directory((session) => <CoordinatesPage session={session} />);
