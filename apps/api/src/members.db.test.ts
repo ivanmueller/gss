@@ -146,6 +146,27 @@ describe('member management as app_api', () => {
     ]);
   });
 
+  it('refuses a stale name-only edit (two admins editing the same version)', async () => {
+    const newbie = (await db.listMembers(as(users.adam), orgs.a))?.find(
+      (m) => m.userId === users.newbie,
+    );
+    if (!newbie) throw new Error('fixture missing');
+    expect(
+      await db.updateMember(as(users.adam), orgs.a, newbie.id, newbie.version, {
+        firstName: 'Alice',
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(
+      await db.updateMember(as(users.adam), orgs.a, newbie.id, newbie.version, {
+        firstName: 'Bob',
+      }),
+    ).toEqual({ status: 'changed' });
+    const after = (await db.listMembers(as(users.adam), orgs.a))?.find(
+      (m) => m.userId === users.newbie,
+    );
+    expect(after?.firstName).toBe('Alice');
+  });
+
   it('keeps an active admin: the second admin cannot demote the first when alone', async () => {
     const olivia = (await db.listMembers(as(users.adam), orgs.a))?.find(
       (m) => m.userId === users.olivia,
