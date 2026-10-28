@@ -85,13 +85,15 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 | `/login` (implemented) | Secure employee access | Email and password, then an authenticator code; at first sign-in, set up the authenticator (QR code, typed key, or **Open in authenticator app** on a phone), choose a password and give a name |
 | `/workspace` | Main map and synchronized table | Commodity, grade, geography, buyer/seller, quote status, valid-as-of |
 | `/facilities/:id` | Facility details | Organization, location, contact, service type, quotes, notes, provenance |
-| `/quotes` | Quote management | Search, filters, create, revision history, import/export |
+| `/quotes` (implemented, without import and export) | Bids and offers: live ones by default | All / Bids / Offers, commodity, include withdrawn and expired; New bid or offer for traders and admins |
+| `/quotes/new` (implemented) | Enter a bid or offer | Side, counterparty (buyers or sellers, and brokers), optional location, commodity, then the terms; `?counterparty=&side=` from a counterparty's page |
+| `/quotes/:id` (implemented) | One bid or offer | Current terms, Record new terms (a new revision), Withdraw (after a confirmation), revision history |
 | `/scenarios/new` | Trade builder | Seller offer, buyer bid, quantity, FX, freight, fees, validation and margin |
 | `/scenarios/:id` | Saved assessment | Input snapshot, calculation version, audit/revisions, export |
 | `/counterparties` (implemented, without the communication log) | Relationship management: buyers and sellers as a table, logos or a map | Search, All / Buyers / Sellers, Table / Logos / Map and show archived in one row; Add counterparty and Import spreadsheet for operations and admin |
 | `/counterparties?view=map` (implemented) | The organization's counterparty locations on a Mapbox map, with a list; replaces the former `/map` page (owner's request, 2026-10-28) | Street or satellite map, pan and zoom, select a pin; buyers green, sellers red, both blue |
 | `/counterparties/new` (implemented) | Add one counterparty by hand with the import's fields | Company, optional first contact and location |
-| `/counterparties/:id` (implemented) | One counterparty | Edit details, archive and restore; add, edit and remove contacts and locations; logo as PNG, JPG or WebP, saved as PNG (operations and admin) |
+| `/counterparties/:id` (implemented) | One counterparty | Edit details, archive and restore; add, edit and remove contacts and locations; logo as PNG, JPG or WebP, saved as PNG (operations and admin); its bids and offers, with New bid / New offer for traders and admins |
 | `/counterparties/coordinates` (implemented) | Find coordinates for locations without them (Geocodio), review, save | Look up addresses, tick or untick each result, save; operations and admin only |
 | `/team` (implemented) | The organization's members, for its admins (owner's request, 2026-10-28) | Add a person by first and last name, email and role (the app makes their login and shows a temporary password once; a login made in Supabase is added by email); edit names and role; suspend and reactivate; what each role may do |
 | `/admin` | Organization control | Data sources, settings, audit views (users and roles: `/team`) |
