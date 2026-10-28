@@ -225,44 +225,10 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
       <h1 id="counterparties-heading" className="sr-only">
         Counterparties
       </h1>
-      {editor && (
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button asChild variant="outline">
-            <Link href="/counterparties/import">
-              <FileUp aria-hidden="true" />
-              Import spreadsheet
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link href="/counterparties/new">
-              <Plus aria-hidden="true" />
-              Add counterparty
-            </Link>
-          </Button>
-        </div>
-      )}
-
-      {list.status === 'loading' && (
-        <p className="text-sm text-muted-foreground">Loading counterparties…</p>
-      )}
-      {list.status === 'error' && (
-        <p role="alert" className="text-sm text-danger">
-          Could not load counterparties: {list.error.message}
-        </p>
-      )}
-      {list.status === 'ok' && all.length === 0 && (
-        <Card className="px-4 py-10 text-center text-sm">
-          <p className="font-medium">No counterparties yet.</p>
-          <p className="text-muted-foreground">
-            {editor
-              ? 'Add one by hand or import your spreadsheet.'
-              : 'An operations or admin member of your organization can add them.'}
-          </p>
-        </Card>
-      )}
-      {list.status === 'ok' && all.length > 0 && (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
+      {/* One row: search and filters on the left, adding on the right. */}
+      <div className="flex flex-wrap items-center gap-3">
+        {list.status === 'ok' && all.length > 0 && (
+          <>
             <label className="relative block w-full max-w-sm">
               <span className="sr-only">Search counterparties</span>
               <Search
@@ -304,7 +270,46 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                 Show archived ({archivedCount})
               </label>
             )}
+          </>
+        )}
+        {editor && (
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/counterparties/import">
+                <FileUp aria-hidden="true" />
+                Import spreadsheet
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/counterparties/new">
+                <Plus aria-hidden="true" />
+                Add counterparty
+              </Link>
+            </Button>
           </div>
+        )}
+      </div>
+
+      {list.status === 'loading' && (
+        <p className="text-sm text-muted-foreground">Loading counterparties…</p>
+      )}
+      {list.status === 'error' && (
+        <p role="alert" className="text-sm text-danger">
+          Could not load counterparties: {list.error.message}
+        </p>
+      )}
+      {list.status === 'ok' && all.length === 0 && (
+        <Card className="px-4 py-10 text-center text-sm">
+          <p className="font-medium">No counterparties yet.</p>
+          <p className="text-muted-foreground">
+            {editor
+              ? 'Add one by hand or import your spreadsheet.'
+              : 'An operations or admin member of your organization can add them.'}
+          </p>
+        </Card>
+      )}
+      {list.status === 'ok' && all.length > 0 && (
+        <>
           <Tabs
             value={view}
             onValueChange={(next) => {
