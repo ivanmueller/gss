@@ -63,7 +63,7 @@ Earlier: ivanmueller/gss#22 (`0411a71`, the project guide brought in line with t
 - **Cloudflare API token** (GitHub secret `CLOUDFLARE_API_TOKEN`): needs Workers edit, Hyperdrive edit, and SSL and Certificates edit.
 - **Logs:** Workers Logs are on (`observability` in `apps/api/wrangler.jsonc`). Database failures log a secret-free `code=… kind=…` line with the request id.
 - **People:** the owner is an admin (`org_admin`) of GSS, the one organization. Admins add people on the **Team** page; the Worker makes their logins through Supabase Auth's admin API with the Worker secret `SUPABASE_SECRET_KEY` (README, Sign-in). Names are set on the Team page or by the person at first sign-in.
-- **Worker secrets:** `GEOCODIO_API_KEY` (set by the owner) and `SUPABASE_SECRET_KEY` (to be added by the owner after ivanmueller/gss#38; until then the Team page shows the steps). The `app_api` password is set by SQL on `gss-staging` and never committed.
+- **Worker secrets:** `GEOCODIO_API_KEY` (set by the owner) and `SUPABASE_SECRET_KEY` (added by the owner on 2026-10-28; making a login from the Team page on staging not yet confirmed). The `app_api` password is set by SQL on `gss-staging` and never committed.
 
 ## Phase 0 tickets
 
@@ -82,7 +82,7 @@ Earlier: ivanmueller/gss#22 (`0411a71`, the project guide brought in line with t
 | GT-010 scaffold | Done | React 19, Vite 8, Tailwind 4, shadcn-style components on design tokens (`docs/DESIGN_SYSTEM.md`); minimal router (`/`, `/counterparties` with `?view=map&type=`, `/counterparties/new`, `/counterparties/import`, `/counterparties/coordinates`, `/counterparties/:id`; `/map` and `/map/coordinates` forward). |
 | GT-011 Supabase projects | Done (one project) | `gss-staging` only; CI and local use a throwaway local Supabase. |
 | GT-012 auth and MFA | Done | Password + required TOTP; no self sign-up; the Worker verifies each token with Supabase Auth and requires `aal2`. |
-| GT-013 organizations and memberships | Done | One organization by owner's decision; membership limits data to active staff. Role checks exist for the directory (operations and org_admin add, edit and archive). Team page and `/api/v1/members` for admins (ivanmueller/gss#37); the app makes logins with a temporary password shown once, and the person chooses a password and gives a name at first sign-in (ivanmueller/gss#38, #39), once the owner adds `SUPABASE_SECRET_KEY`. |
+| GT-013 organizations and memberships | Done | One organization by owner's decision; membership limits data to active staff. Role checks exist for the directory (operations and org_admin add, edit and archive). Team page and `/api/v1/members` for admins (ivanmueller/gss#37); the app makes logins with a temporary password shown once, and the person chooses a password and gives a name at first sign-in (ivanmueller/gss#38, #39), with `SUPABASE_SECRET_KEY` (added by the owner, 2026-10-28). |
 | GT-014 migrations and least-privilege access | Done | `app_api` (no login in migrations, no RLS bypass); every table RLS-protected and revoked from Supabase roles. |
 | GT-015 PostGIS and counterparty/facility schema | Partly done | PostGIS in `extensions`; counterparties, contacts, facilities (lat/long, precision, generated `geography`), logos, import batches. Commodity and grade tables not started. |
 | GT-016 audit infrastructure | Minimal | `app.audit_events` written by trigger for directory tables (actor, action, entity, changed column names, request id); no API access. Audit view (`GET /api/v1/audit`) not started. |
@@ -118,6 +118,6 @@ Earlier: ivanmueller/gss#22 (`0411a71`, the project guide brought in line with t
 
 ## Next exact task
 
-The owner adds `SUPABASE_SECRET_KEY` to the staging Worker (README, "Sign-in") and adds a person from the Team page. In progress, not merged: a documents sweep (build plan status, decisions of 2026-10-28, product pages; this branch). Then, in the owner's order: bids and offers with revisions and the Bank of Canada FX connector (GT-052), leading to the thin trade slice (`docs/BUILD_PLAN.md`).
+The owner added `SUPABASE_SECRET_KEY` to the staging Worker (2026-10-28); next they add a person from the Team page to confirm it works. In progress, not merged: a documents sweep (build plan status, decisions of 2026-10-28, product pages; this branch). Then, in the owner's order: bids and offers with revisions and the Bank of Canada FX connector (GT-052), leading to the thin trade slice (`docs/BUILD_PLAN.md`).
 
 **Instruction for next agent:** Read `AGENTS.md` first, including "Working with the owner"; do not claim any feature is implemented merely because it appears in the specification. Include handoff details in your PR. **Only the integration owner updates this file after an actual merge** with its latest commit, verified tests/results, changed files, blockers, and next task.
