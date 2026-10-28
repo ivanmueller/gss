@@ -66,7 +66,7 @@ An authenticated trader can open the Canadian–U.S. map, filter a commodity and
 - Fully automated legal/compliance determinations, customs filing, or phytosanitary certification.
 - Complex rail tariff/routing modeling, dispatch, live truck tracking, and freight tendering.
 - Production-grade cash risk engine, derivative hedge booking, AI price prediction, or autonomous negotiation.
-- Multi-tenant customer onboarding and public marketplace checkout (data model should accommodate future tenancy).
+- Use by any company other than GSS: the platform only ever serves GSS staff (owner's decision, 2026-10-27 and 2026-10-28, `docs/DECISIONS.md`). No public marketplace checkout.
 
 ## 1.4 Planned next releases
 
@@ -264,7 +264,7 @@ All tenant-owned tables contain `organization_id uuid not null`, with foreign ke
 
 | Table | Essential additional fields / notes |
 |---|---|
-| `organizations` | display_name, brand_settings JSONB, active; initial one tenant |
+| `organizations` | display_name, brand_settings JSONB, active; one row, GSS (its staff are its members) |
 | `organization_members` | user_id FK to auth.users, role, status, joined_at, unique(organization_id,user_id) |
 | `counterparties` | legal_name, trading_name, types[], primary_country, verification_status, risk_flags |
 | `counterparty_contacts` | counterparty_id, name, role, email, phone, confidential scope |

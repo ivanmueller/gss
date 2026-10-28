@@ -2,9 +2,9 @@
 
 Canadian–U.S. physical grain trading operations platform. The repository has the Phase 0 tooling, CI and a staging deploy. On staging, one Cloudflare Worker serves the web app and the API:
 
-- sign-in with an authenticator code;
-- the counterparty directory with spreadsheet import and logos;
-- a Mapbox map, with coordinates looked up through Geocodio;
+- sign-in with an authenticator code, and a **Team** page where admins add people (the app makes their login), set names and roles, and suspend or reactivate them;
+- the counterparty directory of buyers and sellers: added by hand or from a spreadsheet, edited, archived, with logos;
+- its Mapbox map view, with coordinates looked up through Geocodio;
 - a trading workspace (map and order book) that runs on made-up demo data until bids and offers are built.
 
 No real quotes, FX connector, trading engine or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.

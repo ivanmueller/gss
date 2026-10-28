@@ -42,7 +42,7 @@ Use one documented strategy for v1: **server-side API for all private domain rea
 - **Staging:** separate Supabase project, staging Worker, test-only accounts and data.
 - **Production:** separate resources, restricted operators, approval-gated migrations and deployments.
 
-Production secrets live in platform secret stores, never in Git or AI prompt files. The same migration chain runs across environments.
+Production secrets live in platform secret stores, never in Git or AI prompt files. The staging Worker's secrets: `GEOCODIO_API_KEY` (address lookups) and `SUPABASE_SECRET_KEY` (only to make logins from the Team page and set a person's own password, in `apps/api/src/logins.ts`; never for data, which the API reads and writes as `app_api` under row level security). The database connection comes through the Hyperdrive binding. The same migration chain runs across environments.
 
 # 8. Geospatial, routing, and freight design
 
