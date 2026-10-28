@@ -335,6 +335,9 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
   const [resource, reload] = useApiResource<CounterpartyDetail>(`/counterparties/${id}`, token);
   const [editing, setEditing] = useState<Editing>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The first logo's upload button goes away once the logo is saved, so the page keeps its
+  // "Logo saved." in that spot.
+  const [firstLogoSaved, setFirstLogoSaved] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
   const editor = canEditDirectory(organization.role);
@@ -348,6 +351,7 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
 
   function start(next: Editing) {
     setNotice(null);
+    setFirstLogoSaved(false);
     setEditing(next);
   }
 
@@ -447,8 +451,16 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                       counterpartyId={detail.id}
                       token={token}
                       label="Upload logo"
-                      onUploaded={reload}
+                      onUploaded={() => {
+                        setFirstLogoSaved(true);
+                        reload();
+                      }}
                     />
+                  )}
+                  {canChange && detail.logoSha256 !== null && firstLogoSaved && (
+                    <p role="status" className="text-xs text-success">
+                      Logo saved.
+                    </p>
                   )}
                 </div>
                 {canChange && editing?.kind !== 'archive' && (

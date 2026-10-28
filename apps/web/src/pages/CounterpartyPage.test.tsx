@@ -93,11 +93,14 @@ describe('CounterpartyPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('This counterparty does not exist.');
   });
 
-  it('uploads a PNG logo and reloads the counterparty', async () => {
+  it('uploads a PNG logo, reloads the counterparty and still says the logo is saved', async () => {
+    let logoSha256: string | null = null;
     const calls = mockApi({
-      [`GET /counterparties/${ID}`]: () => Response.json(DETAIL),
-      [`PUT /counterparties/${ID}/logo`]: () =>
-        Response.json({ sha256: 'b'.repeat(64), width: 1, height: 1, bytes: 70 }),
+      [`GET /counterparties/${ID}`]: () => Response.json({ ...DETAIL, logoSha256 }),
+      [`PUT /counterparties/${ID}/logo`]: () => {
+        logoSha256 = 'b'.repeat(64);
+        return Response.json({ sha256: logoSha256, width: 1, height: 1, bytes: 70 });
+      },
     });
     render(<CounterpartyPage session={SESSION} id={ID} />);
 
@@ -109,8 +112,15 @@ describe('CounterpartyPage', () => {
     expect(put?.headers.get('Content-Type')).toBe('image/png');
     expect(put?.body).toEqual(PNG);
     await waitFor(() => {
-      expect(calls.filter((call) => call.method === 'GET')).toHaveLength(2);
+      expect(
+        calls.filter((call) => call.method === 'GET' && call.path === `/counterparties/${ID}`),
+      ).toHaveLength(2);
     });
+    // With the logo saved, the upload button gives way to the logo, and the note stays.
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Logo saved.')).toBeInTheDocument();
   });
 
   it('refuses a file that is not a PNG before uploading it', async () => {
