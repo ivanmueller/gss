@@ -188,3 +188,8 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Import columns:** the import already let the user choose a column for each field. It now also lists the file's columns that fill no field, says in each column list which field a column already fills, and recognises seller-side names (seller, supplier, grower, producer, farm name) for the legal name.
 - **Notes** keep their line breaks (in the import too, where they used to be joined into one line).
 
+**2026-10-28 — Member management: a Team page for admins; logins still made in Supabase (owner's request).** The owner asked for member management next. Choices:
+- **Logins** are still created in the Supabase dashboard (one step per new person); the app does not send invitation emails. Inviting from the app would need the Supabase service key as a Worker secret (full control of every login) and a custom email sender, since Supabase's free plan only emails its own team. Revisit when staff are added often.
+- **The Team page** (org admins only) adds a person with a login by email and role, sets first and last names, changes roles, and suspends or reactivates. Memberships are never deleted. Every change is audited.
+- **Safeguards in the database:** only active org admins of the organization can change memberships; an organization always keeps at least one active admin; admins cannot change their own role or status (the API refuses); `app_api` still cannot read the `auth` schema, and three narrow functions, each checking the caller is an admin, read emails and write only names.
+

@@ -10,6 +10,7 @@ import { CounterpartiesPage, type DirectorySession } from './pages/Counterpartie
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { ImportPage } from './pages/ImportPage';
 import { NewCounterpartyPage } from './pages/NewCounterpartyPage';
+import { TeamPage } from './pages/TeamPage';
 import { Workspace } from './pages/Workspace';
 
 function Notice({ children }: { children: ReactNode }) {
@@ -31,6 +32,8 @@ function section(route: Route): NavSection | null {
     case 'coordinates':
     case 'counterparty':
       return 'counterparties';
+    case 'team':
+      return 'team';
     case 'redirect':
     case 'not-found':
       return null;
@@ -83,6 +86,9 @@ export function App({ account }: { account?: Account }) {
       break;
     case 'import':
       page = directory((session) => <ImportPage session={session} />);
+      break;
+    case 'team':
+      page = directory((session) => <TeamPage session={session} />);
       break;
     case 'redirect':
       page = null;

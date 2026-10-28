@@ -4,6 +4,7 @@ import { requireUser } from './auth';
 import { counterpartyRoutes } from './counterparties';
 import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
+import { memberRoutes } from './members';
 import { apiError, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
 export type { ApiEnv, DatabaseFactory } from './respond';
@@ -58,6 +59,7 @@ export function createApp(openDatabase: DatabaseFactory) {
 
   app.route('/counterparties', counterpartyRoutes(openDatabase));
   app.route('/facilities', facilityRoutes(openDatabase));
+  app.route('/members', memberRoutes(openDatabase));
 
   return app;
 }

@@ -67,7 +67,7 @@ App-level pieces in `components/`: `AppShell` (left menu, top bar, page frame), 
 
 ## Layout
 
-- **Left menu:** the GSS logo slot and name at the top (with a yellow **Demo** tag beside the name while demo data is on), then the pages. Planned pages (bids and offers, scenarios, team) are listed greyed out under "Coming next" and are not links. Below 1024 px the menu folds into a panel opened from the top bar.
+- **Left menu:** the GSS logo slot and name at the top (with a yellow **Demo** tag beside the name while demo data is on), then the pages. Planned pages (bids and offers, scenarios) are listed greyed out under "Coming next" and are not links. Below 1024 px the menu folds into a panel opened from the top bar.
 - **Top bar:** a connection dot (green when the server answers; red with the words "Server unreachable" when it does not) and the profile icon, which opens "Signed in as", the **Demo data** switch, the Dark mode switch and Sign out. If the server rejects the session, a red notice appears at the top of the page and the profile icon gets a red dot.
 - **Pages:** each starts with `PageHeader` (an `<h1>`, a description and actions), up to 1,408 px wide (`--container-content`). The Workspace is the exception: its `<h1>` is for screen readers only, so the map starts at the top (owner's decision).
 - **Demo data:** the profile menu's Demo data switch (`lib/demo.ts`, kept in this browser under `gss.demo`, off until turned on) decides whether the Workspace shows the made-up data of `data/synthetic.ts`. The Demo tag beside GSS is the label for it; pages carry no demo notes of their own.

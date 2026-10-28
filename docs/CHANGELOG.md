@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Member management
+
+- `README.md`: adding a person (login in Supabase, then **Team → Add a person**).
+- `docs/API.md`, `docs/DATA_MODEL.md`, `docs/PRODUCT.md`, `docs/DESIGN_SYSTEM.md`: the members endpoints, migration `20261028020000_member_management.sql`, the `/team` route, the menu.
+- `docs/DECISIONS.md`: the owner's choices.
+
 ## 2026-10-28 — Counterparty editing, buyers and sellers, the map in Counterparties
 
 Documents updated for counterparty editing (owner's request; see `docs/DECISIONS.md`, 2026-10-28):

@@ -56,6 +56,7 @@ export type Route =
   | { page: 'new-counterparty' }
   | { page: 'import' }
   | { page: 'counterparty'; id: string }
+  | { page: 'team' }
   /** An old address that now lives elsewhere. */
   | { page: 'redirect'; to: string }
   | { page: 'not-found' };
@@ -67,6 +68,7 @@ export function matchRoute(path: string): Route {
   if (trimmed === '/map') return { page: 'redirect', to: '/counterparties?view=map' };
   if (trimmed === '/map/coordinates')
     return { page: 'redirect', to: '/counterparties/coordinates' };
+  if (trimmed === '/team') return { page: 'team' };
   if (trimmed === '/counterparties') return { page: 'counterparties' };
   if (trimmed === '/counterparties/new') return { page: 'new-counterparty' };
   if (trimmed === '/counterparties/import') return { page: 'import' };

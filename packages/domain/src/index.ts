@@ -4,3 +4,4 @@ export * from './geocoding';
 export * from './money';
 export * from './png';
 export * from './regions';
+export * from './members';

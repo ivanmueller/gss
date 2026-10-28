@@ -93,7 +93,8 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 | `/counterparties/new` (implemented) | Add one counterparty by hand with the import's fields | Company, optional first contact and location |
 | `/counterparties/:id` (implemented) | One counterparty | Edit details, archive and restore; add, edit and remove contacts and locations; logo (operations and admin) |
 | `/counterparties/coordinates` (implemented) | Find coordinates for locations without them (Geocodio), review, save | Look up addresses, tick or untick each result, save; operations and admin only |
-| `/admin` | Organization control | Users, roles, data sources, settings, audit views |
+| `/team` (implemented) | The organization's members, for its admins (owner's request, 2026-10-28) | Add a person who has a login by email with a role; edit names and role; suspend and reactivate; what each role may do |
+| `/admin` | Organization control | Data sources, settings, audit views (users and roles: `/team`) |
 
 ### Workspace layout
 

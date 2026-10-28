@@ -92,9 +92,9 @@ afterAll(async () => {
   await admin`delete from app.facilities where organization_id in ${both}`;
   await admin`delete from app.counterparty_contacts where organization_id in ${both}`;
   await admin`delete from app.counterparties where organization_id in ${both}`;
-  // Deleting the records above writes audit events too, so the audit trail goes last.
-  await admin`delete from app.audit_events where organization_id in ${both}`;
   await admin`delete from app.organization_members where organization_id in ${both}`;
+  // Deleting the records and memberships above writes audit events too, so the audit trail goes last.
+  await admin`delete from app.audit_events where organization_id in ${both}`;
   await admin`delete from app.organizations where id in ${both}`;
   await admin`delete from auth.users where id in ${admin(Object.values(users))}`;
   await admin.end();
