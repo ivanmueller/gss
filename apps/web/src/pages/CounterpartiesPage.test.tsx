@@ -78,9 +78,8 @@ describe('CounterpartiesPage', () => {
     expect(
       await within(row(2)).findByRole('img', { name: 'Synthetic Buyer LLC logo' }),
     ).toHaveAttribute('src', 'blob:synthetic-logo');
-    expect(screen.getByRole('note')).toHaveTextContent(
-      'Only members of Synthetic Org A can see them',
-    );
+    // No "Your organization's records" note (owner's request, 2026-10-28).
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
     expect(calls[0]?.headers.get('Authorization')).toBe('Bearer synthetic-token');
   });
 

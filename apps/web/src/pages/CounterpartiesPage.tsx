@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react';
 
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyMap } from '../components/CounterpartyMap';
-import { RealDataNote } from '../components/RealDataNote';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
@@ -242,7 +241,6 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
           </Button>
         </div>
       )}
-      <RealDataNote organization={organization.name} />
 
       {list.status === 'loading' && (
         <p className="text-sm text-muted-foreground">Loading counterparties…</p>
