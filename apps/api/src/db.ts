@@ -1,4 +1,7 @@
 import type {
+  Member,
+  MemberRole,
+  MemberStatus,
   Bbox,
   ContactInput,
   CounterpartyType,
@@ -135,6 +138,29 @@ export interface MapFacilities {
   withoutCoordinates: number;
 }
 
+export type AddMemberResult =
+  | { status: 'added'; id: string }
+  | { status: 'forbidden' }
+  /** No login has this email: it is created in the Supabase dashboard first. */
+  | { status: 'no_account' }
+  | { status: 'already_member' };
+
+export interface MemberChanges {
+  role?: MemberRole | undefined;
+  status?: MemberStatus | undefined;
+  /** null removes the name; undefined leaves it. */
+  firstName?: string | null | undefined;
+  lastName?: string | null | undefined;
+}
+
+export type UpdateMemberResult =
+  | { status: 'saved' }
+  | { status: 'not_found' }
+  | { status: 'forbidden' }
+  | { status: 'changed' }
+  /** Admins change their own name, but not their own role or status. */
+  | { status: 'self' };
+
 /** Largest list returned by listCounterparties. */
 export const LIST_LIMIT = 5000;
 
@@ -182,6 +208,21 @@ export interface Database {
   counterpartyKeys: (ctx: RequestContext, organizationId: string) => Promise<Set<string>>;
   /** Creates the batch and its counterparties in one transaction; returns the batch id. */
   importCounterparties: (ctx: RequestContext, batch: ImportBatchInput) => Promise<string>;
+  /** The organization's members for its admins; null when the user is not one. */
+  listMembers: (ctx: RequestContext, organizationId: string) => Promise<Member[] | null>;
+  addMember: (
+    ctx: RequestContext,
+    organizationId: string,
+    email: string,
+    role: MemberRole,
+  ) => Promise<AddMemberResult>;
+  updateMember: (
+    ctx: RequestContext,
+    organizationId: string,
+    memberId: string,
+    version: string,
+    changes: MemberChanges,
+  ) => Promise<UpdateMemberResult>;
   /** One counterparty entered by hand, with its first contact and location, in one transaction. */
   createCounterparty: (
     ctx: RequestContext,
@@ -714,6 +755,78 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.facilities ${tx(part)}`;
         }
         return batchId;
+      });
+    },
+
+    listMembers(ctx, organizationId) {
+      return asUser(ctx, async (tx) => {
+        const [check] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${organizationId}) as allowed`;
+        if (check?.allowed !== true) return null;
+        const rows = await tx<Omit<Member, 'isYou'>[]>`
+          select id, user_id as "userId", email, first_name as "firstName",
+                 last_name as "lastName", role::text as role, status::text as status,
+                 joined_at as "joinedAt", version
+          from app.member_directory(${organizationId})`;
+        return rows.map((row) => ({
+          ...row,
+          joinedAt: row.joinedAt === null ? null : new Date(row.joinedAt).toISOString(),
+          isYou: row.userId === ctx.userId,
+        }));
+      });
+    },
+
+    addMember(ctx, organizationId, email, role) {
+      return asUser(ctx, async (tx): Promise<AddMemberResult> => {
+        const [check] = await tx<{ allowed: boolean; login: string | null }[]>`
+          select app.is_org_admin(${organizationId}) as allowed,
+                 app.find_login(${organizationId}, ${email}) as login`;
+        if (check?.allowed !== true) return { status: 'forbidden' };
+        if (check.login === null) return { status: 'no_account' };
+        const rows = await tx<{ id: string }[]>`
+          insert into app.organization_members
+            (organization_id, user_id, role, status, joined_at, created_by)
+          values (${organizationId}, ${check.login}, ${role}::app.member_role, 'active', now(),
+                  app.current_user_id())
+          on conflict (organization_id, user_id) do nothing
+          returning id`;
+        const [added] = rows;
+        return added ? { status: 'added', id: added.id } : { status: 'already_member' };
+      });
+    },
+
+    updateMember(ctx, organizationId, memberId, version, changes) {
+      return asUser(ctx, async (tx): Promise<UpdateMemberResult> => {
+        const [check] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${organizationId}) as allowed`;
+        if (check?.allowed !== true) return { status: 'forbidden' };
+        const [member] = await tx<{ user_id: string; version: string }[]>`
+          select user_id, to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
+          from app.organization_members
+          where id = ${memberId} and organization_id = ${organizationId}
+          for no key update`;
+        if (!member) return NOT_FOUND;
+        if (member.version !== version) return CHANGED;
+        const roleOrStatus = changes.role !== undefined || changes.status !== undefined;
+        if (roleOrStatus && member.user_id === ctx.userId) return { status: 'self' };
+        if (roleOrStatus) {
+          await tx`
+            update app.organization_members
+            set role = coalesce(${changes.role ?? null}::app.member_role, role),
+                status = coalesce(${changes.status ?? null}::app.member_status, status)
+            where id = ${memberId} and organization_id = ${organizationId}`;
+        }
+        if (changes.firstName !== undefined || changes.lastName !== undefined) {
+          const [names] = await tx<{ first_name: string | null; last_name: string | null }[]>`
+            select first_name, last_name from app.member_directory(${organizationId})
+            where id = ${memberId}`;
+          await tx`
+            select app.set_member_name(
+              ${organizationId}, ${memberId},
+              ${changes.firstName === undefined ? (names?.first_name ?? null) : changes.firstName},
+              ${changes.lastName === undefined ? (names?.last_name ?? null) : changes.lastName})`;
+        }
+        return SAVED;
       });
     },
 

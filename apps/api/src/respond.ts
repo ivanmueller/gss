@@ -110,6 +110,14 @@ function databaseFailure(c: ApiContext, error: unknown) {
   if (pg?.code === '23505' && pg.constraint.startsWith('import_batches_')) {
     return apiError(c, 409, 'ALREADY_IMPORTED', 'This file has already been imported.');
   }
+  if (pg?.code === 'GS001') {
+    return apiError(
+      c,
+      409,
+      'LAST_ADMIN',
+      'The organization needs at least one active admin. Make someone else an admin first.',
+    );
+  }
   if (pg?.code === '23505' && pg.constraint === 'counterparties_name_unique') {
     return apiError(
       c,

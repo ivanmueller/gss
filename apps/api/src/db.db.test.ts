@@ -34,6 +34,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await admin`delete from app.organization_members where organization_id in ${admin(Object.values(orgs))}`;
+  // Deleting memberships is audited, so the audit trail goes before the organizations.
+  await admin`delete from app.audit_events where organization_id in ${admin(Object.values(orgs))}`;
   await admin`delete from app.organizations where id in ${admin(Object.values(orgs))}`;
   await admin`delete from auth.users where id in ${admin(Object.values(users))}`;
   await admin.end();

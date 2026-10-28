@@ -64,6 +64,11 @@ export function fakeDatabase(): Mocked<Database> {
     importCounterparties: vi.fn<Database['importCounterparties']>(() =>
       Promise.resolve('00000000-0000-4000-8000-0000000ba7c4'),
     ),
+    listMembers: vi.fn<Database['listMembers']>(() => Promise.resolve([])),
+    addMember: vi.fn<Database['addMember']>(() =>
+      Promise.resolve({ status: 'added', id: '00000000-0000-4000-8000-00000000ae01' }),
+    ),
+    updateMember: vi.fn<Database['updateMember']>(() => saved()),
     createCounterparty: vi.fn<Database['createCounterparty']>(() =>
       Promise.resolve({ status: 'created', id: '00000000-0000-4000-8000-00000000c0de' }),
     ),

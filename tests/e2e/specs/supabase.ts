@@ -48,6 +48,7 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
       'counterparty_contacts',
       'counterparties',
       'import_batches',
+      'organization_members',
       'audit_events',
     ]) {
       await sql`delete from ${sql(`app.${table}`)} where organization_id in

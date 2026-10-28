@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(45);
+select plan(46);
 
 -- Fixtures ------------------------------------------------------------------
 -- Users: alice (active trader in A, active viewer in inactive org C),
@@ -205,9 +205,15 @@ select throws_ok(
   $q$select pg_temp.api_exec('00000000-0000-4000-8000-00000000a11c', $$insert into app.organizations (display_name) values ('Sneaky Org')$$)$q$,
   '42501', null, 'alice cannot create organizations through the API role'
 );
-select throws_ok(
+select lives_ok(
   $q$select pg_temp.api_exec('00000000-0000-4000-8000-00000000a11c', $$update app.organization_members set role = 'org_admin' where user_id = '00000000-0000-4000-8000-00000000a11c'$$)$q$,
-  '42501', null, 'alice cannot change her own role through the API role'
+  'alice''s attempt to make herself an admin runs (member_management.test.sql covers who may change roles)'
+);
+select is(
+  (select string_agg(role::text, ',' order by organization_id) from app.organization_members
+    where user_id = '00000000-0000-4000-8000-00000000a11c'),
+  'trader,viewer',
+  'alice cannot change her own role through the API role: it is unchanged'
 );
 select throws_ok(
   $q$select pg_temp.api_exec('00000000-0000-4000-8000-00000000a11c', 'delete from app.organization_members')$q$,

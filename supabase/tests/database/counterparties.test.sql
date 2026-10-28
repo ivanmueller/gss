@@ -452,7 +452,8 @@ select is(
 select is(
   (select count(*)::int from app.audit_events
     where organization_id = '00000000-0000-4000-8000-0000000000bb' and actor_id is null),
-  6,
+  -- B's directory records and, since member management (audited), its membership.
+  7,
   'changes made outside the API are audited without an actor'
 );
 select throws_ok(
