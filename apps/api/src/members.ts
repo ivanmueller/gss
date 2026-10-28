@@ -10,7 +10,7 @@ import {
   type DatabaseFactory,
 } from './respond';
 
-const FORBIDDEN = 'Only admins of this organization manage its team.';
+const FORBIDDEN = 'Only admins manage the team.';
 const MAX_BODY_BYTES = 8 * 1024;
 
 /** /api/v1/members (GT-013). Mounted after requireUser; every route is for org admins only. */

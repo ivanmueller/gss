@@ -52,20 +52,14 @@ export function App({ account }: { account?: Account }) {
     if (redirectTo !== null) redirect(redirectTo);
   }, [redirectTo]);
 
-  // Pages with the organization's records need a signed-in member of an organization.
+  // Pages with GSS's records need a signed-in, active member.
   function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
-    if (!account) return <Notice>Sign in to see your organization’s counterparties.</Notice>;
+    if (!account) return <Notice>Sign in to see the counterparties.</Notice>;
     if (me.status === 'error')
-      return (
-        <Notice>Your organization’s records appear once the server confirms your session.</Notice>
-      );
+      return <Notice>The records appear once the server confirms your session.</Notice>;
     if (organization === undefined) return <Notice>Loading…</Notice>;
     if (organization === null) {
-      return (
-        <Notice>
-          You are not a member of an organization yet. Ask an administrator to add you.
-        </Notice>
-      );
+      return <Notice>You don’t have access yet. Ask an admin to add you on the Team page.</Notice>;
     }
     return render({ token: account.accessToken, organization });
   }

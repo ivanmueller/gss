@@ -90,9 +90,7 @@ describe('CounterpartyPage', () => {
   it('explains a counterparty that is missing or belongs to another organization', async () => {
     mockApi({});
     render(<CounterpartyPage session={SESSION} id={ID} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'This counterparty does not exist or is not in your organization.',
-    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('This counterparty does not exist.');
   });
 
   it('uploads a PNG logo and reloads the counterparty', async () => {

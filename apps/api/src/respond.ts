@@ -115,7 +115,7 @@ function databaseFailure(c: ApiContext, error: unknown) {
       c,
       409,
       'LAST_ADMIN',
-      'The organization needs at least one active admin. Make someone else an admin first.',
+      'There must always be at least one active admin. Make someone else an admin first.',
     );
   }
   if (pg?.code === '23505' && pg.constraint === 'counterparties_name_unique') {

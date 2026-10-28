@@ -44,7 +44,7 @@ Email and password through Supabase Auth, plus a required authenticator-app code
 Adding a person (an admin of the organization):
 
 1. In Supabase: **Authentication → Users → Add user → Create new user**, with their email and a temporary password, and **Auto Confirm User** ticked. Give them the password in person or by phone.
-2. In the app: **Team → Add a person**, with the same email and a role. On the same page, admins set names, change roles, and suspend or reactivate people. An organization always keeps at least one active admin, and admins cannot change their own role.
+2. In the app: **Team → Add a person**, with the same email and a role. On the same page, admins set names, change roles, and suspend or reactivate people. There is always at least one active admin, and admins cannot change their own role.
 
 Without step 2, a login sees nothing. On first sign-in the app shows a QR code to set up the authenticator. The API accepts only sessions that completed that step (`aal2`), checking each token with Supabase Auth; `/api/v1/health` is the only public API route.
 

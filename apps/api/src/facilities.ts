@@ -24,8 +24,7 @@ import {
 /** Largest request body for saving coordinates (1,000 matches of about 400 bytes). */
 const MAX_SAVE_BODY_BYTES = 1024 * 1024;
 
-const FORBIDDEN_MESSAGE =
-  'Only operations and admin members of this organization can find and save coordinates.';
+const FORBIDDEN_MESSAGE = 'Only operations and admin members can find and save coordinates.';
 
 function notConfigured(c: ApiContext) {
   return apiError(
