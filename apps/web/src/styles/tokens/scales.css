@@ -17,12 +17,15 @@
 
   /*
    * Typography. IBM Plex Sans for the interface, with tabular figures where numbers line up
-   * (prices, quantities); IBM Plex Mono for prices, codes and identifiers. Both are open-source
-   * (SIL OFL) and served with the app, not from Google. Swap the first name to change font.
+   * (prices, quantities); Figtree for prices per tonne (the owner's choice of 2026-10-28, an
+   * open lookalike of the font in their reference); IBM Plex Mono for codes and identifiers.
+   * All are open-source (SIL OFL) and served with the app, not from Google. Swap the first
+   * name to change font.
    */
   --font-sans:
     'IBM Plex Sans Variable', 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif,
     'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-price: 'Figtree Variable', 'Figtree', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
   /* Font sizes with their line heights. Body text is `sm` (14 px), set in base.css; `2xs`
@@ -155,12 +158,14 @@
   --color-bid: var(--bid);
   --color-bid-subtle: var(--bid-subtle);
   --color-bid-border: var(--bid-border);
+  --color-bid-accent: var(--bid-accent);
   --color-bid-solid: var(--bid-solid);
   --color-bid-solid-foreground: var(--bid-solid-foreground);
 
   --color-offer: var(--offer);
   --color-offer-subtle: var(--offer-subtle);
   --color-offer-border: var(--offer-border);
+  --color-offer-accent: var(--offer-accent);
   --color-offer-solid: var(--offer-solid);
   --color-offer-solid-foreground: var(--offer-solid-foreground);
 }

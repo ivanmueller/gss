@@ -74,8 +74,8 @@ function QuoteCell({ entry, selectedId, onSelect, now }: { entry: BookQuote } & 
       className={cn(
         'flex min-w-0 flex-col gap-0.5 rounded-control border px-2.5 py-2 text-left transition-colors aria-pressed:ring-2 aria-pressed:ring-ring',
         ask
-          ? 'border-offer-border bg-offer-subtle hover:border-offer'
-          : 'border-bid-border bg-bid-subtle hover:border-bid',
+          ? 'border-offer-border bg-offer-subtle hover:border-offer-accent'
+          : 'border-bid-border bg-bid-subtle hover:border-bid-accent',
       )}
     >
       <span className="flex items-center justify-between gap-2">
@@ -91,7 +91,7 @@ function QuoteCell({ entry, selectedId, onSelect, now }: { entry: BookQuote } & 
         {facility.region} · {quote.deliveryBasis}
       </span>
       <span className="mt-1 flex flex-wrap items-center justify-between gap-x-2">
-        <span className="flex items-center gap-1 font-mono text-sm font-medium tabular-nums">
+        <span className="flex items-center gap-1 font-price text-sm font-medium tabular-nums">
           {formatAmount(entry.cadDisplay)}/{quote.price.unit}
           {converted && <FxMark text={converted} />}
         </span>
@@ -120,7 +120,7 @@ function Spread({ book }: { book: CommodityBook }) {
   return (
     <span title={SPREAD_CAVEAT} className="flex items-center gap-1.5 text-xs text-muted-foreground">
       Spread
-      <span className="font-mono text-sm font-medium text-foreground tabular-nums">
+      <span className="font-price text-sm font-medium text-foreground tabular-nums">
         {formatSignedAmount(spread.amount)}
       </span>
       {book.indicative && <IndicativeMark label />}
