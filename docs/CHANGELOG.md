@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-10-28 — Documents brought up to date after bids and offers
+
+The owner asked for every document to be current. Updated:
+
+- `README.md`: what staging has (Bids & offers, the workspace on live quotes), a "Bids and offers" section, the workspace's pins and what is left out of the order book, the layout list.
+- `docs/BUILD_PLAN.md`: Phase 3 mostly done, the Bank of Canada FX connector next.
+- `docs/DESIGN_SYSTEM.md`: only Scenarios is still planned in the menu; the Demo data switch against live data; the quote components.
+- `docs/DECISIONS.md`: notes on three entries overtaken the same day (provisional view types, the synthetic-only workspace, the slice that left the workspace on made-up data).
+- `docs/HANDOFF.md`: ivanmueller/gss#49 and Deploy staging run #46, the status line, GT-024, the FX note and the next task.
+- `AGENTS.md`: the FX connector is next.
+
 ## 2026-10-28 — Live bids and offers in the workspace
 
 - `docs/DECISIONS.md`: the workspace on GSS's live bids and offers (kept in step, where each sits, CAD per tonne only in the book).
