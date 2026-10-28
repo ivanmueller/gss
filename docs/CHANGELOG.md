@@ -3,6 +3,7 @@
 ## 2026-10-28 — Order book colours and price font
 
 - `docs/DESIGN_SYSTEM.md`: bids and asks in the owner's reference leaf green and coral, with their own ramps; Figtree for prices.
+- `docs/DESIGN_SYSTEM.md`: the order book's prices and spreads in Figtree semibold (owner's request, after seeing medium).
 
 ## 2026-10-28 — Authenticator link and WebP logos
 

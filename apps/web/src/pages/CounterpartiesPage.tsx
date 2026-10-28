@@ -225,102 +225,104 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
       <h1 id="counterparties-heading" className="sr-only">
         Counterparties
       </h1>
-      {/* One row: search and filters on the left, adding on the right. */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* The tabs hold the whole page so the view switch sits in the toolbar. */}
+      <Tabs
+        value={view}
+        onValueChange={(next) => {
+          setSearchParams({ view: next === 'table' ? null : next });
+        }}
+        className="gap-4"
+      >
+        {/* One row: search, filters and the view on the left, adding on the right. */}
+        <div className="flex flex-wrap items-center gap-3">
+          {list.status === 'ok' && all.length > 0 && (
+            <>
+              <label className="relative block w-full max-w-sm">
+                <span className="sr-only">Search counterparties</span>
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                  }}
+                  placeholder="Search by name, province or state"
+                  className="pl-9"
+                />
+              </label>
+              <SegmentedControl
+                label="Show"
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'buyer', label: 'Buyers' },
+                  { value: 'seller', label: 'Sellers' },
+                ]}
+                value={side}
+                onChange={(next) => {
+                  setSearchParams({ type: next === 'all' ? null : next });
+                }}
+              />
+              <TabsList aria-label="Counterparty view">
+                <TabsTrigger value="table">{wide ? 'Table' : 'List'}</TabsTrigger>
+                <TabsTrigger value="logos">Logos</TabsTrigger>
+                <TabsTrigger value="map">Map</TabsTrigger>
+              </TabsList>
+              {archivedCount > 0 && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={showArchived}
+                    onChange={(event) => {
+                      setShowArchived(event.target.checked);
+                    }}
+                  />
+                  Show archived ({archivedCount})
+                </label>
+              )}
+            </>
+          )}
+          {editor && (
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Button asChild variant="outline">
+                <Link href="/counterparties/import">
+                  <FileUp aria-hidden="true" />
+                  Import spreadsheet
+                </Link>
+              </Button>
+              <Button asChild>
+                <Link href="/counterparties/new">
+                  <Plus aria-hidden="true" />
+                  Add counterparty
+                </Link>
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {list.status === 'loading' && (
+          <p className="text-sm text-muted-foreground">Loading counterparties…</p>
+        )}
+        {list.status === 'error' && (
+          <p role="alert" className="text-sm text-danger">
+            Could not load counterparties: {list.error.message}
+          </p>
+        )}
+        {list.status === 'ok' && all.length === 0 && (
+          <Card className="px-4 py-10 text-center text-sm">
+            <p className="font-medium">No counterparties yet.</p>
+            <p className="text-muted-foreground">
+              {editor
+                ? 'Add one by hand or import your spreadsheet.'
+                : 'An operations or admin member can add them.'}
+            </p>
+          </Card>
+        )}
         {list.status === 'ok' && all.length > 0 && (
           <>
-            <label className="relative block w-full max-w-sm">
-              <span className="sr-only">Search counterparties</span>
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                type="search"
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                }}
-                placeholder="Search by name, province or state"
-                className="pl-9"
-              />
-            </label>
-            <SegmentedControl
-              label="Show"
-              options={[
-                { value: 'all', label: 'All' },
-                { value: 'buyer', label: 'Buyers' },
-                { value: 'seller', label: 'Sellers' },
-              ]}
-              value={side}
-              onChange={(next) => {
-                setSearchParams({ type: next === 'all' ? null : next });
-              }}
-            />
-            {archivedCount > 0 && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={showArchived}
-                  onChange={(event) => {
-                    setShowArchived(event.target.checked);
-                  }}
-                />
-                Show archived ({archivedCount})
-              </label>
-            )}
-          </>
-        )}
-        {editor && (
-          <div className="ml-auto flex flex-wrap gap-2">
-            <Button asChild variant="outline">
-              <Link href="/counterparties/import">
-                <FileUp aria-hidden="true" />
-                Import spreadsheet
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/counterparties/new">
-                <Plus aria-hidden="true" />
-                Add counterparty
-              </Link>
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {list.status === 'loading' && (
-        <p className="text-sm text-muted-foreground">Loading counterparties…</p>
-      )}
-      {list.status === 'error' && (
-        <p role="alert" className="text-sm text-danger">
-          Could not load counterparties: {list.error.message}
-        </p>
-      )}
-      {list.status === 'ok' && all.length === 0 && (
-        <Card className="px-4 py-10 text-center text-sm">
-          <p className="font-medium">No counterparties yet.</p>
-          <p className="text-muted-foreground">
-            {editor
-              ? 'Add one by hand or import your spreadsheet.'
-              : 'An operations or admin member can add them.'}
-          </p>
-        </Card>
-      )}
-      {list.status === 'ok' && all.length > 0 && (
-        <>
-          <Tabs
-            value={view}
-            onValueChange={(next) => {
-              setSearchParams({ view: next === 'table' ? null : next });
-            }}
-          >
-            <TabsList aria-label="Counterparty view">
-              <TabsTrigger value="table">{wide ? 'Table' : 'List'}</TabsTrigger>
-              <TabsTrigger value="logos">Logos</TabsTrigger>
-              <TabsTrigger value="map">Map</TabsTrigger>
-            </TabsList>
             {view !== 'map' && (
               <p className="text-xs text-muted-foreground" aria-live="polite">
                 {shown.length} of {all.length} shown
@@ -344,9 +346,9 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                 only={searched}
               />
             </TabsContent>
-          </Tabs>
-        </>
-      )}
+          </>
+        )}
+      </Tabs>
     </section>
   );
 }
