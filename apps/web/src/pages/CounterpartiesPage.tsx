@@ -35,7 +35,8 @@ export interface DirectorySession {
   organization: MeOrganization;
 }
 
-const VIEWS = ['table', 'logos', 'map'] as const;
+// Logos first, and the view a page opens on (owner's request, 2026-10-29).
+const VIEWS = ['logos', 'table', 'map'] as const;
 type View = (typeof VIEWS)[number];
 /** Buyers, sellers or carriers only; brokers show under All. */
 type Side = 'all' | 'buyer' | 'seller' | 'carrier';
@@ -182,7 +183,7 @@ function LogoGrid({ items, token }: { items: CounterpartySummary[]; token: strin
   );
 }
 
-/** /counterparties: the organization's buyers and sellers as a table, logos or a map. */
+/** /counterparties: the organization's counterparties by logo (the default), as a table or on a map. */
 export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
   const [list] = useApiResource<CounterpartyList>(
@@ -197,7 +198,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   // The view and the type filter live in the address (?view=map&type=seller), so a
   // reload or a shared link keeps them.
   const params = new URLSearchParams(useSearch());
-  const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'table';
+  const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'logos';
   const typeParam = params.get('type');
   const side: Side = SIDES.find((item) => item === typeParam) ?? 'all';
 
@@ -230,7 +231,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
       <Tabs
         value={view}
         onValueChange={(next) => {
-          setSearchParams({ view: next === 'table' ? null : next });
+          setSearchParams({ view: next === 'logos' ? null : next });
         }}
         className="gap-4"
       >
@@ -268,8 +269,8 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                 }}
               />
               <TabsList aria-label="Counterparty view">
-                <TabsTrigger value="table">{wide ? 'Table' : 'List'}</TabsTrigger>
                 <TabsTrigger value="logos">Logos</TabsTrigger>
+                <TabsTrigger value="table">{wide ? 'Table' : 'List'}</TabsTrigger>
                 <TabsTrigger value="map">Map</TabsTrigger>
               </TabsList>
               {archivedCount > 0 && (

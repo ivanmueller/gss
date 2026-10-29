@@ -40,6 +40,9 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   ).toBeVisible();
 
   await page.getByRole('link', { name: 'See the counterparties' }).click();
+  // The page opens on the logos (owner's request, 2026-10-29); the table is one click away.
+  await expect(page.getByRole('tab', { name: 'Logos', selected: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Table' }).click();
   const table = page.getByRole('table', { name: 'Counterparties' });
   await expect(table.getByRole('row')).toHaveCount(3);
   await expect(table).toContainText('MB, SK · Canada');
@@ -147,6 +150,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   // Sellers only.
   await page.getByRole('link', { name: 'All counterparties' }).click();
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Sellers' }).click();
+  await page.getByRole('tab', { name: 'Table' }).click();
   const table = page.getByRole('table', { name: 'Counterparties' });
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
   await expect(table.getByRole('link', { name: 'Synthetic Mills' })).toHaveCount(0);
@@ -430,6 +434,7 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await page.getByRole('link', { name: 'All counterparties' }).click();
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Carriers' }).click();
   await expect(page).toHaveURL(/\/counterparties\?type=carrier$/);
+  await page.getByRole('tab', { name: 'Table' }).click();
   const table = page.getByRole('table', { name: 'Counterparties' });
   await expect(table.getByRole('row')).toHaveCount(2);
   await table.getByRole('link', { name: 'Synthetic Hauling' }).click();
@@ -446,7 +451,10 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
     .click();
   await choose(page.getByLabel('From: company (required)'), 'Synthetic Hand Grower');
   await choose(page.getByLabel('From: location (required)'), 'Synthetic Town, SK');
-  await choose(page.getByLabel('To: company (required)'), 'Synthetic Mills');
+  // The company pickers can be searched (owner's request, 2026-10-29).
+  await page.getByLabel('To: company (required)').click();
+  await page.getByRole('combobox', { name: 'Search the list' }).fill('mills');
+  await page.getByRole('option', { name: 'Synthetic Mills', exact: true }).click();
   await choose(page.getByLabel('To: location (required)'), 'Beta, MB');
   await page.getByLabel('Rate (required)').fill('4200.00');
   await choose(page.getByLabel('Currency (required)'), 'USD');

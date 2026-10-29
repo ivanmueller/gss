@@ -13,10 +13,11 @@ import { PageHeader } from '../components/PageHeader';
 import { QuoteForm } from '../components/QuoteForm';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
+import { SearchSelect } from '../components/ui/search-select';
 import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { sendJson, type CounterpartyDetail, type CounterpartyList } from '../lib/api';
-import { countryName } from '../lib/directory';
+import { counterpartyOptions, countryName } from '../lib/directory';
 import { canEnterQuotes } from '../lib/quotes';
 import { Link, navigate, useSearch } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
@@ -148,7 +149,7 @@ export function NewQuotePage({ session }: { session: DirectorySession }) {
                           : 'Sellers and brokers.'
                     }
                   >
-                    <Select
+                    <SearchSelect
                       id={id('counterparty')}
                       value={chosen ? counterpartyId : ''}
                       onValueChange={(next) => {
@@ -156,7 +157,7 @@ export function NewQuotePage({ session }: { session: DirectorySession }) {
                         setFacilityId('');
                       }}
                       placeholder={list.status === 'loading' ? 'Loading…' : 'Choose…'}
-                      options={choices.map((item) => ({ value: item.id, label: item.legalName }))}
+                      options={counterpartyOptions(choices)}
                     />
                   </Field>
                   <Field

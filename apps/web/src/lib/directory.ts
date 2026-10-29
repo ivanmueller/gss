@@ -43,3 +43,28 @@ export function coordinatesSourceLabel(source: string | null): string | null {
 export function canEditDirectory(role: string): boolean {
   return role === 'operations' || role === 'org_admin';
 }
+
+/**
+ * Counterparties as choices of a searchable dropdown: the legal name, with the trading name
+ * and the provinces or states and country beneath it, all searched.
+ */
+export function counterpartyOptions(
+  items: readonly {
+    id: string;
+    legalName: string;
+    tradingName: string | null;
+    regions: string[];
+    primaryCountry: string;
+  }[],
+) {
+  return items.map((item) => {
+    const where = [item.regions.join(', '), countryName(item.primaryCountry)]
+      .filter((part) => part !== '')
+      .join(' · ');
+    return {
+      value: item.id,
+      label: item.legalName,
+      detail: item.tradingName ? `${item.tradingName} · ${where}` : where,
+    };
+  });
+}

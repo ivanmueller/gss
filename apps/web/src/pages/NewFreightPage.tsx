@@ -7,6 +7,7 @@ import { FreightForm } from '../components/FreightForm';
 import { PageHeader } from '../components/PageHeader';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
+import { SearchSelect } from '../components/ui/search-select';
 import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import {
@@ -15,6 +16,7 @@ import {
   type CounterpartyList,
   type CounterpartySummary,
 } from '../lib/api';
+import { counterpartyOptions } from '../lib/directory';
 import { canEnterFreight, freightPlace } from '../lib/freight';
 import { Link, navigate, useSearch } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
@@ -66,14 +68,14 @@ function RouteEnd({
           error={undefined}
           hint={hint}
         >
-          <Select
+          <SearchSelect
             id={`${baseId}-counterparty`}
             value={chosen ? value.counterpartyId : ''}
             onValueChange={(next) => {
               onChange({ counterpartyId: next, facilityId: '' });
             }}
             placeholder={loading ? 'Loading…' : 'Choose…'}
-            options={choices.map((item) => ({ value: item.id, label: item.legalName }))}
+            options={counterpartyOptions(choices)}
           />
         </Field>
         <Field id={`${baseId}-location`} label={`${label}: location`} required error={undefined}>
@@ -195,15 +197,12 @@ export function NewFreightPage({ session }: { session: DirectorySession }) {
                           : 'Counterparties marked as carriers.'
                       }
                     >
-                      <Select
+                      <SearchSelect
                         id={`${baseId}-carrier`}
                         value={chosen ? carrierId : ''}
                         onValueChange={setCarrierId}
                         placeholder={loading ? 'Loading…' : 'Choose…'}
-                        options={carriers.map((item) => ({
-                          value: item.id,
-                          label: item.legalName,
-                        }))}
+                        options={counterpartyOptions(carriers)}
                       />
                     </Field>
                     <div className="flex flex-col gap-1.5">
