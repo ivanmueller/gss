@@ -93,6 +93,9 @@ describe('NewQuotePage', () => {
     expect(await screen.findByRole('option', { name: 'Synthetic Buyer' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Synthetic Seller' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Synthetic Gone' })).toBeNull();
+    // Typing narrows the list (owner's request, 2026-10-29).
+    await userEvent.type(screen.getByRole('combobox', { name: 'Search the list' }), 'synth buy');
+    expect(screen.getAllByRole('option')).toHaveLength(1);
     await userEvent.click(screen.getByRole('option', { name: 'Synthetic Buyer' }));
     await waitFor(() => {
       expect(screen.getByLabelText(/^Location/)).toBeEnabled();

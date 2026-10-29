@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Counterparties open on Logos; searchable counterparty pickers
+
+- `docs/DECISIONS.md`: the owner's request and the choices made (Logos first, the map kept as a view, `SearchSelect`).
+- `docs/DESIGN_SYSTEM.md`: `SearchSelect`.
+- `docs/PRODUCT.md`, `README.md` ("Counterparties"): the Logos default.
+
 ## 2026-10-29 — A bid's or offer's quantities are never NaN
 
 - `docs/DATA_MODEL.md`: migration `20261029040000_quote_quantities_not_nan.sql`.

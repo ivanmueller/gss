@@ -52,6 +52,7 @@ afterEach(() => {
 
 describe('CounterpartiesPage', () => {
   it("lists the organization's counterparties with the user's token", async () => {
+    window.history.replaceState(null, '', '/counterparties?view=table');
     const calls = mockApi({
       [LIST]: () => Response.json({ counterparties: items, truncated: false }),
       [`GET /counterparties/${items[1]?.id ?? ''}/logo`]: () =>
@@ -84,6 +85,7 @@ describe('CounterpartiesPage', () => {
   });
 
   it('searches by name and province or state', async () => {
+    window.history.replaceState(null, '', '/counterparties?view=table');
     mockApi({ [LIST]: () => Response.json({ counterparties: items, truncated: false }) });
     render(<CounterpartiesPage session={SESSION} />);
 
@@ -94,11 +96,18 @@ describe('CounterpartiesPage', () => {
     expect(screen.getAllByRole('link', { name: 'Synthetic Buyer LLC' }).length).toBeGreaterThan(0);
   });
 
-  it('shows the counterparties by logo', async () => {
+  it('opens on the logos, with the views in the order Logos, Table, Map', async () => {
     mockApi({ [LIST]: () => Response.json({ counterparties: items, truncated: false }) });
     render(<CounterpartiesPage session={SESSION} />);
 
-    await userEvent.click(await screen.findByRole('tab', { name: 'Logos' }));
+    const views = await screen.findByRole('tablist', { name: 'Counterparty view' });
+    expect(
+      within(views)
+        .getAllByRole('tab')
+        .map((tab) => tab.textContent),
+    ).toEqual(['Logos', 'Table', 'Map']);
+    expect(screen.getByRole('tab', { name: 'Logos', selected: true })).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Counterparties' })).not.toBeInTheDocument();
     const grid = screen.getByRole('list', { name: 'Counterparties by logo' });
     expect(within(grid).getAllByRole('listitem')).toHaveLength(2);
     expect(within(grid).getByText('ND · United States')).toBeInTheDocument();
@@ -157,12 +166,12 @@ describe('CounterpartiesPage', () => {
       [LIST]: () =>
         Response.json({ counterparties: [...items, seller, carrier], truncated: false }),
     });
-    window.history.replaceState(null, '', '/counterparties');
+    window.history.replaceState(null, '', '/counterparties?view=table');
     render(<CounterpartiesPage session={SESSION} />);
 
     const show = await screen.findByRole('group', { name: 'Show' });
     await userEvent.click(within(show).getByRole('button', { name: 'Sellers' }));
-    expect(window.location.search).toBe('?type=seller');
+    expect(window.location.search).toBe('?view=table&type=seller');
     expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Synthetic Grower' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Synthetic Prairie Mills' })).not.toBeInTheDocument();
@@ -170,15 +179,16 @@ describe('CounterpartiesPage', () => {
     await userEvent.click(within(show).getByRole('button', { name: 'Buyers' }));
     expect(screen.getByText('2 of 4 shown')).toBeInTheDocument();
     await userEvent.click(within(show).getByRole('button', { name: 'Carriers' }));
-    expect(window.location.search).toBe('?type=carrier');
+    expect(window.location.search).toBe('?view=table&type=carrier');
     expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Synthetic Hauling' })).toBeInTheDocument();
     await userEvent.click(within(show).getByRole('button', { name: 'All' }));
-    expect(window.location.search).toBe('');
+    expect(window.location.search).toBe('?view=table');
     expect(screen.getByText('4 of 4 shown')).toBeInTheDocument();
   });
 
   it('leaves archived counterparties out unless asked', async () => {
+    window.history.replaceState(null, '', '/counterparties?view=table');
     const archived = summary({
       id: '00000000-0000-4000-8000-00000000c004',
       legalName: 'Synthetic Closed Mill',
@@ -212,7 +222,10 @@ describe('CounterpartiesPage', () => {
     expect(calls.some((call) => call.path.endsWith('&type=buyer'))).toBe(true);
 
     await userEvent.click(screen.getByRole('tab', { name: 'Table' }));
-    expect(window.location.search).toBe('?type=buyer');
+    expect(window.location.search).toBe('?view=table&type=buyer');
     expect(screen.getByRole('table', { name: 'Counterparties' })).toBeInTheDocument();
+    // Logos is the default, so choosing it leaves the view out of the address.
+    await userEvent.click(screen.getByRole('tab', { name: 'Logos' }));
+    expect(window.location.search).toBe('?type=buyer');
   });
 });

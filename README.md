@@ -85,7 +85,7 @@ The CAD/USD rate is the Bank of Canada's daily average (series FXUSDCAD), publis
 
 ## Counterparties
 
-Signed-in members see their organization's buyers, sellers and carriers under **Counterparties**, as a table, by logo or on a map, with **All / Buyers / Sellers / Carriers** to show one kind. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
+Signed-in members see their organization's buyers, sellers and carriers under **Counterparties**, by logo (the default), as a table or on a map, with **All / Buyers / Sellers / Carriers** to show one kind. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
 
 Operations and admin members can:
 

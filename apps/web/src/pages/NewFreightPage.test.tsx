@@ -124,6 +124,7 @@ describe('NewFreightPage', () => {
     expect(await screen.findByRole('option', { name: 'Synthetic Carrier' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Synthetic Old Carrier' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Synthetic Seller' })).toBeNull();
+    await userEvent.type(screen.getByRole('combobox', { name: 'Search the list' }), 'carr');
     await userEvent.click(screen.getByRole('option', { name: 'Synthetic Carrier' }));
     await userEvent.click(screen.getByRole('button', { name: 'Rail' }));
 
