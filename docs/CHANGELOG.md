@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #53
+
+- `docs/HANDOFF.md`: ivanmueller/gss#53, CI runs #116 and #117 and Deploy staging run #50.
+
 ## 2026-10-29 — Status checked after the dropdown change
 
 - `AGENTS.md`: Phase 2 and most of Phase 3 on staging.
