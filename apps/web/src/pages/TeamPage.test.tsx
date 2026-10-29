@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { TeamPage } from './TeamPage';
 
@@ -57,7 +58,7 @@ describe('TeamPage', () => {
     await userEvent.type(within(form).getByLabelText('First name'), 'Ana');
     await userEvent.type(within(form).getByLabelText('Last name'), 'Synthetic');
     await userEvent.type(within(form).getByLabelText('Email'), 'ana@example.test');
-    await userEvent.selectOptions(within(form).getByLabelText('Role'), 'trader');
+    await choose(within(form).getByLabelText('Role'), 'Trader');
     await userEvent.click(within(form).getByRole('button', { name: 'Add to team' }));
 
     const shown = await within(form).findByRole('status');
@@ -102,7 +103,7 @@ describe('TeamPage', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Edit olivia@example.test' }));
     const form = screen.getByRole('form', { name: 'Edit olivia@example.test' });
     await userEvent.type(within(form).getByLabelText('First name'), 'Olivia');
-    await userEvent.selectOptions(within(form).getByLabelText('Role'), 'trader');
+    await choose(within(form).getByLabelText('Role'), 'Trader');
     await userEvent.click(within(form).getByRole('button', { name: 'Save' }));
     await waitFor(() => {
       expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({

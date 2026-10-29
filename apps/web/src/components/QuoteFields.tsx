@@ -18,7 +18,8 @@ import { useId, type ReactNode } from 'react';
 
 import { controlProps, Field, issueText } from './DirectoryFields';
 import { Badge } from './ui/badge';
-import { Input, Select, Textarea } from './ui/input';
+import { Input, Textarea } from './ui/input';
+import { Select } from './ui/select';
 
 /** "Bid" or "Offer" in words with an icon, in the buyer's green or the seller's coral. */
 export function QuoteSideBadge({ side }: { side: QuoteSide }) {
@@ -133,14 +134,15 @@ function QuoteField({
       className={className}
     >
       {options ? (
-        <Select {...common}>
-          <option value="">Choose…</option>
-          {options.map(([option, text]) => (
-            <option key={option} value={option}>
-              {text}
-            </option>
-          ))}
-        </Select>
+        <Select
+          {...controlProps(id, error)}
+          value={value}
+          onValueChange={(next) => {
+            props.onChange({ [field]: next });
+          }}
+          disabled={props.disabled}
+          options={options.map(([option, text]) => ({ value: option, label: text }))}
+        />
       ) : kind === 'notes' ? (
         <Textarea {...common} maxLength={2000} />
       ) : (

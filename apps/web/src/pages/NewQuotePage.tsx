@@ -13,7 +13,7 @@ import { PageHeader } from '../components/PageHeader';
 import { QuoteForm } from '../components/QuoteForm';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
-import { Select } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { sendJson, type CounterpartyDetail, type CounterpartyList } from '../lib/api';
 import { countryName } from '../lib/directory';
@@ -151,18 +151,13 @@ export function NewQuotePage({ session }: { session: DirectorySession }) {
                     <Select
                       id={id('counterparty')}
                       value={chosen ? counterpartyId : ''}
-                      onChange={(event) => {
-                        setCounterpartyId(event.target.value);
+                      onValueChange={(next) => {
+                        setCounterpartyId(next);
                         setFacilityId('');
                       }}
-                    >
-                      <option value="">{list.status === 'loading' ? 'Loading…' : 'Choose…'}</option>
-                      {choices.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.legalName}
-                        </option>
-                      ))}
-                    </Select>
+                      placeholder={list.status === 'loading' ? 'Loading…' : 'Choose…'}
+                      options={choices.map((item) => ({ value: item.id, label: item.legalName }))}
+                    />
                   </Field>
                   <Field
                     id={id('location')}
@@ -174,35 +169,32 @@ export function NewQuotePage({ session }: { session: DirectorySession }) {
                       id={id('location')}
                       value={facilityId}
                       disabled={chosen === undefined}
-                      onChange={(event) => {
-                        setFacilityId(event.target.value);
-                      }}
-                    >
-                      <option value="">No particular location</option>
-                      {chosen &&
-                        facilities.map((facility) => (
-                          <option key={facility.id} value={facility.id}>
-                            {locationLabel(facility)}
-                          </option>
-                        ))}
-                    </Select>
+                      onValueChange={setFacilityId}
+                      options={[
+                        { value: '', label: 'No particular location' },
+                        ...(chosen
+                          ? facilities.map((facility) => ({
+                              value: facility.id,
+                              label: locationLabel(facility),
+                            }))
+                          : []),
+                      ]}
+                    />
                   </Field>
                   <Field id={id('commodity')} label="Commodity" required error={undefined}>
                     <Select
                       id={id('commodity')}
                       value={commodity}
-                      onChange={(event) => {
-                        setCommodity(event.target.value);
-                      }}
-                    >
-                      <option value="">Choose…</option>
-                      {commodities.status === 'ok' &&
-                        commodities.data.commodities.map((item) => (
-                          <option key={item.code} value={item.code}>
-                            {item.name}
-                          </option>
-                        ))}
-                    </Select>
+                      onValueChange={setCommodity}
+                      options={
+                        commodities.status === 'ok'
+                          ? commodities.data.commodities.map((item) => ({
+                              value: item.code,
+                              label: item.name,
+                            }))
+                          : []
+                      }
+                    />
                   </Field>
                 </div>
               </fieldset>

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ImportResult } from '../lib/api';
+import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { ImportPage } from './ImportPage';
 
@@ -72,17 +73,17 @@ describe('ImportPage', () => {
       ['Grower,Country,Bushels,Notes', 'Synthetic Grower,Canada,5000,Synthetic', ''].join('\n'),
     );
 
-    expect(await screen.findByLabelText('Legal name (required)')).toHaveValue('Grower');
+    expect(await screen.findByLabelText('Legal name (required)')).toHaveTextContent('Grower');
     expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent('Bushels');
     expect(screen.getByText(/1 column in your file is not used/)).toBeInTheDocument();
 
     const side = screen.getByRole('group', { name: 'The companies in this file are' });
     await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
     // Choosing the column for a field takes it off the unused list.
-    await userEvent.selectOptions(screen.getByLabelText('Counterparty type'), 'Bushels');
+    await choose(screen.getByLabelText('Counterparty type'), 'Bushels');
     expect(screen.getByText('Every column in your file is used.')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Rows with an empty type are' })).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Counterparty type'), '');
+    await choose(screen.getByLabelText('Counterparty type'), '— not in my file —');
 
     await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
     const review = calls.find((call) => call.method === 'POST');
@@ -102,10 +103,10 @@ describe('ImportPage', () => {
     await chooseFile(CSV);
 
     expect(await screen.findByText(/3 rows, 6 columns/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Legal name (required)')).toHaveValue('Company Name');
-    expect(screen.getByLabelText('Province or state')).toHaveValue('Prov');
-    expect(screen.getByLabelText('Contact email')).toHaveValue('E-mail');
-    expect(screen.getByLabelText('Trading name')).toHaveValue('');
+    expect(screen.getByLabelText('Legal name (required)')).toHaveTextContent('Company Name');
+    expect(screen.getByLabelText('Province or state')).toHaveTextContent('Prov');
+    expect(screen.getByLabelText('Contact email')).toHaveTextContent('E-mail');
+    expect(screen.getByLabelText('Trading name')).toHaveTextContent('— not in my file —');
     expect(screen.getByRole('status')).toHaveTextContent('3 rows ready.');
 
     await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
@@ -192,8 +193,8 @@ describe('ImportPage', () => {
       'Choose a column for Legal name and Country.',
     );
     expect(screen.getByRole('button', { name: 'Review import' })).toBeDisabled();
-    await userEvent.selectOptions(screen.getByLabelText('Legal name (required)'), 'Firm');
-    await userEvent.selectOptions(screen.getByLabelText('Country (required)'), 'Nation');
+    await choose(screen.getByLabelText('Legal name (required)'), 'Firm');
+    await choose(screen.getByLabelText('Country (required)'), 'Nation');
     expect(screen.getByRole('status')).toHaveTextContent('1 rows ready.');
     expect(screen.getByRole('button', { name: 'Review import' })).toBeEnabled();
   });

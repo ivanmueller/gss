@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { BID, OFFER } from '../test/quotes';
 import { QuotesPage } from './QuotesPage';
@@ -63,10 +64,7 @@ describe('QuotesPage', () => {
     expect(await screen.findByText('No live bids or offers here.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Offers' }));
     await screen.findByRole('table', { name: 'Bids and offers' });
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Canola' })).toBeInTheDocument();
-    });
-    await userEvent.selectOptions(screen.getByRole('combobox'), 'canola');
+    await choose(screen.getByRole('combobox', { name: 'Commodity' }), 'Canola');
     await userEvent.click(screen.getByLabelText('Include withdrawn and expired'));
     await waitFor(() => {
       expect(calls.map((call) => call.path)).toContain(

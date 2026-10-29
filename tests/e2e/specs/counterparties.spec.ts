@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { choose } from './choose';
 import { OTHER_ORG } from './supabase';
 
 // Synthetic, fictional companies only.
@@ -30,7 +31,7 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
 
   await page.getByRole('link', { name: 'Import spreadsheet' }).click();
   await page.getByLabel('Choose CSV file').setInputFiles(csvFile('synthetic-buyers.csv'));
-  await expect(page.getByLabel('Legal name (required)')).toHaveValue('Company Name');
+  await expect(page.getByLabel('Legal name (required)')).toContainText('Company Name');
   await page.getByRole('button', { name: 'Review import' }).click();
   await expect(page.getByRole('table', { name: 'Counterparties in this import' })).toBeVisible();
   await page.getByRole('button', { name: 'Import 2 new counterparties' }).click();
@@ -103,11 +104,11 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   const company = page.getByRole('region', { name: 'Company' });
   await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
   await company.getByRole('checkbox', { name: 'Seller' }).check();
-  await company.getByLabel('Country (required)').selectOption('CA');
+  await choose(company.getByLabel('Country (required)'), 'Canada');
   await page.getByRole('region', { name: 'Contact' }).getByLabel('Name').fill('Synthetic Farmer');
   const location = page.getByRole('region', { name: 'Location' });
   await location.getByLabel('City or town').fill('Synthetic Town');
-  await location.getByLabel('Province or territory').selectOption('SK');
+  await choose(location.getByLabel('Province or territory'), 'Saskatchewan');
   await page.getByRole('button', { name: 'Add counterparty' }).click();
 
   await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
@@ -129,7 +130,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   const edit = page.getByRole('form', { name: 'Edit Synthetic Town' });
   await edit.getByLabel('Latitude').fill('52.133214');
   await edit.getByLabel('Longitude').fill('-106.670046');
-  await edit.getByLabel('Precision').selectOption('exact');
+  await choose(edit.getByLabel('Precision'), 'Exact');
   await page.getByRole('button', { name: 'Save location' }).click();
   await expect(page.getByRole('region', { name: 'Locations (1)' })).toContainText(
     '52.133214, -106.670046 · exact location · entered by hand',
@@ -306,17 +307,17 @@ test('enters an offer, records new terms, and withdraws it, keeping the history'
   await section.getByRole('link', { name: 'New offer' }).click();
 
   await expect(page.getByRole('heading', { name: 'New offer' })).toBeVisible();
-  await expect(page.getByLabel('Counterparty (required)')).toHaveValue(/[0-9a-f-]{36}/);
-  await page.getByLabel('Location', { exact: true }).selectOption({ label: 'Synthetic Town, SK' });
-  await page.getByLabel('Commodity (required)').selectOption({ label: 'Flaxseed' });
+  await expect(page.getByLabel('Counterparty (required)')).toContainText('Synthetic Hand Grower');
+  await choose(page.getByLabel('Location', { exact: true }), 'Synthetic Town, SK');
+  await choose(page.getByLabel('Commodity (required)'), 'Flaxseed');
   await page.getByLabel('Price (required)').fill('820.00');
-  await page.getByLabel('Currency (required)').selectOption('CAD');
-  await page.getByLabel('Firm or indicative (required)').selectOption('firm');
+  await choose(page.getByLabel('Currency (required)'), 'CAD');
+  await choose(page.getByLabel('Firm or indicative (required)'), 'Firm');
   await page.getByLabel('Grade or quality').fill('No. 1 CW');
   await page.getByLabel('Available quantity (MT) (required)').fill('42');
-  await page.getByLabel('Delivery basis (required)').selectOption('fob');
+  await choose(page.getByLabel('Delivery basis (required)'), 'FOB');
   await page.getByLabel('Valid until (required)').fill('2099-10-30T16:00');
-  await page.getByLabel('Source (required)').selectOption('phone');
+  await choose(page.getByLabel('Source (required)'), 'Phone call');
   await page.getByRole('button', { name: 'Save offer' }).click();
 
   await expect(page.getByRole('heading', { name: /Offer · Flaxseed/ })).toBeVisible();

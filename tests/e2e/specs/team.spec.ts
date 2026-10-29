@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { generate } from 'otplib';
 
+import { choose } from './choose';
 import { E2E_USER, NEW_LOGIN_PREFIX, OTHER_ORG } from './supabase';
 
 async function accessToken(page: Page): Promise<string> {
@@ -49,7 +50,7 @@ test('an admin makes a login; the new person sets up their authenticator and own
   await add.getByLabel('First name').fill('Newbie');
   await add.getByLabel('Last name').fill('Synthetic');
   await add.getByLabel('Email').fill(email);
-  await add.getByLabel('Role').selectOption('viewer');
+  await choose(add.getByLabel('Role'), 'Viewer');
   await add.getByRole('button', { name: 'Add to team' }).click();
   const shown = add.getByRole('status');
   await expect(shown).toContainText(`Newbie can now sign in as ${email}`);
