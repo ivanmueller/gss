@@ -405,3 +405,134 @@ test('enters an offer, records new terms, and withdraws it, keeping the history'
 
   expect(errors).toEqual([]);
 });
+
+// Runs after the tests above in this file, which leave the seller "Synthetic Hand Grower"
+// with a location in Synthetic Town, SK, and "Synthetic Mills" with one in Beta, MB.
+// Freight rates are never deleted either, so a second local run needs a fresh database.
+test('adds a carrier, enters its rate per load on a route, records new terms and withdraws it', async ({
+  page,
+  request,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  // A carrier is a counterparty like any other, marked as a carrier; no location needed.
+  await page.goto('/counterparties');
+  await page.getByRole('link', { name: 'Add counterparty' }).click();
+  const company = page.getByRole('region', { name: 'Company' });
+  await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
+  await company.getByRole('checkbox', { name: 'Carrier' }).check();
+  await choose(company.getByLabel('Country (required)'), 'Canada');
+  await page.getByRole('button', { name: 'Add counterparty' }).click();
+  await expect(page.getByRole('heading', { name: 'Synthetic Hauling' })).toBeVisible();
+
+  // The Carriers filter shows it alone.
+  await page.getByRole('link', { name: 'All counterparties' }).click();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Carriers' }).click();
+  await expect(page).toHaveURL(/\/counterparties\?type=carrier$/);
+  const table = page.getByRole('table', { name: 'Counterparties' });
+  await expect(table.getByRole('row')).toHaveCount(2);
+  await table.getByRole('link', { name: 'Synthetic Hauling' }).click();
+
+  const section = page.getByRole('region', { name: 'Freight rates (0)' });
+  await expect(section).toContainText('No live freight rates.');
+  await section.getByRole('link', { name: 'New freight rate' }).click();
+
+  await expect(page.getByRole('heading', { name: 'New freight rate' })).toBeVisible();
+  await expect(page.getByLabel('Carrier (required)')).toContainText('Synthetic Hauling');
+  await page
+    .getByRole('group', { name: 'Truck or rail' })
+    .getByRole('button', { name: 'Rail' })
+    .click();
+  await choose(page.getByLabel('From: company (required)'), 'Synthetic Hand Grower');
+  await choose(page.getByLabel('From: location (required)'), 'Synthetic Town, SK');
+  await choose(page.getByLabel('To: company (required)'), 'Synthetic Mills');
+  await choose(page.getByLabel('To: location (required)'), 'Beta, MB');
+  await page.getByLabel('Rate (required)').fill('4200.00');
+  await choose(page.getByLabel('Currency (required)'), 'USD');
+  await choose(
+    page.getByLabel('Unit (required)', { exact: true }),
+    'per load (truckload or railcar)',
+  );
+  await page.getByLabel('Payload of one load (required)').fill('90.5');
+  await choose(page.getByLabel('Payload unit (required)'), 'metric tonnes');
+  await choose(page.getByLabel('Firm or indicative (required)'), 'Firm');
+  await page.getByLabel('What the rate includes').fill('Fuel surcharge included');
+  await page.getByLabel('Valid until (required)').fill('2099-11-05T16:00');
+  await choose(page.getByLabel('Source (required)'), 'Email');
+  await page.getByRole('button', { name: 'Save freight rate' }).click();
+
+  await expect(page.getByRole('heading', { name: /Rail rate · Synthetic Hauling/ })).toBeVisible();
+  const route = page.getByRole('region', { name: 'Route' });
+  await expect(route).toContainText('Synthetic Hand Grower');
+  await expect(route).toContainText('Synthetic Mills');
+  const current = page.getByRole('region', { name: 'Current terms' });
+  await expect(current).toContainText('USD 4200.00/load');
+  await expect(current).toContainText('90.5 MT a load');
+  await expect(current).toContainText('Revision 1');
+  await expect(current).toContainText('by Synthetic Trader');
+
+  // New terms are a new revision; the first terms stay in the history.
+  await page.getByRole('button', { name: 'Record new terms' }).click();
+  await choose(page.getByLabel('Unit (required)', { exact: true }), 'per metric tonne (MT)');
+  await page.getByLabel('Rate (required)').fill('46.50');
+  await page.getByRole('button', { name: 'Save new terms' }).click();
+  await expect(page.getByText('New terms saved.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current terms' })).toContainText('USD 46.50/MT');
+  const history = page.getByRole('table', { name: 'Revision history' });
+  await expect(history.getByRole('row')).toHaveCount(3);
+  await expect(history.getByRole('row').nth(2)).toContainText('USD 4200.00/load');
+  await expect(history.getByRole('row').nth(2)).toContainText('Superseded');
+
+  // The Freight page lists it until it is withdrawn; then only with the historical filter.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: 'Freight' })
+    .click();
+  const list = page.getByRole('table', { name: 'Freight rates' });
+  await expect(list).toContainText('USD 46.50/MT');
+  await expect(list).toContainText('Synthetic Hauling');
+  await list
+    .getByRole('link', { name: /^Synthetic Hand Grower, Synthetic Town, SK to Synthetic Mills/ })
+    .click();
+  await page.getByRole('button', { name: 'Withdraw' }).click();
+  await page
+    .getByRole('group', { name: 'Withdraw this freight rate' })
+    .getByRole('button', { name: 'Withdraw' })
+    .click();
+  await expect(page.getByText(/is never live again/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Record new terms' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'All freight rates' }).click();
+  await expect(page.getByText('No live freight rates here.')).toBeVisible();
+  await page.getByLabel('Include withdrawn and expired').check();
+  await expect(page.getByRole('table', { name: 'Freight rates' })).toContainText('Withdrawn');
+
+  // Another organization's location cannot be on a route, and its freight stays hidden.
+  const headers = { Authorization: `Bearer ${await accessToken(page)}` };
+  const intrude = await request.post('/api/v1/freight-quotes', {
+    headers,
+    data: {
+      organizationId: OTHER_ORG.id,
+      carrierId: OTHER_ORG.counterpartyId,
+      originFacilityId: OTHER_ORG.counterpartyId,
+      destinationFacilityId: OTHER_ORG.id,
+      mode: 'truck',
+      values: {
+        firmness: 'firm',
+        rate: '1.00',
+        currency: 'CAD',
+        rateUnit: 'MT',
+        validUntil: '2099-01-01T00:00:00Z',
+        sourceType: 'phone',
+      },
+    },
+  });
+  expect(intrude.status()).toBe(403);
+  const other = await request.get(
+    `/api/v1/freight-quotes?organization_id=${OTHER_ORG.id}&status=all`,
+    { headers },
+  );
+  expect(await other.json()).toEqual({ freight: [], truncated: false });
+
+  expect(errors).toEqual([]);
+});

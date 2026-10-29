@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
 import type { CounterpartyType } from './directory';
+import { isCalendarDate } from './fx';
+import {
+  clean,
+  cleanLines,
+  compareUnsigned,
+  isZero,
+  LABEL_MAX,
+  NOTE_MAX,
+  oneOf,
+  positiveAmount,
+  quantity,
+  quoteTimes,
+} from './terms';
 
 // Bids and offers (GT-031, GT-032; MASTER_PROJECT_SPECIFICATION.md sections 2.3 and 5.2).
 // Shared by the API, which checks every request, and the web app's forms, so both give the
@@ -165,67 +178,6 @@ export const reviseQuoteSchema = z.object({
 });
 export type ReviseQuoteRequest = z.infer<typeof reviseQuoteSchema>;
 
-const LABEL_MAX = 200;
-const NOTE_MAX = 2000;
-/** A quoted time may run a little ahead of the server's clock, not more. */
-const CLOCK_SKEW_MS = 5 * 60 * 1000;
-
-const PRICE = /^\d{1,17}(?:\.\d{1,12})?$/;
-const QUANTITY = /^\d{1,11}(?:\.\d{1,3})?$/;
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?Z$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function clean(value: string | undefined): string | null {
-  const text = (value ?? '').replace(/\s+/g, ' ').trim();
-  return text === '' ? null : text;
-}
-
-function cleanLines(value: string | undefined): string | null {
-  const text = (value ?? '')
-    .split(/\r\n?|\n/)
-    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return text === '' ? null : text;
-}
-
-function oneOf<T extends string>(options: readonly T[], value: string | null): T | null {
-  return value !== null && (options as readonly string[]).includes(value) ? (value as T) : null;
-}
-
-/** Whether a decimal string is zero ("0", "0.000"). */
-function isZero(text: string): boolean {
-  return /^0+(?:\.0+)?$/.test(text);
-}
-
-/** Compares two non-negative decimal strings exactly, without floating point. */
-function compareUnsigned(a: string, b: string): number {
-  const [ai = '', af = ''] = a.split('.');
-  const [bi = '', bf = ''] = b.split('.');
-  const aInt = ai.replace(/^0+(?=\d)/, '');
-  const bInt = bi.replace(/^0+(?=\d)/, '');
-  if (aInt.length !== bInt.length) return aInt.length - bInt.length;
-  if (aInt !== bInt) return aInt < bInt ? -1 : 1;
-  const width = Math.max(af.length, bf.length);
-  const aFrac = af.padEnd(width, '0');
-  const bFrac = bf.padEnd(width, '0');
-  return aFrac === bFrac ? 0 : aFrac < bFrac ? -1 : 1;
-}
-
-/** A real calendar date in YYYY-MM-DD form. */
-function isCalendarDate(text: string): boolean {
-  if (!DATE.test(text)) return false;
-  const date = new Date(`${text}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text;
-}
-
-function instant(text: string): string | null {
-  if (!INSTANT.test(text)) return null;
-  const time = Date.parse(text);
-  return Number.isNaN(time) ? null : new Date(time).toISOString();
-}
-
 /**
  * Checks a form's terms. `now` is the server's (or browser's) clock: the quote time defaults
  * to it, may not be later than it, and the quote must still be valid after it.
@@ -263,25 +215,12 @@ export function parseQuoteTerms(
   const deliveryBasis = choice('deliveryBasis', DELIVERY_BASES);
   const sourceType = choice('sourceType', ENTRY_SOURCES);
 
-  const priceText = clean(values.price);
-  let price: string | null = null;
-  if (priceText === null) issue('price', 'is required');
-  else if (priceText.includes(',')) issue('price', 'needs no commas: type 1025.00, not 1,025.00');
-  else if (!PRICE.test(priceText)) issue('price', 'must be a number such as 725.00');
-  else if (isZero(priceText)) issue('price', 'must be more than zero');
-  else price = priceText;
+  const price = positiveAmount(clean(values.price), 'price', '725.00', issue);
 
-  const quantity = (field: 'quantityMin' | 'quantityMax'): string | null => {
-    const text = clean(values[field]);
-    if (text === null) return null;
-    if (text.includes(',')) issue(field, 'needs no commas: type 1000, not 1,000');
-    else if (!QUANTITY.test(text))
-      issue(field, 'must be tonnes as a number with at most 3 decimals');
-    else return text;
-    return null;
-  };
-  const quantityMin = quantity('quantityMin');
-  const quantityMax = quantity('quantityMax');
+  const tonnes = (field: 'quantityMin' | 'quantityMax') =>
+    quantity(clean(values[field]), field, 'tonnes', issue);
+  const quantityMin = tonnes('quantityMin');
+  const quantityMax = tonnes('quantityMax');
   if (clean(values.quantityMax) === null) issue('quantityMax', 'is required');
   else if (quantityMax !== null && isZero(quantityMax)) {
     issue('quantityMax', 'must be more than zero');
@@ -309,30 +248,13 @@ export function parseQuoteTerms(
     issue('deliveryEnd', 'must not be before the start');
   }
 
-  const quotedText = clean(values.quotedAt);
-  let quotedAt: string | null = now.toISOString();
-  if (quotedText !== null) {
-    quotedAt = instant(quotedText);
-    if (quotedAt === null) issue('quotedAt', 'must be a date and time');
-    else if (Date.parse(quotedAt) > now.getTime() + CLOCK_SKEW_MS) {
-      issue('quotedAt', 'must not be in the future');
-      quotedAt = null;
-    }
-  }
-  const validText = clean(values.validUntil);
-  let validUntil: string | null = null;
-  if (validText === null) issue('validUntil', 'is required');
-  else {
-    validUntil = instant(validText);
-    if (validUntil === null) issue('validUntil', 'must be a date and time');
-    else if (Date.parse(validUntil) <= now.getTime()) {
-      issue('validUntil', 'must be later than now');
-      validUntil = null;
-    } else if (quotedAt !== null && Date.parse(validUntil) <= Date.parse(quotedAt)) {
-      issue('validUntil', 'must be after the time quoted');
-      validUntil = null;
-    }
-  }
+  const { quotedAt, validUntil } = quoteTimes(
+    clean(values.quotedAt),
+    clean(values.validUntil),
+    { quotedAt: 'quotedAt', validUntil: 'validUntil' },
+    now,
+    issue,
+  );
 
   const grade = label('grade');
   const basisLocation = label('basisLocation');

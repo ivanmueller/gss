@@ -5,6 +5,7 @@ import { requireUser } from './auth';
 import { counterpartyRoutes } from './counterparties';
 import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
+import { freightRoutes } from './freight';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { memberRoutes } from './members';
@@ -108,6 +109,7 @@ export function createApp(openDatabase: DatabaseFactory) {
   app.route('/members', memberRoutes(openDatabase));
   app.route('/quotes', quoteRoutes(openDatabase));
   app.route('/commodities', commodityRoutes(openDatabase));
+  app.route('/freight-quotes', freightRoutes(openDatabase));
   app.route('/fx-quotes', fxQuoteRoutes(openDatabase));
 
   return app;

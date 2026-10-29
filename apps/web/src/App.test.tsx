@@ -357,12 +357,13 @@ describe('navigation', () => {
     });
   });
 
-  it('links Bids & offers in the menu', () => {
+  it('links Bids & offers and Freight in the menu', () => {
     render(<App />);
     expect(screen.getAllByRole('link', { name: 'Bids & offers' })[0]).toHaveAttribute(
       'href',
       '/quotes',
     );
+    expect(screen.getAllByRole('link', { name: 'Freight' })[0]).toHaveAttribute('href', '/freight');
   });
 
   it('shows planned pages as not built, not as links', () => {

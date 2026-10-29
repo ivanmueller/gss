@@ -7,3 +7,4 @@ export * from './png';
 export * from './regions';
 export * from './members';
 export * from './quotes';
+export * from './freight';

@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Carrier freight rates by route (part of GT-050)
+
+- `docs/DECISIONS.md`: the owner's answers (units vary by carrier; routes are from one location to another), and the choices made: carriers in Counterparties, who enters freight, a rate per load needs its payload, revisions.
+- `docs/DATA_MODEL.md`: `freight_quotes` and `freight_quote_revisions` as built.
+- `docs/API.md`: `/api/v1/freight-quotes`; `LOCATION_HAS_FREIGHT`.
+- `docs/PRODUCT.md`, `docs/BUILD_PLAN.md`, `README.md` ("Counterparties", "Freight"): the Freight pages and the Carriers filter.
+
 ## 2026-10-29 — Handoff record of #55; ArcGIS map layers on the list
 
 - `docs/HANDOFF.md`: ivanmueller/gss#55 (Codex's finding on #54 fixed), CI runs #119 and #120, Deploy staging run #52; GT-026; the next task and the owner's backlog.

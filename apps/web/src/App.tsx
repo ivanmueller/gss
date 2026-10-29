@@ -10,8 +10,11 @@ import { useMe } from './lib/useMe';
 import { CoordinatesPage } from './pages/CoordinatesPage';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
+import { FreightPage } from './pages/FreightPage';
+import { FreightRatePage } from './pages/FreightRatePage';
 import { ImportPage } from './pages/ImportPage';
 import { NewCounterpartyPage } from './pages/NewCounterpartyPage';
+import { NewFreightPage } from './pages/NewFreightPage';
 import { NewQuotePage } from './pages/NewQuotePage';
 import { QuotePage } from './pages/QuotePage';
 import { QuotesPage } from './pages/QuotesPage';
@@ -43,6 +46,10 @@ function section(route: Route): NavSection | null {
     case 'new-quote':
     case 'quote':
       return 'quotes';
+    case 'freight':
+    case 'new-freight':
+    case 'freight-rate':
+      return 'freight';
     case 'redirect':
     case 'not-found':
       return null;
@@ -107,6 +114,17 @@ export function App({ account }: { account?: Account }) {
       break;
     case 'quote':
       page = directory((session) => <QuotePage key={route.id} session={session} id={route.id} />);
+      break;
+    case 'freight':
+      page = directory((session) => <FreightPage session={session} />);
+      break;
+    case 'new-freight':
+      page = directory((session) => <NewFreightPage session={session} />);
+      break;
+    case 'freight-rate':
+      page = directory((session) => (
+        <FreightRatePage key={route.id} session={session} id={route.id} />
+      ));
       break;
     case 'redirect':
       page = null;

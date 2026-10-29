@@ -13,6 +13,7 @@ Ticket by ticket, with notes, in `docs/HANDOFF.md`. In short:
 | 2 — Counterparties, facilities, map and table | Done on the owner's real buyer data: directory with editing, import, logos, archive (GT-020), locations with Geocodio coordinates (GT-021), map search (GT-022), the Mapbox map in Counterparties (GT-023), fixtures (GT-025). The workspace's synchronized map, order book and table (GT-024) run on GSS's live bids and offers, or on made-up data while Demo data is on. Also built at the owner's request: the Team page (GT-013). |
 | 3 — Versioned quotes | Mostly done: quote and revision tables (GT-030), entering, revising, withdrawing and expiry (GT-031), validation (GT-032), live quotes in a list, on counterparty pages and in the workspace (GT-033), provenance and audit (GT-034). Not started: quote import from files (GT-035). The gate's "never mislabeled firm or actionable" holds for status; actionability comes with Phase 4. |
 | 5 (pulled forward) — Bank of Canada FX connector (GT-052) | Built (ivanmueller/gss#54, #55): the Worker stores the daily USD/CAD rate twice a day and the workspace converts USD bids and offers with it. Done once a stored rate is seen on staging. |
+| 5 (pulled forward) — Carrier freight rates (part of GT-050) | Built at the owner's request (2026-10-29, the priority after the FX connector): carriers in Counterparties with a Carriers filter, and the Freight page for carrier rates from one location to another, kept as revisions. Lanes without a carrier quote, route geometry and routing (GT-051) are not started. |
 | Owner's requests not started | Map overlay layers from ArcGIS (GT-026), waiting for the first layer's address. |
 | 4, 5 (rest), 6 | Not started. The thin trade slice is next. |
 
@@ -56,7 +57,7 @@ After GT-013–GT-015 establish secure organization-bound schema and minimal dat
 
 ## Phase 5 — Commercially useful freight and discovery
 
-**Tickets:** GT-050 freight quote/lane data model; GT-051 licensed road routing integration; GT-052 source/time-aware FX connector (the Bank of Canada daily rate; pulled forward by the owner to be built with bids and offers); GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
+**Tickets:** GT-050 freight quote/lane data model (carrier rates by route pulled forward by the owner, 2026-10-29); GT-051 licensed road routing integration; GT-052 source/time-aware FX connector (the Bank of Canada daily rate; pulled forward by the owner to be built with bids and offers); GT-053 candidate-match query and rankings; GT-054 comparison table and suitability rules; GT-055 performance tests over representative dataset.
 
 **Gate:** Ranked opportunities differentiate confirmed, estimated and insufficient-data scenarios; shipping cost inclusion is auditable; no inaccurate route or estimated cost is presented as firm carrier freight.
 
