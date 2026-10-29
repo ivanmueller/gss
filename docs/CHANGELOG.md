@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #54
+
+- `docs/HANDOFF.md`: ivanmueller/gss#54 (the Bank of Canada FX connector), CI run #118 and Deploy staging run #51, the scheduled job in "How staging is wired", GT-052, the next task.
+
 ## 2026-10-29 — Bank of Canada FX connector (GT-052)
 
 - `docs/DECISIONS.md`: when the rate is fetched and stored, why the table has no organization, the out-of-date rule, what the screen shows.

@@ -43,12 +43,46 @@ describe('bankOfCanadaRate', () => {
   it.each([
     ['no rate stored yet', ok([])],
     ['an answer without a list', { status: 'ok' as const, data: {} as { rates: FxQuote[] } }],
-    ['a rate that is not plain decimal text', ok([rate({ rate: '1.39e0' })])],
-    ['a malformed day', ok([rate({ rateDate: '2026-02-30' })])],
+    ['an answer that is not an object', { status: 'ok' as const, data: null as never }],
   ])('converts nothing with %s', (_, resource) => {
-    const result = bankOfCanadaRate(resource, TUESDAY);
-    expect(result.fx).toBeNull();
-    expect(result.noRate.short).toBe('no CAD/USD rate');
+    expect(bankOfCanadaRate(resource, TUESDAY)).toEqual({
+      fx: null,
+      noRate: {
+        short: 'no CAD/USD rate',
+        long: 'there is no Bank of Canada CAD/USD rate yet. It is fetched each business-day evening.',
+      },
+    });
+  });
+
+  // Rows the database never stores, in case an answer is malformed on the way.
+  const malformed = (row: Record<string, unknown>) => ok([row as unknown as FxQuote]);
+  it.each([
+    ['a rate sent as a JSON number', malformed({ ...rate(), rate: 1.3912 })],
+    ['a zero rate', malformed({ ...rate(), rate: '0.0000' })],
+    ['a rate in exponent form', malformed({ ...rate(), rate: '1.39e0' })],
+    ['a negative rate', malformed({ ...rate(), rate: '-1.3912' })],
+    ['an implausibly large rate', malformed({ ...rate(), rate: '13.912' })],
+    ['a day after today in Ottawa', malformed({ ...rate(), rateDate: '2026-10-28' })],
+    ['an impossible day', malformed({ ...rate(), rateDate: '2026-02-30' })],
+    ['a day sent as a number', malformed({ ...rate(), rateDate: 20261023 })],
+    ['the reversed pair (USD per CAD)', malformed({ ...rate(), base: 'CAD', quote: 'USD' })],
+    ['another source', malformed({ ...rate(), source: 'manual' })],
+    ['another series', malformed({ ...rate(), series: 'FXEURCAD' })],
+    ['a row that is not an object', malformed('1.3912' as never)],
+  ])('converts nothing with %s, and never throws', (_, resource) => {
+    expect(bankOfCanadaRate(resource, TUESDAY)).toEqual({
+      fx: null,
+      noRate: {
+        short: 'no CAD/USD rate',
+        long: 'the latest CAD/USD rate the server sent could not be used.',
+      },
+    });
+  });
+
+  it('does not fall back to an older day when the newest row is unusable', () => {
+    const resource = malformed({ ...rate(), rate: '0.0000' });
+    resource.data.rates.push(rate({ rateDate: '2026-10-22' }));
+    expect(bankOfCanadaRate(resource, TUESDAY).fx).toBeNull();
   });
 
   it('says when the rate is loading or could not be loaded', () => {
