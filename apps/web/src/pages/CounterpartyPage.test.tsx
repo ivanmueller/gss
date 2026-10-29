@@ -530,75 +530,26 @@ describe('CounterpartyPage editing', () => {
 });
 
 describe('CounterpartyPage website', () => {
-  const WEBSITE = 'https://www.example.com/grain';
-  const WITH_WEBSITE = { ...DETAIL, website: WEBSITE };
-
-  function withPreview(preview: string) {
-    return mockApi({
-      [`GET ${PATH}`]: () => Response.json(WITH_WEBSITE),
-      [`GET ${PATH}/website-preview`]: () => Response.json({ website: WEBSITE, preview }),
+  it('links the website in a new tab, with no preview', async () => {
+    const calls = mockApi({
+      [`GET ${PATH}`]: () => Response.json({ ...DETAIL, website: 'https://www.example.com/grain' }),
     });
-  }
-
-  it('links the website in a new tab, without a preview when the site refuses one', async () => {
-    const calls = withPreview('refused');
     render(<CounterpartyPage session={SESSION} id={ID} />);
     const link = await screen.findByRole('link', {
       name: 'example.com/grain (opens in a new tab)',
     });
-    expect(link).toHaveAttribute('href', WEBSITE);
+    expect(link).toHaveAttribute('href', 'https://www.example.com/grain');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    await waitFor(() => {
-      expect(calls.some((call) => call.path === `${PATH}/website-preview`)).toBe(true);
-    });
     expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+    // Nothing asks the site anything: the page reads only the counterparty.
+    expect(calls.map((call) => call.path)).not.toContain(`${PATH}/website-preview`);
   });
 
-  it.each(['not_secure', 'unreachable'])(
-    'offers no preview when the check says %s',
-    async (preview) => {
-      withPreview(preview);
-      render(<CounterpartyPage session={SESSION} id={ID} />);
-      await screen.findByRole('link', { name: 'example.com/grain (opens in a new tab)' });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
-    },
-  );
-
-  it('offers no preview when the check fails', async () => {
-    mockApi({ [`GET ${PATH}`]: () => Response.json(WITH_WEBSITE) });
-    render(<CounterpartyPage session={SESSION} id={ID} />);
-    await screen.findByRole('link', { name: 'example.com/grain (opens in a new tab)' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
-  });
-
-  it('previews a site that allows it in a sandboxed pop-up', async () => {
-    withPreview('allowed');
-    render(<CounterpartyPage session={SESSION} id={ID} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Preview' }));
-    const dialog = screen.getByRole('dialog', { name: 'example.com/grain' });
-    const frame = within(dialog).getByTitle('Preview of example.com/grain');
-    expect(frame).toHaveAttribute('src', WEBSITE);
-    expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
-    const sandbox = frame.getAttribute('sandbox') ?? '';
-    expect(sandbox).toContain('allow-scripts');
-    expect(sandbox).not.toContain('allow-top-navigation');
-    // Its own origin always, so not even a page of the app can reach the app (Codex's review).
-    expect(sandbox).not.toContain('allow-same-origin');
-    expect(
-      within(dialog).getByRole('link', { name: 'Open in new tab (opens in a new tab)' }),
-    ).toHaveAttribute('target', '_blank');
-    await userEvent.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('shows no website and asks nothing when there is none', async () => {
-    const calls = mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
+  it('shows no website when there is none', async () => {
+    mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(screen.queryByRole('link', { name: /opens in a new tab/ })).not.toBeInTheDocument();
-    expect(calls.some((call) => call.path.endsWith('/website-preview'))).toBe(false);
   });
 });

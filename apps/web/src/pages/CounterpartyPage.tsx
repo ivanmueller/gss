@@ -445,14 +445,7 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                   {detail.tradingName && (
                     <p className="text-sm text-muted-foreground">Trading as {detail.tradingName}</p>
                   )}
-                  {detail.website && (
-                    <CounterpartyWebsite
-                      key={detail.website}
-                      counterpartyId={detail.id}
-                      website={detail.website}
-                      token={token}
-                    />
-                  )}
+                  {detail.website && <CounterpartyWebsite website={detail.website} />}
                   <div className="flex flex-wrap gap-1.5">
                     <VerificationBadge status={detail.verificationStatus} />
                     {archived && <Badge>Archived</Badge>}

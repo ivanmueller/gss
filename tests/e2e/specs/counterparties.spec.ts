@@ -127,12 +127,12 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await details.getByLabel('Website').fill('Example.com/');
   await page.getByRole('button', { name: 'Save details' }).click();
   await expect(page.getByText('Trading as Hand Grower')).toBeVisible();
-  // Saved as https://example.com and opened in a new tab. Whether a preview is offered
-  // depends on the live site, so it is not checked here.
+  // Saved as https://example.com and opened in a new tab; there is no preview.
   const website = page.getByRole('link', { name: 'example.com (opens in a new tab)' });
   await expect(website).toHaveAttribute('href', 'https://example.com');
   await expect(website).toHaveAttribute('target', '_blank');
   await expect(website).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(page.getByRole('button', { name: 'Preview' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Edit Synthetic Town' }).click();
   const edit = page.getByRole('form', { name: 'Edit Synthetic Town' });

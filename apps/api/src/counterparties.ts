@@ -33,7 +33,6 @@ import {
   type ApiEnv,
   type DatabaseFactory,
 } from './respond';
-import { checkWebsitePreview } from './website';
 
 /** Largest import request body accepted, in bytes. */
 export const MAX_IMPORT_BODY_BYTES = 10 * 1024 * 1024;
@@ -263,28 +262,6 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         ? c.json(counterparty)
         : apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
     });
-  });
-
-  // Whether the counterparty's saved website may be shown inside the app (website.ts). The
-  // database is read first and released before the site is asked, which can take seconds.
-  routes.get('/:id/website-preview', async (c) => {
-    c.header('Cache-Control', 'no-store');
-    const id = c.req.param('id');
-    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
-    const found: { website: string | null } = { website: null };
-    const read = await withDatabase(c, openDatabase, async (db, ctx) => {
-      const counterparty = await db.getCounterparty(ctx, id);
-      if (!counterparty) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
-      found.website = counterparty.website;
-      return c.body(null, 204);
-    });
-    if (read.status !== 204) return read;
-    if (found.website === null) {
-      return apiError(c, 404, 'NO_WEBSITE', 'This counterparty has no website.');
-    }
-    const preview = await checkWebsitePreview(found.website, new URL(c.req.url).origin);
-    console.log(`Website preview check in request ${c.get('requestId')}: ${preview}`);
-    return c.json({ website: found.website, preview });
   });
 
   routes.get('/:id/logo', async (c) => {

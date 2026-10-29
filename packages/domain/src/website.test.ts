@@ -123,7 +123,7 @@ describe('parseWebsite', () => {
 });
 
 describe('websiteProblem', () => {
-  it('checks an address already parsed, such as a redirect', () => {
+  it('checks an address already parsed', () => {
     expect(websiteProblem(new URL('https://www.example.com/next'))).toBeNull();
     expect(websiteProblem(new URL('http://169.254.169.254/latest'))).toBe(
       'needs a site name such as example.com, not a number address',
@@ -132,7 +132,7 @@ describe('websiteProblem', () => {
 });
 
 describe('writtenAddressProblem', () => {
-  it('reads the site part of an address as written, as a redirect gives it', () => {
+  it('reads the site part of an address as written, before parsing tidies it', () => {
     expect(writtenAddressProblem('https://www.example.com/next')).toBeNull();
     expect(writtenAddressProblem('/relative/path:with:colons')).toBeNull();
     expect(writtenAddressProblem('next?at=a@b')).toBeNull();

@@ -1,8 +1,7 @@
 // A counterparty's website (the owner's request of 2026-10-29, docs/DECISIONS.md). Only
 // public http and https addresses by name are kept: no other schemes (javascript:, data:,
 // file:), no user names or passwords, no port numbers and no number addresses or local
-// names, because the link is opened by staff and its page is fetched by the Worker to see
-// whether it can be previewed.
+// names, because the link is opened by staff from the app.
 
 // URL exists wherever this package runs (browsers, Workers, Node), but the package is
 // compiled against ES2022 alone, without DOM types; this is the part of it used here.
@@ -68,10 +67,7 @@ export function writtenAddressProblem(text: string): string | null {
   return null;
 }
 
-/**
- * Why a parsed address is not a public website, or null when it is. Used for a saved
- * website and for every redirect the Worker follows when it checks one.
- */
+/** Why a parsed address is not a public website, or null when it is. */
 export function websiteProblem(url: WebAddress): string | null {
   if (url.protocol !== 'https:' && url.protocol !== 'http:')
     return 'must be a web address such as example.com';

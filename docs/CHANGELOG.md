@@ -1,5 +1,13 @@
 # Documentation pack changelog
 
+## 2026-10-29 — No website preview (owner's decision)
+
+- `docs/DECISIONS.md`: the website entry rewritten as built, with the preview removed and why; the review's address rules kept.
+- `docs/API.md`: `GET /api/v1/counterparties/{id}/website-preview` removed.
+- `docs/ARCHITECTURE.md`: counterparty websites no longer among the Worker's outbound adapters.
+- `docs/DESIGN_SYSTEM.md`: `Dialog` removed.
+- `docs/PRODUCT.md`, `README.md` ("Counterparties"): the website link only.
+
 ## 2026-10-29 — Codex's review of the website field
 
 - `docs/DATA_MODEL.md`: migration `20261029060000_counterparty_website_rules.sql` (printable ASCII after the site name; no international labels).
