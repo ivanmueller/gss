@@ -20,7 +20,8 @@ export function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          'z-(--z-popover) max-h-(--radix-dropdown-menu-content-available-height) min-w-56 overflow-y-auto rounded-popover border bg-popover p-1 text-popover-foreground shadow-md',
+          menuPanelClass,
+          'max-h-(--radix-dropdown-menu-content-available-height) min-w-56',
           className,
         )}
         {...props}
@@ -29,8 +30,14 @@ export function DropdownMenuContent({
   );
 }
 
-const itemClass =
+/** The open panel of every menu and dropdown (`Select` uses the same), so they all look alike. */
+export const menuPanelClass =
+  'z-(--z-popover) overflow-y-auto rounded-popover border bg-popover p-1 text-popover-foreground shadow-md';
+
+/** One choice in a menu or dropdown (`Select` uses the same). */
+export const menuItemClass =
   'relative flex cursor-default items-center gap-2 rounded-inset px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground';
+const itemClass = menuItemClass;
 
 export function DropdownMenuItem({
   className,

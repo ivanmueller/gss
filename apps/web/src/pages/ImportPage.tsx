@@ -18,7 +18,7 @@ import { RealDataNote } from '../components/RealDataNote';
 import { Button } from '../components/ui/button';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { FileButton } from '../components/ui/file-button';
-import { Select } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import {
   Table,
@@ -209,27 +209,24 @@ function ColumnMapping({
                 <Select
                   id={id}
                   value={header ?? ''}
-                  onChange={(event) => {
+                  onValueChange={(next) => {
                     const rest = Object.fromEntries(
                       Object.entries(mapping).filter(([key]) => key !== field.id),
                     ) as Mapping;
-                    onChange(
-                      event.target.value === ''
-                        ? rest
-                        : { ...rest, [field.id]: event.target.value },
-                    );
+                    onChange(next === '' ? rest : { ...rest, [field.id]: next });
                   }}
-                >
-                  <option value="">— not in my file —</option>
-                  {sheet.headers.map((name) => {
-                    const other = usedBy.get(name);
-                    return (
-                      <option key={name} value={name}>
-                        {other && other !== field.label ? `${name} (used for ${other})` : name}
-                      </option>
-                    );
-                  })}
-                </Select>
+                  options={[
+                    { value: '', label: '— not in my file —' },
+                    ...sheet.headers.map((name) => {
+                      const other = usedBy.get(name);
+                      return {
+                        value: name,
+                        label:
+                          other && other !== field.label ? `${name} (used for ${other})` : name,
+                      };
+                    }),
+                  ]}
+                />
                 <span className="truncate text-xs text-muted-foreground">
                   {header === undefined
                     ? field.required

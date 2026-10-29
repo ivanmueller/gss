@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-29 — One dropdown style
+
+- `docs/DESIGN_SYSTEM.md`: `Select`, the one dropdown for a single choice, and the rule that every dropdown shares the commodity picker's look.
+- `docs/DECISIONS.md`: why the browser's own dropdown was replaced.
+
 ## 2026-10-29 — Authenticator setup by device
 
 - `docs/DECISIONS.md`: the setup screen by device (computer, iPhone, Android), and why the iPhone button now says Apple Passwords.

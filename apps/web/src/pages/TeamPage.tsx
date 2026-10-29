@@ -12,7 +12,8 @@ import { PageHeader } from '../components/PageHeader';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Input, Select } from '../components/ui/input';
+import { Input } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import {
   Table,
   TableBody,
@@ -52,16 +53,11 @@ function RoleSelect({
       id={id}
       value={value}
       disabled={disabled}
-      onChange={(event) => {
-        onChange(event.target.value as MemberRole);
+      onValueChange={(next) => {
+        onChange(next as MemberRole);
       }}
-    >
-      {MEMBER_ROLES.map((role) => (
-        <option key={role} value={role}>
-          {MEMBER_ROLE_LABELS[role]}
-        </option>
-      ))}
-    </Select>
+      options={MEMBER_ROLES.map((role) => ({ value: role, label: MEMBER_ROLE_LABELS[role] }))}
+    />
   );
 }
 

@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { NewCounterpartyPage } from './NewCounterpartyPage';
 
@@ -29,13 +30,13 @@ describe('NewCounterpartyPage', () => {
       'Synthetic Farms',
     );
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Seller' }));
-    await userEvent.selectOptions(within(company).getByLabelText('Country (required)'), 'CA');
+    await choose(within(company).getByLabelText('Country (required)'), 'Canada');
     await userEvent.type(within(section('Contact')).getByLabelText('Name'), 'Synthetic Grower');
     const location = section('Location');
     // The location's country follows the company's.
-    expect(within(location).getByLabelText('Country')).toHaveValue('CA');
+    expect(within(location).getByLabelText('Country')).toHaveTextContent('Canada');
     await userEvent.type(within(location).getByLabelText('City or town'), 'Synthetic Town');
-    await userEvent.selectOptions(within(location).getByLabelText('Province or territory'), 'SK');
+    await choose(within(location).getByLabelText('Province or territory'), 'Saskatchewan');
     await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
 
     await waitFor(() => {
@@ -99,7 +100,7 @@ describe('NewCounterpartyPage', () => {
       'Synthetic Mills',
     );
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Buyer' }));
-    await userEvent.selectOptions(within(company).getByLabelText('Country (required)'), 'US');
+    await choose(within(company).getByLabelText('Country (required)'), 'United States');
     await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(

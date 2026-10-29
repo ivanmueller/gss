@@ -367,7 +367,7 @@ describe('CounterpartyPage editing', () => {
     render(<CounterpartyPage session={SESSION} id={ID} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Edit Synthetic Elevator' }));
     const form = screen.getByRole('form', { name: 'Edit Synthetic Elevator' });
-    expect(within(form).getByLabelText('Province or territory')).toHaveValue('SK');
+    expect(within(form).getByLabelText('Province or territory')).toHaveTextContent('Saskatchewan');
 
     const postal = within(form).getByLabelText('Postal code');
     await userEvent.clear(postal);

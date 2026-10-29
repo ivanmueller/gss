@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CounterpartyDetail, CounterpartySummary } from '../lib/api';
+import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { BID } from '../test/quotes';
 import { NewQuotePage } from './NewQuotePage';
@@ -84,29 +85,26 @@ describe('NewQuotePage', () => {
     render(<NewQuotePage session={SESSION} />);
     expect(screen.getByRole('heading', { name: 'New bid' })).toBeInTheDocument();
     const counterparty = screen.getByLabelText(/^Counterparty/);
+    // Wait for the list, then look: only buyers that are not archived can bid.
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Synthetic Buyer' })).toBeInTheDocument();
+      expect(counterparty).toHaveTextContent('Choose…');
     });
-    // Only buyers that are not archived can bid.
+    await userEvent.click(counterparty);
+    expect(await screen.findByRole('option', { name: 'Synthetic Buyer' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Synthetic Seller' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Synthetic Gone' })).toBeNull();
-    await userEvent.selectOptions(counterparty, BUYER.id);
+    await userEvent.click(screen.getByRole('option', { name: 'Synthetic Buyer' }));
     await waitFor(() => {
-      expect(
-        screen.getByRole('option', { name: 'Synthetic Mill, Synthetic Town, MN' }),
-      ).toBeInTheDocument();
+      expect(screen.getByLabelText(/^Location/)).toBeEnabled();
     });
-    await userEvent.selectOptions(
-      screen.getByLabelText(/^Location/),
-      DETAIL.facilities[0]?.id ?? '',
-    );
-    await userEvent.selectOptions(screen.getByLabelText(/^Commodity/), 'flaxseed');
+    await choose(screen.getByLabelText(/^Location/), 'Synthetic Mill, Synthetic Town, MN');
+    await choose(screen.getByLabelText(/^Commodity/), 'Flaxseed');
     await userEvent.type(screen.getByLabelText(/^Price/), '725.00');
-    await userEvent.selectOptions(screen.getByLabelText(/^Currency/), 'USD');
+    await choose(screen.getByLabelText(/^Currency/), 'USD');
     await userEvent.type(screen.getByLabelText(/^Available quantity/), '84');
-    await userEvent.selectOptions(screen.getByLabelText(/^Delivery basis/), 'delivered');
+    await choose(screen.getByLabelText(/^Delivery basis/), 'Delivered');
     await userEvent.type(screen.getByLabelText(/^Valid until/), '2099-10-30T16:00');
-    await userEvent.selectOptions(screen.getByLabelText(/^Source \(required\)/), 'phone');
+    await choose(screen.getByLabelText(/^Source \(required\)/), 'Phone call');
     await userEvent.click(screen.getByRole('button', { name: 'Save bid' }));
 
     await waitFor(() => {
@@ -138,9 +136,12 @@ describe('NewQuotePage', () => {
     render(<NewQuotePage session={SESSION} />);
     expect(screen.getByRole('heading', { name: 'New offer' })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByLabelText(/^Counterparty/)).toHaveValue(SELLER.id);
+      expect(screen.getByLabelText(/^Counterparty/)).toHaveTextContent('Synthetic Seller');
     });
+    await userEvent.click(screen.getByLabelText(/^Counterparty/));
+    expect(await screen.findByRole('option', { name: 'Synthetic Seller' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Synthetic Buyer' })).toBeNull();
+    await userEvent.keyboard('{Escape}');
     expect(screen.getByRole('link', { name: 'Synthetic Seller' })).toHaveAttribute(
       'href',
       `/counterparties/${SELLER.id}`,

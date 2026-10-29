@@ -20,6 +20,17 @@ if (!('ResizeObserver' in window)) {
   });
 }
 
+// jsdom has no pointer capture or scrolling; the Radix dropdown (components/ui/select.tsx)
+// calls them when it opens.
+for (const name of ['hasPointerCapture', 'releasePointerCapture', 'scrollIntoView'] as const) {
+  if (!(name in Element.prototype)) {
+    Object.defineProperty(Element.prototype, name, {
+      configurable: true,
+      value: () => false,
+    });
+  }
+}
+
 afterEach(() => {
   cleanup();
 });

@@ -12,7 +12,8 @@ import { useId, type ReactNode } from 'react';
 
 import { typeLabel } from '../lib/directory';
 import { cn } from '../lib/utils';
-import { Input, Select, Textarea } from './ui/input';
+import { Input, Textarea } from './ui/input';
+import { Select } from './ui/select';
 
 // The fields of the counterparty, contact and location forms. Their names are the import's
 // field ids, so a form is checked by the same rules (and gives the same messages) as a
@@ -101,6 +102,9 @@ function useFieldHelpers({ values, issues, onChange }: FieldsProps) {
     set: (field: ImportFieldId) => (event: { target: { value: string } }) => {
       onChange({ [field]: event.target.value });
     },
+    choose: (field: ImportFieldId) => (value: string) => {
+      onChange({ [field]: value });
+    },
   };
 }
 
@@ -165,17 +169,10 @@ function CountrySelect({
       <Select
         {...controlProps(f.id(field), error)}
         value={f.value(field)}
-        onChange={f.set(field)}
+        onValueChange={f.choose(field)}
         disabled={props.disabled}
-        required={required}
-      >
-        <option value="">Choose…</option>
-        {SUPPORTED_COUNTRIES.map((code) => (
-          <option key={code} value={code}>
-            {COUNTRY_NAMES[code]}
-          </option>
-        ))}
-      </Select>
+        options={SUPPORTED_COUNTRIES.map((code) => ({ value: code, label: COUNTRY_NAMES[code] }))}
+      />
     </Field>
   );
 }
@@ -241,13 +238,14 @@ export function CompanyFields(props: FieldsProps) {
           value={
             f.value('verificationStatus') === '' ? 'unverified' : f.value('verificationStatus')
           }
-          onChange={f.set('verificationStatus')}
+          onValueChange={f.choose('verificationStatus')}
           disabled={props.disabled}
-        >
-          <option value="unverified">Unverified</option>
-          <option value="pending">Verification pending</option>
-          <option value="verified">Verified</option>
-        </Select>
+          options={[
+            { value: 'unverified', label: 'Unverified' },
+            { value: 'pending', label: 'Verification pending' },
+            { value: 'verified', label: 'Verified' },
+          ]}
+        />
       </Field>
       <Field id={f.id('notes')} label="Notes" error={notesError} className="sm:col-span-2">
         <Textarea
@@ -307,16 +305,13 @@ export function LocationFields(props: FieldsProps) {
         <Select
           {...controlProps(f.id('facilityType'), typeError)}
           value={f.value('facilityType')}
-          onChange={f.set('facilityType')}
+          onValueChange={f.choose('facilityType')}
           disabled={props.disabled}
-        >
-          <option value="">Not given</option>
-          {Object.entries(FACILITY_TYPE_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </Select>
+          options={[
+            { value: '', label: 'Not given' },
+            ...Object.entries(FACILITY_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+          ]}
+        />
       </Field>
       <TextField field="addressLine" label="Address" props={props} className="sm:col-span-2" />
       <TextField field="city" label="City or town" props={props} />
@@ -325,16 +320,13 @@ export function LocationFields(props: FieldsProps) {
         <Select
           {...controlProps(f.id('region'), regionError)}
           value={f.value('region')}
-          onChange={f.set('region')}
+          onValueChange={f.choose('region')}
           disabled={props.disabled}
-        >
-          <option value="">Not given</option>
-          {regions.map(([code, name]) => (
-            <option key={code} value={code}>
-              {name}
-            </option>
-          ))}
-        </Select>
+          options={[
+            { value: '', label: 'Not given' },
+            ...regions.map(([code, name]) => ({ value: code, label: name })),
+          ]}
+        />
       </Field>
       <TextField
         field="postalCode"
@@ -372,13 +364,14 @@ export function LocationFields(props: FieldsProps) {
                 : ''
               : f.value('locationPrecision')
           }
-          onChange={f.set('locationPrecision')}
+          onValueChange={f.choose('locationPrecision')}
           disabled={props.disabled === true || !hasCoordinates}
-        >
-          {!hasCoordinates && <option value="">No coordinates</option>}
-          <option value="approximate">Approximate</option>
-          <option value="exact">Exact</option>
-        </Select>
+          options={[
+            ...(hasCoordinates ? [] : [{ value: '', label: 'No coordinates' }]),
+            { value: 'approximate', label: 'Approximate' },
+            { value: 'exact', label: 'Exact' },
+          ]}
+        />
       </Field>
     </div>
   );

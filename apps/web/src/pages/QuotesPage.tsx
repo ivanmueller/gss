@@ -1,10 +1,10 @@
 import type { Commodity, QuoteSummary } from '@grain/domain';
-import { Plus } from 'lucide-react';
+import { Plus, Wheat } from 'lucide-react';
 
 import { QuoteListCard } from '../components/QuoteList';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
-import { Select } from '../components/ui/input';
+import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { canEnterQuotes } from '../lib/quotes';
 import { Link, setSearchParams, useSearch } from '../lib/router';
@@ -58,24 +58,21 @@ export function QuotesPage({ session }: { session: DirectorySession }) {
             setSearchParams({ side: next === 'all' ? null : next });
           }}
         />
-        <label className="flex items-center gap-2 text-sm">
-          <span className="sr-only sm:not-sr-only">Commodity</span>
-          <Select
-            className="w-48"
-            value={commodity ?? ''}
-            onChange={(event) => {
-              setSearchParams({ commodity: event.target.value || null });
-            }}
-          >
-            <option value="">All commodities</option>
-            {commodities.status === 'ok' &&
-              commodities.data.commodities.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.name}
-                </option>
-              ))}
-          </Select>
-        </label>
+        <Select
+          aria-label="Commodity"
+          className="w-56"
+          icon={<Wheat aria-hidden="true" className="text-muted-foreground" />}
+          value={commodity ?? ''}
+          onValueChange={(next) => {
+            setSearchParams({ commodity: next || null });
+          }}
+          options={[
+            { value: '', label: 'All commodities' },
+            ...(commodities.status === 'ok'
+              ? commodities.data.commodities.map((item) => ({ value: item.code, label: item.name }))
+              : []),
+          ]}
+        />
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"

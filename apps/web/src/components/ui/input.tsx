@@ -10,11 +10,6 @@ export function Input({ className, ...props }: ComponentProps<'input'>) {
   return <input data-slot="input" className={cn(fieldClass, className)} {...props} />;
 }
 
-/** A native select, styled like Input; the browser draws its list. */
-export function Select({ className, ...props }: ComponentProps<'select'>) {
-  return <select data-slot="select" className={cn(fieldClass, 'px-2', className)} {...props} />;
-}
-
 /** Several lines of text, styled like Input. */
 export function Textarea({ className, ...props }: ComponentProps<'textarea'>) {
   return (
