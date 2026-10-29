@@ -122,12 +122,17 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
 
   // Correct the details and the location.
   await page.getByRole('button', { name: 'Edit details' }).click();
-  await page
-    .getByRole('form', { name: 'Edit details' })
-    .getByLabel('Trading name')
-    .fill('Hand Grower');
+  const details = page.getByRole('form', { name: 'Edit details' });
+  await details.getByLabel('Trading name').fill('Hand Grower');
+  await details.getByLabel('Website').fill('Example.com/');
   await page.getByRole('button', { name: 'Save details' }).click();
   await expect(page.getByText('Trading as Hand Grower')).toBeVisible();
+  // Saved as https://example.com and opened in a new tab. Whether a preview is offered
+  // depends on the live site, so it is not checked here.
+  const website = page.getByRole('link', { name: 'example.com (opens in a new tab)' });
+  await expect(website).toHaveAttribute('href', 'https://example.com');
+  await expect(website).toHaveAttribute('target', '_blank');
+  await expect(website).toHaveAttribute('rel', 'noopener noreferrer');
 
   await page.getByRole('button', { name: 'Edit Synthetic Town' }).click();
   const edit = page.getByRole('form', { name: 'Edit Synthetic Town' });

@@ -59,6 +59,7 @@ describe('parseImportRow', () => {
         country: 'Canada',
         types: 'Buyer; seller',
         verificationStatus: 'Verified',
+        website: 'WWW.Example.com',
         notes: 'Prefers rail.\r\nCall mornings.',
         contactName: 'Synthetic Merchandiser',
         contactRole: 'Grain buyer',
@@ -82,6 +83,7 @@ describe('parseImportRow', () => {
         types: ['buyer', 'seller'],
         primaryCountry: 'CA',
         verificationStatus: 'verified',
+        website: 'https://www.example.com',
         notes: 'Prefers rail.\nCall mornings.',
       },
       contact: {
@@ -114,6 +116,7 @@ describe('parseImportRow', () => {
         types: ['buyer'],
         primaryCountry: 'US',
         verificationStatus: 'unverified',
+        website: null,
         notes: null,
       },
       contact: null,
@@ -269,6 +272,7 @@ describe('groupImportRows', () => {
           country: 'CA',
           tradingName: 'Mills Two',
           verificationStatus: 'verified',
+          website: 'mills-two.example.com',
         },
         3,
       ),
@@ -283,6 +287,11 @@ describe('groupImportRows', () => {
       {
         line: 3,
         field: 'verificationStatus',
+        message: "differs from line 2 for the same company; line 2's value is used",
+      },
+      {
+        line: 3,
+        field: 'website',
         message: "differs from line 2 for the same company; line 2's value is used",
       },
     ]);
@@ -415,6 +424,37 @@ describe('buyers and sellers in an import', () => {
   });
 });
 
+describe('websites', () => {
+  it('are tidied in a row and a form, and reported by field when they are not web addresses', () => {
+    expect(
+      ok({ legalName: 'Synthetic Mill', country: 'CA', website: 'example.com/grain' }),
+    ).toMatchObject({ counterparty: { website: 'https://example.com/grain' } });
+    expect(
+      issues({ legalName: 'Synthetic Mill', country: 'CA', website: 'javascript:alert(1)' }),
+    ).toEqual(['website: must be a web address such as example.com']);
+    expect(
+      parseCounterpartyFields({
+        legalName: 'Synthetic Mill',
+        country: 'CA',
+        types: 'buyer',
+        website: 'http://localhost',
+      }),
+    ).toEqual({
+      status: 'invalid',
+      issues: [{ field: 'website', message: 'needs a public site name such as example.com' }],
+    });
+  });
+
+  it('are matched from website and homepage columns', () => {
+    expect(suggestMapping(['Company', 'Country', 'Home Page'])).toMatchObject({
+      website: 'Home Page',
+    });
+    expect(suggestMapping(['Company', 'Country', 'Web site'])).toMatchObject({
+      website: 'Web site',
+    });
+  });
+});
+
 describe('notes', () => {
   it('keep their line breaks, with at most one blank line between paragraphs', () => {
     expect(
@@ -475,6 +515,7 @@ describe('edit forms', () => {
         types: ['seller', 'buyer'],
         primaryCountry: 'US',
         verificationStatus: 'unverified',
+        website: null,
         notes: null,
       },
     });

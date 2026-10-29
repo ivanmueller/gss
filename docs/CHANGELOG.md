@@ -1,5 +1,14 @@
 # Documentation pack changelog
 
+## 2026-10-29 — A website on each counterparty
+
+- `docs/DECISIONS.md`: the owner's request and the choices made (public web addresses only, the Worker's check of whether a site may be previewed, the sandboxed preview).
+- `docs/DATA_MODEL.md`: `website` on counterparties; migration `20261029050000_counterparty_website.sql`.
+- `docs/API.md`: `website` on a counterparty; `GET /api/v1/counterparties/{id}/website-preview`.
+- `docs/DESIGN_SYSTEM.md`: `Dialog`.
+- `docs/ARCHITECTURE.md`: the website check among the Worker's outbound adapters.
+- `docs/PRODUCT.md`, `README.md` ("Counterparties"): the website link and Preview.
+
 ## 2026-10-29 — Counterparties open on Logos; searchable counterparty pickers
 
 - `docs/DECISIONS.md`: the owner's request and the choices made (Logos first, the map kept as a view, `SearchSelect`).

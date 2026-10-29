@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { normalizeCountry, normalizeRegion, type CountryCode } from './regions';
+import { parseWebsite } from './website';
 
 /** Values accepted by the database enums in app (20261027030100_counterparty_directory.sql). */
 export const COUNTERPARTY_TYPES = ['buyer', 'seller', 'broker', 'carrier'] as const;
@@ -86,6 +87,12 @@ export const IMPORT_FIELDS = [
     label: 'Verification status',
     required: false,
     headers: ['verification', 'verification status', 'verified'],
+  },
+  {
+    id: 'website',
+    label: 'Website',
+    required: false,
+    headers: ['website', 'web site', 'web', 'url', 'homepage', 'home page', 'web address'],
   },
   {
     id: 'notes',
@@ -186,6 +193,7 @@ export const COUNTERPARTY_FIELD_IDS = [
   'country',
   'types',
   'verificationStatus',
+  'website',
   'notes',
 ] as const satisfies readonly ImportFieldId[];
 export const CONTACT_FIELD_IDS = [
@@ -272,6 +280,8 @@ export interface CounterpartyInput {
   types: CounterpartyType[];
   primaryCountry: CountryCode;
   verificationStatus: VerificationStatus;
+  /** A public http or https address, tidied by parseWebsite. */
+  website: string | null;
   notes: string | null;
 }
 
@@ -476,10 +486,26 @@ function readCounterparty(
     else verificationStatus = status;
   }
 
+  const websiteText = r.value('website');
+  let website: string | null = null;
+  if (websiteText !== null) {
+    const parsed = parseWebsite(websiteText);
+    if (parsed.ok) website = parsed.website;
+    else r.issue('website', parsed.message);
+  }
+
   const notes = cleanLines(r.raw('notes'));
 
   if (legalName === null || country === null || types.length === 0) return null;
-  return { legalName, tradingName, types, primaryCountry: country, verificationStatus, notes };
+  return {
+    legalName,
+    tradingName,
+    types,
+    primaryCountry: country,
+    verificationStatus,
+    website,
+    notes,
+  };
 }
 
 /** A contact, or null when no contact field has a value. */
@@ -745,6 +771,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         ['tradingName', first.tradingName, row.counterparty.tradingName],
         ['types', first.types.join(', '), row.counterparty.types.join(', ')],
         ['verificationStatus', first.verificationStatus, row.counterparty.verificationStatus],
+        ['website', first.website, row.counterparty.website],
         ['notes', first.notes, row.counterparty.notes],
       ];
       for (const [field, kept, ignored] of compare) {
