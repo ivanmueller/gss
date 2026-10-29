@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Codex's review of the CRM
+
+- `docs/DATA_MODEL.md`: migration `20261029080000_crm_insert_column_grants.sql` (insert grants by column on the CRM tables; the database's own times).
+
 ## 2026-10-29 — A CRM for counterparties (GT-027)
 
 - `docs/DECISIONS.md`: the owner's request and answers, and the choices made (who may do what, corrections as versions, follow-ups changed while open and final once done, Central time, anyone on the team responsible, archived counterparties, the menu's count, what is left out).

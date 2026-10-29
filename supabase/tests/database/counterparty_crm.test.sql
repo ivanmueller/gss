@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(71);
+select plan(77);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), adam (org_admin), olivia (operations), victor (viewer, no name),
@@ -131,10 +131,27 @@ $fn$;
 
 -- Privileges ---------------------------------------------------------------------
 select ok(
-  has_table_privilege('app_api', 'app.contact_log_entries', 'select, insert')
-    and has_table_privilege('app_api', 'app.contact_log_revisions', 'select, insert')
-    and has_table_privilege('app_api', 'app.follow_ups', 'select, insert'),
+  has_table_privilege('app_api', 'app.contact_log_entries', 'select')
+    and has_table_privilege('app_api', 'app.contact_log_revisions', 'select')
+    and has_table_privilege('app_api', 'app.follow_ups', 'select')
+    and has_column_privilege('app_api', 'app.contact_log_entries', 'counterparty_id', 'insert')
+    and has_column_privilege('app_api', 'app.contact_log_revisions', 'occurred_at', 'insert')
+    and has_column_privilege('app_api', 'app.follow_ups', 'due_at', 'insert'),
   'app_api reads and adds contact log entries, revisions and follow-ups'
+);
+-- Codex's review of ivanmueller/gss#69 (20261029080000_crm_insert_column_grants.sql).
+select ok(
+  not has_table_privilege('app_api', 'app.contact_log_entries', 'insert')
+    and not has_table_privilege('app_api', 'app.contact_log_revisions', 'insert')
+    and not has_table_privilege('app_api', 'app.follow_ups', 'insert')
+    and not has_column_privilege('app_api', 'app.contact_log_entries', 'created_at', 'insert')
+    and not has_column_privilege('app_api', 'app.contact_log_revisions', 'created_at', 'insert')
+    and not has_column_privilege('app_api', 'app.follow_ups', 'created_at', 'insert')
+    and not has_column_privilege('app_api', 'app.follow_ups', 'updated_at', 'insert')
+    and not has_column_privilege('app_api', 'app.follow_ups', 'done_at', 'insert')
+    and not has_column_privilege('app_api', 'app.follow_ups', 'done_by', 'insert')
+    and not has_column_privilege('app_api', 'app.follow_ups', 'done_by_name', 'insert'),
+  'app_api cannot set the times the database records, or add a follow-up already done'
 );
 select ok(
   not has_table_privilege('app_api', 'app.contact_log_entries', 'update, delete, truncate')
@@ -339,6 +356,28 @@ select is(
             '''Asked about November delivery.''', 'null')),
   1, 'notes may be left out'
 );
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa'),
+                    'recorded_by_name)', 'recorded_by_name, created_at)'),
+            '''Synthetic Person'')', '''Synthetic Person'', ''2099-01-01T00:00:00Z'')')),
+  '42501', null, 'a revision cannot set its own recording time'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(replace(replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa'),
+                    'recorded_by_name)', 'recorded_by_name, created_at)'),
+            '''Synthetic Person'')', '''Synthetic Person'', ''2099-01-01T00:00:00Z'')'),
+            'now() - interval ''1 hour''', '''2099-01-01T00:00:00Z''')),
+  '42501', null, 'a contact in 2099 cannot pass as recorded in 2099 (Codex''s case)'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    $$insert into app.contact_log_entries (organization_id, counterparty_id, created_by, created_at)
+      values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
+              '00000000-0000-4000-8000-0000000044aa', '2020-01-01T00:00:00Z')$$),
+  '42501', null, 'an entry cannot set its own creation time'
+);
 
 -- Follow-ups: who may plan them, and for whom ------------------------------------------
 select throws_ok(
@@ -383,6 +422,20 @@ select throws_ok(
     replace(pg_temp.new_follow_up('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000044aa',
       '00000000-0000-4000-8000-0000000022aa'), 'now() + interval ''1 day''', '''2100-01-01T00:00:00Z''')),
   '23514', null, 'a due time in 2100 or later is refused'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(replace(pg_temp.new_follow_up('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000044aa',
+      '00000000-0000-4000-8000-0000000022aa'), 'created_by_name)', 'created_by_name, created_at, updated_at)'),
+      '''Synthetic Person'')', '''Synthetic Person'', ''2020-01-01T00:00:00Z'', ''2020-01-01T00:00:00Z'')')),
+  '42501', null, 'a follow-up cannot set its own creation or change time'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(replace(pg_temp.new_follow_up('00000000-0000-4000-8000-00000000f001', '00000000-0000-4000-8000-0000000044aa',
+      '00000000-0000-4000-8000-0000000022aa'), 'created_by_name)', 'created_by_name, done_at, done_by, done_by_name)'),
+      '''Synthetic Person'')', '''Synthetic Person'', now(), ''00000000-0000-4000-8000-0000000044aa'', ''Synthetic Person'')')),
+  '42501', null, 'a follow-up cannot be added already done'
 );
 select is(
   pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
