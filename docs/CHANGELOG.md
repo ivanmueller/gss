@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #75
+
+- `docs/HANDOFF.md`: ivanmueller/gss#75 with its CI and Deploy staging runs; the next task, the owner's choice of a redesigned counterparty page for buyers and sellers.
+
 ## 2026-10-29 — Handoff record of #74
 
 - `docs/HANDOFF.md`: ivanmueller/gss#74 with its CI and Deploy staging runs; #73's runs on `main` green; the owner's check of times in MT on staging.
