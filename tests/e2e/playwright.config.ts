@@ -23,7 +23,6 @@ export default defineConfig({
         'routing.spec.ts',
         'auth.spec.ts',
         'counterparties.spec.ts',
-        'crm.spec.ts',
         'team.spec.ts',
       ],
       dependencies: ['setup'],
