@@ -5,6 +5,7 @@ import {
   parseWebsite,
   websiteLabel,
   websiteProblem,
+  writtenAddressProblem,
   type WebAddress,
 } from './website';
 
@@ -25,12 +26,27 @@ describe('parseWebsite', () => {
       ok: true,
       website: 'http://example.com/about/',
     });
-    // The default port is no port.
-    expect(ok('https://example.com:443')).toEqual({ ok: true, website: 'https://example.com' });
-    // International names are kept in their ASCII form.
-    expect(ok('bücher.example.ca')).toEqual({
-      ok: true,
-      website: 'https://xn--bcher-kva.example.ca',
+  });
+
+  it('refuses international site names, which the database cannot check (Codex’s review)', () => {
+    for (const text of [
+      'bücher.example.ca',
+      'https://xn--bcher-kva.example.ca',
+      'https://shop.xn--bcher-kva.ca/grain',
+      'https://example.xn--p1ai',
+    ]) {
+      expect(ok(text)).toEqual({
+        ok: false,
+        message: 'needs a site name in plain letters, without accents',
+      });
+    }
+  });
+
+  it('counts the length of the saved address, with accents percent-encoded', () => {
+    expect(ok('example.com/é')).toEqual({ ok: true, website: 'https://example.com/%C3%A9' });
+    expect(ok(`example.com/${'é'.repeat(100)}`)).toEqual({
+      ok: false,
+      message: `is longer than ${String(MAX_WEBSITE_LENGTH)} characters`,
     });
   });
 
@@ -54,9 +70,24 @@ describe('parseWebsite', () => {
       ok: false,
       message: 'must not include a user name or password',
     });
-    expect(ok('example.com:8080')).toEqual({
+    // Every port as written, even a default one, which URL parsing would drop (Codex's review).
+    for (const text of [
+      'example.com:8080',
+      'https://example.com:443',
+      'http://example.com:80/grain',
+      'example.com:443',
+      'https://example.com:',
+    ]) {
+      expect(ok(text)).toEqual({ ok: false, message: 'must not include a port number' });
+    }
+    expect(ok('https://user@example.com')).toEqual({
       ok: false,
-      message: 'must not include a port number',
+      message: 'must not include a user name or password',
+    });
+    // A backslash ends the site name, as in browsers: this is example.com with a path.
+    expect(ok('https://example.com\\@evil.example.org')).toEqual({
+      ok: true,
+      website: 'https://example.com/@evil.example.org',
     });
     for (const text of ['127.0.0.1', 'http://10.0.0.8/admin', 'https://[::1]/', 'http://0x7f.1']) {
       expect(ok(text)).toEqual({
@@ -92,9 +123,42 @@ describe('parseWebsite', () => {
 });
 
 describe('websiteProblem', () => {
-  it('checks an address already parsed, such as a redirect', () => {
+  it('checks an address already parsed', () => {
     expect(websiteProblem(new URL('https://www.example.com/next'))).toBeNull();
     expect(websiteProblem(new URL('http://169.254.169.254/latest'))).toBe(
+      'needs a site name such as example.com, not a number address',
+    );
+  });
+});
+
+describe('writtenAddressProblem', () => {
+  it('reads the site part of an address as written, before parsing tidies it', () => {
+    expect(writtenAddressProblem('https://www.example.com/next')).toBeNull();
+    expect(writtenAddressProblem('/relative/path:with:colons')).toBeNull();
+    expect(writtenAddressProblem('next?at=a@b')).toBeNull();
+    expect(writtenAddressProblem('https://example.com:443/')).toBe(
+      'must not include a port number',
+    );
+    expect(writtenAddressProblem('//example.com:443/')).toBe('must not include a port number');
+    expect(writtenAddressProblem('https:\\\\example.com:443')).toBe(
+      'must not include a port number',
+    );
+    expect(writtenAddressProblem('https:example.com:443')).toBe('must not include a port number');
+    expect(writtenAddressProblem('https://u:p@example.com/')).toBe(
+      'must not include a user name or password',
+    );
+    // Parsing drops tabs and line breaks, which would hide a port (Codex's review).
+    expect(writtenAddressProblem('ht\ttps://other.example.com:443/')).toBe(
+      'must not contain spaces',
+    );
+    expect(writtenAddressProblem('https://other.example.com:4\n43/')).toBe(
+      'must not contain spaces',
+    );
+    expect(writtenAddressProblem(' https://other.example.com/')).toBe('must not contain spaces');
+    expect(writtenAddressProblem('\u0000https://other.example.com/')).toBe(
+      'must not contain spaces',
+    );
+    expect(writtenAddressProblem('https://[::1]/')).toBe(
       'needs a site name such as example.com, not a number address',
     );
   });

@@ -56,12 +56,6 @@ export interface CounterpartyDetail extends CounterpartySummary {
   facilities: Facility[];
 }
 
-/** GET /counterparties/{id}/website-preview: whether the site may be shown inside the app. */
-export interface WebsitePreview {
-  website: string;
-  preview: 'allowed' | 'refused' | 'not_secure' | 'unreachable';
-}
-
 export interface CounterpartyList {
   counterparties: CounterpartySummary[];
   truncated: boolean;

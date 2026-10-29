@@ -91,7 +91,7 @@ Operations and admin members can:
 
 - **Add counterparty:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
 - **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped.
-- **Website:** entered under **Edit details** (or when adding a counterparty, or from a "Website" column in a spreadsheet); `example.com` is saved as `https://example.com`. On the counterparty's page it is a link that opens in a new tab. **Preview** shows the site in a pop-up window, and appears only for sites that allow being shown inside another site's page; many company sites do not, and then only the link is shown. To check, the Worker asks the site once each time the page opens, reading only its headers.
+- **Website:** entered under **Edit details** (or when adding a counterparty, or from a "Website" column in a spreadsheet); `example.com` is saved as `https://example.com`. The site name must be in plain letters (no accents). On the counterparty's page it is a link that opens in a new tab.
 - On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 
 ## Bids and offers

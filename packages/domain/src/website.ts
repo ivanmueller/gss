@@ -1,8 +1,7 @@
 // A counterparty's website (the owner's request of 2026-10-29, docs/DECISIONS.md). Only
 // public http and https addresses by name are kept: no other schemes (javascript:, data:,
 // file:), no user names or passwords, no port numbers and no number addresses or local
-// names, because the link is opened by staff and its page is fetched by the Worker to see
-// whether it can be previewed.
+// names, because the link is opened by staff from the app.
 
 // URL exists wherever this package runs (browsers, Workers, Node), but the package is
 // compiled against ES2022 alone, without DOM types; this is the part of it used here.
@@ -40,16 +39,35 @@ const PRIVATE_SUFFIXES = new Set([
   'test',
 ]);
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const TOP_LEVEL = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
+const TOP_LEVEL = /^[a-z]{2,63}$/;
 const IPV4 = /^\d+(?:\.\d+){3}$/;
 // "mailto:", "javascript:" and the like; a colon followed by a digit is a port instead.
 const OTHER_SCHEME = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
 const WEB_SCHEME = /^https?:\/\//i;
 
+// The user, host and port as written, before URL parsing tidies them: parsing drops a
+// default port (https://example.com:443), so a port is looked for in the text itself.
+// Special schemes take any number of slashes, and a backslash counts as one, as in URL.
+const WRITTEN_AUTHORITY = /^(?:[a-z][a-z0-9+.-]*:[/\\]*|[/\\]{2})([^/\\?#]*)/i;
+
 /**
- * Why a parsed address is not a public website, or null when it is. Used for a saved
- * website and for every redirect the Worker follows when it checks one.
+ * Why the address as written (absolute, or starting with //) names its site in a way a
+ * website may not, or null. A relative address has no site of its own and gives null.
  */
+export function writtenAddressProblem(text: string): string | null {
+  // URL parsing drops tabs and line breaks anywhere and spaces and control characters at
+  // the ends, so "ht\ttps://example.com:443" would lose both the tab and the port.
+  if (/[\s\p{Cc}]/u.test(text)) return 'must not contain spaces';
+  const authority = WRITTEN_AUTHORITY.exec(text)?.[1];
+  if (authority === undefined) return null;
+  if (authority.includes('@')) return 'must not include a user name or password';
+  if (authority.startsWith('['))
+    return 'needs a site name such as example.com, not a number address';
+  if (authority.includes(':')) return 'must not include a port number';
+  return null;
+}
+
+/** Why a parsed address is not a public website, or null when it is. */
 export function websiteProblem(url: WebAddress): string | null {
   if (url.protocol !== 'https:' && url.protocol !== 'http:')
     return 'must be a web address such as example.com';
@@ -60,6 +78,10 @@ export function websiteProblem(url: WebAddress): string | null {
     return 'needs a site name such as example.com, not a number address';
   const labels = host.split('.');
   const top = labels.at(-1) ?? '';
+  // An international name in its ASCII form. The database cannot check that such a name is
+  // valid (URL parsing does), so to keep both to one rule they are not taken (Codex's review).
+  if (labels.some((label) => label.startsWith('xn--')))
+    return 'needs a site name in plain letters, without accents';
   if (
     labels.length < 2 ||
     !labels.every((label) => LABEL.test(label)) ||
@@ -84,9 +106,12 @@ export function parseWebsite(text: string): WebsiteResult {
     return { ok: false, message: 'must not contain spaces' };
   if (!WEB_SCHEME.test(value) && OTHER_SCHEME.test(value))
     return { ok: false, message: 'must be a web address such as example.com' };
+  const address = WEB_SCHEME.test(value) ? value : `https://${value}`;
+  const written = writtenAddressProblem(address);
+  if (written !== null) return { ok: false, message: written };
   let url: WebAddress;
   try {
-    url = new URL(WEB_SCHEME.test(value) ? value : `https://${value}`);
+    url = new URL(address);
   } catch {
     return { ok: false, message: `"${value}" is not a web address` };
   }

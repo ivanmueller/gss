@@ -15,7 +15,7 @@ Cloudflare Worker — Hono API
    |  typed repositories / outbound adapters
 Supabase Postgres — PostGIS, quote history, scenarios, audit
 Supabase Storage — private supporting documents
-External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker scheduled job, GT-052); counterparty websites (Worker, headers only, to see whether a site may be previewed); ArcGIS map layers (requested, GT-026); routing, licensed price data (as added)
+External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker scheduled job, GT-052); ArcGIS map layers (requested, GT-026); routing, licensed price data (as added)
 ```
 
 The frontend calls one documented application API for sensitive operations. Avoid direct browser writes to commercial tables. Keep the system a **modular monolith** initially, not a distributed collection of microservices.

@@ -1,5 +1,20 @@
 # Documentation pack changelog
 
+## 2026-10-29 — No website preview (owner's decision)
+
+- `docs/DECISIONS.md`: the website entry rewritten as built, with the preview removed and why; the review's address rules kept.
+- `docs/API.md`: `GET /api/v1/counterparties/{id}/website-preview` removed.
+- `docs/ARCHITECTURE.md`: counterparty websites no longer among the Worker's outbound adapters.
+- `docs/DESIGN_SYSTEM.md`: `Dialog` removed.
+- `docs/PRODUCT.md`, `README.md` ("Counterparties"): the website link only.
+
+## 2026-10-29 — Codex's review of the website field
+
+- `docs/DATA_MODEL.md`: migration `20261029060000_counterparty_website_rules.sql` (printable ASCII after the site name; no international labels).
+- `docs/DECISIONS.md`: ports and user names refused as written, also with a tab or line break inside; the database holding site names to the same rules; site names in plain letters only; the preview without `allow-same-origin`.
+- `README.md` ("Counterparties"): plain-letter site names.
+- `docs/API.md`: the preview check refuses the app's own address and redirects written with a port or user name.
+
 ## 2026-10-29 — A website on each counterparty
 
 - `docs/DECISIONS.md`: the owner's request and the choices made (public web addresses only, the Worker's check of whether a site may be previewed, the sandboxed preview).
