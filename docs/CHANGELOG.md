@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #74
+
+- `docs/HANDOFF.md`: ivanmueller/gss#74 with its CI and Deploy staging runs; #73's runs on `main` green; the owner's check of times in MT on staging.
+
 ## 2026-10-29 — Handoff record of #72 and #73
 
 - `docs/HANDOFF.md`: Alberta time on every screen (ivanmueller/gss#73) and the handoff record of #71 (#72), with their CI and Deploy staging runs; the next task, the owner's check on staging of times in MT and of the CRM.
