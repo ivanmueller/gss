@@ -1,0 +1,50 @@
+import { centralDay, centralToUtc, utcToCentral, type FollowUp } from '@grain/domain';
+
+// The CRM's helpers for the web app: who may do what, and its times in Central time.
+
+/** Roles that log contacts and plan, change and finish follow-ups (owner's decision, 2026-10-29). */
+export function canLogContacts(role: string): boolean {
+  return role === 'trader' || role === 'operations' || role === 'org_admin';
+}
+
+/** Whether the person may mark this follow-up done: those who plan, or the person responsible. */
+export function canFinish(followUp: FollowUp, role: string, userId: string | undefined): boolean {
+  return canLogContacts(role) || (userId !== undefined && followUp.assignedTo.userId === userId);
+}
+
+/**
+ * A datetime-local value, read as Central time, as a UTC instant for the API; empty stays
+ * empty, and anything else is sent as typed, for the API to refuse with its message.
+ */
+export function centralInputToRequest(local: string | undefined): string {
+  if (!local) return '';
+  return centralToUtc(local) ?? local;
+}
+
+/** Now in Central time, as a datetime-local input shows it. */
+export function centralNowInput(now = new Date()): string {
+  return utcToCentral(now.toISOString());
+}
+
+/** 9:00 am Central tomorrow, as a datetime-local input shows it: a follow-up's first due time. */
+export function defaultDueInput(now = new Date()): string {
+  const tomorrow = new Date(`${centralDay(now)}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  return `${tomorrow.toISOString().slice(0, 10)}T09:00`;
+}
+
+export type DueState = 'done' | 'overdue' | 'today' | 'upcoming';
+
+/** Done; overdue (its due time has passed); due later today in Central time; or upcoming. */
+export function dueState(followUp: Pick<FollowUp, 'dueAt' | 'doneAt'>, now = new Date()): DueState {
+  if (followUp.doneAt !== null) return 'done';
+  if (Date.parse(followUp.dueAt) < now.getTime()) return 'overdue';
+  return centralDay(followUp.dueAt) === centralDay(now) ? 'today' : 'upcoming';
+}
+
+/** The window event that asks the menu's follow-up count to refresh after a change. */
+export const FOLLOW_UPS_CHANGED = 'app:follow-ups-changed';
+
+export function noteFollowUpsChanged() {
+  window.dispatchEvent(new Event(FOLLOW_UPS_CHANGED));
+}

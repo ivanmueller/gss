@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import { requireUser } from './auth';
 import { counterpartyRoutes } from './counterparties';
+import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
@@ -111,6 +112,8 @@ export function createApp(openDatabase: DatabaseFactory) {
   app.route('/commodities', commodityRoutes(openDatabase));
   app.route('/freight-quotes', freightRoutes(openDatabase));
   app.route('/fx-quotes', fxQuoteRoutes(openDatabase));
+  app.route('/contact-log', contactLogRoutes(openDatabase));
+  app.route('/follow-ups', followUpRoutes(openDatabase));
 
   return app;
 }

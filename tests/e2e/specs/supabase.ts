@@ -43,7 +43,7 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
   const url = env('E2E_SUPABASE_URL');
   const sql = postgres(env('E2E_DATABASE_URL'), { max: 1, onnotice: () => undefined });
   try {
-    // Bids, offers and freight rates are never deleted (their revisions are history, kept by
+    // Bids, offers, freight rates, the contact log and follow-ups are never deleted (kept by
     // the database even from its owner), so a database where an earlier run entered some
     // cannot be reset by this setup: start from a fresh local database instead.
     const [kept] = await sql<{ count: number }[]>`
@@ -52,10 +52,12 @@ export async function recreateE2eUser(request: APIRequestContext): Promise<void>
       )
       select (select count(*) from app.quotes where organization_id in (select id from e2e))::int
            + (select count(*) from app.freight_quotes where organization_id in (select id from e2e))::int
+           + (select count(*) from app.contact_log_entries where organization_id in (select id from e2e))::int
+           + (select count(*) from app.follow_ups where organization_id in (select id from e2e))::int
              as count`;
     if ((kept?.count ?? 0) > 0) {
       throw new Error(
-        'An earlier browser test run left bids, offers or freight rates, which are never deleted. Reset the local database first: supabase db reset',
+        'An earlier browser test run left bids, offers, freight rates, contacts logged or follow-ups, which are never deleted. Reset the local database first: supabase db reset',
       );
     }
     // App tables reference auth.users and the organization, so remove the previous

@@ -1,5 +1,15 @@
 # Documentation pack changelog
 
+## 2026-10-29 — A CRM for counterparties (GT-027)
+
+- `docs/DECISIONS.md`: the owner's request and answers, and the choices made (who may do what, corrections as versions, follow-ups changed while open and final once done, Central time, anyone on the team responsible, archived counterparties, the menu's count, what is left out).
+- `docs/DATA_MODEL.md`: `contact_log_entries`, `contact_log_revisions` and `follow_ups`; migration `20261029070000_counterparty_crm.sql`.
+- `docs/API.md`: `/api/v1/contact-log` and `/api/v1/follow-ups` (with `/count` and `/team`).
+- `docs/PRODUCT.md`: the counterparty page's follow-ups and contact history, the `/follow-ups` page and the menu's count.
+- `docs/BUILD_PLAN.md`: GT-027 in Phase 2, built.
+- `docs/DESIGN_SYSTEM.md`: `CounterpartyCrm`, `CrmForms`, `FollowUpItem`, `DueBadge`; a count beside a menu item.
+- `README.md`: "Contact log and follow-ups".
+
 ## 2026-10-29 — Handoff record of #64 to #66
 
 - `docs/HANDOFF.md`: the website field (ivanmueller/gss#65, #66) with Codex's two reviews and the preview's removal, the handoff record of #63 (#64); CI runs #138 to #145 and Deploy staging runs #61 to #63; the owner's checks on staging (Logos and searchable pickers, the Freight page, a stored Bank of Canada rate); the next task.

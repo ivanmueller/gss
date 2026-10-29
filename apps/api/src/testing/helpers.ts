@@ -98,6 +98,27 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     reviseFreight: vi.fn<Database['reviseFreight']>(() => saved()),
     withdrawFreight: vi.fn<Database['withdrawFreight']>(() => saved()),
+    listContactLog: vi.fn<Database['listContactLog']>(() => Promise.resolve([])),
+    getContactLogEntry: vi.fn<Database['getContactLogEntry']>(() => Promise.resolve(null)),
+    createContactLog: vi.fn<Database['createContactLog']>(() =>
+      Promise.resolve({
+        status: 'created',
+        id: '00000000-0000-4000-8000-00000000e101',
+        followUpId: null,
+      }),
+    ),
+    correctContactLog: vi.fn<Database['correctContactLog']>(() => saved()),
+    listFollowUps: vi.fn<Database['listFollowUps']>(() => Promise.resolve([])),
+    countFollowUps: vi.fn<Database['countFollowUps']>(() =>
+      Promise.resolve({ overdue: 0, dueToday: 0 }),
+    ),
+    teamNames: vi.fn<Database['teamNames']>(() => Promise.resolve([])),
+    getFollowUp: vi.fn<Database['getFollowUp']>(() => Promise.resolve(null)),
+    createFollowUp: vi.fn<Database['createFollowUp']>(() =>
+      Promise.resolve({ status: 'created', id: '00000000-0000-4000-8000-00000000f101' }),
+    ),
+    updateFollowUp: vi.fn<Database['updateFollowUp']>(() => saved()),
+    finishFollowUp: vi.fn<Database['finishFollowUp']>(() => saved()),
     listFxQuotes: vi.fn<Database['listFxQuotes']>(() => Promise.resolve([])),
     storeBankOfCanadaRates: vi.fn<Database['storeBankOfCanadaRates']>((rates) =>
       Promise.resolve(rates.map((rate) => ({ rate, outcome: 'stored' as const }))),

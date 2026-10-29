@@ -57,8 +57,8 @@ const DETAIL: CounterpartyDetail = {
 };
 
 /**
- * The page's API, with no bids, offers or freight for the counterparty unless a test says
- * otherwise.
+ * The page's API, with no bids, offers, freight, contacts logged or follow-ups for the
+ * counterparty unless a test says otherwise.
  */
 function mockApi(handlers: Parameters<typeof mockBaseApi>[0]) {
   return mockBaseApi({
@@ -67,6 +67,11 @@ function mockApi(handlers: Parameters<typeof mockBaseApi>[0]) {
       Response.json({ freight: [], truncated: false }),
     [`GET /freight-quotes?carrier_id=${ID}`]: () =>
       Response.json({ freight: [], truncated: false }),
+    [`GET /contact-log?counterparty_id=${ID}`]: () =>
+      Response.json({ entries: [], truncated: false }),
+    [`GET /follow-ups?counterparty_id=${ID}&status=all`]: () =>
+      Response.json({ followUps: [], truncated: false }),
+    [`GET /follow-ups/team?organization_id=${ORG.id}`]: () => Response.json({ members: [] }),
     ...handlers,
   });
 }

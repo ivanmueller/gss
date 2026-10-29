@@ -14,6 +14,7 @@ Ticket by ticket, with notes, in `docs/HANDOFF.md`. In short:
 | 3 — Versioned quotes | Mostly done: quote and revision tables (GT-030), entering, revising, withdrawing and expiry (GT-031), validation (GT-032), live quotes in a list, on counterparty pages and in the workspace (GT-033), provenance and audit (GT-034). Not started: quote import from files (GT-035). The gate's "never mislabeled firm or actionable" holds for status; actionability comes with Phase 4. |
 | 5 (pulled forward) — Bank of Canada FX connector (GT-052) | Done (ivanmueller/gss#54, #55): the Worker stores the daily USD/CAD rate twice a day and the workspace converts USD bids and offers with it; a stored rate was seen on staging by the owner (2026-10-29). |
 | 5 (pulled forward) — Carrier freight rates (part of GT-050) | Built at the owner's request (2026-10-29, the priority after the FX connector): carriers in Counterparties with a Carriers filter, and the Freight page for carrier rates from one location to another, kept as revisions. Lanes without a carrier quote, route geometry and routing (GT-051) are not started. |
+| 2 — CRM for counterparties (GT-027) | Built at the owner's request (2026-10-29): a contact log (calls, emails, meetings and visits, corrections kept as versions) and follow-ups (due time in Central time, the person responsible, marked done) on each counterparty's page, a Follow-ups page and a count in the menu. |
 | Owner's requests not started | Map overlay layers from ArcGIS (GT-026), waiting for the first layer's address. |
 | 4, 5 (rest), 6 | Not started. The thin trade slice is next. |
 
@@ -39,7 +40,7 @@ After GT-013–GT-015 establish secure organization-bound schema and minimal dat
 
 ## Phase 2 — Counterparties, facilities, map and table
 
-**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 Mapbox GL JS map with Mapbox tiles; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures; GT-026 map overlay layers from ArcGIS services (owner's request, 2026-10-29), switchable on the Mapbox maps, each layer's terms of use recorded first.
+**Tickets:** GT-020 counterparty CRUD with permissions; GT-021 facility details/geocoding precision; GT-022 viewport/bbox API using PostGIS; GT-023 Mapbox GL JS map with Mapbox tiles; GT-024 responsive synchronized facility table, filters and accessibility; GT-025 synthetic producer/buyer fixtures; GT-026 map overlay layers from ArcGIS services (owner's request, 2026-10-29), switchable on the Mapbox maps, each layer's terms of use recorded first; GT-027 the counterparty communication log: contacts logged and follow-ups planned (owner's request, 2026-10-29).
 
 **Gate:** Verified/approximate geolocations display distinctly; map selection updates detail panel and table; tenant isolation holds for geographic queries; mobile/narrow screens remain usable.
 

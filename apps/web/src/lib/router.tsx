@@ -63,6 +63,7 @@ export type Route =
   | { page: 'freight' }
   | { page: 'new-freight' }
   | { page: 'freight-rate'; id: string }
+  | { page: 'follow-ups' }
   /** An old address that now lives elsewhere. */
   | { page: 'redirect'; to: string }
   | { page: 'not-found' };
@@ -85,6 +86,7 @@ export function matchRoute(path: string): Route {
   if (trimmed === '/quotes/new') return { page: 'new-quote' };
   const quote = /^\/quotes\/([0-9a-f-]{36})$/i.exec(trimmed);
   if (quote?.[1]) return { page: 'quote', id: quote[1] };
+  if (trimmed === '/follow-ups') return { page: 'follow-ups' };
   if (trimmed === '/freight') return { page: 'freight' };
   if (trimmed === '/freight/new') return { page: 'new-freight' };
   const freight = /^\/freight\/([0-9a-f-]{36})$/i.exec(trimmed);

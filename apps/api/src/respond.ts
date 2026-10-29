@@ -123,6 +123,9 @@ function databaseFailure(c: ApiContext, error: unknown) {
   if (pg?.code === 'GS002') {
     return apiError(c, 409, 'WITHDRAWN', 'This quote was withdrawn. Enter a new one instead.');
   }
+  if (pg?.code === 'GS004') {
+    return apiError(c, 422, 'NOT_A_MEMBER', 'Choose the person responsible from the team list.');
+  }
   if (pg?.code === 'GS003') {
     return apiError(
       c,

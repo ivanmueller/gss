@@ -11,6 +11,8 @@ export type MeState =
   | { status: 'loading' }
   | {
       status: 'ok';
+      /** The signed-in person's user id. */
+      id: string | null;
       name: string | null;
       /** No first name yet: the app asks for it before anything else. */
       nameMissing: boolean;
@@ -68,6 +70,7 @@ export function useMe(accessToken: string | null, version = 0): MeState {
           res.ok
             ? {
                 status: 'ok',
+                id: stringProperty(body, 'id'),
                 name: displayName(
                   stringProperty(body, 'firstName'),
                   stringProperty(body, 'lastName'),
