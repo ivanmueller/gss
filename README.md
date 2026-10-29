@@ -6,9 +6,10 @@ Canadian–U.S. physical grain trading operations platform. The repository has t
 - the counterparty directory of buyers and sellers: added by hand or from a spreadsheet, edited, archived, with logos;
 - its Mapbox map view, with coordinates looked up through Geocodio;
 - **Bids & offers**: real bids and offers linked to counterparties, with a revision history that is never edited;
-- a trading workspace (map and order book in CAD) showing those live bids and offers, or made-up demo data while the Demo data switch is on.
+- a trading workspace (map and order book in CAD) showing those live bids and offers, or made-up demo data while the Demo data switch is on;
+- the Bank of Canada's daily CAD/USD rate, fetched by the Worker twice a day, which converts USD bids and offers in the order book.
 
-No FX connector (so USD prices are not yet in the order book), trading engine, saved scenarios or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
+No trading engine, saved scenarios or production deployment exists yet; `docs/HANDOFF.md` records the last merged state.
 
 1. Read `MASTER_PROJECT_SPECIFICATION.md` for product and technical requirements.
 2. Read `docs/BUILD_PLAN.md` for staged work and its early end-to-end demonstration path.
