@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(67);
+select plan(69);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), adam (org_admin), olivia (operations), victor (viewer),
@@ -359,6 +359,11 @@ select throws_ok(
 );
 select throws_ok(
   format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    pg_temp.new_revision('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa', '''NaN''')),
+  '23514', null, 'a rate of NaN is refused'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
     replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
             '''CAD''', '''EUR''')),
   '23514', null, 'a currency other than CAD or USD is refused'
@@ -392,6 +397,13 @@ select throws_ok(
     replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
             '''MT'', null, null', '''LOAD'', 0, ''MT''')),
   '23514', null, 'a payload of zero is refused'
+);
+-- Postgres ranks numeric NaN above every number, so "above zero" alone would let it in.
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
+            '''MT'', null, null', '''LOAD'', ''NaN'', ''MT''')),
+  '23514', null, 'a payload of NaN is refused'
 );
 select throws_ok(
   format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
