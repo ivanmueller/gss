@@ -50,6 +50,7 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           types: ['buyer', 'seller'],
           primaryCountry: 'CA',
           verificationStatus: 'pending',
+          website: 'https://www.example.com',
           notes: 'Synthetic record.',
         },
         contacts: [
@@ -94,6 +95,7 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           types: ['buyer'],
           primaryCountry: 'US',
           verificationStatus: 'unverified',
+          website: null,
           notes: null,
         },
         contacts: [],
@@ -182,6 +184,7 @@ describe('the counterparty directory as app_api', () => {
       legalName: 'Synthetic Prairie Mills',
       tradingName: 'Prairie Mills',
       verificationStatus: 'pending',
+      website: 'https://www.example.com',
       notes: 'Synthetic record.',
       contacts: [
         {

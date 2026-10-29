@@ -48,10 +48,18 @@ export interface Facility {
 }
 
 export interface CounterpartyDetail extends CounterpartySummary {
+  /** A public http or https address, or null. */
+  website: string | null;
   notes: string | null;
   version: string;
   contacts: Contact[];
   facilities: Facility[];
+}
+
+/** GET /counterparties/{id}/website-preview: whether the site may be shown inside the app. */
+export interface WebsitePreview {
+  website: string;
+  preview: 'allowed' | 'refused' | 'not_secure' | 'unreachable';
 }
 
 export interface CounterpartyList {
