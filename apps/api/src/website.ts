@@ -1,4 +1,4 @@
-import { websiteProblem } from '@grain/domain';
+import { websiteProblem, writtenAddressProblem } from '@grain/domain';
 
 // Whether a counterparty's website can be previewed inside the app (docs/DECISIONS.md,
 // website preview). Many sites forbid being shown inside another site's page with the
@@ -89,10 +89,13 @@ export async function checkWebsitePreview(
   } catch {
     return 'unreachable';
   }
+  const app = new URL(appOrigin).origin;
   const signal = AbortSignal.timeout(TIMEOUT_MS);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     if (websiteProblem(url) !== null) return 'unreachable';
     if (url.protocol !== 'https:') return 'not_secure';
+    // The app is never previewed inside itself, nor asked for its own pages.
+    if (url.origin === app) return 'refused';
     let res: Response;
     try {
       res = await fetchImpl(url.href, {
@@ -108,7 +111,8 @@ export async function checkWebsitePreview(
     await res.body?.cancel().catch(() => undefined);
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get('location');
-      if (location === null) return 'unreachable';
+      // A port, user name or number address in the redirect as written, which parsing could hide.
+      if (location === null || writtenAddressProblem(location) !== null) return 'unreachable';
       try {
         url = new URL(location, url);
       } catch {

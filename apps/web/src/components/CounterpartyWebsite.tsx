@@ -8,11 +8,12 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 
 // Opened from the app, a site gets no referrer and no handle on the app's window, and its
-// preview runs sandboxed: it cannot navigate the app away. The browser cannot tell whether
-// a site allows being shown in a frame, so the API asks the site (apps/api/src/website.ts)
-// and Preview appears only when it allows it.
-const SANDBOX =
-  'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox';
+// preview runs sandboxed: it cannot navigate the app away. Without allow-same-origin the
+// frame always has an origin of its own, so even a page of the app itself (saved as the
+// website, or reached from the site's links) cannot read the app's storage or its page.
+// The browser cannot tell whether a site allows being shown in a frame, so the API asks the
+// site (apps/api/src/website.ts) and Preview appears only when it allows it.
+const SANDBOX = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox';
 
 /** A link to the website in a new tab; other props (a button's class, from Button asChild) pass through. */
 function NewTabLink({

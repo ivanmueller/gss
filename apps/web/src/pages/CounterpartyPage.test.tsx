@@ -585,6 +585,8 @@ describe('CounterpartyPage website', () => {
     const sandbox = frame.getAttribute('sandbox') ?? '';
     expect(sandbox).toContain('allow-scripts');
     expect(sandbox).not.toContain('allow-top-navigation');
+    // Its own origin always, so not even a page of the app can reach the app (Codex's review).
+    expect(sandbox).not.toContain('allow-same-origin');
     expect(
       within(dialog).getByRole('link', { name: 'Open in new tab (opens in a new tab)' }),
     ).toHaveAttribute('target', '_blank');

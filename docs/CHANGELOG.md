@@ -2,7 +2,7 @@
 
 ## 2026-10-29 — A website on each counterparty
 
-- `docs/DECISIONS.md`: the owner's request and the choices made (public web addresses only, the Worker's check of whether a site may be previewed, the sandboxed preview).
+- `docs/DECISIONS.md`: the owner's request and the choices made (public web addresses only, the Worker's check of whether a site may be previewed, the sandboxed preview); after Codex's review, ports and user names refused as written, the database holding site names to the same rules, and the preview without `allow-same-origin`.
 - `docs/DATA_MODEL.md`: `website` on counterparties; migration `20261029050000_counterparty_website.sql`.
 - `docs/API.md`: `website` on a counterparty; `GET /api/v1/counterparties/{id}/website-preview`.
 - `docs/DESIGN_SYSTEM.md`: `Dialog`.

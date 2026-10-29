@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(19);
+select plan(39);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader).
@@ -161,6 +161,39 @@ select is(
       and actor_id in ('00000000-0000-4000-8000-0000000011aa', '00000000-0000-4000-8000-0000000022aa')),
   2, 'setting and clearing a website are each audited with who did it'
 );
+
+-- The same rules for site names as the API (Codex's review) -----------------------------
+-- True when setting counterparty A's website to this is refused by the check constraint.
+create function pg_temp.refused(website text) returns boolean
+language plpgsql as $fn$
+begin
+  perform pg_temp.api_changed('00000000-0000-4000-8000-0000000011aa', pg_temp.set_a(website));
+  return false;
+exception when check_violation then
+  return true;
+end
+$fn$;
+
+select ok(pg_temp.refused('https://user:secret@example.com'), 'a user name and password are refused');
+select ok(pg_temp.refused('https://user@example.com/'), 'a user name alone is refused');
+select ok(pg_temp.refused('https://example.com:8443'), 'a port is refused');
+select ok(pg_temp.refused('https://example.com:443/'), 'even the default https port is refused');
+select ok(pg_temp.refused('http://example.com:80'), 'even the default http port is refused');
+select ok(pg_temp.refused('https://127.0.0.1'), 'a number address is refused');
+select ok(pg_temp.refused('http://169.254.169.254/latest'), 'a link-local number address is refused');
+select ok(pg_temp.refused('https://[::1]/'), 'an IPv6 address is refused');
+select ok(pg_temp.refused('https://localhost'), 'localhost is refused');
+select ok(pg_temp.refused('https://printer.local'), 'a .local name is refused');
+select ok(pg_temp.refused('https://grain.internal/x'), 'an .internal name is refused');
+select ok(pg_temp.refused('https://intranet'), 'a single-label name is refused');
+select ok(pg_temp.refused('https://Example.com'), 'a site name not in lower case is refused (the API lowers it)');
+select ok(pg_temp.refused('https://example.com./'), 'a site name ending in a dot is refused');
+select ok(pg_temp.refused('https://-bad-.example.com'), 'a label starting with a hyphen is refused');
+select ok(pg_temp.refused('https://example.c0m'), 'a top-level name with a digit is refused');
+select ok(pg_temp.refused('https://example.com\@evil.example.org'), 'a backslash in the site name is refused');
+select ok(not pg_temp.refused('https://www.example.co.uk/grain?region=SK#bids'), 'a path, query and fragment are kept');
+select ok(not pg_temp.refused('https://xn--bcher-kva.example.ca'), 'an international site name in its xn-- form is kept');
+select is(pg_temp.website_a(), 'https://xn--bcher-kva.example.ca', 'the last accepted website is saved');
 
 select * from finish();
 rollback;

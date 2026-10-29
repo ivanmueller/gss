@@ -111,12 +111,23 @@ describe('checkWebsitePreview', () => {
       'https://localhost/',
       'https://printer.local/',
       'https://example.com:8443/',
+      'https://example.com:443/',
+      '//example.com:443/next',
       'https://user:secret@example.com/',
     ]) {
       const fetchImpl = site({ 'https://example.com/': redirect(location) });
       expect(await checkWebsitePreview('https://example.com', APP, fetchImpl)).toBe('unreachable');
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('never previews or asks the app itself, even through a redirect', async () => {
+    const none = site({});
+    expect(await checkWebsitePreview(`${APP}/counterparties`, APP, none)).toBe('refused');
+    expect(none).not.toHaveBeenCalled();
+    const fetchImpl = site({ 'https://example.com/': redirect(`${APP}/`) });
+    expect(await checkWebsitePreview('https://example.com', APP, fetchImpl)).toBe('refused');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('says unreachable for errors, error statuses, endless redirects and no answer', async () => {
