@@ -82,8 +82,9 @@ create table app.freight_quote_revisions (
   -- Per metric tonne, short ton (2,000 lb), bushel, hundredweight (100 lb) or load, as quoted.
   rate_unit text not null check (rate_unit in ('MT', 'ST', 'BU', 'CWT', 'LOAD')),
   -- The contract payload of one load, in metric tonnes, short tons or pounds as quoted;
-  -- required for a rate per load and only then.
-  payload numeric(14, 3) check (payload > 0),
+  -- required for a rate per load and only then. Postgres ranks numeric NaN above every
+  -- number, so it is refused by name (Codex's review); the column's size refuses infinity.
+  payload numeric(14, 3) check (payload > 0 and payload <> 'NaN'),
   payload_unit text check (payload_unit in ('MT', 'ST', 'LB')),
   -- What the rate includes, e.g. "Fuel surcharge included; border crossing extra".
   inclusions app.label,
