@@ -366,6 +366,35 @@ describe('navigation', () => {
     expect(screen.getAllByRole('link', { name: 'Freight' })[0]).toHaveAttribute('href', '/freight');
   });
 
+  it('counts the person’s follow-ups overdue or due today beside Follow-ups in the menu', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url === '/api/v1/me'
+          ? Response.json(ALICE)
+          : url === '/api/v1/follow-ups/count?organization_id=org-a'
+            ? Response.json({ overdue: 2, dueToday: 1 })
+            : Response.json({ status: 'ok', service: 'api' }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    const link = await within(nav).findByRole('link', {
+      name: 'Follow-ups, 3 overdue or due today',
+    });
+    expect(link).toHaveAttribute('href', '/follow-ups');
+  });
+
+  it('shows no count beside Follow-ups when nothing is due', () => {
+    render(<App />);
+    expect(screen.getAllByRole('link', { name: 'Follow-ups' })[0]).toHaveAttribute(
+      'href',
+      '/follow-ups',
+    );
+  });
+
   it('shows planned pages as not built, not as links', () => {
     render(<App />);
     const planned = screen.getByRole('list', { name: 'Coming next' });

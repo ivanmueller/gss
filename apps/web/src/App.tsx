@@ -6,10 +6,12 @@ import { notePasswordChanged } from './auth/passwordNotice';
 import { AppShell, type NavSection } from './components/AppShell';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
+import { useFollowUpCount } from './lib/useFollowUpCount';
 import { useMe } from './lib/useMe';
 import { CoordinatesPage } from './pages/CoordinatesPage';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
+import { FollowUpsPage } from './pages/FollowUpsPage';
 import { FreightPage } from './pages/FreightPage';
 import { FreightRatePage } from './pages/FreightRatePage';
 import { ImportPage } from './pages/ImportPage';
@@ -42,6 +44,8 @@ function section(route: Route): NavSection | null {
       return 'counterparties';
     case 'team':
       return 'team';
+    case 'follow-ups':
+      return 'follow-ups';
     case 'quotes':
     case 'new-quote':
     case 'quote':
@@ -63,6 +67,12 @@ export function App({ account }: { account?: Account }) {
   const route = matchRoute(usePath());
   const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
   const redirectTo = route.page === 'redirect' ? route.to : null;
+  const userId = me.status === 'ok' ? (me.id ?? undefined) : undefined;
+  const dueCount = useFollowUpCount(
+    account && organization
+      ? { token: account.accessToken, organizationId: organization.id }
+      : null,
+  );
 
   // Old addresses (the map page before it moved into Counterparties) keep working.
   useEffect(() => {
@@ -78,7 +88,11 @@ export function App({ account }: { account?: Account }) {
     if (organization === null) {
       return <Notice>You don’t have access yet. Ask an admin to add you on the Team page.</Notice>;
     }
-    return render({ token: account.accessToken, organization });
+    return render({
+      token: account.accessToken,
+      organization,
+      ...(userId !== undefined && { userId }),
+    });
   }
 
   let page: ReactNode;
@@ -105,6 +119,9 @@ export function App({ account }: { account?: Account }) {
       break;
     case 'team':
       page = directory((session) => <TeamPage session={session} />);
+      break;
+    case 'follow-ups':
+      page = directory((session) => <FollowUpsPage session={session} />);
       break;
     case 'quotes':
       page = directory((session) => <QuotesPage session={session} />);
@@ -177,6 +194,7 @@ export function App({ account }: { account?: Account }) {
     <AppShell
       current={section(route)}
       health={health}
+      counts={{ 'follow-ups': dueCount }}
       {...(account && {
         user: {
           name: me.status === 'ok' ? me.name : null,

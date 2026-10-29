@@ -10,6 +10,7 @@ import { useState, type ChangeEvent, type SyntheticEvent, type ReactNode } from 
 
 import { BackLink } from '../components/BackLink';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import { CounterpartyCrm } from '../components/CounterpartyCrm';
 import { CounterpartyFreight } from '../components/CounterpartyFreight';
 import { CounterpartyQuotes } from '../components/CounterpartyQuotes';
 import { CounterpartyWebsite } from '../components/CounterpartyWebsite';
@@ -694,6 +695,15 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                   )}
                 </section>
               </Card>
+
+              <CounterpartyCrm
+                session={session}
+                counterparty={{
+                  id: detail.id,
+                  archived,
+                  contactNames: detail.contacts.map((contact) => contact.name),
+                }}
+              />
 
               <Card asChild>
                 <section aria-labelledby="locations-heading">

@@ -2,6 +2,7 @@ import {
   ArrowLeftRight,
   Building2,
   Calculator,
+  ListTodo,
   CircleAlert,
   LayoutDashboard,
   Menu,
@@ -17,11 +18,13 @@ import { useMediaQuery } from '../lib/useMediaQuery';
 import { Brand } from './Brand';
 import { ConnectionStatus } from './ConnectionStatus';
 import { ProfileMenu, type ProfileUser } from './ProfileMenu';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
-export type NavSection = 'workspace' | 'counterparties' | 'quotes' | 'freight' | 'team';
+export type NavSection =
+  'workspace' | 'counterparties' | 'follow-ups' | 'quotes' | 'freight' | 'team';
 
 interface NavItem {
   id: NavSection;
@@ -34,6 +37,7 @@ interface NavItem {
 const NAV: readonly NavItem[] = [
   { id: 'workspace', href: '/', label: 'Workspace', Icon: LayoutDashboard },
   { id: 'counterparties', href: '/counterparties', label: 'Counterparties', Icon: Building2 },
+  { id: 'follow-ups', href: '/follow-ups', label: 'Follow-ups', Icon: ListTodo },
   { id: 'quotes', href: '/quotes', label: 'Bids & offers', Icon: ArrowLeftRight },
   { id: 'freight', href: '/freight', label: 'Freight', Icon: Truck },
   { id: 'team', href: '/team', label: 'Team', Icon: Users },
@@ -46,11 +50,16 @@ const PLANNED: readonly { label: string; Icon: LucideIcon }[] = [
 
 const itemClass = 'flex h-9 items-center gap-3 rounded-control px-3 text-sm font-medium';
 
+/** A count beside a menu item, e.g. follow-ups overdue or due today; nothing when zero. */
+export type NavCounts = Partial<Record<NavSection, number>>;
+
 function SidebarContent({
   current,
+  counts,
   onNavigate,
 }: {
   current: NavSection | null;
+  counts: NavCounts;
   onNavigate?: () => void;
 }) {
   return (
@@ -65,11 +74,23 @@ function SidebarContent({
               <Link
                 href={href}
                 aria-current={current === id ? 'page' : undefined}
+                aria-label={
+                  (counts[id] ?? 0) > 0
+                    ? `${label}, ${String(counts[id])} overdue or due today`
+                    : undefined
+                }
                 onClick={onNavigate}
                 className={`${itemClass} text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground`}
               >
                 <Icon aria-hidden="true" className="size-4 shrink-0" />
                 {label}
+                {(counts[id] ?? 0) > 0 && (
+                  <>
+                    <Badge variant="danger" className="ml-auto" aria-hidden="true">
+                      {counts[id]}
+                    </Badge>
+                  </>
+                )}
               </Link>
             </li>
           ))}
@@ -98,11 +119,13 @@ export function AppShell({
   current,
   health,
   user,
+  counts = {},
   children,
 }: {
   current: NavSection | null;
   health: ApiHealth;
   user?: ProfileUser;
+  counts?: NavCounts;
   children: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -123,7 +146,7 @@ export function AppShell({
         Skip to content
       </a>
       <div className="fixed inset-y-0 left-0 z-(--z-sidebar) hidden w-sidebar flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
-        <SidebarContent current={current} />
+        <SidebarContent current={current} counts={counts} />
       </div>
       <div className="flex min-h-dvh flex-col lg:pl-sidebar">
         <header className="sticky top-0 z-(--z-topbar) flex h-topbar shrink-0 items-center gap-2 border-b bg-background/90 px-4 backdrop-blur-sm lg:px-8">
@@ -137,6 +160,7 @@ export function AppShell({
             <SheetContent title="Menu">
               <SidebarContent
                 current={current}
+                counts={counts}
                 onNavigate={() => {
                   setMenuOpen(false);
                 }}

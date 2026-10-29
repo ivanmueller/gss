@@ -30,7 +30,7 @@ export interface FieldsProps {
 
 /** A field problem as a sentence, e.g. "Legal name is required." */
 export function issueText(label: string, message: string): string {
-  const sentence = /^(is|needs|must)\b/.test(message) ? `${label} ${message}` : message;
+  const sentence = /^(is|are|needs|must)\b/.test(message) ? `${label} ${message}` : message;
   return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 }
 

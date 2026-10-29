@@ -94,6 +94,18 @@ Operations and admin members can:
 - **Website:** entered under **Edit details** (or when adding a counterparty, or from a "Website" column in a spreadsheet); `example.com` is saved as `https://example.com`. The site name must be in plain letters (no accents). On the counterparty's page it is a link that opens in a new tab.
 - On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 
+## Contact log and follow-ups
+
+Each counterparty's page has **Follow-ups** and **Contact history**. **Follow-ups** in the menu lists your own follow-ups (or everyone's) across counterparties, overdue first, then due today, then coming up; the number beside it counts yours that are overdue or due today. Times are typed and shown in Central time (CT).
+
+Traders, operations and admin members can:
+
+- **Log contact:** when it happened (now unless changed), how (call, email, meeting or visit), who you spoke to (pick one of the counterparty's contacts or type a name) and notes; tick **Plan a follow-up** to plan one in the same step.
+- **Correct:** a correction is saved as a new version; the entry as it was stays under **Show earlier versions**. Nothing is ever deleted.
+- **Plan follow-up:** what to do, when it is due and who is responsible (anyone on the team; you unless changed). **Edit** changes these while it is open; **Mark done** finishes it for good. The person responsible can mark their own follow-up done whatever their role.
+
+Viewers and analysts read both. Nothing new is logged or planned for an archived counterparty, but its follow-ups can still be marked done.
+
 ## Bids and offers
 
 **Bids & offers** lists GSS's live bids and offers (tick **Include withdrawn and expired** for the rest), filtered by Bids or Offers and commodity. Each counterparty's page lists its own, with **New bid** / **New offer**.

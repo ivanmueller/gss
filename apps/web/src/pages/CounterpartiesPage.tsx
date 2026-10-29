@@ -33,6 +33,8 @@ const WIDE_QUERY = '(min-width: 768px)';
 export interface DirectorySession {
   token: string;
   organization: MeOrganization;
+  /** The signed-in person's user id, when known (the person responsible for a follow-up). */
+  userId?: string;
 }
 
 // Logos first, and the view a page opens on (owner's request, 2026-10-29).
