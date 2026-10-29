@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #70
+
+- `docs/HANDOFF.md`: Codex's fix of the CRM's insert grants (ivanmueller/gss#70), CI runs #154 and #155 and Deploy staging run #67; the owner's decisions on sign-in (keep the authenticator; no texted codes; no iPhone experiment); the next task (the owner's answer on Central time after Manitoba's change, the owner's check on staging).
+- `AGENTS.md`: the status line with the CRM.
+
 ## 2026-10-29 — Codex's review of the CRM
 
 - `docs/DATA_MODEL.md`: migration `20261029080000_crm_insert_column_grants.sql` (insert grants by column on the CRM tables; the database's own times).
