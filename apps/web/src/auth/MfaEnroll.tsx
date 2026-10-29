@@ -1,7 +1,8 @@
-import { Smartphone } from 'lucide-react';
+import { Copy, KeyRound, Smartphone } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../components/ui/button';
+import { detectPlatform, type Platform } from '../lib/device';
 import type { AuthClient } from '../lib/supabase';
 import { AuthCard, FieldError } from './AuthCard';
 import { CodeForm, WRONG_CODE } from './CodeForm';
@@ -26,7 +27,67 @@ function qrSource(qrCode: string): string {
     : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrCode)}`;
 }
 
-export function MfaEnroll({ auth, onSignOut }: { auth: AuthClient; onSignOut: () => void }) {
+/** The setup key, which the person can copy into their authenticator app or type by hand. */
+function SetupKey({ secret }: { secret: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      Key:{' '}
+      <code data-testid="totp-secret" className="font-mono break-all text-foreground">
+        {secret}
+      </code>
+    </p>
+  );
+}
+
+/** Copies the setup key and says what to do with it in the authenticator app. */
+function CopyKey({ secret, primary }: { secret: string; primary: boolean }) {
+  const [copied, setCopied] = useState<'yes' | 'failed' | null>(null);
+  return (
+    <>
+      <Button
+        type="button"
+        variant={primary ? 'primary' : 'outline'}
+        className="w-full"
+        onClick={() => {
+          navigator.clipboard.writeText(secret).then(
+            () => {
+              setCopied('yes');
+            },
+            () => {
+              setCopied('failed');
+            },
+          );
+        }}
+      >
+        <Copy aria-hidden="true" />
+        Copy setup key
+      </Button>
+      {copied && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {copied === 'yes'
+            ? 'Copied. In your authenticator app, add a code with “Enter a setup key”, name it GSS and paste.'
+            : 'Could not copy. Type the key below into your authenticator app.'}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * First sign-in: adds GSS to the person's authenticator app. A computer shows the QR code to
+ * scan with a phone. A phone cannot scan its own screen: an iPhone copies the key for Google
+ * or Microsoft Authenticator, or saves it in Apple Passwords (where iOS sends every setup
+ * link, whatever app is installed); Android opens the authenticator app with the link.
+ */
+export function MfaEnroll({
+  auth,
+  onSignOut,
+  platform = detectPlatform(),
+}: {
+  auth: AuthClient;
+  onSignOut: () => void;
+  platform?: Platform;
+}) {
   const started = useRef(false);
   const [factor, setFactor] = useState<PendingFactor | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,43 +127,56 @@ export function MfaEnroll({ auth, onSignOut }: { auth: AuthClient; onSignOut: ()
     return verifyError ? WRONG_CODE : null;
   }
 
+  const phone = platform !== 'computer';
   return (
     <AuthCard title="Set up your authenticator app">
       <div className="flex flex-col gap-4 text-sm">
         <p>
-          Two-factor sign-in is required. Scan this code with an authenticator app (for example
-          Google Authenticator, Microsoft Authenticator or 1Password), then enter the 6-digit code
-          it shows.
+          {phone
+            ? 'Add GSS to your authenticator app, then enter the 6-digit code it shows.'
+            : 'Scan this code with the authenticator app on your phone, then enter the 6-digit code it shows.'}
         </p>
         <FieldError message={error} />
         {factor && (
           <>
-            {factor.uri && (
-              <div className="flex flex-col gap-1.5">
-                <Button asChild className="w-full">
-                  <a href={factor.uri}>
-                    <Smartphone aria-hidden="true" />
-                    Open in authenticator app
-                  </a>
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  On this phone: tap to add GSS to your authenticator app, save it there, then come
-                  back here for the 6-digit code. Install an authenticator app first if you have
-                  none. On a computer, scan the code below with your phone.
-                </p>
+            {platform === 'computer' && (
+              <>
+                <img
+                  src={qrSource(factor.qrCode)}
+                  alt="QR code for your authenticator app"
+                  className="mx-auto size-44 rounded-control border bg-white p-2"
+                />
+                <SetupKey secret={factor.secret} />
+              </>
+            )}
+            {platform === 'ios' && (
+              <div className="flex flex-col gap-2">
+                <CopyKey secret={factor.secret} primary />
+                {factor.uri && (
+                  <Button asChild variant="outline" className="w-full">
+                    <a href={factor.uri}>
+                      <KeyRound aria-hidden="true" />
+                      Save in Apple Passwords
+                    </a>
+                  </Button>
+                )}
+                <SetupKey secret={factor.secret} />
               </div>
             )}
-            <img
-              src={qrSource(factor.qrCode)}
-              alt="QR code for your authenticator app"
-              className="mx-auto size-44 rounded-control border bg-white p-2"
-            />
-            <p className="text-xs text-muted-foreground">
-              Can&apos;t scan? Enter this key in the app instead:{' '}
-              <code data-testid="totp-secret" className="font-mono break-all text-foreground">
-                {factor.secret}
-              </code>
-            </p>
+            {platform === 'android' && (
+              <div className="flex flex-col gap-2">
+                {factor.uri && (
+                  <Button asChild className="w-full">
+                    <a href={factor.uri}>
+                      <Smartphone aria-hidden="true" />
+                      Open in authenticator app
+                    </a>
+                  </Button>
+                )}
+                <CopyKey secret={factor.secret} primary={!factor.uri} />
+                <SetupKey secret={factor.secret} />
+              </div>
+            )}
             <CodeForm submitLabel="Confirm and continue" onSubmit={verify} />
           </>
         )}

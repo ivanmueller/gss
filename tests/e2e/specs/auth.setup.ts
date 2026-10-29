@@ -23,10 +23,8 @@ setup('signs in with password and sets up the authenticator', async ({ page, req
     timeout: 15_000,
   });
   await expect(page.getByRole('img', { name: 'QR code for your authenticator app' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open in authenticator app' })).toHaveAttribute(
-    'href',
-    /^otpauth:\/\/totp\//,
-  );
+  // A computer scans with a phone, so it gets no setup link (phones: MfaEnroll.test.tsx).
+  await expect(page.getByRole('link', { name: /authenticator|Apple Passwords/ })).toHaveCount(0);
   const secret = (await page.getByTestId('totp-secret').textContent())?.trim() ?? '';
   expect(secret).not.toBe('');
 

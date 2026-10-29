@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Authenticator setup by device
+
+- `docs/DECISIONS.md`: the setup screen by device (computer, iPhone, Android), and why the iPhone button now says Apple Passwords.
+- `README.md` and `docs/PRODUCT.md`: the new buttons at first sign-in.
+
 ## 2026-10-28 — Documents brought up to date after bids and offers
 
 The owner asked for every document to be current. Updated:

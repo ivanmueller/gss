@@ -82,7 +82,7 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 
 | Route | Main purpose | Primary controls |
 |---|---|---|
-| `/login` (implemented) | Secure employee access | Email and password, then an authenticator code; at first sign-in, set up the authenticator (QR code, typed key, or **Open in authenticator app** on a phone), choose a password and give a name |
+| `/login` (implemented) | Secure employee access | Email and password, then an authenticator code; at first sign-in, set up the authenticator (a computer: QR code and key; an iPhone: **Copy setup key** or **Save in Apple Passwords**; Android: **Open in authenticator app** or **Copy setup key**), choose a password and give a name |
 | `/workspace` | Main map and synchronized table | Commodity, grade, geography, buyer/seller, quote status, valid-as-of |
 | `/facilities/:id` | Facility details | Organization, location, contact, service type, quotes, notes, provenance |
 | `/quotes` (implemented, without import and export) | Bids and offers: live ones by default | All / Bids / Offers, commodity, include withdrawn and expired; New bid or offer for traders and admins |
