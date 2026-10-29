@@ -5,7 +5,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(57);
+select plan(61);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), adam (org_admin), olivia (operations), victor (viewer),
@@ -322,6 +322,30 @@ select throws_ok(
     replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
             '21.000, 84.000', 'null, 0')),
   '23514', null, 'no available quantity is refused'
+);
+-- Postgres ranks numeric NaN above every number, so "above zero" alone would let it in.
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
+            '21.000, 84.000', '21.000, ''NaN''')),
+  '23514', null, 'an available quantity of NaN is refused'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
+            '21.000, 84.000', 'null, ''NaN''')),
+  '23514', null, 'an available quantity of NaN without a minimum is refused'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    replace(pg_temp.new_revision('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-0000000044aa', '1.00'),
+            '21.000, 84.000', '''NaN'', ''NaN''')),
+  '23514', null, 'NaN as both the minimum and the available quantity is refused'
+);
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
+    pg_temp.new_revision('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-0000000044aa', '''NaN''')),
+  '23514', null, 'a price of NaN is refused'
 );
 select throws_ok(
   format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',

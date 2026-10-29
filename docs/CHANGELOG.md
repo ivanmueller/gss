@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — A bid's or offer's quantities are never NaN
+
+- `docs/DATA_MODEL.md`: migration `20261029040000_quote_quantities_not_nan.sql`.
+
 ## 2026-10-29 — A freight payload is never NaN
 
 - `docs/DATA_MODEL.md`: migration `20261029030000_freight_payload_not_nan.sql` (Codex's review of ivanmueller/gss#58).
