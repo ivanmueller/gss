@@ -76,6 +76,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   db = fakeDatabase();
   openDatabase.mockClear();
@@ -291,12 +292,16 @@ describe('/api/v1/follow-ups', () => {
   });
 
   it('counts the person’s follow-ups overdue and due today', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-30T15:00:00.000Z'));
     db.countFollowUps.mockResolvedValueOnce({ overdue: 2, dueToday: 1 });
     const res = await request('GET', `/follow-ups/count?organization_id=${ORG}`);
     expect(await res.json()).toEqual({ overdue: 2, dueToday: 1 });
     expect(db.countFollowUps).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID }),
       ORG,
+      // 10 am Central on 30 October 2026: today ends at the next midnight there.
+      '2026-10-31T05:00:00.000Z',
     );
     expect((await request('GET', '/follow-ups/count')).status).toBe(422);
   });

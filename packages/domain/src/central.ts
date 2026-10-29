@@ -114,6 +114,15 @@ export function centralDay(iso: string | Date): string {
   return `${String(clock.year)}-${two(clock.month)}-${two(clock.day)}`;
 }
 
+/** The end of the Central calendar day of `now` (the next midnight there), as a UTC instant. */
+export function endOfCentralDay(now: Date): string {
+  const next = new Date(`${centralDay(now)}T12:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const end = centralToUtc(`${next.toISOString().slice(0, 10)}T00:00`);
+  if (end === null) throw new Error('no Central midnight');
+  return end;
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 

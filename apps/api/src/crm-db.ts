@@ -1,5 +1,4 @@
 import {
-  CENTRAL_TIME_ZONE,
   type ContactChannel,
   type ContactLogEntry,
   type ContactLogInput,
@@ -89,8 +88,15 @@ export interface CrmDatabase {
   ) => Promise<CorrectContactLogResult>;
   /** Open follow-ups soonest due first, then done ones latest done first. */
   listFollowUps: (ctx: RequestContext, filter: FollowUpFilter) => Promise<FollowUp[]>;
-  /** The signed-in person's open follow-ups overdue and due later today, in Central time. */
-  countFollowUps: (ctx: RequestContext, organizationId: string) => Promise<FollowUpCount>;
+  /**
+   * The signed-in person's open follow-ups overdue and due later today: before `endOfDay`, the
+   * end of today in Central time, worked out by the caller with the same rules as the web app.
+   */
+  countFollowUps: (
+    ctx: RequestContext,
+    organizationId: string,
+    endOfDay: string,
+  ) => Promise<FollowUpCount>;
   /** Active members who can be made responsible; empty for anyone not an active member. */
   teamNames: (ctx: RequestContext, organizationId: string) => Promise<TeamMemberName[]>;
   getFollowUp: (ctx: RequestContext, id: string) => Promise<FollowUp | null>;
@@ -411,15 +417,12 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
       });
     },
 
-    countFollowUps(ctx, organizationId) {
+    countFollowUps(ctx, organizationId, endOfDay) {
       return asUser(ctx, async (tx) => {
-        // The end of today in Central time, whatever the database's own time zone.
         const [row] = await tx<{ overdue: number; due_today: number }[]>`
           select count(*) filter (where f.due_at < now())::int as overdue,
                  count(*) filter (
-                   where f.due_at >= now()
-                     and f.due_at < (((now() at time zone ${CENTRAL_TIME_ZONE})::date + 1)::timestamp
-                                     at time zone ${CENTRAL_TIME_ZONE})
+                   where f.due_at >= now() and f.due_at < ${endOfDay}::timestamptz
                  )::int as due_today
           from app.follow_ups f
           where f.organization_id = ${organizationId} and f.assigned_to = app.current_user_id()

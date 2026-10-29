@@ -35,7 +35,7 @@ const CALL_BACK = followUp('Call back', '2026-10-29T14:00:00.000Z');
 const LIST = [
   CALL_BACK,
   followUp('Send the bid sheet', '2026-10-30T22:00:00.000Z'),
-  followUp('Visit the elevator', '2026-11-03T15:00:00.000Z'),
+  followUp('Visit the elevator', '2026-10-31T15:00:00.000Z'),
 ];
 
 beforeEach(() => {
@@ -70,7 +70,7 @@ describe('FollowUpsPage', () => {
       'Due todaySend the bid sheet',
     );
     expect(screen.getByRole('region', { name: 'Coming up (1)' })).toHaveTextContent(
-      'Due Tue 3 Nov 2026, 9:00 am CT · Tess Trader',
+      'Due Sat 31 Oct 2026, 10:00 am CT · Tess Trader',
     );
     // A viewer marks done what they are responsible for, and cannot change it.
     expect(

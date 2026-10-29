@@ -1,4 +1,9 @@
-import { centralDay, type ContactLogInput, type FollowUpInput } from '@grain/domain';
+import {
+  centralDay,
+  endOfCentralDay,
+  type ContactLogInput,
+  type FollowUpInput,
+} from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -261,8 +266,14 @@ describe('follow-ups as app_api', () => {
   it('counts the person’s follow-ups overdue and due later today in Central time', async () => {
     const soon = minutesFromNow(2);
     const today = centralDay(soon) === centralDay(new Date()) ? 1 : 0;
-    expect(await db.countFollowUps(as(users.val), orgs.a)).toEqual({ overdue: 1, dueToday: today });
-    expect(await db.countFollowUps(as(users.bob), orgs.a)).toEqual({ overdue: 0, dueToday: 0 });
+    expect(await db.countFollowUps(as(users.val), orgs.a, endOfCentralDay(new Date()))).toEqual({
+      overdue: 1,
+      dueToday: today,
+    });
+    expect(await db.countFollowUps(as(users.bob), orgs.a, endOfCentralDay(new Date()))).toEqual({
+      overdue: 0,
+      dueToday: 0,
+    });
   });
 
   it('lists the active team by name for any member, and nothing for another organization', async () => {
@@ -330,6 +341,8 @@ describe('follow-ups as app_api', () => {
       status: 'done',
     });
     expect(doneList.map((item) => item.id)).toEqual([overdue]);
-    expect((await db.countFollowUps(as(users.val), orgs.a)).overdue).toBe(0);
+    expect(
+      (await db.countFollowUps(as(users.val), orgs.a, endOfCentralDay(new Date()))).overdue,
+    ).toBe(0);
   });
 });
