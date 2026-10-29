@@ -19,6 +19,12 @@ describe('matchRoute', () => {
       page: 'quote',
       id: '00000000-0000-4000-8000-00000000a001',
     });
+    expect(matchRoute('/freight/')).toEqual({ page: 'freight' });
+    expect(matchRoute('/freight/new')).toEqual({ page: 'new-freight' });
+    expect(matchRoute('/freight/00000000-0000-4000-8000-00000000e001')).toEqual({
+      page: 'freight-rate',
+      id: '00000000-0000-4000-8000-00000000e001',
+    });
     expect(matchRoute('/counterparties/new')).toEqual({ page: 'new-counterparty' });
     expect(matchRoute('/counterparties/import')).toEqual({ page: 'import' });
     expect(matchRoute('/counterparties/coordinates')).toEqual({ page: 'coordinates' });
@@ -39,6 +45,7 @@ describe('matchRoute', () => {
   it('treats anything else as not found', () => {
     expect(matchRoute('/counterparties/not-an-id')).toEqual({ page: 'not-found' });
     expect(matchRoute('/quotes/not-an-id')).toEqual({ page: 'not-found' });
+    expect(matchRoute('/freight/not-an-id')).toEqual({ page: 'not-found' });
     expect(matchRoute('/admin')).toEqual({ page: 'not-found' });
   });
 });

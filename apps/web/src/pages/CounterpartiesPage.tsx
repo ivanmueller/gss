@@ -37,8 +37,9 @@ export interface DirectorySession {
 
 const VIEWS = ['table', 'logos', 'map'] as const;
 type View = (typeof VIEWS)[number];
-/** Buyers or sellers only; brokers and carriers show under All. */
-type Side = 'all' | 'buyer' | 'seller';
+/** Buyers, sellers or carriers only; brokers show under All. */
+type Side = 'all' | 'buyer' | 'seller' | 'carrier';
+const SIDES: readonly Side[] = ['buyer', 'seller', 'carrier'];
 
 function matches(counterparty: CounterpartySummary, query: string): boolean {
   const wanted = query.trim().toLowerCase();
@@ -193,12 +194,12 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const editor = canEditDirectory(organization.role);
   const wide = useMediaQuery(WIDE_QUERY, true);
 
-  // The view and the buyer/seller filter live in the address (?view=map&type=seller), so a
+  // The view and the type filter live in the address (?view=map&type=seller), so a
   // reload or a shared link keeps them.
   const params = new URLSearchParams(useSearch());
   const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'table';
   const typeParam = params.get('type');
-  const side: Side = typeParam === 'buyer' || typeParam === 'seller' ? typeParam : 'all';
+  const side: Side = SIDES.find((item) => item === typeParam) ?? 'all';
 
   const all = useMemo(() => (list.status === 'ok' ? list.data.counterparties : []), [list]);
   const archivedCount = all.filter((counterparty) => counterparty.archivedAt !== null).length;
@@ -259,6 +260,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                   { value: 'all', label: 'All' },
                   { value: 'buyer', label: 'Buyers' },
                   { value: 'seller', label: 'Sellers' },
+                  { value: 'carrier', label: 'Carriers' },
                 ]}
                 value={side}
                 onChange={(next) => {

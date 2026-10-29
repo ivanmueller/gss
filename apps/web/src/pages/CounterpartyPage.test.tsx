@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CounterpartyDetail } from '../lib/api';
 import { mockApi as mockBaseApi, ORG, PNG, SESSION } from '../test/api';
+import { FREIGHT } from '../test/freight';
 import { BID } from '../test/quotes';
 import { CounterpartyPage } from './CounterpartyPage';
 
@@ -54,10 +55,17 @@ const DETAIL: CounterpartyDetail = {
   ],
 };
 
-/** The page's API, with no bids or offers for the counterparty unless a test says otherwise. */
+/**
+ * The page's API, with no bids, offers or freight for the counterparty unless a test says
+ * otherwise.
+ */
 function mockApi(handlers: Parameters<typeof mockBaseApi>[0]) {
   return mockBaseApi({
     [`GET /quotes?counterparty_id=${ID}`]: () => Response.json({ quotes: [], truncated: false }),
+    [`GET /freight-quotes?counterparty_id=${ID}`]: () =>
+      Response.json({ freight: [], truncated: false }),
+    [`GET /freight-quotes?carrier_id=${ID}`]: () =>
+      Response.json({ freight: [], truncated: false }),
     ...handlers,
   });
 }
@@ -117,6 +125,49 @@ describe('CounterpartyPage', () => {
     expect(quotes).toHaveTextContent('No live bids or offers.');
     expect(within(quotes).queryByRole('link', { name: 'New bid' })).toBeNull();
     expect(within(quotes).queryByRole('link', { name: 'New offer' })).toBeNull();
+  });
+
+  it('lists a carrier’s freight rates and offers a new one to operations', async () => {
+    const carrier = { ...DETAIL, types: ['carrier'], facilities: [] };
+    mockApi({
+      [`GET /counterparties/${ID}`]: () => Response.json(carrier),
+      [`GET /freight-quotes?carrier_id=${ID}`]: () =>
+        Response.json({
+          freight: [{ ...FREIGHT, carrier: { ...FREIGHT.carrier, id: ID } }],
+          truncated: false,
+        }),
+    });
+    render(
+      <CounterpartyPage
+        session={{ ...SESSION, organization: { ...ORG, role: 'operations' } }}
+        id={ID}
+      />,
+    );
+    const freight = await screen.findByRole('region', { name: 'Freight rates (1)' });
+    const table = within(freight).getByRole('table', { name: 'Freight rates of this carrier' });
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('CAD 105.00/MT');
+    // The carrier is the page itself, so the table leaves it out.
+    expect(within(table).queryByRole('columnheader', { name: 'Carrier' })).toBeNull();
+    expect(within(freight).getByRole('link', { name: 'New freight rate' })).toHaveAttribute(
+      'href',
+      `/freight/new?carrier=${ID}`,
+    );
+  });
+
+  it('lists freight to and from the locations of a counterparty that is not a carrier', async () => {
+    const calls = mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
+    render(
+      <CounterpartyPage
+        session={{ ...SESSION, organization: { ...ORG, role: 'trader' } }}
+        id={ID}
+      />,
+    );
+    const freight = await screen.findByRole('region', {
+      name: 'Freight to and from its locations (0)',
+    });
+    expect(freight).toHaveTextContent('No live freight rates.');
+    expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
+    expect(calls.map((call) => call.path)).not.toContain(`/freight-quotes?carrier_id=${ID}`);
   });
 
   it('shows the counterparty, its contacts and its locations', async () => {

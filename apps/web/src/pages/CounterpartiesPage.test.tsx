@@ -142,14 +142,20 @@ describe('CounterpartiesPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The database is unavailable.');
   });
 
-  it('shows only buyers or only sellers, and keeps the choice in the address', async () => {
+  it('shows only buyers, sellers or carriers, and keeps the choice in the address', async () => {
     const seller = summary({
       id: '00000000-0000-4000-8000-00000000c003',
       legalName: 'Synthetic Grower',
       types: ['seller'],
     });
+    const carrier = summary({
+      id: '00000000-0000-4000-8000-00000000d001',
+      legalName: 'Synthetic Hauling',
+      types: ['carrier'],
+    });
     mockApi({
-      [LIST]: () => Response.json({ counterparties: [...items, seller], truncated: false }),
+      [LIST]: () =>
+        Response.json({ counterparties: [...items, seller, carrier], truncated: false }),
     });
     window.history.replaceState(null, '', '/counterparties');
     render(<CounterpartiesPage session={SESSION} />);
@@ -157,15 +163,19 @@ describe('CounterpartiesPage', () => {
     const show = await screen.findByRole('group', { name: 'Show' });
     await userEvent.click(within(show).getByRole('button', { name: 'Sellers' }));
     expect(window.location.search).toBe('?type=seller');
-    expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Synthetic Grower' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Synthetic Prairie Mills' })).not.toBeInTheDocument();
 
     await userEvent.click(within(show).getByRole('button', { name: 'Buyers' }));
-    expect(screen.getByText('2 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByText('2 of 4 shown')).toBeInTheDocument();
+    await userEvent.click(within(show).getByRole('button', { name: 'Carriers' }));
+    expect(window.location.search).toBe('?type=carrier');
+    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Hauling' })).toBeInTheDocument();
     await userEvent.click(within(show).getByRole('button', { name: 'All' }));
     expect(window.location.search).toBe('');
-    expect(screen.getByText('3 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByText('4 of 4 shown')).toBeInTheDocument();
   });
 
   it('leaves archived counterparties out unless asked', async () => {

@@ -123,6 +123,26 @@ function databaseFailure(c: ApiContext, error: unknown) {
   if (pg?.code === 'GS002') {
     return apiError(c, 409, 'WITHDRAWN', 'This quote was withdrawn. Enter a new one instead.');
   }
+  if (pg?.code === 'GS003') {
+    return apiError(
+      c,
+      409,
+      'WITHDRAWN',
+      'This freight rate was withdrawn. Enter a new one instead.',
+    );
+  }
+  if (
+    pg?.code === '23503' &&
+    (pg.constraint === 'freight_quotes_origin_fkey' ||
+      pg.constraint === 'freight_quotes_destination_fkey')
+  ) {
+    return apiError(
+      c,
+      409,
+      'LOCATION_HAS_FREIGHT',
+      'Freight rates start or end at this location and keep their history. It cannot be removed.',
+    );
+  }
   if (pg?.code === '23503' && pg.constraint === 'quotes_facility_fkey') {
     return apiError(
       c,

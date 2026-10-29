@@ -10,6 +10,7 @@ import { useState, type ChangeEvent, type SyntheticEvent, type ReactNode } from 
 
 import { BackLink } from '../components/BackLink';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import { CounterpartyFreight } from '../components/CounterpartyFreight';
 import { CounterpartyQuotes } from '../components/CounterpartyQuotes';
 import {
   CompanyFields,
@@ -830,6 +831,16 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
               <CounterpartyQuotes
                 session={session}
                 counterparty={{ id: detail.id, types: detail.types, archived }}
+              />
+
+              <CounterpartyFreight
+                session={session}
+                counterparty={{
+                  id: detail.id,
+                  types: detail.types,
+                  archived,
+                  facilityCount: detail.facilities.length,
+                }}
               />
             </>
           );

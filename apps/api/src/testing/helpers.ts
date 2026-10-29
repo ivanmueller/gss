@@ -91,6 +91,13 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     reviseQuote: vi.fn<Database['reviseQuote']>(() => saved()),
     withdrawQuote: vi.fn<Database['withdrawQuote']>(() => saved()),
+    listFreight: vi.fn<Database['listFreight']>(() => Promise.resolve([])),
+    getFreight: vi.fn<Database['getFreight']>(() => Promise.resolve(null)),
+    createFreight: vi.fn<Database['createFreight']>(() =>
+      Promise.resolve({ status: 'created', id: '00000000-0000-4000-8000-00000000e001' }),
+    ),
+    reviseFreight: vi.fn<Database['reviseFreight']>(() => saved()),
+    withdrawFreight: vi.fn<Database['withdrawFreight']>(() => saved()),
     listFxQuotes: vi.fn<Database['listFxQuotes']>(() => Promise.resolve([])),
     storeBankOfCanadaRates: vi.fn<Database['storeBankOfCanadaRates']>((rates) =>
       Promise.resolve(rates.map((rate) => ({ rate, outcome: 'stored' as const }))),

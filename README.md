@@ -85,7 +85,7 @@ The CAD/USD rate is the Bank of Canada's daily average (series FXUSDCAD), publis
 
 ## Counterparties
 
-Signed-in members see their organization's buyers and sellers under **Counterparties**, as a table, by logo or on a map, with **All / Buyers / Sellers** to show one side. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
+Signed-in members see their organization's buyers, sellers and carriers under **Counterparties**, as a table, by logo or on a map, with **All / Buyers / Sellers / Carriers** to show one kind. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
 
 Operations and admin members can:
 
@@ -104,6 +104,17 @@ Traders and admins can:
 - **Withdraw:** for good; the quote stays readable with its history. A new price is entered as a new quote.
 
 A quote past its valid-until time shows as expired. A location with quotes cannot be removed from its counterparty. The commodity list (20 grains, oilseeds and pulses) is set in the database; ask for others to be added.
+
+## Freight
+
+**Freight** lists carriers' live freight rates by route (tick **Include withdrawn and expired** for the rest), filtered by truck or rail and by carrier. A carrier is a counterparty marked as a carrier (add one under **Counterparties**); its page lists its rates with **New freight rate**, and any other counterparty's page lists the rates to and from its locations.
+
+Traders, operations and admin members can:
+
+- **New freight rate:** choose the carrier, truck or rail, where the freight leaves from and where it goes (a company, then one of its locations: a specific address), and the terms: the rate as the carrier quoted it (CAD or USD, per tonne, short ton, bushel, hundredweight or load; for a rate per load, the load's payload as the carrier stated it), firm or indicative, what the rate includes, quoted and valid-until times, source and notes.
+- **Record new terms** and **Withdraw**, as for bids and offers: earlier terms are kept and never edited.
+
+Rates are shown as quoted, never converted or estimated; the trading engine, when built, will convert them with recorded factors. A location on a route cannot be removed from its counterparty.
 
 ## Map
 

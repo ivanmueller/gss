@@ -5,6 +5,7 @@ import {
   CircleAlert,
   LayoutDashboard,
   Menu,
+  Truck,
   Users,
   type LucideIcon,
 } from 'lucide-react';
@@ -20,7 +21,7 @@ import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
-export type NavSection = 'workspace' | 'counterparties' | 'quotes' | 'team';
+export type NavSection = 'workspace' | 'counterparties' | 'quotes' | 'freight' | 'team';
 
 interface NavItem {
   id: NavSection;
@@ -34,6 +35,7 @@ const NAV: readonly NavItem[] = [
   { id: 'workspace', href: '/', label: 'Workspace', Icon: LayoutDashboard },
   { id: 'counterparties', href: '/counterparties', label: 'Counterparties', Icon: Building2 },
   { id: 'quotes', href: '/quotes', label: 'Bids & offers', Icon: ArrowLeftRight },
+  { id: 'freight', href: '/freight', label: 'Freight', Icon: Truck },
   { id: 'team', href: '/team', label: 'Team', Icon: Users },
 ];
 
