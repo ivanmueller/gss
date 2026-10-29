@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #64 to #66
+
+- `docs/HANDOFF.md`: the website field (ivanmueller/gss#65, #66) with Codex's two reviews and the preview's removal, the handoff record of #63 (#64); CI runs #138 to #145 and Deploy staging runs #61 to #63; the owner's checks on staging (Logos and searchable pickers, the Freight page, a stored Bank of Canada rate); the next task.
+- `AGENTS.md`: the status line with carriers, websites and Freight.
+- `docs/BUILD_PLAN.md`: websites in GT-020; the Bank of Canada FX connector done.
+
 ## 2026-10-29 — No website preview (owner's decision)
 
 - `docs/DECISIONS.md`: the website entry rewritten as built, with the preview removed and why; the review's address rules kept.
