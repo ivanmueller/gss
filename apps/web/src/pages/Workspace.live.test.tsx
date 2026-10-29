@@ -218,6 +218,36 @@ describe('Workspace on live bids and offers', () => {
     expect(screen.getByRole('table')).toHaveTextContent('USD 725.00/MTCAD/USD rate out of date');
   });
 
+  it('keeps working, converting nothing, when the rate it is sent is malformed', async () => {
+    mockApi({
+      [LIVE]: () => Response.json({ quotes: [SELLER, CAD_BUYER, USD_BUYER], truncated: false }),
+      ...COMMODITIES,
+      'GET /fx-quotes': () =>
+        Response.json({
+          rates: [
+            {
+              base: 'USD',
+              quote: 'CAD',
+              rate: 1.3912,
+              rateDate: '2026-10-26',
+              source: 'bank_of_canada',
+              series: 'FXUSDCAD',
+              fetchedAt: '2026-10-26T22:15:03.000Z',
+            },
+          ],
+        }),
+    });
+    render(<Workspace mapbox={MAPBOX} session={SESSION} />);
+
+    expect(
+      await within(book()).findByText(
+        /USD quotes are left out of the book: the latest CAD\/USD rate the server sent could not be used\./,
+      ),
+    ).toBeInTheDocument();
+    expect(within(book()).getByText('+85.50')).toBeInTheDocument();
+    expect(screen.getByRole('table')).toHaveTextContent('USD 725.00/MTno CAD/USD rate');
+  });
+
   it('picks up new bids and offers when the page is shown again', async () => {
     let quotes: QuoteSummary[] = [SELLER];
     const calls = mockApi({
