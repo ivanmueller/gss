@@ -91,6 +91,10 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     reviseQuote: vi.fn<Database['reviseQuote']>(() => saved()),
     withdrawQuote: vi.fn<Database['withdrawQuote']>(() => saved()),
+    listFxQuotes: vi.fn<Database['listFxQuotes']>(() => Promise.resolve([])),
+    storeBankOfCanadaRates: vi.fn<Database['storeBankOfCanadaRates']>((rates) =>
+      Promise.resolve(rates.map((rate) => ({ rate, outcome: 'stored' as const }))),
+    ),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
 }

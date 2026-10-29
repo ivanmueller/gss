@@ -1,10 +1,10 @@
 import { ChevronDown, CircleDashed, TriangleAlert } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 
 import { formatAmount, formatPrice, formatQuantityShort, formatSignedAmount } from '../lib/format';
 import { displayStatus, type BookQuote, type CommodityBook } from '../lib/orderBook';
 import { cn } from '../lib/utils';
-import { conversionText } from './CadPrice';
+import { conversionText, NoRateContext } from './CadPrice';
 import { Card } from './ui/card';
 
 interface Selection {
@@ -151,6 +151,7 @@ function CommoditySection({ book, ...selection }: { book: CommodityBook } & Sele
   const live = book.asks.length + book.bids.length;
   const noRate = book.outOfBook.some((entry) => entry.reason === 'FX_MISSING');
   const otherUnit = book.outOfBook.some((entry) => entry.reason === 'UNIT_NOT_MT');
+  const why = useContext(NoRateContext).long;
   return (
     <details open className="group border-b last:border-b-0">
       <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
@@ -184,7 +185,7 @@ function CommoditySection({ book, ...selection }: { book: CommodityBook } & Sele
       {noRate && (
         <p className="flex items-start gap-1.5 px-4 pb-3 text-xs text-caution">
           <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-          USD quotes are left out of the book: there is no CAD/USD rate to convert them.
+          USD quotes are left out of the book: {why}
         </p>
       )}
       {otherUnit && (
@@ -224,7 +225,8 @@ export function OrderBook({
 } & Selection) {
   const entries = books.flatMap((book) => [...book.asks, ...book.bids]);
   const anyIndicative = entries.some((entry) => entry.quote.status === 'indicative');
-  const anyConverted = entries.some((entry) => entry.fx !== null);
+  // Every converted price in the book uses the same rate; the footer names it.
+  const rate = entries.find((entry) => entry.fx !== null)?.fx ?? null;
   return (
     <Card asChild>
       <aside
@@ -255,7 +257,7 @@ export function OrderBook({
             ))
           )}
         </div>
-        {(anyIndicative || anyConverted) && (
+        {(anyIndicative || rate) && (
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t px-4 py-2 text-2xs text-muted-foreground">
             {anyIndicative && (
               <span className="flex items-center gap-1">
@@ -263,10 +265,10 @@ export function OrderBook({
                 Indicative, not firm
               </span>
             )}
-            {anyConverted && (
+            {rate && (
               <span className="flex items-center gap-1">
                 <span className="rounded-xs border px-0.5 leading-none font-medium">FX</span>
-                Converted from USD
+                Converted from USD at {rate.cadPerUsd} CAD per USD, {rate.source}
               </span>
             )}
           </p>

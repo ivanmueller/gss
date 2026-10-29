@@ -23,6 +23,27 @@ vi.mock('../components/FacilityMap', () => ({
 
 const MAPBOX = { status: 'ok', token: 'pk.synthetic' } as const;
 const LIVE = `GET /quotes?organization_id=${ORG.id}`;
+const NO_RATES = { 'GET /fx-quotes': () => Response.json({ rates: [] }) };
+
+function bankRate(rate: string, rateDate: string) {
+  return {
+    'GET /fx-quotes': () =>
+      Response.json({
+        rates: [
+          {
+            base: 'USD',
+            quote: 'CAD',
+            rate,
+            rateDate,
+            source: 'bank_of_canada',
+            series: 'FXUSDCAD',
+            fetchedAt: `${rateDate}T22:15:03.000Z`,
+          },
+        ],
+      }),
+  };
+}
+
 const COMMODITIES = {
   'GET /commodities': () =>
     Response.json({
@@ -114,6 +135,7 @@ describe('Workspace on live bids and offers', () => {
       [LIVE]: () =>
         Response.json({ quotes: [SELLER, CAD_BUYER, USD_BUYER, BUSHEL], truncated: false }),
       ...COMMODITIES,
+      ...NO_RATES,
     });
     render(<Workspace mapbox={MAPBOX} session={SESSION} />);
 
@@ -128,8 +150,12 @@ describe('Workspace on live bids and offers', () => {
       within(ladder).getByRole('button', { name: /^Bid: Synthetic Buyer, CAD 905\.50\/MT/ }),
     ).toHaveTextContent('Synthetic Port, BC · Delivered');
     expect(section).toHaveTextContent('Spread+85.50');
-    // A USD bid is never converted at a made-up rate.
-    expect(section).toHaveTextContent('USD quotes are left out of the book');
+    // Without a Bank of Canada rate, a USD bid is never converted at a made-up one.
+    await waitFor(() => {
+      expect(section).toHaveTextContent(
+        'USD quotes are left out of the book: there is no Bank of Canada CAD/USD rate yet.',
+      );
+    });
     expect(within(ladder).queryByText(/Synthetic US Buyer/)).toBeNull();
 
     const canola = within(book()).getByText('Canola').closest('details');
@@ -142,6 +168,54 @@ describe('Workspace on live bids and offers', () => {
     expect(table).toHaveTextContent('Synthetic US Buyer');
     expect(table).toHaveTextContent('USD 725.00/MTno CAD/USD rate');
     expect(screen.getByRole('button', { name: 'Commodities: All' })).toBeInTheDocument();
+  });
+
+  it("converts USD prices at the Bank of Canada's latest rate and names it", async () => {
+    mockApi({
+      [LIVE]: () => Response.json({ quotes: [SELLER, CAD_BUYER, USD_BUYER], truncated: false }),
+      ...COMMODITIES,
+      // Monday's rate, read on Tuesday 27 October.
+      ...bankRate('1.3912', '2026-10-26'),
+    });
+    render(<Workspace mapbox={MAPBOX} session={SESSION} />);
+
+    // USD 725.00 × 1.3912 = CAD 1,008.62 exactly: the best bid now, ahead of CAD 905.50.
+    const usd = await within(book()).findByRole('button', {
+      name: /^Bid: Synthetic US Buyer, CAD 1008\.62\/MT, converted from USD 725\.00\/MT at 1\.3912 CAD per USD, Bank of Canada, 26 Oct 2026/,
+    });
+    const section = usd.closest('details');
+    if (!section) throw new Error('no flaxseed section');
+    expect(
+      within(section)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')?.split(',')[0]),
+    ).toEqual(['Ask: Synthetic Seller', 'Bid: Synthetic US Buyer', 'Bid: Synthetic Buyer']);
+    expect(section).toHaveTextContent('Spread+188.62');
+    expect(section).not.toHaveTextContent('left out of the book');
+    expect(book()).toHaveTextContent(
+      'Converted from USD at 1.3912 CAD per USD, Bank of Canada, 26 Oct 2026',
+    );
+    expect(screen.getByRole('table')).toHaveTextContent(
+      'CAD 1008.62/MTFX: converted from USD 725.00/MT at 1.3912 CAD per USD, Bank of Canada, 26 Oct 2026',
+    );
+  });
+
+  it('leaves USD prices out when the latest rate is more than four days old', async () => {
+    mockApi({
+      [LIVE]: () => Response.json({ quotes: [SELLER, USD_BUYER], truncated: false }),
+      ...COMMODITIES,
+      // Thursday 22 October's rate on Tuesday 27 October (08:00 in Ottawa): five days old.
+      ...bankRate('1.3912', '2026-10-22'),
+    });
+    render(<Workspace mapbox={MAPBOX} session={SESSION} />);
+
+    expect(
+      await within(book()).findByText(
+        /USD quotes are left out of the book: the latest CAD\/USD rate \(Bank of Canada, 22 Oct 2026\) is out of date\./,
+      ),
+    ).toBeInTheDocument();
+    expect(within(book()).queryByRole('button', { name: /Synthetic US Buyer/ })).toBeNull();
+    expect(screen.getByRole('table')).toHaveTextContent('USD 725.00/MTCAD/USD rate out of date');
   });
 
   it('picks up new bids and offers when the page is shown again', async () => {

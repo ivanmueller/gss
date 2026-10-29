@@ -5,6 +5,7 @@ import { requireUser } from './auth';
 import { counterpartyRoutes } from './counterparties';
 import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
+import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { memberRoutes } from './members';
 import { commodityRoutes, quoteRoutes } from './quotes';
@@ -107,10 +108,17 @@ export function createApp(openDatabase: DatabaseFactory) {
   app.route('/members', memberRoutes(openDatabase));
   app.route('/quotes', quoteRoutes(openDatabase));
   app.route('/commodities', commodityRoutes(openDatabase));
+  app.route('/fx-quotes', fxQuoteRoutes(openDatabase));
 
   return app;
 }
 
 export const app = createApp(postgresDatabase);
 
-export default app;
+export default {
+  fetch: app.fetch,
+  // The Bank of Canada's USD/CAD rate, twice a day (wrangler.jsonc, triggers).
+  scheduled(_controller, env, ctx) {
+    ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));
+  },
+} satisfies ExportedHandler<ApiEnv['Bindings']>;

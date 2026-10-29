@@ -11,7 +11,7 @@ Vendor capabilities were checked against public technical documentation availabl
 - Supabase RLS: https://supabase.com/docs/guides/database/postgres/row-level-security
 - Mapbox GL JS: https://docs.mapbox.com/mapbox-gl-js/
 - Geocodio API: https://www.geocod.io/docs/ (accuracy types: https://www.geocod.io/guides/accuracy-types-scores)
-- Bank of Canada daily exchange rates: https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates/ and the Valet API (series `FXUSDCAD`): https://www.bankofcanada.ca/valet-api-how-to/ (found by web search on 27 October 2026; the site was not reachable from the build session, so check the publication time and terms of use before building GT-052)
+- Bank of Canada daily exchange rates: https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates/ and the Valet API (series `FXUSDCAD`): https://www.bankofcanada.ca/valet-api-how-to/ (found by web search on 27 October 2026; the site was not reachable from the build sessions). Publication by 16:30 ET each business day, and late rates published the next business day, per the Bank's daily exchange rates page as quoted by web search on 29 October 2026; the Valet answer shape (`observations[].d`, `observations[].FXUSDCAD.v` as text) from third-party descriptions of it. Terms of use still to be checked before production
 - Codex repository instructions: https://developers.openai.com/cookbook/examples/codex/iterating-development-workflows-with-codex
 - Gemini CLI context configuration: https://geminicli.com/docs/reference/configuration/
 - Cursor 3 agent environment: https://cursor.com/changelog/3-0

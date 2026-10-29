@@ -17,7 +17,7 @@ All tenant-owned tables contain `organization_id uuid not null`, with foreign ke
 | `commodity_grades` | commodity_id, grade_code, specifications JSONB, standard_id/version, compatibility rules |
 | `quotes` | current revision pointer, facility_id, side, status; searchable identity shell |
 | `quote_revisions` | immutable economic fields from §5.2, notes, valid dates, source, revision, entered_by; snapshot original input |
-| `fx_quotes` | base_currency, quote_currency, convention, rate numeric, timestamp, expires_at, source, quality. First source: the Bank of Canada's daily USD/CAD rate, one row per published day, never edited (owner's decision, `docs/DECISIONS.md`) |
+| `fx_quotes` | Built (`20261029010000_fx_quotes.sql`): base_currency `USD`, quote_currency `CAD` (the rate is CAD per 1 USD), rate numeric as published, rate_date (the business day), source `bank_of_canada`, source_series `FXUSDCAD`, fetched_at; one row per day, never changed or deleted (triggers). Public reference data, so no organization_id; read by signed-in users, written only by `app.record_bank_of_canada_rate()` from the Worker's scheduled job. Staleness (more than four days) is computed when read, not stored as expires_at (owner's decision, `docs/DECISIONS.md`) |
 | `freight_quotes` | origin_facility_id, dest_facility_id, carrier, mode, quoted amount/unit/currency, payload, route/basis, valid dates |
 | `trade_scenarios` | label, status, owner, latest_version_id, created_at |
 | `scenario_versions` | immutable JSONB input_snapshot and output_snapshot, engine_version, assumptions, warnings/errors, calculated_at, input hashes |

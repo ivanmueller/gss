@@ -13,6 +13,7 @@ import type {
 } from '@grain/domain';
 import postgres from 'postgres';
 
+import { fxQueries, type FxDatabase } from './fx-db';
 import type { FacilityAddress } from './geocoding';
 import { quoteQueries, type QuoteDatabase } from './quotes-db';
 
@@ -169,7 +170,7 @@ export const LIST_LIMIT = 5000;
 export const MAP_LIMIT = 5000;
 
 /** What the API reads from and writes to Postgres. Every call runs as the given, already verified user. */
-export interface Database extends QuoteDatabase {
+export interface Database extends QuoteDatabase, FxDatabase {
   memberships: (userId: string) => Promise<Membership[]>;
   canEditDirectory: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   listCounterparties: (
@@ -492,6 +493,7 @@ export function createDatabase(sql: postgres.Sql): Database {
 
   return {
     ...quoteQueries(asUser),
+    ...fxQueries(asUser, sql),
 
     async memberships(userId) {
       const rows = await sql.begin(async (tx) => {

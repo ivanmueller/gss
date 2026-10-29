@@ -1,4 +1,5 @@
 export * from './directory';
+export * from './fx';
 export * from './geo';
 export * from './geocoding';
 export * from './money';

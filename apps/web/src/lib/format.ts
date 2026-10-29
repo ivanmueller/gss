@@ -73,3 +73,13 @@ export function formatQuantityShort(range: { min: string | null; max: string }):
 export function formatPlace(region: string, country: string): string {
   return [region, country].filter((part) => part !== '').join(', ');
 }
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-10-28" → "28 Oct 2026": a calendar day, the same for every viewer and language. */
+export function formatDay(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  const month = match ? MONTHS[Number(match[2]) - 1] : undefined;
+  if (!match || month === undefined) throw new Error(`Not a date: "${date}"`);
+  return `${String(Number(match[3]))} ${month} ${match[1] ?? ''}`;
+}

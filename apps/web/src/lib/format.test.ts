@@ -7,6 +7,7 @@ import {
   formatQuantityShort,
   formatSignedAmount,
   formatSignedPrice,
+  formatDay,
   formatUtc,
 } from './format';
 
@@ -105,5 +106,17 @@ describe('formatAmount and formatSignedAmount', () => {
       expect(() => formatAmount(amount)).toThrow(/decimal/);
       expect(() => formatSignedAmount(amount)).toThrow(/decimal/);
     }
+  });
+});
+
+describe('formatDay', () => {
+  it('writes a day the same way for every viewer', () => {
+    expect(formatDay('2026-10-28')).toBe('28 Oct 2026');
+    expect(formatDay('2026-01-05')).toBe('5 Jan 2026');
+  });
+
+  it('refuses anything that is not a YYYY-MM-DD day', () => {
+    expect(() => formatDay('2026-13-01')).toThrow('Not a date');
+    expect(() => formatDay('28 Oct 2026')).toThrow('Not a date');
   });
 });

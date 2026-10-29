@@ -1,6 +1,8 @@
+import type { FxQuoteList } from '@grain/domain';
 import { ChevronLeft, ChevronRight, MapPinned } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { NoRateContext } from '../components/CadPrice';
 import { CommodityPicker } from '../components/CommodityPicker';
 import { FacilityList } from '../components/FacilityList';
 import { FacilityTable } from '../components/FacilityTable';
@@ -11,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES, SYNTHETIC_FX } from '../data/synthetic';
 import type { Facility, FacilityRole } from '../data/types';
 import { useDemoData } from '../lib/demo';
+import { bankOfCanadaRate } from '../lib/fx';
 import { mapboxToken, type MapboxToken, type MapPin } from '../lib/mapbox';
 import { buildOrderBooks } from '../lib/orderBook';
 import { useTheme } from '../lib/theme';
@@ -95,8 +98,9 @@ function MapUnavailable({ refused }: { refused: boolean }) {
  * book of their asks and bids in CAD, and the facility list. It shows GSS's live bids and
  * offers, fetched again every minute and when the page is shown again; with demo data on
  * (profile menu) it shows made-up data instead, with the golden fixture's CAD/USD rate.
- * Real USD quotes wait for a real rate (the Bank of Canada's, not built yet): they are left
- * out of the book with a note, never converted at a made-up rate.
+ * Real USD quotes are converted at the Bank of Canada's latest daily rate, named beside each
+ * converted price; without a current one they are left out of the book with a note, never
+ * converted at a made-up or out-of-date rate.
  */
 export function Workspace({
   mapbox = mapboxToken(),
@@ -139,12 +143,19 @@ export function Workspace({
     real ? '/commodities' : null,
     token,
   );
-  // New, revised, withdrawn and expired quotes reach the book without a reload of the page.
+  // The Bank of Canada's CAD/USD rate, which converts real USD prices.
+  const [rates, reloadRates] = useApiResource<FxQuoteList>(real ? '/fx-quotes' : null, token);
+  // New, revised, withdrawn and expired quotes, and a new day's rate, reach the book without a
+  // reload of the page.
   useEffect(() => {
     if (!real) return;
-    const timer = window.setInterval(reloadLive, 60_000);
+    const reload = () => {
+      reloadLive();
+      reloadRates();
+    };
+    const timer = window.setInterval(reload, 60_000);
     const onShow = () => {
-      if (document.visibilityState === 'visible') reloadLive();
+      if (document.visibilityState === 'visible') reload();
     };
     document.addEventListener('visibilitychange', onShow);
     window.addEventListener('focus', onShow);
@@ -153,7 +164,7 @@ export function Workspace({
       document.removeEventListener('visibilitychange', onShow);
       window.removeEventListener('focus', onShow);
     };
-  }, [real, reloadLive]);
+  }, [real, reloadLive, reloadRates]);
   const realFacilities = useMemo(
     () =>
       // An answer without a list (a proxy's error page, say) shows nothing rather than failing.
@@ -163,8 +174,10 @@ export function Workspace({
     [live],
   );
   const facilities = demo ? SYNTHETIC_FACILITIES : realFacilities;
-  // The demo's made-up rate converts only made-up prices; real USD prices have no rate yet.
-  const fx = demo ? SYNTHETIC_FX : null;
+  // The demo's made-up rate converts only made-up prices; real USD prices use the Bank of
+  // Canada's latest rate, or stay unconverted when there is none or it is out of date.
+  const bank = useMemo(() => bankOfCanadaRate(rates, now), [rates, now]);
+  const fx = demo ? SYNTHETIC_FX : bank.fx;
   const available = useMemo(
     () =>
       demo
@@ -272,92 +285,94 @@ export function Workspace({
   };
 
   return (
-    <section aria-labelledby="workspace-heading" className="flex flex-col gap-4">
-      {/* The menu already says where the user is; the heading is kept for screen readers. */}
-      <h1 id="workspace-heading" className="sr-only">
-        Workspace
-      </h1>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <CommodityPicker commodities={available} chosen={commodities} onChange={setPicked} />
-        <SegmentedControl
-          label="Show facilities"
-          options={ROLES}
-          value={roleFilter}
-          onChange={setRoleFilter}
-        />
-        <div className="lg:ml-auto">
-          <Legend />
-        </div>
-      </div>
-
-      {floating ? (
-        <>
-          <div className="h-[calc(100dvh-11rem)] min-h-[34rem]">
-            {map(
-              // Flush with the map's right edge, full height. The tab on its left edge points
-              // right to tuck the book away and left to bring it back.
-              <div
-                className={cn(
-                  'absolute inset-y-0 right-0 w-[27rem] transition-transform duration-200 motion-reduce:transition-none',
-                  !bookOpen && 'translate-x-full',
-                )}
-              >
-                <button
-                  type="button"
-                  aria-expanded={bookOpen}
-                  aria-controls="order-book"
-                  onClick={() => {
-                    setBookOpen((open) => !open);
-                  }}
-                  className="absolute top-1/2 right-full flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-l-control border border-r-0 bg-card text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-                >
-                  {bookOpen ? (
-                    <ChevronRight aria-hidden="true" className="size-4" />
-                  ) : (
-                    <ChevronLeft aria-hidden="true" className="size-4" />
-                  )}
-                  <span className="sr-only">
-                    {bookOpen ? 'Hide order book' : 'Show order book'}
-                  </span>
-                </button>
-                <OrderBook
-                  id="order-book"
-                  inert={!bookOpen}
-                  className="size-full rounded-none border-0 border-l shadow-none"
-                  {...bookProps}
-                />
-              </div>,
-            )}
+    <NoRateContext value={bank.noRate}>
+      <section aria-labelledby="workspace-heading" className="flex flex-col gap-4">
+        {/* The menu already says where the user is; the heading is kept for screen readers. */}
+        <h1 id="workspace-heading" className="sr-only">
+          Workspace
+        </h1>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <CommodityPicker commodities={available} chosen={commodities} onChange={setPicked} />
+          <SegmentedControl
+            label="Show facilities"
+            options={ROLES}
+            value={roleFilter}
+            onChange={setRoleFilter}
+          />
+          <div className="lg:ml-auto">
+            <Legend />
           </div>
-          <FacilityTable {...facilityProps} />
-        </>
-      ) : isDesktop ? (
-        <>
-          <div className="h-[32rem]">{map()}</div>
-          <OrderBook className="max-h-[44rem]" {...bookProps} />
-          <FacilityTable {...facilityProps} />
-        </>
-      ) : (
-        <Tabs defaultValue="map">
-          <TabsList aria-label="Workspace view">
-            <TabsTrigger value="map">Map</TabsTrigger>
-            <TabsTrigger value="book">Order book</TabsTrigger>
-            <TabsTrigger value="list">Facilities</TabsTrigger>
-          </TabsList>
-          <TabsContent value="map" className="flex flex-col gap-4">
-            <div className="h-[60vh] min-h-80">{map()}</div>
-            {selectedBlock && (
-              <div className="overflow-hidden rounded-card border bg-card">{selectedBlock}</div>
-            )}
-          </TabsContent>
-          <TabsContent value="book">
-            <OrderBook {...bookProps} />
-          </TabsContent>
-          <TabsContent value="list">
-            <FacilityList {...facilityProps} />
-          </TabsContent>
-        </Tabs>
-      )}
-    </section>
+        </div>
+
+        {floating ? (
+          <>
+            <div className="h-[calc(100dvh-11rem)] min-h-[34rem]">
+              {map(
+                // Flush with the map's right edge, full height. The tab on its left edge points
+                // right to tuck the book away and left to bring it back.
+                <div
+                  className={cn(
+                    'absolute inset-y-0 right-0 w-[27rem] transition-transform duration-200 motion-reduce:transition-none',
+                    !bookOpen && 'translate-x-full',
+                  )}
+                >
+                  <button
+                    type="button"
+                    aria-expanded={bookOpen}
+                    aria-controls="order-book"
+                    onClick={() => {
+                      setBookOpen((open) => !open);
+                    }}
+                    className="absolute top-1/2 right-full flex h-14 w-6 -translate-y-1/2 items-center justify-center rounded-l-control border border-r-0 bg-card text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                  >
+                    {bookOpen ? (
+                      <ChevronRight aria-hidden="true" className="size-4" />
+                    ) : (
+                      <ChevronLeft aria-hidden="true" className="size-4" />
+                    )}
+                    <span className="sr-only">
+                      {bookOpen ? 'Hide order book' : 'Show order book'}
+                    </span>
+                  </button>
+                  <OrderBook
+                    id="order-book"
+                    inert={!bookOpen}
+                    className="size-full rounded-none border-0 border-l shadow-none"
+                    {...bookProps}
+                  />
+                </div>,
+              )}
+            </div>
+            <FacilityTable {...facilityProps} />
+          </>
+        ) : isDesktop ? (
+          <>
+            <div className="h-[32rem]">{map()}</div>
+            <OrderBook className="max-h-[44rem]" {...bookProps} />
+            <FacilityTable {...facilityProps} />
+          </>
+        ) : (
+          <Tabs defaultValue="map">
+            <TabsList aria-label="Workspace view">
+              <TabsTrigger value="map">Map</TabsTrigger>
+              <TabsTrigger value="book">Order book</TabsTrigger>
+              <TabsTrigger value="list">Facilities</TabsTrigger>
+            </TabsList>
+            <TabsContent value="map" className="flex flex-col gap-4">
+              <div className="h-[60vh] min-h-80">{map()}</div>
+              {selectedBlock && (
+                <div className="overflow-hidden rounded-card border bg-card">{selectedBlock}</div>
+              )}
+            </TabsContent>
+            <TabsContent value="book">
+              <OrderBook {...bookProps} />
+            </TabsContent>
+            <TabsContent value="list">
+              <FacilityList {...facilityProps} />
+            </TabsContent>
+          </Tabs>
+        )}
+      </section>
+    </NoRateContext>
   );
 }

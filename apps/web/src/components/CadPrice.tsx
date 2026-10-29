@@ -1,7 +1,13 @@
+import { createContext, useContext } from 'react';
+
 import type { FxRate, Quote } from '../data/types';
 import { formatPrice } from '../lib/format';
+import { NO_RATE, type NoRate } from '../lib/fx';
 import { cadPrice } from '../lib/orderBook';
 import { cn } from '../lib/utils';
+
+/** Why USD prices are not converted on this page: no rate yet, an old one, or a failure. */
+export const NoRateContext = createContext<NoRate>(NO_RATE);
 
 /** "USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)". */
 export function conversionText(quote: Quote, fx: FxRate): string {
@@ -23,11 +29,12 @@ export function CadPrice({
   className?: string;
 }) {
   const price = cadPrice(quote, fx);
+  const noRate = useContext(NoRateContext);
   if (!price) {
     return (
       <span className={cn('inline-flex flex-wrap items-center gap-x-1.5', className)}>
         <span className="font-price tabular-nums">{formatPrice(quote.price)}</span>
-        <span className="font-sans text-xs font-normal text-caution">no CAD/USD rate</span>
+        <span className="font-sans text-xs font-normal text-caution">{noRate.short}</span>
       </span>
     );
   }

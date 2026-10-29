@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Bank of Canada FX connector (GT-052)
+
+- `docs/DECISIONS.md`: when the rate is fetched and stored, why the table has no organization, the out-of-date rule, what the screen shows.
+- `docs/API.md`: `GET /api/v1/fx-quotes`.
+- `docs/DATA_MODEL.md`: `fx_quotes` as built.
+- `docs/ARCHITECTURE.md`, `docs/BUILD_PLAN.md`, `docs/PRODUCT.md`, `docs/REFERENCES.md`, `README.md` ("Exchange rate", "Workspace"): the connector built.
+
+## 2026-10-29 — Handoff record of #53
+
+- `docs/HANDOFF.md`: ivanmueller/gss#53, CI runs #116 and #117 and Deploy staging run #50.
+
 ## 2026-10-29 — Status checked after the dropdown change
 
 - `AGENTS.md`: Phase 2 and most of Phase 3 on staging.
