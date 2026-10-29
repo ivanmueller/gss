@@ -115,6 +115,7 @@ function TextField({
   required,
   hint,
   type = 'text',
+  inputMode,
   autoComplete = 'off',
   className,
 }: {
@@ -124,6 +125,7 @@ function TextField({
   required?: boolean | undefined;
   hint?: ReactNode;
   type?: 'text' | 'email' | 'tel';
+  inputMode?: 'url';
   autoComplete?: string;
   className?: string | undefined;
 }) {
@@ -141,6 +143,7 @@ function TextField({
       <Input
         {...controlProps(f.id(field), error)}
         type={type}
+        inputMode={inputMode}
         autoComplete={autoComplete}
         value={f.value(field)}
         onChange={f.set(field)}
@@ -177,7 +180,7 @@ function CountrySelect({
   );
 }
 
-/** A counterparty's own details: names, buyer/seller, country, verification and notes. */
+/** A counterparty's own details: names, buyer/seller, country, verification, website and notes. */
 export function CompanyFields(props: FieldsProps) {
   const f = useFieldHelpers(props);
   const chosen = new Set(
@@ -247,6 +250,14 @@ export function CompanyFields(props: FieldsProps) {
           ]}
         />
       </Field>
+      {/* Text rather than type="url", which would refuse "example.com" before the check does. */}
+      <TextField
+        field="website"
+        label="Website"
+        props={props}
+        inputMode="url"
+        hint="For example example.com."
+      />
       <Field id={f.id('notes')} label="Notes" error={notesError} className="sm:col-span-2">
         <Textarea
           {...controlProps(f.id('notes'), notesError)}

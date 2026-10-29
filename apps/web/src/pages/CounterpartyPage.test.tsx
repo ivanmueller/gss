@@ -23,6 +23,7 @@ const DETAIL: CounterpartyDetail = {
   facilityCount: 1,
   regions: ['SK'],
   logoSha256: null,
+  website: null,
   notes: 'Synthetic record.',
   archivedAt: null,
   version: '2026-10-27T14:05:00.000000Z',
@@ -296,6 +297,7 @@ describe('CounterpartyPage editing', () => {
     expect(within(form).getByRole('checkbox', { name: 'Seller' })).toBeChecked();
     await userEvent.click(within(form).getByRole('checkbox', { name: 'Seller' }));
     await userEvent.clear(within(form).getByLabelText('Trading name'));
+    await userEvent.type(within(form).getByLabelText('Website'), 'example.com/grain');
     await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
 
     await waitFor(() => {
@@ -310,6 +312,7 @@ describe('CounterpartyPage editing', () => {
         types: 'buyer',
         country: 'CA',
         verificationStatus: 'pending',
+        website: 'example.com/grain',
         notes: 'Synthetic record.',
       },
     });
@@ -317,6 +320,20 @@ describe('CounterpartyPage editing', () => {
       calls.filter((call) => call.method === 'GET' && call.path.startsWith('/counterparties')),
     ).toHaveLength(2);
     expect(screen.getByRole('status')).toHaveTextContent('Details saved.');
+  });
+
+  it('refuses a website that is not a web address before sending it', async () => {
+    const calls = mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit details' }));
+    const form = screen.getByRole('form', { name: 'Edit details' });
+    await userEvent.type(within(form).getByLabelText('Website'), 'javascript:alert(1)');
+    await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
+    expect(
+      await within(form).findByText('Website must be a web address such as example.com.'),
+    ).toBeInTheDocument();
+    expect(within(form).getByLabelText('Website')).toHaveAttribute('aria-invalid', 'true');
+    expect(calls.some((call) => call.method === 'PATCH')).toBe(false);
   });
 
   it('checks the form before sending it', async () => {
@@ -509,5 +526,77 @@ describe('CounterpartyPage editing', () => {
       'accept',
       'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp',
     );
+  });
+});
+
+describe('CounterpartyPage website', () => {
+  const WEBSITE = 'https://www.example.com/grain';
+  const WITH_WEBSITE = { ...DETAIL, website: WEBSITE };
+
+  function withPreview(preview: string) {
+    return mockApi({
+      [`GET ${PATH}`]: () => Response.json(WITH_WEBSITE),
+      [`GET ${PATH}/website-preview`]: () => Response.json({ website: WEBSITE, preview }),
+    });
+  }
+
+  it('links the website in a new tab, without a preview when the site refuses one', async () => {
+    const calls = withPreview('refused');
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    const link = await screen.findByRole('link', {
+      name: 'example.com/grain (opens in a new tab)',
+    });
+    expect(link).toHaveAttribute('href', WEBSITE);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    await waitFor(() => {
+      expect(calls.some((call) => call.path === `${PATH}/website-preview`)).toBe(true);
+    });
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+
+  it.each(['not_secure', 'unreachable'])(
+    'offers no preview when the check says %s',
+    async (preview) => {
+      withPreview(preview);
+      render(<CounterpartyPage session={SESSION} id={ID} />);
+      await screen.findByRole('link', { name: 'example.com/grain (opens in a new tab)' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+    },
+  );
+
+  it('offers no preview when the check fails', async () => {
+    mockApi({ [`GET ${PATH}`]: () => Response.json(WITH_WEBSITE) });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await screen.findByRole('link', { name: 'example.com/grain (opens in a new tab)' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+
+  it('previews a site that allows it in a sandboxed pop-up', async () => {
+    withPreview('allowed');
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Preview' }));
+    const dialog = screen.getByRole('dialog', { name: 'example.com/grain' });
+    const frame = within(dialog).getByTitle('Preview of example.com/grain');
+    expect(frame).toHaveAttribute('src', WEBSITE);
+    expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+    const sandbox = frame.getAttribute('sandbox') ?? '';
+    expect(sandbox).toContain('allow-scripts');
+    expect(sandbox).not.toContain('allow-top-navigation');
+    expect(
+      within(dialog).getByRole('link', { name: 'Open in new tab (opens in a new tab)' }),
+    ).toHaveAttribute('target', '_blank');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows no website and asks nothing when there is none', async () => {
+    const calls = mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
+    expect(screen.queryByRole('link', { name: /opens in a new tab/ })).not.toBeInTheDocument();
+    expect(calls.some((call) => call.path.endsWith('/website-preview'))).toBe(false);
   });
 });

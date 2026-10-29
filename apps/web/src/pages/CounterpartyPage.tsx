@@ -12,6 +12,7 @@ import { BackLink } from '../components/BackLink';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyFreight } from '../components/CounterpartyFreight';
 import { CounterpartyQuotes } from '../components/CounterpartyQuotes';
+import { CounterpartyWebsite } from '../components/CounterpartyWebsite';
 import {
   CompanyFields,
   ContactFields,
@@ -145,6 +146,7 @@ function companyValues(detail: CounterpartyDetail): FormValues {
     types: detail.types.join(','),
     country: detail.primaryCountry,
     verificationStatus: detail.verificationStatus,
+    website: detail.website ?? '',
     notes: detail.notes ?? '',
   };
 }
@@ -442,6 +444,14 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                   </h1>
                   {detail.tradingName && (
                     <p className="text-sm text-muted-foreground">Trading as {detail.tradingName}</p>
+                  )}
+                  {detail.website && (
+                    <CounterpartyWebsite
+                      key={detail.website}
+                      counterpartyId={detail.id}
+                      website={detail.website}
+                      token={token}
+                    />
                   )}
                   <div className="flex flex-wrap gap-1.5">
                     <VerificationBadge status={detail.verificationStatus} />

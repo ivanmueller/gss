@@ -51,6 +51,7 @@ function record(legalName: string, overrides: Partial<NewCounterparty> = {}): Ne
       types: ['seller'],
       primaryCountry: 'CA',
       verificationStatus: 'unverified',
+      website: null,
       notes: 'Synthetic record.\nSecond line.',
     },
     contacts: [contact('Synthetic Grower')],
@@ -103,7 +104,9 @@ afterAll(async () => {
 describe('adding a counterparty by hand as app_api', () => {
   it('creates it with its first contact and location, entered by hand and audited', async () => {
     const ctx = as(users.olivia);
-    const result = await db.createCounterparty(ctx, orgs.a, record('Synthetic Hand Grower'));
+    const input = record('Synthetic Hand Grower');
+    input.counterparty.website = 'https://www.example.com';
+    const result = await db.createCounterparty(ctx, orgs.a, input);
     expect(result.status).toBe('created');
     if (result.status !== 'created') return;
 
@@ -112,6 +115,7 @@ describe('adding a counterparty by hand as app_api', () => {
       legalName: 'Synthetic Hand Grower',
       types: ['seller'],
       source: 'manual',
+      website: 'https://www.example.com',
       notes: 'Synthetic record.\nSecond line.',
       archivedAt: null,
       contacts: [{ name: 'Synthetic Grower' }],
@@ -159,6 +163,7 @@ describe('editing a counterparty as app_api', () => {
       ...record('Synthetic Edited').counterparty,
       types: ['buyer' as const, 'seller' as const],
       verificationStatus: 'verified' as const,
+      website: 'https://www.example.com/grain',
     };
 
     expect(
@@ -169,6 +174,7 @@ describe('editing a counterparty as app_api', () => {
       legalName: 'Synthetic Edited',
       types: ['buyer', 'seller'],
       verificationStatus: 'verified',
+      website: 'https://www.example.com/grain',
     });
     expect(after.version).not.toBe(before.version);
 

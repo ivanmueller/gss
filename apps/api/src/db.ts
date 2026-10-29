@@ -73,6 +73,8 @@ export interface Facility {
 }
 
 export interface CounterpartyDetail extends CounterpartySummary {
+  /** A public http or https address (parseWebsite in @grain/domain). */
+  website: string | null;
   notes: string | null;
   version: string;
   contacts: Contact[];
@@ -539,8 +541,10 @@ export function createDatabase(sql: postgres.Sql): Database {
 
     getCounterparty(ctx, id) {
       return asUser(ctx, async (tx) => {
-        const [row] = await tx<(SummaryRow & { notes: string | null; version: string })[]>`
-          select ${summaryColumns(tx)}, c.notes,
+        const [row] = await tx<
+          (SummaryRow & { website: string | null; notes: string | null; version: string })[]
+        >`
+          select ${summaryColumns(tx)}, c.website, c.notes,
                  to_char(c.updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.counterparties c
           left join app.counterparty_logos l on l.counterparty_id = c.id
@@ -565,6 +569,7 @@ export function createDatabase(sql: postgres.Sql): Database {
         `;
         return {
           ...summary(row),
+          website: row.website,
           notes: row.notes,
           version: row.version,
           contacts: [...contacts],
@@ -726,6 +731,7 @@ export function createDatabase(sql: postgres.Sql): Database {
             types: enumArray(c.types),
             primary_country: c.primaryCountry,
             verification_status: c.verificationStatus,
+            website: c.website,
             notes: c.notes,
             source: 'file_import',
             import_batch_id: batchId,
@@ -872,10 +878,11 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.counterparties
             (organization_id, legal_name, trading_name, types, primary_country,
-             verification_status, notes, source, created_by)
+             verification_status, website, notes, source, created_by)
           values (${organizationId}, ${c.legalName}, ${c.tradingName},
                   ${enumArray(c.types)}::app.counterparty_type[], ${c.primaryCountry},
-                  ${c.verificationStatus}::app.verification_status, ${c.notes}, 'manual',
+                  ${c.verificationStatus}::app.verification_status, ${c.website}, ${c.notes},
+                  'manual',
                   app.current_user_id())
           returning id
         `;
@@ -900,7 +907,7 @@ export function createDatabase(sql: postgres.Sql): Database {
               types = ${enumArray(input.types)}::app.counterparty_type[],
               primary_country = ${input.primaryCountry},
               verification_status = ${input.verificationStatus}::app.verification_status,
-              notes = ${input.notes}
+              website = ${input.website}, notes = ${input.notes}
           where id = ${id} and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
           returning id
         `;

@@ -38,6 +38,7 @@ const ARCHIVED = {
 };
 const DETAIL: CounterpartyDetail = {
   ...BUYER,
+  website: null,
   notes: null,
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [],

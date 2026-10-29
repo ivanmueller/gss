@@ -150,6 +150,7 @@ describe('GET /api/v1/counterparties/:id', () => {
   it('returns the counterparty with its contacts and facilities', async () => {
     const detail = {
       ...summary('Synthetic Buyer LLC'),
+      website: null,
       notes: null,
       version: VERSION,
       contacts: [],
@@ -499,6 +500,7 @@ describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
 function detail(overrides: Record<string, unknown> = {}) {
   return {
     ...summary('Synthetic Buyer LLC'),
+    website: null,
     notes: null,
     version: VERSION,
     contacts: [],
@@ -627,6 +629,32 @@ describe('PATCH /api/v1/counterparties/:id', () => {
       VERSION,
       expect.objectContaining({ legalName: 'Synthetic Renamed', types: ['buyer', 'seller'] }),
     );
+  });
+
+  it('saves a website tidied, and refuses one that is not a web address', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail({ website: 'https://example.com' }));
+    const saved = await send('PATCH', `/${COUNTERPARTY}`, {
+      version: VERSION,
+      values: { ...values, website: ' Example.com/ ' },
+    });
+    expect(saved.status).toBe(200);
+    expect(db.updateCounterparty).toHaveBeenCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      VERSION,
+      expect.objectContaining({ website: 'https://example.com' }),
+    );
+
+    openDatabase.mockClear();
+    const refused = await send('PATCH', `/${COUNTERPARTY}`, {
+      version: VERSION,
+      values: { ...values, website: 'javascript:alert(1)' },
+    });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toMatchObject({
+      issues: [{ field: 'website', message: 'must be a web address such as example.com' }],
+    });
+    expect(openDatabase).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -792,5 +820,61 @@ describe('locations', () => {
     );
     expect((await send('DELETE', path)).status).toBe(200);
     expect(db.removeFacility).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, FACILITY);
+  });
+});
+
+describe('GET /api/v1/counterparties/:id/website-preview', () => {
+  function sites(answer: Response) {
+    const auth = Response.json({ id: USER_ID, email: 'olivia@example.test' });
+    const fetchMock = mockAuthServer(auth);
+    fetchMock.mockImplementation((url) =>
+      Promise.resolve(url.startsWith('https://www.example.com') ? answer : auth.clone()),
+    );
+    return fetchMock;
+  }
+
+  const siteCalls = (fetchMock: ReturnType<typeof sites>) =>
+    fetchMock.mock.calls.filter(([url]) => url.startsWith('https://www.example.com'));
+
+  it('asks the saved website whether it may be shown in the app', async () => {
+    const fetchMock = sites(new Response('', { headers: { 'x-frame-options': 'SAMEORIGIN' } }));
+    db.getCounterparty.mockResolvedValueOnce(detail({ website: 'https://www.example.com' }));
+    const res = await request(`/${COUNTERPARTY}/website-preview`, { headers: AUTH });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ website: 'https://www.example.com', preview: 'refused' });
+    const calls = siteCalls(fetchMock);
+    expect(calls.map(([url]) => url)).toEqual(['https://www.example.com/']);
+    // The user's token never goes to the site.
+    expect(new Headers(calls[0]?.[1]?.headers).has('authorization')).toBe(false);
+  });
+
+  it('answers allowed when nothing forbids it', async () => {
+    sites(new Response('', { status: 200 }));
+    db.getCounterparty.mockResolvedValueOnce(detail({ website: 'https://www.example.com/grain' }));
+    const res = await request(`/${COUNTERPARTY}/website-preview`, { headers: AUTH });
+    expect(await res.json()).toEqual({
+      website: 'https://www.example.com/grain',
+      preview: 'allowed',
+    });
+  });
+
+  it('answers 404 without asking anyone when there is no website or no such counterparty', async () => {
+    const fetchMock = sites(new Response(''));
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    const none = await request(`/${COUNTERPARTY}/website-preview`, { headers: AUTH });
+    expect(none.status).toBe(404);
+    expect(await none.json()).toMatchObject({ error: { code: 'NO_WEBSITE' } });
+    db.getCounterparty.mockResolvedValueOnce(null);
+    const missing = await request(`/${COUNTERPARTY}/website-preview`, { headers: AUTH });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    expect(siteCalls(fetchMock)).toEqual([]);
+  });
+
+  it('needs a signed-in user', async () => {
+    const res = await request(`/${COUNTERPARTY}/website-preview`);
+    expect(res.status).toBe(401);
+    expect(db.getCounterparty).not.toHaveBeenCalled();
   });
 });
