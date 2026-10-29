@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #55; ArcGIS map layers on the list
+
+- `docs/HANDOFF.md`: ivanmueller/gss#55 (Codex's finding on #54 fixed), CI runs #119 and #120, Deploy staging run #52; GT-026; the next task and the owner's backlog.
+- `docs/BUILD_PLAN.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`: map overlay layers from ArcGIS (GT-026), requested and not started, with the proposed approach.
+- `AGENTS.md`, `README.md`: the Bank of Canada FX connector built; ArcGIS layers requested.
+
 ## 2026-10-29 — Handoff record of #54
 
 - `docs/HANDOFF.md`: ivanmueller/gss#54 (the Bank of Canada FX connector), CI run #118 and Deploy staging run #51, the scheduled job in "How staging is wired", GT-052, the next task.
