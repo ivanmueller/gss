@@ -17,7 +17,7 @@ const GROUPS: readonly { state: DueState; title: string }[] = [
 ];
 
 /**
- * /follow-ups: follow-ups across counterparties, overdue first, then due today (Central
+ * /follow-ups: follow-ups across counterparties, overdue first, then due today (Alberta
  * time), then coming up; the signed-in person's own by default, everyone's on request
  * (?who=everyone), done ones only when asked for (?status=all).
  */
@@ -71,7 +71,7 @@ export function FollowUpsPage({ session }: { session: DirectorySession }) {
           />
           Include done
         </label>
-        <p className="text-xs text-muted-foreground">Times in Central time (CT).</p>
+        <p className="text-xs text-muted-foreground">Times in Alberta time (MT).</p>
       </div>
 
       {list.status === 'loading' && (

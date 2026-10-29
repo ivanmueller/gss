@@ -128,7 +128,8 @@ describe('NewQuotePage', () => {
         priceUnit: 'MT',
         quantityMax: '84',
         deliveryBasis: 'delivered',
-        validUntil: new Date('2099-10-30T16:00').toISOString(),
+        // Typed in Alberta time (UTC−6).
+        validUntil: '2099-10-30T22:00:00.000Z',
         sourceType: 'phone',
       },
     });

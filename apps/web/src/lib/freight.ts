@@ -2,19 +2,19 @@ import type { FreightFormValues, FreightLocation, FreightRevision } from '@grain
 
 import { countryName } from './directory';
 import { formatAmount } from './format';
-import { fromLocalInput } from './quotes';
+import { albertaInputToRequest } from './time';
 
 /** Organization roles allowed to enter, revise and withdraw freight rates (spec section 2.1). */
 export function canEnterFreight(role: string): boolean {
   return role === 'trader' || role === 'operations' || role === 'org_admin';
 }
 
-/** The form's values as the API takes them: its two times as UTC instants. */
+/** The form's values as the API takes them: its two times, typed in Alberta time, as UTC instants. */
 export function freightFormToRequest(values: FreightFormValues): FreightFormValues {
   return {
     ...values,
-    quotedAt: fromLocalInput(values.quotedAt),
-    validUntil: fromLocalInput(values.validUntil),
+    quotedAt: albertaInputToRequest(values.quotedAt),
+    validUntil: albertaInputToRequest(values.validUntil),
   };
 }
 

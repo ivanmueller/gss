@@ -36,7 +36,7 @@ describe('QuotesPage', () => {
     const table = await screen.findByRole('table', { name: 'Bids and offers' });
     const rows = within(table).getAllByRole('row');
     expect(rows[1]).toHaveTextContent(
-      'BidFlaxseedNo. 1 CWSynthetic BuyerSynthetic Mill, Synthetic Town, MNUSD 730.50/MTUp to 84.5 MTDeliveredSynthetic Town, MN2026-11-01 to 2026-11-302026-10-28 14:00 UTC2099-10-30 22:00 UTCIndicative',
+      'BidFlaxseedNo. 1 CWSynthetic BuyerSynthetic Mill, Synthetic Town, MNUSD 730.50/MTUp to 84.5 MTDeliveredSynthetic Town, MN2026-11-01 to 2026-11-30Wed 28 Oct 2026, 8:00 am MTFri 30 Oct 2099, 4:00 pm MTIndicative',
     );
     expect(rows[2]).toHaveTextContent('OfferCanolaSynthetic SellerCAD 15.25/bu21–84.5 MT');
     expect(within(table).getByRole('link', { name: 'Flaxseed' })).toHaveAttribute(

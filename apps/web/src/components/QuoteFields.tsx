@@ -87,8 +87,8 @@ const HINTS: Partial<Record<QuoteFieldId, ReactNode>> = {
   grade: 'E.g. No. 1 CW, or the specification quoted.',
   basisLocation: 'Where the basis applies, e.g. the delivery point.',
   quantityMin: 'Leave empty for no minimum.',
-  quotedAt: 'Your local time. Leave empty for now.',
-  validUntil: 'Your local time. Times are shown elsewhere in UTC.',
+  quotedAt: 'Alberta time (MT). Leave empty for now.',
+  validUntil: 'Alberta time (MT).',
   sourceReference: 'E.g. who you spoke to, or a reference number.',
 };
 

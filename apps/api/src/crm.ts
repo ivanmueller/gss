@@ -2,7 +2,7 @@ import {
   correctContactLogSchema,
   createContactLogSchema,
   createFollowUpSchema,
-  endOfCentralDay,
+  endOfAlbertaDay,
   parseContactLog,
   parseFollowUp,
   updateFollowUpSchema,
@@ -240,9 +240,9 @@ export function followUpRoutes(openDatabase: DatabaseFactory) {
     if (!isUuid(organizationId)) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'organization_id must be a UUID.');
     }
-    // Today's end in Central time comes from the same code as the web app's, not from the
-    // database's time zone rules, which may be of another edition (Manitoba, 2026).
-    const endOfDay = endOfCentralDay(new Date());
+    // Today's end in Alberta time comes from the same code as the web app's, not from the
+    // database's time zone rules, which may be of an older edition (Alberta, 2026).
+    const endOfDay = endOfAlbertaDay(new Date());
     return withDatabase(c, openDatabase, async (db, ctx) =>
       c.json(await db.countFollowUps(ctx, organizationId, endOfDay)),
     );

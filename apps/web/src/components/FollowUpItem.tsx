@@ -1,4 +1,4 @@
-import { formatCentral, utcToCentral, type FollowUp, type TeamMemberName } from '@grain/domain';
+import { formatAlberta, utcToAlberta, type FollowUp, type TeamMemberName } from '@grain/domain';
 import { AlarmClock, CalendarClock, Check, CircleCheck, Pencil } from 'lucide-react';
 import { useState } from 'react';
 
@@ -41,7 +41,7 @@ export function DueBadge({ followUp, now }: { followUp: FollowUp; now?: Date }) 
 }
 
 /**
- * One follow-up: what to do, when it is due (Central time), who is responsible, and, for
+ * One follow-up: what to do, when it is due (Alberta time), who is responsible, and, for
  * those allowed, Mark done and Edit. `showCounterparty` names the counterparty (on the
  * Follow-ups page; on a counterparty's own page it goes without saying).
  */
@@ -87,7 +87,7 @@ export function FollowUpItem({
         <FollowUpForm
           initial={{
             task: followUp.task,
-            dueAt: utcToCentral(followUp.dueAt),
+            dueAt: utcToAlberta(followUp.dueAt),
             assignedTo: followUp.assignedTo.userId,
           }}
           team={team}
@@ -131,11 +131,11 @@ export function FollowUpItem({
           </Link>
         )}
         <p className="text-sm">
-          Due {formatCentral(followUp.dueAt)} · {followUp.assignedTo.name}
+          Due {formatAlberta(followUp.dueAt)} · {followUp.assignedTo.name}
         </p>
         <p className="text-xs text-muted-foreground">
           {done && followUp.doneAt
-            ? `Done ${formatCentral(followUp.doneAt)} by ${followUp.doneByName ?? 'GSS staff'}`
+            ? `Done ${formatAlberta(followUp.doneAt)} by ${followUp.doneByName ?? 'GSS staff'}`
             : `Planned by ${followUp.createdByName}${followUp.contactLogEntryId ? ' after a contact' : ''}`}
         </p>
         {error && (

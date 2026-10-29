@@ -7,38 +7,19 @@ import {
 
 import { countryName } from './directory';
 import { formatAmount } from './format';
+import { albertaInputToRequest } from './time';
 
 /** Organization roles allowed to enter, revise and withdraw bids and offers (spec section 2.1). */
 export function canEnterQuotes(role: string): boolean {
   return role === 'trader' || role === 'org_admin';
 }
 
-const two = (value: number) => String(value).padStart(2, '0');
-
-/**
- * An instant as a datetime-local input shows it, in the browser's own time zone
- * ("2026-10-30T16:00"); empty for a missing or malformed value.
- */
-export function toLocalInput(iso: string | undefined): string {
-  if (!iso) return '';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${String(date.getFullYear())}-${two(date.getMonth() + 1)}-${two(date.getDate())}T${two(date.getHours())}:${two(date.getMinutes())}`;
-}
-
-/** A datetime-local value, read in the browser's time zone, as a UTC instant; empty stays empty. */
-export function fromLocalInput(local: string | undefined): string {
-  if (!local) return '';
-  const date = new Date(local);
-  return Number.isNaN(date.getTime()) ? local : date.toISOString();
-}
-
-/** The form's values as the API takes them: its two times as UTC instants. */
+/** The form's values as the API takes them: its two times, typed in Alberta time, as UTC instants. */
 export function formToRequest(values: QuoteFormValues): QuoteFormValues {
   return {
     ...values,
-    quotedAt: fromLocalInput(values.quotedAt),
-    validUntil: fromLocalInput(values.validUntil),
+    quotedAt: albertaInputToRequest(values.quotedAt),
+    validUntil: albertaInputToRequest(values.validUntil),
   };
 }
 

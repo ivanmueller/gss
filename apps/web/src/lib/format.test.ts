@@ -8,7 +8,6 @@ import {
   formatSignedAmount,
   formatSignedPrice,
   formatDay,
-  formatUtc,
 } from './format';
 
 describe('formatPrice', () => {
@@ -35,20 +34,6 @@ describe('formatPrice', () => {
     for (const amount of ['', '7.25e2', '+1.00', '--1.00', '-', '1,000.00', 'NaN', ' 1.00']) {
       expect(() => formatPrice({ amount, currency: 'USD', unit: 'MT' })).toThrow(/decimal/);
     }
-  });
-});
-
-describe('formatUtc', () => {
-  it('formats a UTC timestamp to the minute', () => {
-    expect(formatUtc('2026-10-26T15:00:00Z')).toBe('2026-10-26 15:00 UTC');
-  });
-
-  it('converts offsets to UTC', () => {
-    expect(formatUtc('2026-10-26T10:30:00-05:00')).toBe('2026-10-26 15:30 UTC');
-  });
-
-  it('rejects text that is not a timestamp', () => {
-    expect(() => formatUtc('tomorrow')).toThrow(/timestamp/);
   });
 });
 

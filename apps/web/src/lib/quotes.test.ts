@@ -3,13 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   canEnterQuotes,
   formToRequest,
-  fromLocalInput,
   quoteBasis,
   quoteDelivery,
   quotePlace,
   quotePrice,
   quoteQuantity,
-  toLocalInput,
 } from './quotes';
 
 describe('quote helpers', () => {
@@ -19,18 +17,11 @@ describe('quote helpers', () => {
     ).toEqual(['trader', 'org_admin']);
   });
 
-  it('turns a datetime-local value into a UTC instant and back, in the browser’s zone', () => {
-    const local = '2026-10-30T16:00';
-    const instant = fromLocalInput(local);
-    expect(instant).toBe(new Date(local).toISOString());
-    expect(toLocalInput(instant)).toBe(local);
-    expect(fromLocalInput('')).toBe('');
-    expect(toLocalInput(undefined)).toBe('');
-    expect(toLocalInput('not a time')).toBe('');
-    expect(formToRequest({ price: '1', quotedAt: '', validUntil: local })).toEqual({
+  it('sends the form’s times, typed in Alberta time, as UTC instants', () => {
+    expect(formToRequest({ price: '1', quotedAt: '', validUntil: '2026-12-15T16:00' })).toEqual({
       price: '1',
       quotedAt: '',
-      validUntil: instant,
+      validUntil: '2026-12-15T22:00:00.000Z',
     });
   });
 

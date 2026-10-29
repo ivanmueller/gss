@@ -26,16 +26,6 @@ export function formatPrice(price: Price): string {
   return `${price.currency} ${formatAmount(price.amount)}/${price.unit}`;
 }
 
-/** "2026-10-26 15:00 UTC". Shown in UTC so every viewer reads the same time. */
-export function formatUtc(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Not a timestamp: "${iso}"`);
-  }
-  const text = date.toISOString();
-  return `${text.slice(0, 10)} ${text.slice(11, 16)} UTC`;
-}
-
 /** "+22.00", "−15.00" (a true minus sign), "0.00": a spread, signed so a negative one is plain. */
 export function formatSignedAmount(amount: string): string {
   if (!SIGNED.test(amount)) {

@@ -260,13 +260,15 @@ describe('Workspace', () => {
     expect(bid).toHaveTextContent(
       'Quoted as USD 725.00/MT at 1.360000 CAD per USD, synthetic rate (golden fixture)',
     );
-    expect(bid).toHaveTextContent('Quoted 2026-10-26 16:30 UTC · valid until 2026-11-09 23:59 UTC');
+    expect(bid).toHaveTextContent(
+      'Quoted Mon 26 Oct 2026, 10:30 am MT · valid until Mon 9 Nov 2026, 5:59 pm MT',
+    );
 
     // The table shows CAD too, with the times.
     const row = within(table()).getByRole('button', { name: 'Demo Buyer H' }).closest('tr');
     expect(row).toHaveTextContent('CAD 408.00/MT');
     expect(row).toHaveTextContent('CAD 448.80/MT');
-    expect(row).toHaveTextContent(/Quoted .* UTC · valid until .* UTC/);
+    expect(row).toHaveTextContent(/Quoted .* MT · valid until .* MT/);
   });
 
   it('tucks the order book away to the right with the arrow tab, and brings it back', async () => {

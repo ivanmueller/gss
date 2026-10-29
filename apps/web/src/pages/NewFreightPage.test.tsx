@@ -180,7 +180,8 @@ describe('NewFreightPage', () => {
         payload: '90.5',
         payloadUnit: 'MT',
         inclusions: 'Fuel surcharge included',
-        validUntil: new Date('2099-11-05T16:00').toISOString(),
+        // Typed in Alberta time (UTC−6).
+        validUntil: '2099-11-05T22:00:00.000Z',
         sourceType: 'email',
       },
     });

@@ -96,7 +96,7 @@ Operations and admin members can:
 
 ## Contact log and follow-ups
 
-Each counterparty's page has **Follow-ups** and **Contact history**. **Follow-ups** in the menu lists your own follow-ups (or everyone's) across counterparties, overdue first, then due today, then coming up; the number beside it counts yours that are overdue or due today. Times are typed and shown in Central time (CT).
+Each counterparty's page has **Follow-ups** and **Contact history**. **Follow-ups** in the menu lists your own follow-ups (or everyone's) across counterparties, overdue first, then due today, then coming up; the number beside it counts yours that are overdue or due today. Times are typed and shown in Alberta time (MT).
 
 Traders, operations and admin members can:
 
@@ -112,7 +112,7 @@ Viewers and analysts read both. Nothing new is logged or planned for an archived
 
 Traders and admins can:
 
-- **New bid or offer:** choose a bid (from a buyer or broker) or an offer (from a seller or broker), the counterparty, optionally one of its locations, and the commodity; then the terms: price as quoted (CAD or USD, per tonne, short ton, bushel or hundredweight), firm or indicative, grade, quantity, delivery basis and window, quoted and valid-until times (typed in local time, shown in UTC), source and notes.
+- **New bid or offer:** choose a bid (from a buyer or broker) or an offer (from a seller or broker), the counterparty, optionally one of its locations, and the commodity; then the terms: price as quoted (CAD or USD, per tonne, short ton, bushel or hundredweight), firm or indicative, grade, quantity, delivery basis and window, quoted and valid-until times (typed and shown in Alberta time, MT), source and notes.
 - **Record new terms:** a change of price, quantity or timing is saved as a new revision; earlier revisions are kept and never edited. If someone recorded newer terms after you opened the quote, your save is refused and you can load them.
 - **Withdraw:** for good; the quote stays readable with its history. A new price is entered as a new quote.
 
