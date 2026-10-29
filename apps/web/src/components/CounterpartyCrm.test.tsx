@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { CounterpartyCrm } from './CounterpartyCrm';
 
-// Synthetic values only. The clock is fixed at 10 am Central daylight time, 30 October 2026.
+// Synthetic values only. The clock is fixed at 10 am in Alberta (UTC−6), 30 October 2026.
 const ID = '00000000-0000-4000-8000-00000000c001';
 const ME = '00000000-0000-4000-8000-0000000044aa';
 const ADAM = '00000000-0000-4000-8000-0000000022aa';
@@ -21,16 +21,16 @@ const TEAM = {
 const ENTRY: ContactLogEntry = {
   id: ENTRY_ID,
   counterpartyId: ID,
-  createdAt: '2026-10-29T14:00:00.000Z',
+  createdAt: '2026-10-29T15:00:00.000Z',
   current: {
     id: 'r2',
     revisionNumber: 2,
-    occurredAt: '2026-10-29T13:30:00.000Z',
+    occurredAt: '2026-10-29T14:30:00.000Z',
     channel: 'call',
     contactName: 'Pat Q. Buyer',
     notes: 'Wants November delivery.',
     recordedByName: 'Adam Admin',
-    recordedAt: '2026-10-29T15:00:00.000Z',
+    recordedAt: '2026-10-29T16:00:00.000Z',
   },
   revisions: [],
 };
@@ -43,7 +43,7 @@ ENTRY.revisions = [
     contactName: 'Pat Buyer',
     notes: 'Wants delivery.',
     recordedByName: 'Tess Trader',
-    recordedAt: '2026-10-29T14:00:00.000Z',
+    recordedAt: '2026-10-29T15:00:00.000Z',
   },
 ];
 
@@ -57,20 +57,20 @@ const FOLLOW_UP: FollowUp = {
   },
   contactLogEntryId: ENTRY_ID,
   task: 'Send the bid sheet',
-  dueAt: '2026-10-30T14:00:00.000Z',
+  dueAt: '2026-10-30T15:00:00.000Z',
   assignedTo: { userId: ME, name: 'Tess Trader' },
   createdByName: 'Adam Admin',
-  createdAt: '2026-10-29T14:00:00.000Z',
+  createdAt: '2026-10-29T15:00:00.000Z',
   doneAt: null,
   doneByName: null,
-  version: '2026-10-29T14:00:00.000000Z',
+  version: '2026-10-29T15:00:00.000000Z',
 };
 
 const DONE: FollowUp = {
   ...FOLLOW_UP,
   id: '00000000-0000-4000-8000-00000000f102',
   task: 'Call about October',
-  doneAt: '2026-10-29T16:00:00.000Z',
+  doneAt: '2026-10-29T17:00:00.000Z',
   doneByName: 'Tess Trader',
 };
 
@@ -96,7 +96,7 @@ function show(role: string, userId: string | undefined = ME, archived = false) {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-30T15:00:00.000Z'));
+  vi.setSystemTime(new Date('2026-10-30T16:00:00.000Z'));
 });
 
 afterEach(() => {
@@ -105,13 +105,13 @@ afterEach(() => {
 });
 
 describe('CounterpartyCrm', () => {
-  it('shows open follow-ups with when they are due in Central time, and done ones on request', async () => {
+  it('shows open follow-ups with when they are due in Alberta time, and done ones on request', async () => {
     api();
     show('trader');
     const section = await screen.findByRole('region', { name: 'Follow-ups (1 open)' });
     const open = within(section).getByRole('list', { name: 'Open follow-ups' });
     expect(open).toHaveTextContent('OverdueSend the bid sheet');
-    expect(open).toHaveTextContent('Due Fri 30 Oct 2026, 9:00 am CT · Tess Trader');
+    expect(open).toHaveTextContent('Due Fri 30 Oct 2026, 9:00 am MT · Tess Trader');
     expect(open).toHaveTextContent('Planned by Adam Admin after a contact');
     expect(within(section).queryByText('Call about October')).not.toBeInTheDocument();
     await userEvent.click(within(section).getByRole('button', { name: 'Show done (1)' }));
@@ -124,10 +124,10 @@ describe('CounterpartyCrm', () => {
     api();
     show('viewer');
     const history = await screen.findByRole('region', { name: 'Contact history (1)' });
-    expect(history).toHaveTextContent('Call with Pat Q. Buyer · Thu 29 Oct 2026, 8:30 am CT');
+    expect(history).toHaveTextContent('Call with Pat Q. Buyer · Thu 29 Oct 2026, 8:30 am MT');
     expect(history).toHaveTextContent('Wants November delivery.');
     expect(history).toHaveTextContent(
-      'Logged by Tess Trader · corrected by Adam Admin, Thu 29 Oct 2026, 10:00 am CT',
+      'Logged by Tess Trader · corrected by Adam Admin, Thu 29 Oct 2026, 10:00 am MT',
     );
     await userEvent.click(
       within(history).getByRole('button', { name: 'Show earlier versions (1)' }),
@@ -137,7 +137,7 @@ describe('CounterpartyCrm', () => {
     );
   });
 
-  it('logs a contact with a follow-up, its times typed in Central time and sent in UTC', async () => {
+  it('logs a contact with a follow-up, its times typed in Alberta time and sent in UTC', async () => {
     const calls = api({
       'POST /contact-log': () =>
         Response.json({ entry: ENTRY, followUpId: FOLLOW_UP.id }, { status: 201 }),
@@ -152,7 +152,7 @@ describe('CounterpartyCrm', () => {
     await user.type(within(history).getByLabelText(/Who you spoke to/), 'Pat Buyer');
     await user.type(within(history).getByLabelText('Notes'), 'Wants November delivery.');
     await user.click(within(history).getByLabelText('Plan a follow-up'));
-    // A follow-up starts as the person's own, due at 9 am Central tomorrow.
+    // A follow-up starts as the person's own, due at 9 am tomorrow in Alberta.
     expect(within(history).getByLabelText(/Due/)).toHaveValue('2026-10-31T09:00');
     expect(within(history).getByLabelText(/Who is responsible/)).toHaveTextContent('Tess Trader');
     await user.type(within(history).getByLabelText(/What to do/), 'Send the bid sheet');
@@ -164,12 +164,12 @@ describe('CounterpartyCrm', () => {
     expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
       counterpartyId: ID,
       values: {
-        occurredAt: '2026-10-29T13:30:00.000Z',
+        occurredAt: '2026-10-29T14:30:00.000Z',
         channel: 'call',
         contactName: 'Pat Buyer',
         notes: 'Wants November delivery.',
       },
-      followUp: { task: 'Send the bid sheet', dueAt: '2026-10-30T19:00:00.000Z', assignedTo: ME },
+      followUp: { task: 'Send the bid sheet', dueAt: '2026-10-30T20:00:00.000Z', assignedTo: ME },
     });
   });
 
@@ -203,7 +203,7 @@ describe('CounterpartyCrm', () => {
     expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
       basedOnRevision: 2,
       values: {
-        occurredAt: '2026-10-29T13:30:00.000Z',
+        occurredAt: '2026-10-29T14:30:00.000Z',
         channel: 'call',
         contactName: 'Pat Q. Buyer',
         notes: 'Wants November and December.',
@@ -225,7 +225,7 @@ describe('CounterpartyCrm', () => {
     expect(await screen.findByText('Follow-up planned.')).toBeInTheDocument();
     expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
       counterpartyId: ID,
-      values: { task: 'Call back', dueAt: '2026-10-31T14:00:00.000Z', assignedTo: ADAM },
+      values: { task: 'Call back', dueAt: '2026-10-31T15:00:00.000Z', assignedTo: ADAM },
     });
 
     await user.click(
@@ -236,7 +236,7 @@ describe('CounterpartyCrm', () => {
     await waitFor(() => {
       expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
         version: FOLLOW_UP.version,
-        values: { task: 'Send the bid sheet', dueAt: '2026-10-30T14:00:00.000Z', assignedTo: ME },
+        values: { task: 'Send the bid sheet', dueAt: '2026-10-30T15:00:00.000Z', assignedTo: ME },
       });
     });
   });

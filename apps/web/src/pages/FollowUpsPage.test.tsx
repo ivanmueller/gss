@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { FollowUpsPage } from './FollowUpsPage';
 
-// Synthetic values only. The clock is fixed at 10 am Central daylight time, 30 October 2026.
+// Synthetic values only. The clock is fixed at 10 am in Alberta (UTC−6), 30 October 2026.
 const ME = '00000000-0000-4000-8000-0000000044aa';
 
 function followUp(task: string, dueAt: string, extra: Partial<FollowUp> = {}): FollowUp {
@@ -23,24 +23,24 @@ function followUp(task: string, dueAt: string, extra: Partial<FollowUp> = {}): F
     dueAt,
     assignedTo: { userId: ME, name: 'Tess Trader' },
     createdByName: 'Tess Trader',
-    createdAt: '2026-10-28T14:00:00.000Z',
+    createdAt: '2026-10-28T15:00:00.000Z',
     doneAt: null,
     doneByName: null,
-    version: '2026-10-28T14:00:00.000000Z',
+    version: '2026-10-28T15:00:00.000000Z',
     ...extra,
   };
 }
 
-const CALL_BACK = followUp('Call back', '2026-10-29T14:00:00.000Z');
+const CALL_BACK = followUp('Call back', '2026-10-29T15:00:00.000Z');
 const LIST = [
   CALL_BACK,
-  followUp('Send the bid sheet', '2026-10-30T22:00:00.000Z'),
-  followUp('Visit the elevator', '2026-10-31T15:00:00.000Z'),
+  followUp('Send the bid sheet', '2026-10-30T23:00:00.000Z'),
+  followUp('Visit the elevator', '2026-10-31T16:00:00.000Z'),
 ];
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-30T15:00:00.000Z'));
+  vi.setSystemTime(new Date('2026-10-30T16:00:00.000Z'));
   window.history.replaceState(null, '', '/follow-ups');
 });
 
@@ -70,7 +70,7 @@ describe('FollowUpsPage', () => {
       'Due todaySend the bid sheet',
     );
     expect(screen.getByRole('region', { name: 'Coming up (1)' })).toHaveTextContent(
-      'Due Sat 31 Oct 2026, 10:00 am CT · Tess Trader',
+      'Due Sat 31 Oct 2026, 10:00 am MT · Tess Trader',
     );
     // A viewer marks done what they are responsible for, and cannot change it.
     expect(
@@ -91,8 +91,8 @@ describe('FollowUpsPage', () => {
       [`GET /follow-ups?organization_id=${ORG.id}&status=all`]: () =>
         Response.json({
           followUps: [
-            followUp('Call back', '2026-10-29T14:00:00.000Z', {
-              doneAt: '2026-10-29T15:00:00.000Z',
+            followUp('Call back', '2026-10-29T15:00:00.000Z', {
+              doneAt: '2026-10-29T16:00:00.000Z',
               doneByName: 'Adam Admin',
             }),
           ],
@@ -108,7 +108,7 @@ describe('FollowUpsPage', () => {
     expect(await screen.findByText('No open follow-ups.')).toBeInTheDocument();
     await user.click(screen.getByLabelText('Include done'));
     const done = await screen.findByRole('region', { name: 'Done (1)' });
-    expect(done).toHaveTextContent('Done Thu 29 Oct 2026, 10:00 am CT by Adam Admin');
+    expect(done).toHaveTextContent('Done Thu 29 Oct 2026, 10:00 am MT by Adam Admin');
     expect(calls.map((call) => call.path)).toContain(
       `/follow-ups?organization_id=${ORG.id}&status=all`,
     );

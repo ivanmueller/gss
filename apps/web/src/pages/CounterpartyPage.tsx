@@ -1,4 +1,5 @@
 import {
+  formatAlberta,
   normalizeCountry,
   parseContactFields,
   parseCounterpartyFields,
@@ -45,7 +46,6 @@ import {
   sourceLabel,
   typeLabel,
 } from '../lib/directory';
-import { formatUtc } from '../lib/format';
 import { logoAsPng } from '../lib/logoImage';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
@@ -408,8 +408,8 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                 <Callout variant="warning" icon={Archive}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p>
-                      <strong>Archived</strong> on {formatUtc(detail.archivedAt ?? '')}. It is left
-                      off the list and the map, and cannot be changed until it is restored.
+                      <strong>Archived</strong> on {formatAlberta(detail.archivedAt ?? '')}. It is
+                      left off the list and the map, and cannot be changed until it is restored.
                     </p>
                     {editor && (
                       <Button
@@ -558,7 +558,7 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
                     <Field label="Type">{detail.types.map(typeLabel).join(', ')}</Field>
                     <Field label="Country">{countryName(detail.primaryCountry)}</Field>
                     <Field label="Source">{sourceLabel(detail.source)}</Field>
-                    <Field label="Added">{formatUtc(detail.createdAt)}</Field>
+                    <Field label="Added">{formatAlberta(detail.createdAt)}</Field>
                     {detail.notes && (
                       <div className="sm:col-span-2">
                         <Field label="Notes">

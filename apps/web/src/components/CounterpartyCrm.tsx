@@ -1,7 +1,7 @@
 import {
   CONTACT_CHANNEL_LABELS,
-  formatCentral,
-  utcToCentral,
+  formatAlberta,
+  utcToAlberta,
   type ContactLogEntry,
   type FollowUp,
   type TeamMemberName,
@@ -10,7 +10,8 @@ import { History, Mail, MapPin, MessageSquarePlus, Pencil, Phone, Plus, Users } 
 import { useState, type ReactNode } from 'react';
 
 import { sendJson } from '../lib/api';
-import { canLogContacts, centralNowInput, defaultDueInput, noteFollowUpsChanged } from '../lib/crm';
+import { canLogContacts, defaultDueInput, noteFollowUpsChanged } from '../lib/crm';
+import { albertaNowInput } from '../lib/time';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ContactLogForm, FollowUpForm } from './CrmForms';
@@ -56,7 +57,7 @@ function Revision({ revision }: { revision: ContactLogEntry['current'] }) {
     <div className="flex flex-col gap-0.5">
       <p className="text-sm">
         <span className="font-medium">{contactTitle(revision)}</span> ·{' '}
-        {formatCentral(revision.occurredAt)}
+        {formatAlberta(revision.occurredAt)}
       </p>
       {revision.notes && <p className="text-sm whitespace-pre-line">{revision.notes}</p>}
     </div>
@@ -91,7 +92,7 @@ function Entry({
         </p>
         <ContactLogForm
           initial={{
-            occurredAt: utcToCentral(current.occurredAt),
+            occurredAt: utcToAlberta(current.occurredAt),
             channel: current.channel,
             contactName: current.contactName,
             notes: current.notes ?? '',
@@ -128,7 +129,7 @@ function Entry({
           <p className="text-xs text-muted-foreground">
             Logged by {entry.revisions.at(-1)?.recordedByName ?? current.recordedByName}
             {earlier.length > 0 &&
-              ` · corrected by ${current.recordedByName}, ${formatCentral(current.recordedAt)}`}
+              ` · corrected by ${current.recordedByName}, ${formatAlberta(current.recordedAt)}`}
           </p>
           {earlier.length > 0 && (
             <div className="flex flex-col gap-2">
@@ -152,7 +153,7 @@ function Entry({
                       <Revision revision={revision} />
                       <p className="text-xs">
                         Version {revision.revisionNumber}, recorded by {revision.recordedByName},{' '}
-                        {formatCentral(revision.recordedAt)}
+                        {formatAlberta(revision.recordedAt)}
                       </p>
                     </li>
                   ))}
@@ -351,7 +352,7 @@ export function CounterpartyCrm({
           {adding === 'contact' && (
             <div className="border-b px-4 py-4">
               <ContactLogForm
-                initial={{ occurredAt: centralNowInput(), channel: 'call' }}
+                initial={{ occurredAt: albertaNowInput(), channel: 'call' }}
                 contactNames={counterparty.contactNames}
                 {...(team && { team, followUpDefaults })}
                 submitLabel="Save contact"

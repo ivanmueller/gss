@@ -1,8 +1,12 @@
-import { FREIGHT_MODE_LABELS, type FreightLocation, type FreightSummary } from '@grain/domain';
+import {
+  FREIGHT_MODE_LABELS,
+  formatAlberta,
+  type FreightLocation,
+  type FreightSummary,
+} from '@grain/domain';
 import { ArrowRight, TrainFront, Truck } from 'lucide-react';
 
 import { freightPayload, freightPlace, freightRate } from '../lib/freight';
-import { formatUtc } from '../lib/format';
 import { Link } from '../lib/router';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import { QuoteStatusBadge } from './QuoteStatusBadge';
@@ -120,8 +124,8 @@ export function FreightList({
               <span className="text-xs text-muted-foreground">{item.current.inclusions}</span>
             )}
             <span className="text-xs text-muted-foreground">
-              Quoted {formatUtc(item.current.quotedAt)} · valid until{' '}
-              {formatUtc(item.current.validUntil)}
+              Quoted {formatAlberta(item.current.quotedAt)} · valid until{' '}
+              {formatAlberta(item.current.validUntil)}
             </span>
           </li>
         ))}
@@ -138,7 +142,7 @@ export function FreightList({
           <TableHead>Mode</TableHead>
           <TableHead>Rate</TableHead>
           <TableHead>Includes</TableHead>
-          <TableHead>Quoted · valid until (UTC)</TableHead>
+          <TableHead>Quoted · valid until (MT)</TableHead>
           <TableHead>Status</TableHead>
         </tr>
       </TableHeader>
@@ -161,9 +165,9 @@ export function FreightList({
             </TableCell>
             <TableCell className="text-xs">{item.current.inclusions ?? '—'}</TableCell>
             <TableCell className="text-xs whitespace-nowrap">
-              {formatUtc(item.current.quotedAt)}
+              {formatAlberta(item.current.quotedAt)}
               <span className="block text-muted-foreground">
-                {formatUtc(item.current.validUntil)}
+                {formatAlberta(item.current.validUntil)}
               </span>
             </TableCell>
             <TableCell>

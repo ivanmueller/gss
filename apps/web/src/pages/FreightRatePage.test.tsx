@@ -28,7 +28,9 @@ describe('FreightRatePage', () => {
       `/counterparties/${FREIGHT.destination.counterparty.id}`,
     );
     const current = screen.getByRole('region', { name: 'Current terms' });
-    expect(current).toHaveTextContent('Revision 2, recorded 2026-10-29 15:00 UTC by Tess Trader');
+    expect(current).toHaveTextContent(
+      'Revision 2, recorded Thu 29 Oct 2026, 9:00 am MT by Tess Trader',
+    );
     expect(current).toHaveTextContent('RateCAD 105.00/MT');
     expect(current).toHaveTextContent('Firm or indicativeIndicative');
     expect(current).toHaveTextContent('What the rate includesNot stated');
@@ -136,7 +138,7 @@ describe('FreightRatePage', () => {
     const confirm = screen.getByRole('group', { name: 'Withdraw this freight rate' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Withdraw' }));
     expect(
-      await screen.findByText(/on 2026-10-29 17:00 UTC by Olivia Operations/),
+      await screen.findByText(/on Thu 29 Oct 2026, 11:00 am MT by Olivia Operations/),
     ).toBeInTheDocument();
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Record new terms' })).toBeNull();
@@ -158,7 +160,9 @@ describe('FreightRatePage', () => {
         id={FREIGHT_ID}
       />,
     );
-    expect(await screen.findByText(/at 2026-10-29 15:00 UTC\. It is not live/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/at Thu 29 Oct 2026, 9:00 am MT\. It is not live/),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Record new terms' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
   });

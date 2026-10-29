@@ -7,7 +7,7 @@ import { clean, cleanLines, LABEL_MAX, oneOf } from './terms';
 // decisions of 2026-10-29, docs/DECISIONS.md). Shared by the API, which checks every
 // request, and the web app's forms, so both give the same messages. The database checks
 // the same rules again (20261029070000_counterparty_crm.sql). Times arrive as UTC instants;
-// the forms take and show them in Central time (central.ts).
+// the forms take and show them in Alberta time (alberta.ts).
 
 /** How the contact happened. */
 export const CONTACT_CHANNELS = ['call', 'email', 'meeting', 'visit'] as const;

@@ -1,6 +1,5 @@
-import { DELIVERY_BASIS_LABELS, type QuoteSummary } from '@grain/domain';
+import { DELIVERY_BASIS_LABELS, formatAlberta, type QuoteSummary } from '@grain/domain';
 
-import { formatUtc } from '../lib/format';
 import { quoteBasis, quoteDelivery, quotePlace, quotePrice, quoteQuantity } from '../lib/quotes';
 import { Link } from '../lib/router';
 import { useMediaQuery } from '../lib/useMediaQuery';
@@ -89,8 +88,8 @@ export function QuoteList({
               {quoteDelivery(quote.current).toLowerCase()}
             </span>
             <span className="text-xs text-muted-foreground">
-              Quoted {formatUtc(quote.current.quotedAt)} · valid until{' '}
-              {formatUtc(quote.current.validUntil)}
+              Quoted {formatAlberta(quote.current.quotedAt)} · valid until{' '}
+              {formatAlberta(quote.current.validUntil)}
             </span>
           </li>
         ))}
@@ -109,7 +108,7 @@ export function QuoteList({
           <TableHead>Quantity</TableHead>
           <TableHead>Basis</TableHead>
           <TableHead>Delivery</TableHead>
-          <TableHead>Quoted · valid until (UTC)</TableHead>
+          <TableHead>Quoted · valid until (MT)</TableHead>
           <TableHead>Status</TableHead>
         </tr>
       </TableHeader>
@@ -143,9 +142,9 @@ export function QuoteList({
             </TableCell>
             <TableCell className="whitespace-nowrap">{quoteDelivery(quote.current)}</TableCell>
             <TableCell className="text-xs whitespace-nowrap">
-              {formatUtc(quote.current.quotedAt)}
+              {formatAlberta(quote.current.quotedAt)}
               <span className="block text-muted-foreground">
-                {formatUtc(quote.current.validUntil)}
+                {formatAlberta(quote.current.validUntil)}
               </span>
             </TableCell>
             <TableCell>

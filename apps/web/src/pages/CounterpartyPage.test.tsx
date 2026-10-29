@@ -187,7 +187,7 @@ describe('CounterpartyPage', () => {
     expect(screen.getByText('Verification pending')).toBeInTheDocument();
     expect(screen.getByText('Buyer, Seller')).toBeInTheDocument();
     expect(screen.getByText('Imported from a spreadsheet')).toBeInTheDocument();
-    expect(screen.getByText('2026-10-27 14:05 UTC')).toBeInTheDocument();
+    expect(screen.getByText('Tue 27 Oct 2026, 8:05 am MT')).toBeInTheDocument();
 
     const contacts = screen.getByRole('region', { name: 'Contacts (1)' });
     expect(within(contacts).getByRole('link', { name: 'merch@example.test' })).toHaveAttribute(
@@ -492,7 +492,7 @@ describe('CounterpartyPage editing', () => {
     const confirm = screen.getByRole('group', { name: 'Archive this counterparty' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Archive' }));
 
-    expect(await screen.findByText(/on 2026-10-28 10:00 UTC/)).toBeInTheDocument();
+    expect(await screen.findByText(/on Wed 28 Oct 2026, 4:00 am MT/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();

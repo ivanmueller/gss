@@ -13,7 +13,7 @@ import {
 import { useId, useState, type ReactNode, type SyntheticEvent } from 'react';
 
 import { ApiError } from '../lib/api';
-import { centralInputToRequest } from '../lib/crm';
+import { albertaInputToRequest } from '../lib/time';
 import { controlProps, Field, issueText } from './DirectoryFields';
 import { Button } from './ui/button';
 import { Input, Textarea } from './ui/input';
@@ -21,7 +21,7 @@ import { Select } from './ui/select';
 
 // The CRM's forms: logging a contact (with an optional follow-up) and planning or changing
 // a follow-up. They check with the API's rules (packages/domain/src/crm.ts) before sending.
-// Times are typed in Central time and sent as UTC instants.
+// Times are typed in Alberta time and sent as UTC instants.
 
 const LABELS: Record<CrmFieldId, string> = {
   occurredAt: 'When',
@@ -34,10 +34,10 @@ const LABELS: Record<CrmFieldId, string> = {
 };
 
 const HINTS: Partial<Record<CrmFieldId, ReactNode>> = {
-  occurredAt: 'Central time.',
+  occurredAt: 'Alberta time (MT).',
   contactName: 'Pick one of their contacts or type a name.',
   task: 'E.g. send the November bid sheet.',
-  dueAt: 'Central time.',
+  dueAt: 'Alberta time (MT).',
 };
 
 /** The issues in a 422 answer to a CRM form, if any. */
@@ -194,7 +194,7 @@ function failure(error: unknown) {
 }
 
 const logRequest = (values: Values): ContactLogFormValues => ({
-  occurredAt: centralInputToRequest(values.occurredAt),
+  occurredAt: albertaInputToRequest(values.occurredAt),
   channel: values.channel ?? '',
   contactName: values.contactName ?? '',
   notes: values.notes ?? '',
@@ -202,7 +202,7 @@ const logRequest = (values: Values): ContactLogFormValues => ({
 
 const planRequest = (values: Values): FollowUpFormValues => ({
   task: values.task ?? '',
-  dueAt: centralInputToRequest(values.dueAt),
+  dueAt: albertaInputToRequest(values.dueAt),
   assignedTo: values.assignedTo ?? '',
 });
 

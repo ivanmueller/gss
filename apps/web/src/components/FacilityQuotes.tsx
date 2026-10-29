@@ -1,5 +1,6 @@
+import { formatAlberta } from '@grain/domain';
+
 import type { Facility, FxRate } from '../data/types';
-import { formatUtc } from '../lib/format';
 import { displayStatus } from '../lib/orderBook';
 import { CadPrice } from './CadPrice';
 import { QuoteStatusBadge } from './QuoteStatusBadge';
@@ -34,7 +35,7 @@ export function FacilityQuotes({
             <QuoteStatusBadge status={displayStatus(quote, now)} />
           </span>
           <span className="text-xs text-muted-foreground">
-            Quoted {formatUtc(quote.quotedAt)} · valid until {formatUtc(quote.validUntil)}
+            Quoted {formatAlberta(quote.quotedAt)} · valid until {formatAlberta(quote.validUntil)}
           </span>
         </span>
       ))}

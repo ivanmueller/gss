@@ -1,7 +1,8 @@
+import { formatAlberta } from '@grain/domain';
 import { X } from 'lucide-react';
 
 import type { Facility, FxRate, Quote } from '../data/types';
-import { formatPlace, formatQuantityRange, formatUtc } from '../lib/format';
+import { formatPlace, formatQuantityRange } from '../lib/format';
 import { cadPrice, displayStatus, isLive } from '../lib/orderBook';
 import { Link } from '../lib/router';
 import { CadPrice, conversionText } from './CadPrice';
@@ -39,7 +40,7 @@ function QuoteDetails({ quote, fx, now }: { quote: Quote; fx: FxRate | null; now
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        Quoted {formatUtc(quote.quotedAt)} · valid until {formatUtc(quote.validUntil)}
+        Quoted {formatAlberta(quote.quotedAt)} · valid until {formatAlberta(quote.validUntil)}
       </p>
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
         <dt className="text-muted-foreground">Commodity</dt>

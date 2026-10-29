@@ -556,15 +556,13 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
 // count. Contacts logged and follow-ups are never deleted, so a second local run needs a
 // fresh database (supabase.ts says so).
 
-/** A Central wall-clock time a day before now, as a datetime-local input takes it. */
-function yesterdayInCentral(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Winnipeg',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(Date.now() - 86_400_000));
-  return `${parts}T09:00`;
+/**
+ * 9 am yesterday in Alberta, as a datetime-local input takes it. Alberta's clocks stay at
+ * UTC−6 (packages/domain/src/alberta.ts), whatever this computer's time zone rules say.
+ */
+function yesterdayInAlberta(): string {
+  const day = new Date(Date.now() - 86_400_000 - 6 * 3_600_000).toISOString().slice(0, 10);
+  return `${day}T09:00`;
 }
 
 test('logs a contact with a follow-up, corrects it, and marks the follow-up done', async ({
@@ -601,7 +599,7 @@ test('logs a contact with a follow-up, corrects it, and marks the follow-up done
   await history.getByLabel('Plan a follow-up').check();
   await history.getByLabel(/What to do/).fill('Send the synthetic bid sheet');
   // Due yesterday, so it is overdue at once.
-  await history.getByLabel(/Due/).fill(yesterdayInCentral());
+  await history.getByLabel(/Due/).fill(yesterdayInAlberta());
   await history.getByRole('button', { name: 'Save contact' }).click();
   await expect(page.getByText('Contact logged and follow-up planned.')).toBeVisible();
 
@@ -610,7 +608,7 @@ test('logs a contact with a follow-up, corrects it, and marks the follow-up done
   await expect(logged).toContainText('Logged by Synthetic Trader');
   const followUps = page.getByRole('region', { name: 'Follow-ups (1 open)' });
   await expect(followUps).toContainText('OverdueSend the synthetic bid sheet');
-  await expect(followUps).toContainText('9:00 am CT · Synthetic Trader');
+  await expect(followUps).toContainText('9:00 am MT · Synthetic Trader');
   const nav = page.getByRole('navigation', { name: 'Main' });
   await expect(nav.getByRole('link', { name: 'Follow-ups, 1 overdue or due today' })).toBeVisible();
 

@@ -1,6 +1,6 @@
 import {
-  centralDay,
-  endOfCentralDay,
+  albertaDay,
+  endOfAlbertaDay,
   type ContactLogInput,
   type FollowUpInput,
 } from '@grain/domain';
@@ -263,14 +263,14 @@ describe('follow-ups as app_api', () => {
     expect(everyone).toHaveLength(4);
   });
 
-  it('counts the person’s follow-ups overdue and due later today in Central time', async () => {
+  it('counts the person’s follow-ups overdue and due later today in Alberta time', async () => {
     const soon = minutesFromNow(2);
-    const today = centralDay(soon) === centralDay(new Date()) ? 1 : 0;
-    expect(await db.countFollowUps(as(users.val), orgs.a, endOfCentralDay(new Date()))).toEqual({
+    const today = albertaDay(soon) === albertaDay(new Date()) ? 1 : 0;
+    expect(await db.countFollowUps(as(users.val), orgs.a, endOfAlbertaDay(new Date()))).toEqual({
       overdue: 1,
       dueToday: today,
     });
-    expect(await db.countFollowUps(as(users.bob), orgs.a, endOfCentralDay(new Date()))).toEqual({
+    expect(await db.countFollowUps(as(users.bob), orgs.a, endOfAlbertaDay(new Date()))).toEqual({
       overdue: 0,
       dueToday: 0,
     });
@@ -342,7 +342,7 @@ describe('follow-ups as app_api', () => {
     });
     expect(doneList.map((item) => item.id)).toEqual([overdue]);
     expect(
-      (await db.countFollowUps(as(users.val), orgs.a, endOfCentralDay(new Date()))).overdue,
+      (await db.countFollowUps(as(users.val), orgs.a, endOfAlbertaDay(new Date()))).overdue,
     ).toBe(0);
   });
 });

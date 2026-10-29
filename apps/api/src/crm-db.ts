@@ -90,7 +90,7 @@ export interface CrmDatabase {
   listFollowUps: (ctx: RequestContext, filter: FollowUpFilter) => Promise<FollowUp[]>;
   /**
    * The signed-in person's open follow-ups overdue and due later today: before `endOfDay`, the
-   * end of today in Central time, worked out by the caller with the same rules as the web app.
+   * end of today in Alberta time, worked out by the caller with the same rules as the web app.
    */
   countFollowUps: (
     ctx: RequestContext,

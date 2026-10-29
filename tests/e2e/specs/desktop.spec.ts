@@ -133,7 +133,7 @@ test('shows the selected buyer bid in CAD, with its USD price, rate and validity
   // The golden fixture: USD 725.00 at 1.360000 CAD per USD is CAD 986.00.
   await expect(bid).toContainText('CAD 986.00/MT');
   await expect(bid).toContainText('Quoted as USD 725.00/MT at 1.360000 CAD per USD');
-  await expect(bid).toContainText('valid until 2026-11-09 23:59 UTC');
+  await expect(bid).toContainText('valid until Mon 9 Nov 2026, 5:59 pm MT');
   await expect(bid).toContainText('Not executable');
 });
 

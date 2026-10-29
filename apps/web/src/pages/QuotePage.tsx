@@ -1,8 +1,10 @@
 import {
+  formatAlberta,
   QUOTE_SIDE_LABELS,
   QUOTE_SOURCE_LABELS,
   QUOTE_STATUS_LABELS,
   termsToFormValues,
+  utcToAlberta,
   type QuoteDetail,
   type QuoteRevision,
 } from '@grain/domain';
@@ -28,7 +30,6 @@ import {
   TableRowHeader,
 } from '../components/ui/table';
 import { ApiError, sendJson } from '../lib/api';
-import { formatUtc } from '../lib/format';
 import {
   canEnterQuotes,
   quoteBasis,
@@ -36,7 +37,6 @@ import {
   quotePlace,
   quotePrice,
   quoteQuantity,
-  toLocalInput,
 } from '../lib/quotes';
 import { Link } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
@@ -64,8 +64,8 @@ function Terms({ revision }: { revision: QuoteRevision }) {
       <Term label="Quantity">{quoteQuantity(revision)}</Term>
       <Term label="Delivery basis">{quoteBasis(revision)}</Term>
       <Term label="Delivery">{quoteDelivery(revision)}</Term>
-      <Term label="Quoted at">{formatUtc(revision.quotedAt)}</Term>
-      <Term label="Valid until">{formatUtc(revision.validUntil)}</Term>
+      <Term label="Quoted at">{formatAlberta(revision.quotedAt)}</Term>
+      <Term label="Valid until">{formatAlberta(revision.validUntil)}</Term>
       <Term label="Source">
         {QUOTE_SOURCE_LABELS[revision.sourceType]}
         {revision.sourceReference && (
@@ -138,9 +138,9 @@ function RevisionHistory({ quote }: { quote: QuoteDetail }) {
           <TableHead>Quantity</TableHead>
           <TableHead>Basis</TableHead>
           <TableHead>Delivery</TableHead>
-          <TableHead>Valid until (UTC)</TableHead>
+          <TableHead>Valid until (MT)</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Recorded (UTC)</TableHead>
+          <TableHead>Recorded (MT)</TableHead>
         </tr>
       </TableHeader>
       <TableBody>
@@ -159,12 +159,14 @@ function RevisionHistory({ quote }: { quote: QuoteDetail }) {
               <TableCell className="whitespace-nowrap">{quoteQuantity(revision)}</TableCell>
               <TableCell>{quoteBasis(revision)}</TableCell>
               <TableCell className="whitespace-nowrap">{quoteDelivery(revision)}</TableCell>
-              <TableCell className="whitespace-nowrap">{formatUtc(revision.validUntil)}</TableCell>
+              <TableCell className="whitespace-nowrap">
+                {formatAlberta(revision.validUntil)}
+              </TableCell>
               <TableCell>
                 <QuoteStatusBadge status={latest ? quote.status : 'superseded'} />
               </TableCell>
               <TableCell className="text-xs whitespace-nowrap">
-                {formatUtc(revision.recordedAt)}
+                {formatAlberta(revision.recordedAt)}
                 <span className="block text-muted-foreground">
                   {revision.recordedByName} · {QUOTE_SOURCE_LABELS[revision.sourceType]}
                 </span>
@@ -274,7 +276,7 @@ export function QuotePage({ session, id }: { session: DirectorySession; id: stri
               {withdrawn && (
                 <Callout variant="warning" icon={Ban}>
                   <p>
-                    <strong>Withdrawn</strong> on {formatUtc(quote.withdrawnAt ?? '')}
+                    <strong>Withdrawn</strong> on {formatAlberta(quote.withdrawnAt ?? '')}
                     {quote.withdrawnByName && ` by ${quote.withdrawnByName}`}. It is kept with its
                     history and is never live again.
                   </p>
@@ -283,7 +285,7 @@ export function QuotePage({ session, id }: { session: DirectorySession; id: stri
               {quote.status === 'expired' && (
                 <Callout variant="warning" icon={TimerOff}>
                   <p>
-                    <strong>Expired</strong> at {formatUtc(quote.current.validUntil)}. It is not
+                    <strong>Expired</strong> at {formatAlberta(quote.current.validUntil)}. It is not
                     live; record new terms with a later valid-until time if the counterparty renewed
                     it.
                   </p>
@@ -325,7 +327,7 @@ export function QuotePage({ session, id }: { session: DirectorySession; id: stri
                       <QuoteForm
                         initial={{
                           ...termsToFormValues(quote.current),
-                          validUntil: toLocalInput(quote.current.validUntil),
+                          validUntil: utcToAlberta(quote.current.validUntil),
                         }}
                         submitLabel="Save new terms"
                         busyLabel="Saving…"
@@ -364,7 +366,7 @@ export function QuotePage({ session, id }: { session: DirectorySession; id: stri
                       </CardTitle>
                       <p className="text-xs text-muted-foreground">
                         Revision {quote.current.revisionNumber}, recorded{' '}
-                        {formatUtc(quote.current.recordedAt)} by {quote.current.recordedByName}
+                        {formatAlberta(quote.current.recordedAt)} by {quote.current.recordedByName}
                       </p>
                     </CardHeader>
                     <CardContent>

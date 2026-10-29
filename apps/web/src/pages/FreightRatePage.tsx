@@ -1,8 +1,10 @@
 import {
+  formatAlberta,
   FREIGHT_MODE_LABELS,
   freightTermsToFormValues,
   QUOTE_SOURCE_LABELS,
   QUOTE_STATUS_LABELS,
+  utcToAlberta,
   type FreightDetail,
   type FreightLocation,
   type FreightRevision,
@@ -30,8 +32,6 @@ import {
 } from '../components/ui/table';
 import { ApiError, sendJson } from '../lib/api';
 import { canEnterFreight, freightPayload, freightPlace, freightRate } from '../lib/freight';
-import { formatUtc } from '../lib/format';
-import { toLocalInput } from '../lib/quotes';
 import { Link } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
@@ -59,8 +59,8 @@ function Terms({ revision }: { revision: FreightRevision }) {
       {payload && <Term label="Payload">{payload}</Term>}
       <Term label="Firm or indicative">{QUOTE_STATUS_LABELS[revision.firmness]}</Term>
       <Term label="What the rate includes">{revision.inclusions ?? 'Not stated'}</Term>
-      <Term label="Quoted at">{formatUtc(revision.quotedAt)}</Term>
-      <Term label="Valid until">{formatUtc(revision.validUntil)}</Term>
+      <Term label="Quoted at">{formatAlberta(revision.quotedAt)}</Term>
+      <Term label="Valid until">{formatAlberta(revision.validUntil)}</Term>
       <Term label="Source">
         {QUOTE_SOURCE_LABELS[revision.sourceType]}
         {revision.sourceReference && (
@@ -135,9 +135,9 @@ function RevisionHistory({ freight }: { freight: FreightDetail }) {
           <TableHead>Revision</TableHead>
           <TableHead>Rate</TableHead>
           <TableHead>Includes</TableHead>
-          <TableHead>Valid until (UTC)</TableHead>
+          <TableHead>Valid until (MT)</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Recorded (UTC)</TableHead>
+          <TableHead>Recorded (MT)</TableHead>
         </tr>
       </TableHeader>
       <TableBody>
@@ -155,12 +155,14 @@ function RevisionHistory({ freight }: { freight: FreightDetail }) {
                 </span>
               </TableCell>
               <TableCell className="text-xs">{revision.inclusions ?? '—'}</TableCell>
-              <TableCell className="whitespace-nowrap">{formatUtc(revision.validUntil)}</TableCell>
+              <TableCell className="whitespace-nowrap">
+                {formatAlberta(revision.validUntil)}
+              </TableCell>
               <TableCell>
                 <QuoteStatusBadge status={latest ? freight.status : 'superseded'} />
               </TableCell>
               <TableCell className="text-xs whitespace-nowrap">
-                {formatUtc(revision.recordedAt)}
+                {formatAlberta(revision.recordedAt)}
                 <span className="block text-muted-foreground">
                   {revision.recordedByName} · {QUOTE_SOURCE_LABELS[revision.sourceType]}
                 </span>
@@ -278,7 +280,7 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
               {withdrawn && (
                 <Callout variant="warning" icon={Ban}>
                   <p>
-                    <strong>Withdrawn</strong> on {formatUtc(freight.withdrawnAt ?? '')}
+                    <strong>Withdrawn</strong> on {formatAlberta(freight.withdrawnAt ?? '')}
                     {freight.withdrawnByName && ` by ${freight.withdrawnByName}`}. It is kept with
                     its history and is never live again.
                   </p>
@@ -287,8 +289,9 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
               {freight.status === 'expired' && (
                 <Callout variant="warning" icon={TimerOff}>
                   <p>
-                    <strong>Expired</strong> at {formatUtc(freight.current.validUntil)}. It is not
-                    live; record new terms with a later valid-until time if the carrier renewed it.
+                    <strong>Expired</strong> at {formatAlberta(freight.current.validUntil)}. It is
+                    not live; record new terms with a later valid-until time if the carrier renewed
+                    it.
                   </p>
                 </Callout>
               )}
@@ -339,7 +342,7 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
                       <FreightForm
                         initial={{
                           ...freightTermsToFormValues(freight.current),
-                          validUntil: toLocalInput(freight.current.validUntil),
+                          validUntil: utcToAlberta(freight.current.validUntil),
                         }}
                         submitLabel="Save new terms"
                         busyLabel="Saving…"
@@ -378,7 +381,8 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
                       </CardTitle>
                       <p className="text-xs text-muted-foreground">
                         Revision {freight.current.revisionNumber}, recorded{' '}
-                        {formatUtc(freight.current.recordedAt)} by {freight.current.recordedByName}
+                        {formatAlberta(freight.current.recordedAt)} by{' '}
+                        {freight.current.recordedByName}
                       </p>
                     </CardHeader>
                     <CardContent>

@@ -9,5 +9,5 @@ export * from './members';
 export * from './quotes';
 export * from './freight';
 export * from './website';
-export * from './central';
+export * from './alberta';
 export * from './crm';

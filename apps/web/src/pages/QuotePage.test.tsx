@@ -22,16 +22,20 @@ describe('QuotePage', () => {
       `/counterparties/${BID.counterparty.id}`,
     );
     const current = screen.getByRole('region', { name: 'Current terms' });
-    expect(current).toHaveTextContent('Revision 2, recorded 2026-10-28 16:00 UTC by Adam Admin');
+    expect(current).toHaveTextContent(
+      'Revision 2, recorded Wed 28 Oct 2026, 10:00 am MT by Adam Admin',
+    );
     expect(current).toHaveTextContent('PriceUSD 730.50/MT');
     expect(current).toHaveTextContent('Firm or indicativeIndicative');
-    expect(current).toHaveTextContent('Valid until2099-10-30 22:00 UTC');
+    expect(current).toHaveTextContent('Valid untilFri 30 Oct 2099, 4:00 pm MT');
     expect(current).toHaveTextContent('SourcePhone callSynthetic call');
 
     const history = screen.getByRole('table', { name: 'Revision history' });
     const rows = within(history).getAllByRole('row');
     expect(rows[1]).toHaveTextContent('2USD 730.50/MTIndicative · No. 1 CW');
-    expect(rows[1]).toHaveTextContent('Indicative2026-10-28 16:00 UTCAdam Admin · Phone call');
+    expect(rows[1]).toHaveTextContent(
+      'IndicativeWed 28 Oct 2026, 10:00 am MTAdam Admin · Phone call',
+    );
     expect(rows[2]).toHaveTextContent('1USD 725.00/MTFirm · No. 1 CW21–84.5 MT');
     expect(rows[2]).toHaveTextContent('Superseded');
   });
@@ -123,7 +127,9 @@ describe('QuotePage', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
     const confirm = screen.getByRole('group', { name: 'Withdraw this quote' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Withdraw' }));
-    expect(await screen.findByText(/on 2026-10-28 17:00 UTC by Adam Admin/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/on Wed 28 Oct 2026, 11:00 am MT by Adam Admin/),
+    ).toBeInTheDocument();
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Record new terms' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Last terms' })).toBeInTheDocument();
@@ -144,7 +150,9 @@ describe('QuotePage', () => {
         id={QUOTE_ID}
       />,
     );
-    expect(await screen.findByText(/at 2026-10-28 15:00 UTC\. It is not live/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/at Wed 28 Oct 2026, 9:00 am MT\. It is not live/),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Record new terms' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
   });
