@@ -1,8 +1,14 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Codex's review of the website field
+
+- `docs/DATA_MODEL.md`: migration `20261029060000_counterparty_website_rules.sql`.
+- `docs/DECISIONS.md`: ports and user names refused as written, the database holding site names to the same rules, and the preview without `allow-same-origin`.
+- `docs/API.md`: the preview check refuses the app's own address and redirects written with a port or user name.
+
 ## 2026-10-29 — A website on each counterparty
 
-- `docs/DECISIONS.md`: the owner's request and the choices made (public web addresses only, the Worker's check of whether a site may be previewed, the sandboxed preview); after Codex's review, ports and user names refused as written, the database holding site names to the same rules, and the preview without `allow-same-origin`.
+- `docs/DECISIONS.md`: the owner's request and the choices made (public web addresses only, the Worker's check of whether a site may be previewed, the sandboxed preview).
 - `docs/DATA_MODEL.md`: `website` on counterparties; migration `20261029050000_counterparty_website.sql`.
 - `docs/API.md`: `website` on a counterparty; `GET /api/v1/counterparties/{id}/website-preview`.
 - `docs/DESIGN_SYSTEM.md`: `Dialog`.
