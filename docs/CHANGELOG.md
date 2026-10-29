@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Handoff record of #72 and #73
+
+- `docs/HANDOFF.md`: Alberta time on every screen (ivanmueller/gss#73) and the handoff record of #71 (#72), with their CI and Deploy staging runs; the next task, the owner's check on staging of times in MT and of the CRM.
+
 ## 2026-10-29 — Alberta time on every screen
 
 - `docs/DECISIONS.md`: the owner's decision: every time typed and shown in Alberta time (MT), UTC−6 all year from 8 March 2026, stored in UTC; saved follow-ups keep their moment; the exchange rate's age still counted in Ottawa days.
