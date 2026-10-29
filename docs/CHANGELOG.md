@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-29 — A freight payload is never NaN
+
+- `docs/DATA_MODEL.md`: migration `20261029030000_freight_payload_not_nan.sql` (Codex's review of ivanmueller/gss#58).
+
 ## 2026-10-29 — Carrier freight rates by route (part of GT-050)
 
 - `docs/DECISIONS.md`: the owner's answers (units vary by carrier; routes are from one location to another), and the choices made: carriers in Counterparties, who enters freight, a rate per load needs its payload, revisions.
