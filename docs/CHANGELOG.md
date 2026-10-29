@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-29 — Status checked after the dropdown change
+
+- `AGENTS.md`: Phase 2 and most of Phase 3 on staging.
+- `docs/HANDOFF.md`: ivanmueller/gss#52 and Deploy staging run #49, the status line, the tests of #50–#52, the next task (the Bank of Canada FX connector).
+
 ## 2026-10-29 — One dropdown style
 
 - `docs/DESIGN_SYSTEM.md`: `Select`, the one dropdown for a single choice, and the rule that every dropdown shares the commodity picker's look.
