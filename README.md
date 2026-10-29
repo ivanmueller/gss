@@ -69,8 +69,18 @@ The opening page shows a commodity picker and a seller/buyer filter above the ma
 - **Order book:** for each commodity, sellers' asks in red boxes on the left and buyers' bids in green boxes on the right, best first, all in CAD per tonne. The gross spread (best bid minus best ask, before freight and basis) is in each commodity's heading. A dashed circle marks an indicative price; "FX" marks a price converted from USD.
 - **Hiding the book:** the arrow tab on its left edge slides it away and back.
 - **Map pins:** one per location quoted at that has coordinates (buyers green, sellers coral, hollow when approximate). Quotes without a location, or at one without coordinates, are in the book and the table only.
-- **Left out of the book, with a note:** USD prices, until the Bank of Canada daily rate is built (`docs/DECISIONS.md`), and prices per bushel, short ton or hundredweight, which need a conversion factor not set up yet. Both stay in the facility table, as quoted. Nothing is converted at a made-up rate.
+- **USD prices** are converted to CAD at the Bank of Canada's latest daily rate (CAD per USD), exactly, and placed among the CAD prices. Each carries "FX"; hovering it, or selecting the location, shows the USD price, the rate and its day, for example "USD 725.00/MT at 1.3912 CAD per USD, Bank of Canada, 28 Oct 2026". The book's footer names the rate in use.
+- **Left out of the book, with a note:** USD prices when there is no Bank of Canada rate yet or the latest is more than four days old ("CAD/USD rate out of date"), and prices per bushel, short ton or hundredweight, which need a conversion factor not set up yet. Both stay in the facility table, as quoted. Nothing is converted at a made-up or old rate.
 - **Demo data:** profile icon → **Demo data** shows made-up sellers, buyers and prices instead (never mixed with real ones). It is off until turned on, and the browser remembers the choice. While it is on, a yellow "Demo" tag sits beside GSS. The demo converts USD at the golden fixture's 1.360000, labelled synthetic.
+
+## Exchange rate
+
+The CAD/USD rate is the Bank of Canada's daily average (series FXUSDCAD), published by 16:30 Ottawa time on business days through its free Valet service, which needs no key or account. The Worker fetches it at 14:15 and 22:15 UTC every day (`apps/api/wrangler.jsonc`, triggers) and stores each new day once, with the time it was fetched; stored rates are never changed. A run that fails stores nothing, and the next run catches up on the days missed (it reads the last ten published days).
+
+- **See it:** the order book's footer names the rate and day whenever a USD price is converted; `GET /api/v1/fx-quotes` lists the last ten days.
+- **Check a run:** Cloudflare → Workers & Pages → grain-trading-api-staging → Logs: look for "Bank of Canada USD/CAD refreshed: … stored, … unchanged …" after 22:15 UTC, or "Bank of Canada USD/CAD not refreshed: …" with the reason.
+- **Old rate:** a rate more than four calendar days old is out of date (a stopped feed); USD prices then stay out of the book until a new one arrives.
+- **Before production:** check the Bank's terms of use for the data (`docs/DECISIONS.md`).
 
 ## Counterparties
 

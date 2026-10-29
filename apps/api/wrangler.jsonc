@@ -30,6 +30,11 @@
       // Hyperdrive (staging)" workflow. `wrangler dev` reads the local database from
       // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE.
       "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "bbc915879c6848abaa08605ff7d7825c" }],
+      // The Bank of Canada's USD/CAD rate (src/fx.ts), times in UTC. The Bank publishes by
+      // 16:30 Ottawa time on business days: 22:15 UTC is after that all year (17:15 or 18:15
+      // in Ottawa), and 14:15 UTC the next morning picks up a rate published late or a run
+      // that failed. Locally: `wrangler dev --test-scheduled`, then /__scheduled.
+      "triggers": { "crons": ["15 14,22 * * *"] },
       // Keeps Workers Logs on across deploys (the API logs secret-free failure reasons).
       "observability": {
         "logs": {
