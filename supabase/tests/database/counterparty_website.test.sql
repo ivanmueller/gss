@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(39);
+select plan(45);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader).
@@ -192,8 +192,14 @@ select ok(pg_temp.refused('https://-bad-.example.com'), 'a label starting with a
 select ok(pg_temp.refused('https://example.c0m'), 'a top-level name with a digit is refused');
 select ok(pg_temp.refused('https://example.com\@evil.example.org'), 'a backslash in the site name is refused');
 select ok(not pg_temp.refused('https://www.example.co.uk/grain?region=SK#bids'), 'a path, query and fragment are kept');
-select ok(not pg_temp.refused('https://xn--bcher-kva.example.ca'), 'an international site name in its xn-- form is kept');
-select is(pg_temp.website_a(), 'https://xn--bcher-kva.example.ca', 'the last accepted website is saved');
+select ok(pg_temp.refused('https://xn--bcher-kva.example.ca'), 'an international site name is refused, like the API does');
+select ok(pg_temp.refused('https://xn--a.com'), 'an invalid international name is refused (Codex''s review)');
+select ok(pg_temp.refused('https://example.xn--a'), 'an invalid international top-level name is refused');
+select ok(pg_temp.refused('https://example.xn--a-'), 'an international top-level name ending in a hyphen is refused');
+select ok(pg_temp.refused('https://example.com/' || repeat('é', 100)), 'accented letters not percent-encoded are refused, as the API never saves them');
+select ok(not pg_temp.refused('https://example.com/' || repeat('%C3%A9', 80)), 'percent-encoded accents within 500 characters are kept');
+select ok(not pg_temp.refused('https://ab--cd.example.com/a%20b'), 'a double hyphen inside a label and an encoded space are kept');
+select is(pg_temp.website_a(), 'https://ab--cd.example.com/a%20b', 'the last accepted website is saved');
 
 select * from finish();
 rollback;

@@ -40,7 +40,7 @@ const PRIVATE_SUFFIXES = new Set([
   'test',
 ]);
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const TOP_LEVEL = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
+const TOP_LEVEL = /^[a-z]{2,63}$/;
 const IPV4 = /^\d+(?:\.\d+){3}$/;
 // "mailto:", "javascript:" and the like; a colon followed by a digit is a port instead.
 const OTHER_SCHEME = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
@@ -56,6 +56,9 @@ const WRITTEN_AUTHORITY = /^(?:[a-z][a-z0-9+.-]*:[/\\]*|[/\\]{2})([^/\\?#]*)/i;
  * website may not, or null. A relative address has no site of its own and gives null.
  */
 export function writtenAddressProblem(text: string): string | null {
+  // URL parsing drops tabs and line breaks anywhere and spaces and control characters at
+  // the ends, so "ht\ttps://example.com:443" would lose both the tab and the port.
+  if (/[\s\p{Cc}]/u.test(text)) return 'must not contain spaces';
   const authority = WRITTEN_AUTHORITY.exec(text)?.[1];
   if (authority === undefined) return null;
   if (authority.includes('@')) return 'must not include a user name or password';
@@ -79,6 +82,10 @@ export function websiteProblem(url: WebAddress): string | null {
     return 'needs a site name such as example.com, not a number address';
   const labels = host.split('.');
   const top = labels.at(-1) ?? '';
+  // An international name in its ASCII form. The database cannot check that such a name is
+  // valid (URL parsing does), so to keep both to one rule they are not taken (Codex's review).
+  if (labels.some((label) => label.startsWith('xn--')))
+    return 'needs a site name in plain letters, without accents';
   if (
     labels.length < 2 ||
     !labels.every((label) => LABEL.test(label)) ||

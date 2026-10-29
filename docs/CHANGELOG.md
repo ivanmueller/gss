@@ -2,8 +2,9 @@
 
 ## 2026-10-29 — Codex's review of the website field
 
-- `docs/DATA_MODEL.md`: migration `20261029060000_counterparty_website_rules.sql`.
-- `docs/DECISIONS.md`: ports and user names refused as written, the database holding site names to the same rules, and the preview without `allow-same-origin`.
+- `docs/DATA_MODEL.md`: migration `20261029060000_counterparty_website_rules.sql` (printable ASCII after the site name; no international labels).
+- `docs/DECISIONS.md`: ports and user names refused as written, also with a tab or line break inside; the database holding site names to the same rules; site names in plain letters only; the preview without `allow-same-origin`.
+- `README.md` ("Counterparties"): plain-letter site names.
 - `docs/API.md`: the preview check refuses the app's own address and redirects written with a port or user name.
 
 ## 2026-10-29 — A website on each counterparty

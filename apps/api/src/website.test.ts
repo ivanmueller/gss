@@ -113,6 +113,9 @@ describe('checkWebsitePreview', () => {
       'https://example.com:8443/',
       'https://example.com:443/',
       '//example.com:443/next',
+      'ht\ttps://other.example.com:443/',
+      'https://other.example.com:4\t43/',
+      'https://xn--a.com/',
       'https://user:secret@example.com/',
     ]) {
       const fetchImpl = site({ 'https://example.com/': redirect(location) });

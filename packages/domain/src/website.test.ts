@@ -26,10 +26,27 @@ describe('parseWebsite', () => {
       ok: true,
       website: 'http://example.com/about/',
     });
-    // International names are kept in their ASCII form.
-    expect(ok('bücher.example.ca')).toEqual({
-      ok: true,
-      website: 'https://xn--bcher-kva.example.ca',
+  });
+
+  it('refuses international site names, which the database cannot check (Codex’s review)', () => {
+    for (const text of [
+      'bücher.example.ca',
+      'https://xn--bcher-kva.example.ca',
+      'https://shop.xn--bcher-kva.ca/grain',
+      'https://example.xn--p1ai',
+    ]) {
+      expect(ok(text)).toEqual({
+        ok: false,
+        message: 'needs a site name in plain letters, without accents',
+      });
+    }
+  });
+
+  it('counts the length of the saved address, with accents percent-encoded', () => {
+    expect(ok('example.com/é')).toEqual({ ok: true, website: 'https://example.com/%C3%A9' });
+    expect(ok(`example.com/${'é'.repeat(100)}`)).toEqual({
+      ok: false,
+      message: `is longer than ${String(MAX_WEBSITE_LENGTH)} characters`,
     });
   });
 
@@ -129,6 +146,17 @@ describe('writtenAddressProblem', () => {
     expect(writtenAddressProblem('https:example.com:443')).toBe('must not include a port number');
     expect(writtenAddressProblem('https://u:p@example.com/')).toBe(
       'must not include a user name or password',
+    );
+    // Parsing drops tabs and line breaks, which would hide a port (Codex's review).
+    expect(writtenAddressProblem('ht\ttps://other.example.com:443/')).toBe(
+      'must not contain spaces',
+    );
+    expect(writtenAddressProblem('https://other.example.com:4\n43/')).toBe(
+      'must not contain spaces',
+    );
+    expect(writtenAddressProblem(' https://other.example.com/')).toBe('must not contain spaces');
+    expect(writtenAddressProblem('\u0000https://other.example.com/')).toBe(
+      'must not contain spaces',
     );
     expect(writtenAddressProblem('https://[::1]/')).toBe(
       'needs a site name such as example.com, not a number address',
