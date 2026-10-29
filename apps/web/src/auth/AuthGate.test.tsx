@@ -188,10 +188,8 @@ describe('AuthGate', () => {
       await screen.findByRole('img', { name: 'QR code for your authenticator app' }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('totp-secret')).toHaveTextContent('SYNTHETICSECRET');
-    expect(screen.getByRole('link', { name: 'Open in authenticator app' })).toHaveAttribute(
-      'href',
-      'otpauth://totp/GSS:alice@example.test?secret=SYNTHETICSECRET&issuer=GSS',
-    );
+    // A computer scans with a phone: no setup link here (MfaEnroll.test.tsx covers phones).
+    expect(screen.queryByRole('link')).toBeNull();
     expect(mock.mfa.unenroll).toHaveBeenCalledWith({ factorId: 'factor-stale' });
     expect(mock.mfa.enroll).toHaveBeenCalledTimes(1);
 
