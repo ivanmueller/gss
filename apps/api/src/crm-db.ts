@@ -492,12 +492,15 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
           update app.follow_ups
           set task = ${plan.task}, due_at = ${plan.dueAt}::timestamptz,
               assigned_to = ${plan.assignedTo}
-          where id = ${id} and done_at is null
+          where id = ${id} and done_at is null and removed_at is null
             and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
           returning id`;
         if (updated.length === 1) return { status: 'saved' };
+        // Removed meanwhile (an admin's removal committed while this waited): gone, not
+        // changed (Codex's review of ivanmueller/gss#83).
         const [now] = await tx<{ done: boolean }[]>`
-          select done_at is not null as done from app.follow_ups where id = ${id}`;
+          select done_at is not null as done from app.follow_ups
+          where id = ${id} and removed_at is null`;
         if (!now) return { status: 'not_found' };
         return now.done ? { status: 'done' } : { status: 'changed' };
       });
@@ -514,8 +517,11 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
         await tx`
           update app.follow_ups
           set done_at = now(), done_by = app.current_user_id(), done_by_name = ${doneByName}
-          where id = ${id} and done_at is null`;
-        return { status: 'saved' };
+          where id = ${id} and done_at is null and removed_at is null`;
+        // Removed meanwhile: gone, rather than the trigger's refusal of a change to it.
+        const [now] = await tx`
+          select 1 from app.follow_ups where id = ${id} and removed_at is null`;
+        return now ? { status: 'saved' } : { status: 'not_found' };
       });
     },
 
@@ -527,10 +533,12 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
         if (!row) return { status: 'not_found' };
         if (!row.allowed) return { status: 'forbidden' };
         // The database fills in when and the admin's name, and checks they are an admin.
-        await tx`
+        const removed = await tx`
           update app.follow_ups set removed_by = app.current_user_id()
-          where id = ${id} and removed_by is null`;
-        return { status: 'saved' };
+          where id = ${id} and removed_by is null
+          returning id`;
+        // Another admin's removal committed while this one waited: already gone.
+        return removed.length === 1 ? { status: 'saved' } : { status: 'not_found' };
       });
     },
   };
