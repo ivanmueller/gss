@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #78
+
+- `docs/HANDOFF.md`: what counterparties buy and sell, the commodity filter and the lighter header (ivanmueller/gss#78), its CI and Deploy staging runs and Codex's review; the next task, the owner's check on staging.
+
 ## 2026-10-30 — What counterparties buy and sell
 
 - `docs/DECISIONS.md`: the owner's answers (a list kept by hand, anyone can change it, the 20 commodities, a filter, an import column), the next follow-up and last contact in the header instead of four boxes, freight's Show and Hide in one place.
