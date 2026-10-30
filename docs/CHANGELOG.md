@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #82
+
+- `docs/HANDOFF.md`: the company phone, rail and truck, coordinates when adding, the + window and verified commodities (ivanmueller/gss#82) with their CI and Deploy staging runs; the owner's check on staging and next request in the next task.
+
 ## 2026-10-30 — Company phone, rail and truck, coordinates when adding, the + window, verified commodities
 
 - `docs/DECISIONS.md`: the owner's request and answers: a company phone; rail or truck access by location, never from a spreadsheet; coordinates found when counterparties and locations are added, sure results saved, doubtful ones asked; adding and importing in the + window; commodities from a spreadsheet unverified until anyone on the team verifies them.
