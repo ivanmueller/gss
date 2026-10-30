@@ -7,6 +7,7 @@ import type { AuthClient } from '../lib/supabase';
 import { notePasswordChanged } from './passwordNotice';
 import { AuthGate } from './AuthGate';
 import { WRONG_CODE } from './CodeForm';
+import * as apiCache from '../lib/useApiResource';
 
 interface Factor {
   id: string;
@@ -30,13 +31,13 @@ function fakeAuth(initial: Partial<FakeState> = {}) {
     factors: [],
     ...initial,
   };
-  let listener: (() => void) | undefined;
+  let listener: ((event?: string) => void) | undefined;
   const ok = <T,>(data: T) => Promise.resolve({ data, error: null });
   const mock = {
     getSession: vi.fn(() => ok({ session: state.session })),
-    onAuthStateChange: vi.fn((callback: () => void) => {
+    onAuthStateChange: vi.fn((callback: (event?: string) => void) => {
       listener = callback;
-      callback(); // INITIAL_SESSION
+      callback('INITIAL_SESSION');
       return { data: { subscription: { unsubscribe: vi.fn() } } };
     }),
     signInWithPassword: vi.fn(() => ok({})),
@@ -66,7 +67,7 @@ function fakeAuth(initial: Partial<FakeState> = {}) {
     auth: mock as unknown as AuthClient,
     mock,
     state,
-    emit: () => listener?.(),
+    emit: (event?: string) => listener?.(event),
   };
 }
 
@@ -234,5 +235,19 @@ describe('AuthGate', () => {
     await user.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(mock.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  // Codex's review of ivanmueller/gss#85: a sign-out in another tab reaches this one as an
+  // event; the answers kept for quick page switches go then too.
+  it('forgets the kept API answers when a sign-out arrives, from this tab or another', async () => {
+    const { auth, emit } = fakeAuth({ session: SESSION, currentLevel: 'aal2', nextLevel: 'aal2' });
+    const forget = vi.spyOn(apiCache, 'clearApiCache');
+    renderGate(auth);
+    await screen.findByText(/app for alice@example.test/);
+    emit('TOKEN_REFRESHED');
+    expect(forget).not.toHaveBeenCalled();
+    emit('SIGNED_OUT');
+    expect(forget).toHaveBeenCalledTimes(1);
+    forget.mockRestore();
   });
 });

@@ -616,10 +616,13 @@ describe('markets and tier', () => {
       ok({
         legalName: 'Synthetic Feeds',
         country: 'CA',
-        markets: 'Birds; small animals, PET / Aquatic and horse; Pet',
+        markets: 'Birds; small animals, PET / Aquatic and horse; Pet; Specialties',
         tier: 'tier b',
       }).counterparty,
-    ).toMatchObject({ markets: ['pet', 'bird', 'equine', 'small_animal', 'aqua'], tier: 'B' });
+    ).toMatchObject({
+      markets: ['pet', 'bird', 'equine', 'specialty', 'small_animal', 'aqua'],
+      tier: 'B',
+    });
     expect(suggestMapping(['Company', 'Country', 'Type', 'Market', 'Tier'])).toMatchObject({
       types: 'Type',
       markets: 'Market',

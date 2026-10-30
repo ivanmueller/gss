@@ -203,6 +203,8 @@ describe('GET /api/v1/counterparties/:id/logo', () => {
     db.getLogo.mockResolvedValue({ data: PNG, sha256: 'a'.repeat(64) });
     const current = await request(`/${COUNTERPARTY}/logo?v=${'a'.repeat(64)}`, { headers: AUTH });
     expect(current.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    // Kept per sign-in, never handed to another login on the same browser.
+    expect(current.headers.get('vary')).toBe('Authorization');
     // An old checksum (the logo was replaced since) is not kept.
     const old = await request(`/${COUNTERPARTY}/logo?v=${'b'.repeat(64)}`, { headers: AUTH });
     expect(old.headers.get('cache-control')).toBe('private, no-cache');
