@@ -366,6 +366,109 @@ describe('contacts and locations as app_api', () => {
     expect(audit?.count).toBe(4);
   });
 
+  // Codex's review of ivanmueller/gss#76: choices made at the same moment, on two connections.
+  it('leaves one main contact when two people choose different ones at the same moment', async () => {
+    const counterpartyId = await create('Synthetic Main Race', {
+      contacts: [contact('Synthetic Ana'), contact('Synthetic Ben')],
+    });
+    const [ana, ben] = (await detail(counterpartyId)).contacts;
+    if (!ana || !ben) throw new Error('contacts not added');
+    // Another session holds the counterparty's lock, so both choices start and wait for it.
+    const holder = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+    let release: () => void = () => undefined;
+    let ready: (pid: number) => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const locked = new Promise<number>((resolve) => {
+      ready = resolve;
+    });
+    const holding = holder.begin(async (tx) => {
+      const [me] = await tx<{ pid: number }[]>`select pg_backend_pid() as pid`;
+      await tx`select 1 from app.counterparties where id = ${counterpartyId} for no key update`;
+      ready(me?.pid ?? 0);
+      await held;
+    });
+    const pid = await locked;
+    // Two people, two connections.
+    const first = postgresDatabase(API_URL);
+    const second = postgresDatabase(API_URL);
+    const choices = [
+      first.setMainContact(as(users.olivia), counterpartyId, ana.id),
+      second.setMainContact(as(users.olivia), counterpartyId, ben.id),
+    ];
+    for (let tries = 0; ; tries += 1) {
+      // The first waits for the holder; the second may queue behind the first.
+      const [waiting] = await admin<{ count: number }[]>`
+        with w as (
+          select pid, pg_blocking_pids(pid) as blockers from pg_stat_activity
+          where usename = 'app_api'
+        )
+        select count(*)::int as count from w
+        where ${pid}::int = any (w.blockers)
+           or exists (select 1 from w first
+                      where first.pid = any (w.blockers) and ${pid}::int = any (first.blockers))`;
+      if ((waiting?.count ?? 0) === 2) break;
+      if (tries > 200) throw new Error('the two choices never waited for the lock together');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    release();
+    await holding;
+    await holder.end();
+    // One after the other: both saved, and the later one is the main contact.
+    expect(await Promise.all(choices)).toEqual([{ status: 'saved' }, { status: 'saved' }]);
+    await Promise.all([first.close(), second.close()]);
+    const main = (await detail(counterpartyId)).contacts.filter((k) => k.isMain);
+    expect(main).toHaveLength(1);
+  });
+
+  it('refuses a second main contact written directly while the first is not yet committed', async () => {
+    const counterpartyId = await create('Synthetic Main Index Race', {
+      contacts: [contact('Synthetic Ana'), contact('Synthetic Ben')],
+    });
+    const [ana, ben] = (await detail(counterpartyId)).contacts;
+    if (!ana || !ben) throw new Error('contacts not added');
+    // Without the counterparty's lock: only the unique index stands between the two.
+    const one = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+    const two = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+    let commit: () => void = () => undefined;
+    let marked: (pid: number) => void = () => undefined;
+    const go = new Promise<void>((resolve) => {
+      commit = resolve;
+    });
+    const firstMarked = new Promise<number>((resolve) => {
+      marked = resolve;
+    });
+    const firstWrite = one.begin(async (tx) => {
+      const [me] = await tx<{ pid: number }[]>`select pg_backend_pid() as pid`;
+      await tx`update app.counterparty_contacts set is_main = true where id = ${ana.id}`;
+      marked(me?.pid ?? 0);
+      await go;
+    });
+    const pid = await firstMarked;
+    const secondWrite = two.begin(
+      (tx) => tx`update app.counterparty_contacts set is_main = true where id = ${ben.id}`,
+    );
+    // The second waits on the index for the first to commit or roll back.
+    for (let tries = 0; ; tries += 1) {
+      const [waiting] = await admin<{ count: number }[]>`
+        select count(*)::int as count from pg_stat_activity
+        where ${pid}::int = any (pg_blocking_pids(pid))`;
+      if ((waiting?.count ?? 0) > 0) break;
+      if (tries > 200) throw new Error('the second write never waited for the first');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    commit();
+    await firstWrite;
+    await expect(secondWrite).rejects.toMatchObject({
+      code: '23505',
+      constraint_name: 'counterparty_contacts_one_main',
+    });
+    await Promise.all([one.end(), two.end()]);
+    const main = (await detail(counterpartyId)).contacts.filter((k) => k.isMain);
+    expect(main.map((k) => k.name)).toEqual(['Synthetic Ana']);
+  });
+
   it('keeps the geocoder as the source until the coordinates themselves change', async () => {
     const counterpartyId = await create('Synthetic Locations', { facilities: [facility()] });
     const [unlocated] = (await detail(counterpartyId)).facilities;
