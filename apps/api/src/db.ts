@@ -146,6 +146,33 @@ export interface ImportBatchInput {
   /** Keys (counterpartyKey) that already exist and are skipped. */
   skippedCount: number;
   counterparties: NewCounterparty[];
+  /**
+   * New locations, contacts and commodities for companies already in the list (owner's
+   * answer, 2026-10-30); their own details are never changed. A company archived meanwhile
+   * gets nothing.
+   */
+  additions: ImportAddition[];
+}
+
+export interface ImportAddition {
+  counterpartyId: string;
+  contacts: ContactInput[];
+  facilities: FacilityInput[];
+  commodities: CommodityInterest[];
+}
+
+/** A company already in the list, with what it has, to match an import against. */
+export interface ExistingCounterparty {
+  id: string;
+  primaryCountry: string;
+  legalName: string;
+  archived: boolean;
+  facilities: Pick<
+    FacilityInput,
+    'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country'
+  >[];
+  contacts: Pick<ContactInput, 'name' | 'email' | 'phone'>[];
+  commodities: CommodityInterest[];
 }
 
 /** A located facility for a map pin, with the counterparty it belongs to. */
@@ -242,8 +269,11 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     counterpartyId: string,
     data: Uint8Array,
   ) => Promise<PutLogoResult>;
-  /** counterpartyKey values of the organization's existing counterparties. */
-  counterpartyKeys: (ctx: RequestContext, organizationId: string) => Promise<Set<string>>;
+  /** The organization's counterparties with their locations, contacts and commodities. */
+  existingCounterparties: (
+    ctx: RequestContext,
+    organizationId: string,
+  ) => Promise<ExistingCounterparty[]>;
   /** Creates the batch and its counterparties in one transaction; returns the batch id. */
   importCounterparties: (ctx: RequestContext, batch: ImportBatchInput) => Promise<string>;
   isOrgAdmin: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
@@ -717,7 +747,7 @@ export function createDatabase(sql: postgres.Sql): Database {
                 ? tx`true`
                 : 'counterpartyId' in scope
                   ? tx`c.id = ${scope.counterpartyId}`
-                  : tx`c.import_batch_id = ${scope.importBatchId}`
+                  : tx`(f.import_batch_id = ${scope.importBatchId} or c.import_batch_id = ${scope.importBatchId})`
             }
           order by lower(c.legal_name), c.id, lower(f.name), f.id
           limit ${limit + 1}
@@ -794,12 +824,57 @@ export function createDatabase(sql: postgres.Sql): Database {
       });
     },
 
-    counterpartyKeys(ctx, organizationId) {
+    existingCounterparties(ctx, organizationId) {
       return asUser(ctx, async (tx) => {
-        const rows = await tx<{ key: string }[]>`
-          select primary_country || ':' || lower(legal_name) as key
+        const companies = await tx<
+          { id: string; primary_country: string; legal_name: string; archived: boolean }[]
+        >`
+          select id, primary_country, legal_name, archived_at is not null as archived
           from app.counterparties where organization_id = ${organizationId}`;
-        return new Set(rows.map((row) => row.key));
+        const facilities = await tx<
+          (ExistingCounterparty['facilities'][number] & { counterparty_id: string })[]
+        >`
+          select counterparty_id, name, address_line as "addressLine", city, region,
+                 postal_code as "postalCode", country
+          from app.facilities where organization_id = ${organizationId}`;
+        const contacts = await tx<
+          (ExistingCounterparty['contacts'][number] & { counterparty_id: string })[]
+        >`
+          select counterparty_id, name, email, phone
+          from app.counterparty_contacts where organization_id = ${organizationId}`;
+        const commodities = await tx<
+          {
+            counterparty_id: string;
+            commodity: CommodityInterest['commodity'];
+            direction: CommodityDirection;
+          }[]
+        >`
+          select counterparty_id, commodity_code as commodity, direction
+          from app.counterparty_commodities where organization_id = ${organizationId}`;
+        const byId = new Map<string, ExistingCounterparty>(
+          companies.map((row) => [
+            row.id,
+            {
+              id: row.id,
+              primaryCountry: row.primary_country,
+              legalName: row.legal_name,
+              archived: row.archived,
+              facilities: [],
+              contacts: [],
+              commodities: [],
+            },
+          ]),
+        );
+        for (const { counterparty_id, ...facility } of facilities) {
+          byId.get(counterparty_id)?.facilities.push(facility);
+        }
+        for (const { counterparty_id, ...contact } of contacts) {
+          byId.get(counterparty_id)?.contacts.push(contact);
+        }
+        for (const { counterparty_id, ...interest } of commodities) {
+          byId.get(counterparty_id)?.commodities.push(interest);
+        }
+        return [...byId.values()];
       });
     },
 
@@ -840,7 +915,30 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.counterparties ${tx(rows)}`;
         }
 
-        const contacts = withIds.flatMap(({ id, contacts: list }) =>
+        // Companies already in the list get only what is new to them, and nothing once archived;
+        // they are locked, so archiving one waits for this import or this import sees it.
+        const additionIds = batch.additions.map((item) => item.counterpartyId);
+        const open =
+          additionIds.length === 0
+            ? new Set<string>()
+            : new Set(
+                (
+                  await tx<{ id: string }[]>`
+                    select id from app.counterparties
+                    where organization_id = ${org} and id in ${tx(additionIds)}
+                      and archived_at is null
+                    order by id
+                    for no key update`
+                ).map((row) => row.id),
+              );
+        const targets = [
+          ...withIds,
+          ...batch.additions
+            .filter((item) => open.has(item.counterpartyId))
+            .map(({ counterpartyId, ...item }) => ({ id: counterpartyId, ...item })),
+        ];
+
+        const contacts = targets.flatMap(({ id, contacts: list }) =>
           list.map((k) => ({
             organization_id: org,
             counterparty_id: id,
@@ -855,7 +953,7 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.counterparty_contacts ${tx(part)}`;
         }
 
-        const facilities = withIds.flatMap(({ id, facilities: list }) =>
+        const facilities = targets.flatMap(({ id, facilities: list }) =>
           list.map((f) => ({
             organization_id: org,
             counterparty_id: id,
@@ -870,6 +968,8 @@ export function createDatabase(sql: postgres.Sql): Database {
             longitude: f.longitude,
             location_precision: f.locationPrecision,
             geocoding_source: enteredSource(f, 'file_import'),
+            // So the import's coordinates step finds it, on a company already listed too.
+            import_batch_id: batchId,
             created_by: ctx.userId,
           })),
         );
@@ -877,7 +977,7 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.facilities ${tx(part)}`;
         }
 
-        const commodities = withIds.flatMap(({ id, commodities: list }) =>
+        const commodities = targets.flatMap(({ id, commodities: list }) =>
           list.map((k) => ({
             organization_id: org,
             counterparty_id: id,
@@ -887,7 +987,8 @@ export function createDatabase(sql: postgres.Sql): Database {
           })),
         );
         for (const part of chunks(commodities)) {
-          await tx`insert into app.counterparty_commodities ${tx(part)}`;
+          // Unverified; one a company already lists stays as it is.
+          await tx`insert into app.counterparty_commodities ${tx(part)} on conflict do nothing`;
         }
         return batchId;
       });

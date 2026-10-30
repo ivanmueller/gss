@@ -42,6 +42,7 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
     contentSha256: 'c'.repeat(64),
     rowCount: 3,
     skippedCount: 0,
+    additions: [],
     counterparties: [
       {
         counterparty: {
@@ -238,13 +239,85 @@ describe('the counterparty directory as app_api', () => {
     const [any] = await db.listCounterparties(as(users.olivia), orgs.a);
     expect(await db.listCounterparties(as(users.bob), null)).toEqual([]);
     expect(await db.getCounterparty(as(users.bob), any?.id ?? '')).toBeNull();
-    expect(await db.counterpartyKeys(as(users.bob), orgs.a)).toEqual(new Set());
+    expect(await db.existingCounterparties(as(users.bob), orgs.a)).toEqual([]);
   });
 
-  it('reports existing names as keys that match the import grouping', async () => {
-    expect(await db.counterpartyKeys(as(users.victor), orgs.a)).toEqual(
-      new Set(['CA:synthetic prairie mills', 'US:synthetic buyer llc']),
+  it('lists the companies already there, with their locations, contacts and commodities', async () => {
+    const existing = await db.existingCounterparties(as(users.victor), orgs.a);
+    expect(
+      existing.map((company) => `${company.primaryCountry}:${company.legalName}`).sort(),
+    ).toEqual(['CA:Synthetic Prairie Mills', 'US:Synthetic Buyer LLC']);
+    const mills = existing.find((company) => company.legalName === 'Synthetic Prairie Mills');
+    expect(mills?.archived).toBe(false);
+    expect(mills?.facilities.length).toBeGreaterThan(0);
+    expect(mills?.contacts.length).toBeGreaterThan(0);
+    expect(mills?.commodities.length).toBeGreaterThan(0);
+  });
+
+  it('adds new locations, contacts and grains to companies already listed, not archived ones', async () => {
+    const ctx = as(users.olivia);
+    const [mills] = (await db.existingCounterparties(ctx, orgs.a)).filter(
+      (company) => company.legalName === 'Synthetic Prairie Mills',
     );
+    if (!mills) throw new Error('fixture missing');
+    const template = batch().counterparties[1];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      counterparty: { ...template.counterparty, legalName: 'Synthetic Closed Co' },
+      contacts: [],
+      facilities: [],
+      commodities: [],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const closed = created;
+    await db.setArchived(ctx, closed.id, true);
+    const spur = {
+      name: 'Synthetic Spur',
+      facilityType: null,
+      addressLine: null,
+      city: 'Synthetic Spur',
+      region: 'AB',
+      postalCode: null,
+      country: 'CA',
+      latitude: null,
+      longitude: null,
+      locationPrecision: null,
+    } as const;
+
+    const batchId = await db.importCounterparties(
+      ctx,
+      batch({
+        contentSha256: 'd'.repeat(64),
+        counterparties: [],
+        additions: [
+          {
+            counterpartyId: mills.id,
+            facilities: [spur],
+            contacts: [{ name: 'Synthetic Second Buyer', role: null, email: null, phone: null }],
+            // Canola is listed already: it stays as it was.
+            commodities: [
+              { commodity: 'canola', direction: 'buys' },
+              { commodity: 'oats', direction: 'buys' },
+            ],
+          },
+          { counterpartyId: closed.id, facilities: [spur], contacts: [], commodities: [] },
+        ],
+      }),
+    );
+
+    const after = await db.getCounterparty(ctx, mills.id);
+    expect(after?.facilities.map((facility) => facility.name)).toContain('Synthetic Spur');
+    expect(after?.contacts.map((contact) => contact.name)).toContain('Synthetic Second Buyer');
+    expect(after?.commodities.filter((item) => item.code === 'oats')).toEqual([
+      { code: 'oats', name: 'Oats', direction: 'buys', verifiedAt: null },
+    ]);
+    expect(after?.legalName).toBe('Synthetic Prairie Mills');
+    expect((await db.getCounterparty(ctx, closed.id))?.facilities).toEqual([]);
+    // The import's coordinates step finds the location added to the company already listed.
+    const looked = await db.facilitiesWithoutCoordinates(ctx, orgs.a, 10, {
+      importBatchId: batchId,
+    });
+    expect(looked.map((facility) => facility.facilityName)).toEqual(['Synthetic Spur']);
   });
 
   it('refuses the same content twice', async () => {

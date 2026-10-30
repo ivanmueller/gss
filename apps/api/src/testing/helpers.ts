@@ -60,7 +60,7 @@ export function fakeDatabase(): Mocked<Database> {
     putLogo: vi.fn<Database['putLogo']>(() =>
       Promise.resolve({ status: 'saved', sha256: 'f'.repeat(64) }),
     ),
-    counterpartyKeys: vi.fn<Database['counterpartyKeys']>(() => Promise.resolve(new Set<string>())),
+    existingCounterparties: vi.fn<Database['existingCounterparties']>(() => Promise.resolve([])),
     importCounterparties: vi.fn<Database['importCounterparties']>(() =>
       Promise.resolve('00000000-0000-4000-8000-0000000ba7c4'),
     ),

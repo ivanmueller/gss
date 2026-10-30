@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  companyNameKey,
+  counterpartyKey,
   createCounterpartySchema,
   groupImportRows,
   importRequestSchema,
@@ -116,6 +118,7 @@ describe('parseImportRow', () => {
         { commodity: 'canola', direction: 'sells' },
         { commodity: 'flaxseed', direction: 'sells' },
       ],
+      notices: [],
     });
   });
 
@@ -137,6 +140,7 @@ describe('parseImportRow', () => {
       contact: null,
       facility: null,
       commodities: [],
+      notices: [],
     });
   });
 
@@ -607,6 +611,89 @@ describe('company phones', () => {
         message: "differs from line 2 for the same company; line 2's value is used",
       },
     ]);
+  });
+});
+
+describe('companies with several locations', () => {
+  it('matches a company name without case, punctuation, spacing or the way its ending is written', () => {
+    const same = [
+      'Prairie Feeds Ltd.',
+      'PRAIRIE FEEDS LIMITED',
+      'Prairie  Feeds, Ltd',
+      'Prairie-Feeds Ltd',
+    ].map(companyNameKey);
+    expect(new Set(same).size).toBe(1);
+    expect(companyNameKey('Smith & Sons Inc.')).toBe(companyNameKey('Smith and Sons Incorporated'));
+    expect(companyNameKey('Coop Grain Corp')).toBe(companyNameKey('Coop Grain Corporation'));
+    // Different companies stay different.
+    expect(companyNameKey('Prairie Feeds Ltd')).not.toBe(companyNameKey('Prairie Seeds Ltd'));
+    // The same name in another country is another company.
+    expect(counterpartyKey('CA', 'Prairie Feeds Ltd')).not.toBe(
+      counterpartyKey('US', 'Prairie Feeds Ltd'),
+    );
+  });
+
+  it('makes one company of rows spelled differently, each location once, and says so', () => {
+    const { groups, warnings } = groupImportRows([
+      ok({ legalName: 'Prairie Feeds Ltd.', country: 'CA', city: 'Lethbridge', region: 'AB' }, 2),
+      ok({ legalName: 'PRAIRIE FEEDS LIMITED', country: 'CA', city: 'Brandon', region: 'MB' }, 3),
+      ok({ legalName: 'Prairie Feeds Ltd.', country: 'CA', city: 'lethbridge ', region: 'AB' }, 4),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.counterparty.legalName).toBe('Prairie Feeds Ltd.');
+    expect(groups[0]?.facilities.map((facility) => facility.city)).toEqual([
+      'Lethbridge',
+      'Brandon',
+    ]);
+    expect(warnings).toEqual([
+      {
+        line: 3,
+        field: 'legalName',
+        message: "differs from line 2 for the same company; line 2's value is used",
+      },
+    ]);
+  });
+
+  it('reads a City or Town column', () => {
+    expect(suggestMapping(['Legal Name', 'Country', 'City or Town'])).toMatchObject({
+      city: 'City or Town',
+    });
+  });
+
+  it('keeps the first of two company phone numbers from a spreadsheet and puts the rest in the notes', () => {
+    const row = ok({
+      legalName: 'Synthetic Feeds',
+      country: 'US',
+      companyPhone: '555-010-0100; 555-010-0101',
+      notes: 'Synthetic record.',
+    });
+    expect(row.counterparty).toMatchObject({
+      phone: '555-010-0100',
+      notes: 'Synthetic record.\nCompany phone also: 555-010-0101',
+    });
+    expect(row.notices).toEqual([
+      {
+        line: 2,
+        field: 'companyPhone',
+        message:
+          'holds more than one number or a note: "555-010-0100" is the company phone, and "555-010-0101" is added to the notes',
+      },
+    ]);
+    expect(
+      ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555-010-0100 (front desk)' })
+        .counterparty,
+    ).toMatchObject({ phone: '555-010-0100', notes: 'Company phone also: (front desk)' });
+    // The notice reaches the check step as a warning.
+    expect(groupImportRows([row]).warnings).toEqual(row.notices);
+    // A form someone is filling in still refuses two numbers.
+    expect(
+      parseCounterpartyFields({
+        legalName: 'Synthetic Feeds',
+        country: 'US',
+        types: 'buyer',
+        companyPhone: '555-010-0100; 555-010-0101',
+      }).status,
+    ).toBe('invalid');
   });
 });
 

@@ -1,7 +1,12 @@
 import { crc32 } from '@grain/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LIST_LIMIT, type CounterpartySummary, type Database } from './db';
+import {
+  LIST_LIMIT,
+  type CounterpartySummary,
+  type Database,
+  type ExistingCounterparty,
+} from './db';
 import { createApp } from './index';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
 
@@ -303,6 +308,24 @@ describe('PUT /api/v1/counterparties/:id/logo', () => {
   });
 });
 
+/** A company already in the list, with nothing under it unless given. */
+function existing(
+  legalName: string,
+  primaryCountry: string,
+  overrides: Partial<ExistingCounterparty> = {},
+): ExistingCounterparty {
+  return {
+    id: `00000000-0000-4000-8000-${String(legalName.length).padStart(12, '0')}`,
+    primaryCountry,
+    legalName,
+    archived: false,
+    facilities: [],
+    contacts: [],
+    commodities: [],
+    ...overrides,
+  };
+}
+
 describe('POST /api/v1/counterparties/import', () => {
   const rows = [
     {
@@ -316,7 +339,7 @@ describe('POST /api/v1/counterparties/import', () => {
   const body = { organizationId: ORG, fileName: 'buyers.csv', commit: false, rows };
 
   it('previews an import without writing anything', async () => {
-    db.counterpartyKeys.mockResolvedValueOnce(new Set(['US:synthetic existing co']));
+    db.existingCounterparties.mockResolvedValueOnce([existing('Synthetic Existing Co', 'US')]);
     const res = await postImport(body);
 
     expect(res.status).toBe(200);
@@ -332,6 +355,10 @@ describe('POST /api/v1/counterparties/import', () => {
         existingCounterparties: 1,
         contacts: 1,
         facilities: 1,
+        existingWithAdditions: 0,
+        addedContacts: 0,
+        addedFacilities: 0,
+        addedCommodities: 0,
       },
       counterparties: [
         {
@@ -376,7 +403,7 @@ describe('POST /api/v1/counterparties/import', () => {
   });
 
   it('imports the new companies only, in one call, as the verified user', async () => {
-    db.counterpartyKeys.mockResolvedValueOnce(new Set(['US:synthetic existing co']));
+    db.existingCounterparties.mockResolvedValueOnce([existing('Synthetic Existing Co', 'US')]);
     const res = await postImport({ ...body, commit: true });
 
     expect(res.status).toBe(201);
@@ -481,10 +508,112 @@ describe('POST /api/v1/counterparties/import', () => {
     expect(db.importCounterparties).not.toHaveBeenCalled();
   });
 
-  it('says when there is nothing new to import', async () => {
-    db.counterpartyKeys.mockResolvedValueOnce(
-      new Set(['CA:synthetic mills', 'US:synthetic existing co']),
+  it('adds new locations, contacts and grains to a company already in the list, matched loosely', async () => {
+    db.existingCounterparties.mockResolvedValueOnce([
+      existing('Synthetic Mills Limited', 'CA', {
+        facilities: [
+          {
+            name: null,
+            addressLine: null,
+            city: 'Alpha',
+            region: 'SK',
+            postalCode: null,
+            country: 'CA',
+          },
+        ],
+        contacts: [{ name: 'Ana', email: null, phone: null }],
+        commodities: [{ commodity: 'canola', direction: 'buys' }],
+      }),
+      existing('Synthetic Closed Co', 'US', { archived: true }),
+    ]);
+    const res = await postImport({
+      ...body,
+      commit: true,
+      rows: [
+        // "Synthetic Mills Ltd." is the "Synthetic Mills Limited" already in the list.
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Mills Ltd.',
+            country: 'CA',
+            city: 'Alpha',
+            region: 'SK',
+            commodities: 'Canola; Oats',
+          },
+        },
+        {
+          line: 3,
+          values: { legalName: 'SYNTHETIC MILLS LTD', country: 'CA', city: 'Beta', region: 'MB' },
+        },
+        {
+          line: 4,
+          values: { legalName: 'Synthetic Mills Ltd.', country: 'CA', contactName: 'Ana' },
+        },
+        {
+          line: 5,
+          values: { legalName: 'Synthetic Mills Ltd.', country: 'CA', contactName: 'Ben' },
+        },
+        {
+          line: 6,
+          values: { legalName: 'Synthetic Closed Co', country: 'US', city: 'Gamma', region: 'ND' },
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const answer = await res.json<{
+      summary: Record<string, number>;
+      counterparties: { legalName: string; status: string; facilities: number; contacts: number }[];
+      warnings: { line: number; field: string }[];
+    }>();
+    expect(answer.summary).toMatchObject({
+      newCounterparties: 0,
+      existingCounterparties: 2,
+      existingWithAdditions: 1,
+      addedFacilities: 1,
+      addedContacts: 1,
+      addedCommodities: 1,
+    });
+    expect(answer.counterparties).toMatchObject([
+      { legalName: 'Synthetic Mills Ltd.', status: 'existing', facilities: 1, contacts: 1 },
+      { legalName: 'Synthetic Closed Co', status: 'archived' },
+    ]);
+    // A spelling that differs from the first row's is said on the check step.
+    expect(answer.warnings).toContainEqual(
+      expect.objectContaining({ line: 3, field: 'legalName' }),
     );
+    expect(db.importCounterparties).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        counterparties: [],
+        additions: [
+          {
+            counterpartyId: existing('Synthetic Mills Limited', 'CA').id,
+            facilities: [expect.objectContaining({ city: 'Beta', region: 'MB' }) as unknown],
+            contacts: [expect.objectContaining({ name: 'Ben' }) as unknown],
+            commodities: [{ commodity: 'oats', direction: 'buys' }],
+          },
+        ],
+      }),
+    );
+  });
+
+  it('says when there is nothing new to import', async () => {
+    db.existingCounterparties.mockResolvedValueOnce([
+      existing('Synthetic Mills', 'CA', {
+        facilities: [
+          {
+            name: null,
+            addressLine: null,
+            city: 'Alpha',
+            region: 'SK',
+            postalCode: null,
+            country: 'CA',
+          },
+        ],
+        contacts: [{ name: 'Ana', email: null, phone: null }],
+      }),
+      existing('Synthetic Existing Co', 'US'),
+    ]);
     const res = await postImport({ ...body, commit: true });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: { code: 'NOTHING_TO_IMPORT' } });
@@ -495,7 +624,7 @@ describe('POST /api/v1/counterparties/import', () => {
     db.canEditDirectory.mockResolvedValueOnce(false);
     const res = await postImport(body);
     expect(res.status).toBe(403);
-    expect(db.counterpartyKeys).not.toHaveBeenCalled();
+    expect(db.existingCounterparties).not.toHaveBeenCalled();
     expect(db.importCounterparties).not.toHaveBeenCalled();
   });
 

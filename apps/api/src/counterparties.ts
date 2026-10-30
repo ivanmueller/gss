@@ -1,5 +1,8 @@
 import {
   commodityChangeSchema,
+  contactKey,
+  counterpartyKey,
+  facilityKey,
   createContactSchema,
   createCounterpartySchema,
   createFacilitySchema,
@@ -25,7 +28,14 @@ import {
 } from '@grain/domain';
 import { Hono } from 'hono';
 
-import { LIST_LIMIT, type Database, type RequestContext, type WriteResult } from './db';
+import {
+  LIST_LIMIT,
+  type Database,
+  type ExistingCounterparty,
+  type ImportAddition,
+  type RequestContext,
+  type WriteResult,
+} from './db';
 import {
   apiError,
   isUuid,
@@ -111,6 +121,26 @@ function declaredLength(header: string | undefined): number | null {
   return Number(header);
 }
 
+/**
+ * What a file adds to a company already in the list: the locations, contacts and
+ * commodities it does not have yet. Its own details are never changed.
+ */
+function newFor(company: ExistingCounterparty, group: ImportGroup): ImportAddition {
+  const facilities = new Set(company.facilities.map(facilityKey));
+  const contacts = new Set(company.contacts.map(contactKey));
+  const commodities = new Set(company.commodities.map((k) => `${k.direction}:${k.commodity}`));
+  return {
+    counterpartyId: company.id,
+    facilities: group.facilities.filter((facility) => !facilities.has(facilityKey(facility))),
+    contacts: group.contacts.filter((contact) => !contacts.has(contactKey(contact))),
+    commodities: group.commodities.filter((k) => !commodities.has(`${k.direction}:${k.commodity}`)),
+  };
+}
+
+function hasAny(addition: ImportAddition): boolean {
+  return addition.facilities.length + addition.contacts.length + addition.commodities.length > 0;
+}
+
 interface ImportPlan {
   parsed: ParsedImportRow[];
   emptyRows: number;
@@ -189,8 +219,18 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           'Only operations and admin members can import counterparties.',
         );
       }
-      const existing = await db.counterpartyKeys(ctx, organizationId);
+      // Companies already in the list, matched as the file's rows are (counterpartyKey).
+      const existing = new Map<string, ExistingCounterparty>();
+      for (const company of await db.existingCounterparties(ctx, organizationId)) {
+        const key = counterpartyKey(company.primaryCountry, company.legalName);
+        if (!existing.has(key)) existing.set(key, company);
+      }
       const fresh = plan.groups.filter((group) => !existing.has(group.key));
+      const additions = plan.groups.flatMap((group) => {
+        const company = existing.get(group.key);
+        return company && !company.archived ? [{ group, addition: newFor(company, group) }] : [];
+      });
+      const adding = additions.filter(({ addition }) => hasAny(addition));
       const result = {
         committed: false,
         importBatchId: null as string | null,
@@ -203,15 +243,30 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           existingCounterparties: plan.groups.length - fresh.length,
           contacts: fresh.reduce((sum, group) => sum + group.contacts.length, 0),
           facilities: fresh.reduce((sum, group) => sum + group.facilities.length, 0),
+          // What the file adds to companies already in the list (owner's answer, 2026-10-30).
+          existingWithAdditions: adding.length,
+          addedContacts: adding.reduce((sum, { addition }) => sum + addition.contacts.length, 0),
+          addedFacilities: adding.reduce(
+            (sum, { addition }) => sum + addition.facilities.length,
+            0,
+          ),
+          addedCommodities: adding.reduce(
+            (sum, { addition }) => sum + addition.commodities.length,
+            0,
+          ),
         },
-        counterparties: plan.groups.map((group) => ({
-          legalName: group.counterparty.legalName,
-          country: group.counterparty.primaryCountry,
-          lines: group.lines,
-          contacts: group.contacts.length,
-          facilities: group.facilities.length,
-          status: existing.has(group.key) ? 'existing' : 'new',
-        })),
+        counterparties: plan.groups.map((group) => {
+          const company = existing.get(group.key);
+          const addition = additions.find((item) => item.group === group)?.addition;
+          return {
+            legalName: group.counterparty.legalName,
+            country: group.counterparty.primaryCountry,
+            lines: group.lines,
+            contacts: addition ? addition.contacts.length : group.contacts.length,
+            facilities: addition ? addition.facilities.length : group.facilities.length,
+            status: !company ? 'new' : company.archived ? 'archived' : 'existing',
+          };
+        }),
         issues: plan.issues,
         warnings: plan.warnings,
       };
@@ -220,12 +275,12 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       if (plan.issues.length > 0) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Fix the rows with problems first.', result);
       }
-      if (fresh.length === 0) {
+      if (fresh.length === 0 && adding.length === 0) {
         return apiError(
           c,
           409,
           'NOTHING_TO_IMPORT',
-          'Every company in this file is already in the list.',
+          'Every company in this file is already in the list, with nothing new to add.',
           result,
         );
       }
@@ -265,6 +320,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           facilities,
           commodities,
         })),
+        additions: adding.map(({ addition }) => addition),
       });
       return c.json({ ...result, committed: true, importBatchId }, 201);
     });
