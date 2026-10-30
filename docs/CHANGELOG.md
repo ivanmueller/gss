@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #83
+
+- `docs/HANDOFF.md`: removing follow-ups, the simpler locations map, shorter coordinates and Added (ivanmueller/gss#83) with their CI and Deploy staging runs and Codex's review; the owner's check on staging extended to #83.
+
 ## 2026-10-30 — Removing follow-ups, a simpler locations map, shorter coordinates and Added
 
 - `docs/DECISIONS.md`: the owner's request: admins remove follow-ups (kept, never deleted); the small locations map without road names and highway numbers, closer; coordinates without their source; Added without the weekday.

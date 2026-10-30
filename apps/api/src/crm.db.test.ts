@@ -394,3 +394,78 @@ describe('removing follow-ups, as app_api', () => {
     expect(row).toEqual({ removed_by: users.ada, removed_by_name: 'Ada Admin', removed: true });
   });
 });
+
+// Codex's review of ivanmueller/gss#83: a removal that commits while a completion, an edit or
+// another removal waits for the row must answer not_found, not a refusal or a conflict.
+describe('a removal committed while another change waits', () => {
+  async function overdueFollowUp(): Promise<string> {
+    const created = await db.createFollowUp(
+      as(users.tess),
+      counterparties.buyer,
+      plan({ assignedTo: users.tess }),
+      'Tess Trader',
+    );
+    if (created.status !== 'created') throw new Error(created.status);
+    return created.id;
+  }
+
+  /** Ada's removal held open while `change` starts and waits for the row; then committed. */
+  async function removedWhileWaiting<T>(followUpId: string, change: () => Promise<T>): Promise<T> {
+    const holder = postgres(API_URL ?? '', { max: 1, onnotice: () => undefined });
+    let release: () => void = () => undefined;
+    let ready: (pid: number) => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const removing = new Promise<number>((resolve) => {
+      ready = resolve;
+    });
+    const holding = holder.begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.ada}, true)`;
+      const [me] = await tx<{ pid: number }[]>`select pg_backend_pid() as pid`;
+      await tx`update app.follow_ups set removed_by = ${users.ada} where id = ${followUpId}`;
+      ready(me?.pid ?? 0);
+      await held;
+    });
+    const pid = await removing;
+    const result = change();
+    for (let tries = 0; ; tries += 1) {
+      const [waiting] = await admin<{ count: number }[]>`
+        select count(*)::int as count from pg_stat_activity
+        where ${pid}::int = any (pg_blocking_pids(pid))`;
+      if ((waiting?.count ?? 0) > 0) break;
+      if (tries > 200) throw new Error('the change never waited for the removal');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    release();
+    await holding;
+    await holder.end();
+    return result;
+  }
+
+  it('answers not_found to a completion', async () => {
+    const followUpId = await overdueFollowUp();
+    expect(
+      await removedWhileWaiting(followUpId, () =>
+        db.finishFollowUp(as(users.tess), followUpId, 'Tess Trader'),
+      ),
+    ).toEqual({ status: 'not_found' });
+  });
+
+  it('answers not_found to an edit', async () => {
+    const followUpId = await overdueFollowUp();
+    const before = await db.getFollowUp(as(users.tess), followUpId);
+    expect(
+      await removedWhileWaiting(followUpId, () =>
+        db.updateFollowUp(as(users.tess), followUpId, before?.version ?? '', plan()),
+      ),
+    ).toEqual({ status: 'not_found' });
+  });
+
+  it('answers not_found to a second removal', async () => {
+    const followUpId = await overdueFollowUp();
+    expect(
+      await removedWhileWaiting(followUpId, () => db.removeFollowUp(as(users.ada), followUpId)),
+    ).toEqual({ status: 'not_found' });
+  });
+});
