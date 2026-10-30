@@ -126,6 +126,14 @@ function databaseFailure(c: ApiContext, error: unknown) {
   if (pg?.code === 'GS004') {
     return apiError(c, 422, 'NOT_A_MEMBER', 'Choose the person responsible from the team list.');
   }
+  if (pg?.code === 'GS005') {
+    return apiError(
+      c,
+      409,
+      'ARCHIVED',
+      'This counterparty is archived. Restore it before changing it.',
+    );
+  }
   if (pg?.code === 'GS003') {
     return apiError(
       c,

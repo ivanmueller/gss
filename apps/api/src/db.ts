@@ -3,6 +3,9 @@ import type {
   MemberRole,
   MemberStatus,
   Bbox,
+  CommodityChange,
+  CommodityDirection,
+  CommodityInterest,
   ContactInput,
   CounterpartyType,
   SignedMatch,
@@ -48,6 +51,9 @@ export interface CounterpartySummary {
   logoSha256: string | null;
   /** When it was archived; archived counterparties are left off the map. */
   archivedAt: string | null;
+  /** The commodities it buys and sells (codes), in the commodity list's order. */
+  buys: string[];
+  sells: string[];
 }
 
 export interface Contact extends ContactInput {
@@ -82,6 +88,14 @@ export interface CounterpartyDetail extends CounterpartySummary {
   version: string;
   contacts: Contact[];
   facilities: Facility[];
+  /** What it buys and sells, in the commodity list's order, buys first. */
+  commodities: CounterpartyCommodity[];
+}
+
+export interface CounterpartyCommodity {
+  code: string;
+  name: string;
+  direction: CommodityDirection;
 }
 
 /** The outcome of a change to a counterparty, its contacts or its locations. */
@@ -110,6 +124,7 @@ export interface NewCounterparty {
   counterparty: CounterpartyInput;
   contacts: ContactInput[];
   facilities: FacilityInput[];
+  commodities: CommodityInterest[];
 }
 
 export interface ImportBatchInput {
@@ -271,6 +286,15 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     counterpartyId: string,
     contactId: string,
   ) => Promise<WriteResult>;
+  /**
+   * Adds and removes commodities a counterparty buys or sells; any active member of its
+   * organization may. Adding one already listed, or removing one that is not, changes nothing.
+   */
+  changeCommodities: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    change: CommodityChange,
+  ) => Promise<WriteResult>;
   /** Makes one of its contacts the main contact (any other stops being it), or none (null). */
   setMainContact: (
     ctx: RequestContext,
@@ -329,6 +353,8 @@ interface SummaryRow {
   regions: string[];
   logo_sha256: string | null;
   archived_at: Date | null;
+  buys: string[];
+  sells: string[];
 }
 
 function summary(row: SummaryRow): CounterpartySummary {
@@ -347,6 +373,8 @@ function summary(row: SummaryRow): CounterpartySummary {
     regions: row.regions,
     logoSha256: row.logo_sha256,
     archivedAt: row.archived_at?.toISOString() ?? null,
+    buys: row.buys,
+    sells: row.sells,
   };
 }
 
@@ -500,7 +528,15 @@ export function createDatabase(sql: postgres.Sql): Database {
     (select count(*)::int from app.facilities f where f.counterparty_id = c.id) as facility_count,
     to_jsonb(array(select distinct f.region::text from app.facilities f
                     where f.counterparty_id = c.id and f.region is not null order by 1)) as regions,
-    l.sha256 as logo_sha256, c.archived_at
+    l.sha256 as logo_sha256, c.archived_at,
+    to_jsonb(array(select k.commodity_code from app.counterparty_commodities k
+                   join app.commodities m on m.code = k.commodity_code
+                   where k.counterparty_id = c.id and k.direction = 'buys'
+                   order by m.sort_order)) as buys,
+    to_jsonb(array(select k.commodity_code from app.counterparty_commodities k
+                   join app.commodities m on m.code = k.commodity_code
+                   where k.counterparty_id = c.id and k.direction = 'sells'
+                   order by m.sort_order)) as sells
   `;
 
   return {
@@ -577,6 +613,13 @@ export function createDatabase(sql: postgres.Sql): Database {
           from app.facilities where counterparty_id = ${id}
           order by country, region nulls last, city nulls last, id
         `;
+        const commodities = await tx<CounterpartyCommodity[]>`
+          select k.commodity_code as code, m.display_name as name, k.direction
+          from app.counterparty_commodities k
+          join app.commodities m on m.code = k.commodity_code
+          where k.counterparty_id = ${id}
+          order by k.direction, m.sort_order
+        `;
         return {
           ...summary(row),
           website: row.website,
@@ -584,6 +627,7 @@ export function createDatabase(sql: postgres.Sql): Database {
           version: row.version,
           contacts: [...contacts],
           facilities: [...facilities],
+          commodities: [...commodities],
         };
       });
     },
@@ -786,6 +830,19 @@ export function createDatabase(sql: postgres.Sql): Database {
         for (const part of chunks(facilities)) {
           await tx`insert into app.facilities ${tx(part)}`;
         }
+
+        const commodities = withIds.flatMap(({ id, commodities: list }) =>
+          list.map((k) => ({
+            organization_id: org,
+            counterparty_id: id,
+            commodity_code: k.commodity,
+            direction: k.direction,
+            created_by: ctx.userId,
+          })),
+        );
+        for (const part of chunks(commodities)) {
+          await tx`insert into app.counterparty_commodities ${tx(part)}`;
+        }
         return batchId;
       });
     },
@@ -903,6 +960,13 @@ export function createDatabase(sql: postgres.Sql): Database {
         for (const facility of record.facilities) {
           await insertFacility(tx, organizationId, created.id, facility);
         }
+        for (const interest of record.commodities) {
+          await tx`
+            insert into app.counterparty_commodities
+              (organization_id, counterparty_id, commodity_code, direction, created_by)
+            values (${organizationId}, ${created.id}, ${interest.commodity}, ${interest.direction},
+                    app.current_user_id())`;
+        }
         return { status: 'created', id: created.id };
       });
     },
@@ -977,6 +1041,33 @@ export function createDatabase(sql: postgres.Sql): Database {
           returning id
         `;
         return rows.length === 1 ? SAVED : NOT_FOUND;
+      });
+    },
+
+    changeCommodities(ctx, counterpartyId, change) {
+      return asUser(ctx, async (tx) => {
+        // Visible only to members of its organization; the database refuses an archived one
+        // (GS005) after waiting for any archiving under way, so this answer is the usual case.
+        const [row] = await tx<{ organization_id: string; archived: boolean }[]>`
+          select organization_id, archived_at is not null as archived
+          from app.counterparties where id = ${counterpartyId}`;
+        if (!row) return NOT_FOUND;
+        if (row.archived) return { status: 'archived' };
+        for (const { commodity, direction } of change.remove) {
+          await tx`
+            delete from app.counterparty_commodities
+            where counterparty_id = ${counterpartyId} and commodity_code = ${commodity}
+              and direction = ${direction}`;
+        }
+        for (const { commodity, direction } of change.add) {
+          await tx`
+            insert into app.counterparty_commodities
+              (organization_id, counterparty_id, commodity_code, direction, created_by)
+            values (${row.organization_id}, ${counterpartyId}, ${commodity}, ${direction},
+                    app.current_user_id())
+            on conflict (counterparty_id, commodity_code, direction) do nothing`;
+        }
+        return SAVED;
       });
     },
 

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { normalizeCountry, normalizeRegion, type CountryCode } from './regions';
+import { commodityDirections, parseCommodityList, type CommodityInterest } from './commodities';
 import { parseWebsite } from './website';
 
 /** Values accepted by the database enums in app (20261027030100_counterparty_directory.sql). */
@@ -93,6 +94,21 @@ export const IMPORT_FIELDS = [
     label: 'Website',
     required: false,
     headers: ['website', 'web site', 'web', 'url', 'homepage', 'home page', 'web address'],
+  },
+  {
+    id: 'commodities',
+    label: 'Commodities',
+    required: false,
+    headers: [
+      'commodities',
+      'commodity',
+      'crops',
+      'crop',
+      'grains',
+      'products',
+      'commodities bought',
+      'commodities sold',
+    ],
   },
   {
     id: 'notes',
@@ -323,6 +339,8 @@ export interface DirectoryRecord {
   counterparty: CounterpartyInput;
   contact: ContactInput | null;
   facility: FacilityInput | null;
+  /** What it buys and sells, from a Commodities column: buyers buy them, sellers sell them. */
+  commodities: CommodityInterest[];
 }
 
 export interface ParsedImportRow extends DirectoryRecord {
@@ -510,6 +528,29 @@ function readCounterparty(
   };
 }
 
+/**
+ * A Commodities column's names ("Canola; Yellow peas"), as what the counterparty buys if it
+ * is a buyer, sells if it is a seller, and both for a broker. Names off the list are refused.
+ */
+function readCommodities(r: FieldReader, types: readonly string[]): CommodityInterest[] {
+  const text = r.value('commodities');
+  if (text === null) return [];
+  const { commodities, unknown } = parseCommodityList(text);
+  if (unknown.length > 0) {
+    r.issue(
+      'commodities',
+      `${unknown.map((name) => `"${name}"`).join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not on the list of commodities (for example Spring wheat, Feed barley, Yellow peas)`,
+    );
+  }
+  const directions = commodityDirections(types);
+  if (types.length > 0 && directions.length === 0) {
+    r.issue('commodities', 'are for buyers, sellers and brokers, not carriers');
+  }
+  return directions.flatMap((direction) =>
+    commodities.map((commodity) => ({ commodity, direction })),
+  );
+}
+
 /** A contact, or null when no contact field has a value. */
 function readContact(r: FieldReader): ContactInput | null {
   if (!CONTACT_FIELD_IDS.some((field) => r.value(field) !== null)) return null;
@@ -639,8 +680,9 @@ export function parseDirectoryRecord(
   const contact = readContact(r);
   const countryText = r.value('country');
   const facility = readFacility(r, countryText === null ? null : normalizeCountry(countryText));
+  const commodities = readCommodities(r, counterparty?.types ?? []);
   if (r.issues.length > 0 || counterparty === null) return { status: 'invalid', issues: r.issues };
-  return { status: 'ok', record: { counterparty, contact, facility } };
+  return { status: 'ok', record: { counterparty, contact, facility, commodities } };
 }
 
 /** Validates one mapped spreadsheet row; rows without a type are buyers unless `defaultTypes` says otherwise. */
@@ -741,13 +783,16 @@ export interface ImportGroup {
   counterparty: CounterpartyInput;
   contacts: ContactInput[];
   facilities: FacilityInput[];
+  /** Every row's commodities, each once. */
+  commodities: CommodityInterest[];
   lines: number[];
 }
 
 /**
  * Rows with the same legal name and country become one counterparty with several
  * contacts and locations. The first row's company details are used; a later row that
- * disagrees produces a warning, not an error. Repeated contacts and locations are kept once.
+ * disagrees produces a warning, not an error. Repeated contacts and locations are kept once;
+ * every row's commodities are kept, each once.
  */
 export function groupImportRows(rows: ParsedImportRow[]): {
   groups: ImportGroup[];
@@ -762,7 +807,14 @@ export function groupImportRows(rows: ParsedImportRow[]): {
     const key = counterpartyKey(row.counterparty.primaryCountry, row.counterparty.legalName);
     let group = groups.get(key);
     if (!group) {
-      group = { key, counterparty: row.counterparty, contacts: [], facilities: [], lines: [] };
+      group = {
+        key,
+        counterparty: row.counterparty,
+        contacts: [],
+        facilities: [],
+        commodities: [],
+        lines: [],
+      };
       groups.set(key, group);
       contactKeys.set(key, new Set());
       facilityKeys.set(key, new Set());
@@ -797,6 +849,12 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         seen.add(contactKey);
         group.contacts.push(row.contact);
       }
+    }
+    for (const interest of row.commodities) {
+      const listed = group.commodities.some(
+        (kept) => kept.commodity === interest.commodity && kept.direction === interest.direction,
+      );
+      if (!listed) group.commodities.push(interest);
     }
     if (row.facility) {
       const facilityKey = JSON.stringify(row.facility).toLowerCase();

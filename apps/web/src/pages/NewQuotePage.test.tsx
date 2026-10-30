@@ -23,6 +23,8 @@ const BUYER: CounterpartySummary = {
   regions: ['MN'],
   logoSha256: null,
   archivedAt: null,
+  buys: [],
+  sells: [],
 };
 const SELLER = {
   ...BUYER,
@@ -38,6 +40,7 @@ const ARCHIVED = {
 };
 const DETAIL: CounterpartyDetail = {
   ...BUYER,
+  commodities: [],
   website: null,
   notes: null,
   version: '2026-10-27T14:05:00.000000Z',

@@ -56,6 +56,7 @@ function record(legalName: string, overrides: Partial<NewCounterparty> = {}): Ne
     },
     contacts: [contact('Synthetic Grower')],
     facilities: [facility({ latitude: '52.133214', longitude: '-106.670046' })],
+    commodities: [],
     ...overrides,
   };
 }
@@ -91,6 +92,9 @@ afterAll(async () => {
   await db.close();
   const both = admin([orgs.a, orgs.b]);
   await admin`delete from app.facilities where organization_id in ${both}`;
+  // An archived counterparty's commodities cannot be removed, so restore them all first.
+  await admin`update app.counterparties set archived_at = null where organization_id in ${both}`;
+  await admin`delete from app.counterparty_commodities where organization_id in ${both}`;
   await admin`delete from app.counterparty_contacts where organization_id in ${both}`;
   await admin`delete from app.counterparties where organization_id in ${both}`;
   await admin`delete from app.organization_members where organization_id in ${both}`;
@@ -255,6 +259,55 @@ describe('editing a counterparty as app_api', () => {
       select count(*)::int as count from app.audit_events
       where entity_id = ${counterpartyId} and changed_fields = array['archived_at']`;
     expect(audit?.count).toBe(2);
+  });
+});
+
+describe('what a counterparty buys and sells, as app_api', () => {
+  const canola = { commodity: 'canola', direction: 'buys' } as const;
+  const oats = { commodity: 'oats', direction: 'sells' } as const;
+  const listed = async (counterpartyId: string) =>
+    (await detail(counterpartyId)).commodities.map((k) => `${k.direction} ${k.name}`);
+
+  it('is added with a counterparty entered by hand', async () => {
+    const counterpartyId = await create('Synthetic Commodity Grower', { commodities: [oats] });
+    expect(await listed(counterpartyId)).toEqual(['sells Oats']);
+  });
+
+  it('is changed by anyone on the team, a viewer too; repeats change nothing', async () => {
+    const counterpartyId = await create('Synthetic Commodity Buyer');
+    expect(
+      await db.changeCommodities(as(users.victor), counterpartyId, {
+        add: [canola, oats],
+        remove: [],
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(await listed(counterpartyId)).toEqual(['buys Canola', 'sells Oats']);
+    // Adding one listed already and removing one not listed change nothing.
+    expect(
+      await db.changeCommodities(as(users.olivia), counterpartyId, {
+        add: [canola],
+        remove: [{ commodity: 'rye', direction: 'buys' }, oats],
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(await listed(counterpartyId)).toEqual(['buys Canola']);
+    const [audit] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.audit_events
+      where entity = 'counterparty_commodities' and organization_id = ${orgs.a}
+        and actor_id = ${users.victor} and action = 'insert'`;
+    expect(audit?.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('is out of reach of another organization, and fixed while archived', async () => {
+    const counterpartyId = await create('Synthetic Commodity Archived');
+    const change = { add: [canola], remove: [] };
+    expect(await db.changeCommodities(as(users.bob), counterpartyId, change)).toEqual({
+      status: 'not_found',
+    });
+    await db.setArchived(as(users.olivia), counterpartyId, true);
+    expect(await db.changeCommodities(as(users.victor), counterpartyId, change)).toEqual({
+      status: 'archived',
+    });
+    expect(await listed(counterpartyId)).toEqual([]);
   });
 });
 

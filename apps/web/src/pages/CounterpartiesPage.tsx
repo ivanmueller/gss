@@ -1,4 +1,5 @@
-import { FileUp, Plus, Search } from 'lucide-react';
+import { COMMODITIES } from '@grain/domain';
+import { FileUp, Plus, Search, Wheat } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
@@ -8,6 +9,7 @@ import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { SegmentedControl } from '../components/ui/segmented-control';
+import { Select } from '../components/ui/select';
 import {
   Table,
   TableBody,
@@ -185,6 +187,21 @@ function LogoGrid({ items, token }: { items: CounterpartySummary[]; token: strin
   );
 }
 
+/**
+ * Whether a counterparty trades the chosen commodity: buys it among buyers, sells it among
+ * sellers, either otherwise. No commodity chosen: every counterparty.
+ */
+export function tradesCommodity(
+  counterparty: Pick<CounterpartySummary, 'buys' | 'sells'>,
+  commodity: string | null,
+  side: string,
+): boolean {
+  if (commodity === null) return true;
+  if (side === 'buyer') return counterparty.buys.includes(commodity);
+  if (side === 'seller') return counterparty.sells.includes(commodity);
+  return counterparty.buys.includes(commodity) || counterparty.sells.includes(commodity);
+}
+
 /** /counterparties: the organization's counterparties by logo (the default), as a table or on a map. */
 export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
@@ -203,6 +220,10 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'logos';
   const typeParam = params.get('type');
   const side: Side = SIDES.find((item) => item === typeParam) ?? 'all';
+  const commodityParam = params.get('commodity');
+  const commodity = COMMODITIES.some((item) => item.code === commodityParam)
+    ? commodityParam
+    : null;
 
   const all = useMemo(() => (list.status === 'ok' ? list.data.counterparties : []), [list]);
   const archivedCount = all.filter((counterparty) => counterparty.archivedAt !== null).length;
@@ -210,17 +231,24 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
     (counterparty) =>
       (showArchived || counterparty.archivedAt === null) &&
       (side === 'all' || counterparty.types.includes(side)) &&
+      tradesCommodity(counterparty, commodity, side) &&
       matches(counterparty, query),
   );
-  // The map narrows to what the search finds; without a search it shows every location.
+  // The map narrows to what the search and the commodity find; without them it shows every
+  // location.
   const searched = useMemo(
     () =>
-      query.trim() === ''
+      query.trim() === '' && commodity === null
         ? null
         : new Set(
-            all.filter((counterparty) => matches(counterparty, query)).map((item) => item.id),
+            all
+              .filter(
+                (counterparty) =>
+                  matches(counterparty, query) && tradesCommodity(counterparty, commodity, side),
+              )
+              .map((item) => item.id),
           ),
-    [all, query],
+    [all, query, commodity, side],
   );
 
   return (
@@ -269,6 +297,19 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                 onChange={(next) => {
                   setSearchParams({ type: next === 'all' ? null : next });
                 }}
+              />
+              <Select
+                aria-label="Commodity"
+                className="w-52"
+                icon={<Wheat aria-hidden="true" className="text-muted-foreground" />}
+                value={commodity ?? ''}
+                onValueChange={(next) => {
+                  setSearchParams({ commodity: next || null });
+                }}
+                options={[
+                  { value: '', label: 'All commodities' },
+                  ...COMMODITIES.map(({ code, name }) => ({ value: code, label: name })),
+                ]}
               />
               <TabsList aria-label="Counterparty view">
                 <TabsTrigger value="logos">Logos</TabsTrigger>

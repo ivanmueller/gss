@@ -1,7 +1,6 @@
 import {
   CONTACT_CHANNEL_LABELS,
   formatAlberta,
-  isLive,
   normalizeCountry,
   parseContactFields,
   parseCounterpartyFields,
@@ -35,6 +34,7 @@ import {
   useCounterpartyCrm,
   type CounterpartyCrmState,
 } from '../components/CounterpartyCrm';
+import { CounterpartyCommodities } from '../components/CounterpartyCommodities';
 import { CounterpartyFreight } from '../components/CounterpartyFreight';
 import { CounterpartyLocationsMap } from '../components/CounterpartyLocationsMap';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
@@ -42,7 +42,6 @@ import {
   CounterpartyQuotesCard,
   quoteSides,
   useCounterpartyQuotes,
-  type CounterpartyQuotesState,
 } from '../components/CounterpartyQuotes';
 import { CounterpartyWebsite } from '../components/CounterpartyWebsite';
 import {
@@ -685,7 +684,11 @@ function CounterpartyView({
           )}
         </div>
       </div>
-      <MainContact contact={main} hint={canChange && detail.contacts.length > 0} />
+      <div className="grid gap-x-6 gap-y-3 border-t pt-3 text-sm md:grid-cols-3">
+        <MainContact contact={main} hint={canChange && detail.contacts.length > 0} />
+        <NextFollowUp crm={crm} />
+        <LastContact crm={crm} />
+      </div>
       {archiveConfirm}
     </Card>
   );
@@ -1021,6 +1024,8 @@ function CounterpartyView({
     </Card>
   );
 
+  const commoditiesCard = <CounterpartyCommodities token={token} detail={detail} onSaved={done} />;
+
   const counterparty = { id: detail.id, types: detail.types, archived };
   const quotesCard = (
     <CounterpartyQuotesCard
@@ -1088,7 +1093,6 @@ function CounterpartyView({
       {trading && (
         <>
           {tradingHeader}
-          <TradingFacts quotes={quotes} crm={crm} facilities={detail.facilities} />
           {editDetails}
           <CrmMessage crm={crm} />
           {wide ? (
@@ -1100,6 +1104,7 @@ function CounterpartyView({
               </div>
               <div className="flex min-w-0 flex-col gap-4">
                 {contactsCard}
+                {commoditiesCard}
                 {locationsCard}
                 {detailsCard}
                 {freightCard}
@@ -1111,6 +1116,7 @@ function CounterpartyView({
               {quotesCard}
               {contactsCard}
               <ContactHistoryCard crm={crm} />
+              {commoditiesCard}
               {locationsCard}
               {detailsCard}
               {freightCard}
@@ -1150,131 +1156,95 @@ function ContactLinks({ contact }: { contact: Contact }) {
 
 /** The main contact at the top of a buyer's or seller's page; a hint to editors when none. */
 function MainContact({ contact, hint }: { contact: Contact | null; hint: boolean }) {
-  if (!contact) {
-    return hint ? (
-      <p className="border-t pt-3 text-sm text-muted-foreground">
-        No main contact yet: choose one under Contacts with <strong>Make main</strong>.
-      </p>
-    ) : null;
-  }
   return (
-    <div
-      role="group"
-      aria-label="Main contact"
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-3 text-sm"
-    >
+    <HeaderFact label="Main contact">
+      {contact ? (
+        <>
+          <span>
+            <span className="font-medium">{contact.name}</span>
+            {contact.role && <span className="text-muted-foreground"> · {contact.role}</span>}
+          </span>
+          <ContactLinks contact={contact} />
+        </>
+      ) : (
+        <span className="text-muted-foreground">
+          {hint ? (
+            <>
+              None yet: choose one under Contacts with <strong>Make main</strong>.
+            </>
+          ) : (
+            'None yet.'
+          )}
+        </span>
+      )}
+    </HeaderFact>
+  );
+}
+
+/** One of the three facts at the bottom of the header, with its label above. */
+function HeaderFact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={label} className="flex min-w-0 flex-col gap-0.5">
       <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Main contact
+        {label}
       </span>
-      <span>
-        <span className="font-medium">{contact.name}</span>
-        {contact.role && <span className="text-muted-foreground"> · {contact.role}</span>}
-      </span>
-      <ContactLinks contact={contact} />
+      {children}
     </div>
   );
 }
 
-function count(n: number, one: string, many: string): string {
-  return `${String(n)} ${n === 1 ? one : many}`;
-}
-
-function Fact({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) {
+/** The soonest open follow-up, due time in MT and overdue or due today in words. */
+function NextFollowUp({ crm }: { crm: CounterpartyCrmState }) {
+  const { followUps } = crm;
+  const next = followUps.status === 'ok' ? nextFollowUp(followUps.data.followUps) : null;
+  const due = next ? dueState(next) : null;
   return (
-    <Card className="flex min-w-0 flex-col gap-0.5 px-4 py-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-sm font-semibold break-words">{children}</dd>
-      {note && <dd className="text-xs break-words text-muted-foreground">{note}</dd>}
-    </Card>
+    <HeaderFact label="Next follow-up">
+      {followUps.status === 'loading' && <span className="text-muted-foreground">Loading…</span>}
+      {followUps.status === 'error' && (
+        <span className="text-muted-foreground">Could not be loaded.</span>
+      )}
+      {followUps.status === 'ok' &&
+        (next ? (
+          <>
+            <span className="flex flex-wrap items-center gap-1.5">
+              {due === 'overdue' && <Badge variant="danger">Overdue</Badge>}
+              {due === 'today' && <Badge variant="caution">Due today</Badge>}
+              <span className="font-medium">{formatAlberta(next.dueAt)}</span>
+            </span>
+            <span className="break-words text-muted-foreground">
+              {next.task} · {next.assignedTo.name}
+            </span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">None planned.</span>
+        ))}
+    </HeaderFact>
   );
 }
 
-/** Four facts from the records: live bids and offers, the next follow-up, the last contact, locations. */
-function TradingFacts({
-  quotes,
-  crm,
-  facilities,
-}: {
-  quotes: CounterpartyQuotesState;
-  crm: CounterpartyCrmState;
-  facilities: readonly Facility[];
-}) {
-  const loading = '…';
-  const live =
-    quotes.list.status === 'ok'
-      ? quotes.list.data.quotes.filter((quote) => isLive(quote.status))
-      : null;
-  const bids = live?.filter((quote) => quote.side === 'bid').length ?? 0;
-  const next = crm.followUps.status === 'ok' ? nextFollowUp(crm.followUps.data.followUps) : null;
-  const last = crm.log.status === 'ok' ? lastContact(crm.log.data.entries) : null;
-  const located = facilities.filter((f) => f.latitude !== null && f.longitude !== null).length;
-  const due = next ? dueState(next) : null;
-
+/** The latest contact logged: when, how and with whom. */
+function LastContact({ crm }: { crm: CounterpartyCrmState }) {
+  const { log } = crm;
+  const last = log.status === 'ok' ? lastContact(log.data.entries) : null;
   return (
-    <section aria-label="At a glance">
-      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Fact
-          label="Live bids and offers"
-          note={
-            live &&
-            live.length > 0 &&
-            [
-              bids > 0 && count(bids, 'bid', 'bids'),
-              live.length > bids && count(live.length - bids, 'offer', 'offers'),
-            ]
-              .filter(Boolean)
-              .join(' · ')
-          }
-        >
-          {live ? live.length : quotes.list.status === 'error' ? 'Not loaded' : loading}
-        </Fact>
-        <Fact
-          label="Next follow-up"
-          note={
-            next &&
-            (due === 'overdue'
-              ? `Overdue · ${next.task}`
-              : due === 'today'
-                ? `Due today · ${next.task}`
-                : next.task)
-          }
-        >
-          {crm.followUps.status === 'ok'
-            ? next
-              ? formatAlberta(next.dueAt)
-              : 'None planned'
-            : crm.followUps.status === 'error'
-              ? 'Not loaded'
-              : loading}
-        </Fact>
-        <Fact
-          label="Last contact"
-          note={
-            last &&
-            `${CONTACT_CHANNEL_LABELS[last.current.channel]} with ${last.current.contactName}`
-          }
-        >
-          {crm.log.status === 'ok'
-            ? last
-              ? formatAlberta(last.current.occurredAt)
-              : 'None logged'
-            : crm.log.status === 'error'
-              ? 'Not loaded'
-              : loading}
-        </Fact>
-        <Fact
-          label="Locations"
-          note={
-            facilities.length > 0 &&
-            (located === facilities.length
-              ? 'All with coordinates'
-              : `${String(located)} with coordinates`)
-          }
-        >
-          {facilities.length}
-        </Fact>
-      </dl>
-    </section>
+    <HeaderFact label="Last contact">
+      {log.status === 'loading' && <span className="text-muted-foreground">Loading…</span>}
+      {log.status === 'error' && (
+        <span className="text-muted-foreground">Could not be loaded.</span>
+      )}
+      {log.status === 'ok' &&
+        (last ? (
+          <>
+            <span className="font-medium">{formatAlberta(last.current.occurredAt)}</span>
+            <span className="break-words text-muted-foreground">
+              {CONTACT_CHANNEL_LABELS[last.current.channel]} with {last.current.contactName}
+            </span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">None logged.</span>
+        ))}
+    </HeaderFact>
   );
 }
 

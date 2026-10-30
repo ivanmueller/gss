@@ -145,6 +145,14 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
     '52.133214, -106.670046 · exact location · entered by hand',
   );
 
+  // What the seller sells: ticked from the list of commodities, then shown on its page.
+  await page.getByRole('button', { name: 'Edit what they sell' }).click();
+  const sells = page.getByRole('form', { name: 'Edit what they sell' });
+  await sells.getByRole('checkbox', { name: 'Yellow peas' }).check();
+  await sells.getByRole('checkbox', { name: 'Oats' }).check();
+  await sells.getByRole('button', { name: 'Save commodities' }).click();
+  await expect(page.getByRole('list', { name: 'What they sell' })).toHaveText(/Yellow peas\s*Oats/);
+
   // The main contact, shown at the top with a link to call.
   await page.getByRole('button', { name: 'Make Synthetic Farmer the main contact' }).click();
   await expect(page.getByRole('group', { name: 'Main contact' })).toContainText('Synthetic Farmer');
@@ -165,6 +173,12 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   const table = page.getByRole('table', { name: 'Counterparties' });
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
   await expect(table.getByRole('link', { name: 'Synthetic Mills' })).toHaveCount(0);
+  // Sellers of oats, then of a commodity it does not sell.
+  await choose(page.getByRole('combobox', { name: 'Commodity' }), 'Oats');
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
+  await choose(page.getByRole('combobox', { name: 'Commodity' }), 'Rye');
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
+  await choose(page.getByRole('combobox', { name: 'Commodity' }), 'All commodities');
 
   // Archive: off the list until shown, then restored.
   await table.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
@@ -287,6 +301,10 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
     request.post(`${one}/facilities`, { headers, data: { values: { city: 'Elsewhere' } } }),
     request.delete(`${one}/facilities/${OTHER_ORG.counterpartyId}`, { headers }),
     request.put(`${one}/main-contact`, { headers, data: { contactId: null } }),
+    request.patch(`${one}/commodities`, {
+      headers,
+      data: { add: [{ commodity: 'canola', direction: 'buys' }], remove: [] },
+    }),
   ];
   for (const write of await Promise.all(writes)) expect(write.status()).toBe(404);
 

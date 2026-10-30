@@ -87,6 +87,10 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
             locationPrecision: null,
           },
         ],
+        commodities: [
+          { commodity: 'yellow_peas', direction: 'sells' },
+          { commodity: 'canola', direction: 'buys' },
+        ],
       },
       {
         counterparty: {
@@ -100,6 +104,7 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
         },
         contacts: [],
         facilities: [],
+        commodities: [],
       },
     ],
     ...overrides,
@@ -125,6 +130,7 @@ afterAll(async () => {
   await db.close();
   const both = admin([orgs.a, orgs.b]);
   await admin`delete from app.counterparty_logos where organization_id in ${both}`;
+  await admin`delete from app.counterparty_commodities where organization_id in ${both}`;
   await admin`delete from app.facilities where organization_id in ${both}`;
   await admin`delete from app.counterparty_contacts where organization_id in ${both}`;
   await admin`delete from app.counterparties where organization_id in ${both}`;
@@ -159,8 +165,8 @@ describe('the counterparty directory as app_api', () => {
     const [audit] = await admin<{ count: number }[]>`
       select count(*)::int as count from app.audit_events
       where request_id = ${ctx.requestId} and actor_id = ${users.olivia}`;
-    // 1 batch + 2 counterparties + 1 contact + 2 facilities.
-    expect(audit?.count).toBe(6);
+    // 1 batch + 2 counterparties + 1 contact + 2 facilities + 2 commodities.
+    expect(audit?.count).toBe(8);
   });
 
   it('lists the organization’s counterparties for any member', async () => {
@@ -172,6 +178,11 @@ describe('the counterparty directory as app_api', () => {
       ['Synthetic Prairie Mills', ['buyer', 'seller'], 1, 2, ['MB', 'SK'], 'file_import'],
     ]);
     expect(list[0]?.createdAt).toMatch(/^\d{4}-\d\d-\d\dT/);
+    // What each buys and sells, as codes for the list's commodity filter.
+    expect(list.map((c) => [c.buys, c.sells])).toEqual([
+      [[], []],
+      [['canola'], ['yellow_peas']],
+    ]);
     expect(await db.listCounterparties(as(users.victor), orgs.b)).toEqual([]);
   });
 
@@ -186,6 +197,11 @@ describe('the counterparty directory as app_api', () => {
       verificationStatus: 'pending',
       website: 'https://www.example.com',
       notes: 'Synthetic record.',
+      // Buys first, each in the commodity list's order, with its name.
+      commodities: [
+        { code: 'canola', name: 'Canola', direction: 'buys' },
+        { code: 'yellow_peas', name: 'Yellow peas', direction: 'sells' },
+      ],
       contacts: [
         {
           name: 'Synthetic Merchandiser',

@@ -11,3 +11,4 @@ export * from './freight';
 export * from './website';
 export * from './alberta';
 export * from './crm';
+export * from './commodities';

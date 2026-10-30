@@ -40,93 +40,100 @@ export function CounterpartyFreight({
   const count = list.status === 'ok' ? list.data.freight.length : null;
   const title = carrier ? 'Freight rates' : 'Freight to and from its locations';
 
-  if (!open) {
-    return (
-      <Card asChild className="overflow-hidden">
-        <section aria-labelledby="counterparty-freight-heading">
-          <h2 id="counterparty-freight-heading" className="text-sm font-semibold">
-            <button
-              type="button"
-              aria-expanded={false}
-              className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-accent/50"
-              onClick={() => {
-                setOpen(true);
-              }}
-            >
-              {title}
-              <ChevronDown aria-hidden="true" className="size-4 text-muted-foreground" />
-            </button>
-          </h2>
-        </section>
-      </Card>
-    );
-  }
+  const options = (
+    <>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="size-4 accent-primary"
+          checked={everything}
+          onChange={(event) => {
+            setEverything(event.target.checked);
+          }}
+        />
+        Include withdrawn and expired
+      </label>
+      {canAdd && (
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/freight/new?carrier=${counterparty.id}`}>
+            <Plus aria-hidden="true" />
+            New freight rate
+          </Link>
+        </Button>
+      )}
+    </>
+  );
+
+  // Folded (a buyer's or seller's page): the heading row opens and closes it, with Show or
+  // Hide in the same place on the right either way (owner's request, 2026-10-30).
+  const header = folded ? (
+    <>
+      <h2 id="counterparty-freight-heading" className="text-sm font-semibold">
+        <button
+          type="button"
+          aria-expanded={open}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-accent/50"
+          onClick={() => {
+            setOpen(!open);
+          }}
+        >
+          <span>
+            {title}
+            {open && count !== null && ` (${String(count)})`}
+          </span>
+          <span
+            aria-hidden="true"
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground"
+          >
+            {open ? 'Hide' : 'Show'}
+            {open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </span>
+        </button>
+      </h2>
+      {open && (
+        <div className="flex flex-wrap items-center gap-2 border-y px-4 py-2">{options}</div>
+      )}
+    </>
+  ) : (
+    <CardHeader>
+      <CardTitle id="counterparty-freight-heading">
+        {title}
+        {count !== null && ` (${String(count)})`}
+      </CardTitle>
+      <div className="flex flex-wrap items-center gap-2">{options}</div>
+    </CardHeader>
+  );
 
   return (
     <Card asChild className="overflow-hidden">
       <section aria-labelledby="counterparty-freight-heading">
-        <CardHeader>
-          <CardTitle id="counterparty-freight-heading">
-            {title}
-            {count !== null && ` (${String(count)})`}
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            {folded && (
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-expanded={true}
-                onClick={() => {
-                  setOpen(false);
-                }}
-              >
-                <ChevronUp aria-hidden="true" />
-                Hide
-              </Button>
+        {header}
+        {open && (
+          <>
+            {list.status === 'loading' && (
+              <p className="px-4 py-4 text-sm text-muted-foreground">Loading…</p>
             )}
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="size-4 accent-primary"
-                checked={everything}
-                onChange={(event) => {
-                  setEverything(event.target.checked);
-                }}
-              />
-              Include withdrawn and expired
-            </label>
-            {canAdd && (
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/freight/new?carrier=${counterparty.id}`}>
-                  <Plus aria-hidden="true" />
-                  New freight rate
-                </Link>
-              </Button>
+            {list.status === 'error' && (
+              <p role="alert" className="px-4 py-4 text-sm text-danger">
+                Could not load freight rates: {list.error.message}
+              </p>
             )}
-          </div>
-        </CardHeader>
-        {list.status === 'loading' && (
-          <p className="px-4 py-4 text-sm text-muted-foreground">Loading…</p>
+            {list.status === 'ok' &&
+              (list.data.freight.length === 0 ? (
+                <p className="px-4 py-4 text-sm text-muted-foreground">
+                  {everything ? 'No freight rates recorded.' : 'No live freight rates.'}
+                </p>
+              ) : (
+                <FreightList
+                  freight={list.data.freight}
+                  caption={
+                    carrier ? 'Freight rates of this carrier' : 'Freight to and from its locations'
+                  }
+                  showCarrier={!carrier}
+                />
+              ))}
+          </>
         )}
-        {list.status === 'error' && (
-          <p role="alert" className="px-4 py-4 text-sm text-danger">
-            Could not load freight rates: {list.error.message}
-          </p>
-        )}
-        {list.status === 'ok' &&
-          (list.data.freight.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-muted-foreground">
-              {everything ? 'No freight rates recorded.' : 'No live freight rates.'}
-            </p>
-          ) : (
-            <FreightList
-              freight={list.data.freight}
-              caption={
-                carrier ? 'Freight rates of this carrier' : 'Freight to and from its locations'
-              }
-              showCarrier={!carrier}
-            />
-          ))}
       </section>
     </Card>
   );

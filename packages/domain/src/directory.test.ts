@@ -62,6 +62,7 @@ describe('parseImportRow', () => {
         verificationStatus: 'Verified',
         website: 'WWW.Example.com',
         notes: 'Prefers rail.\r\nCall mornings.',
+        commodities: 'Canola; flax',
         contactName: 'Synthetic Merchandiser',
         contactRole: 'Grain buyer',
         contactEmail: 'merch@example.test',
@@ -105,6 +106,13 @@ describe('parseImportRow', () => {
         longitude: '-106.670046',
         locationPrecision: 'exact',
       },
+      // A buyer and seller: both ways.
+      commodities: [
+        { commodity: 'canola', direction: 'buys' },
+        { commodity: 'flaxseed', direction: 'buys' },
+        { commodity: 'canola', direction: 'sells' },
+        { commodity: 'flaxseed', direction: 'sells' },
+      ],
     });
   });
 
@@ -122,6 +130,66 @@ describe('parseImportRow', () => {
       },
       contact: null,
       facility: null,
+      commodities: [],
+    });
+  });
+
+  it('reads a Commodities column as what a buyer buys or a seller sells', () => {
+    const row = (values: Record<string, string>, defaultTypes: ('buyer' | 'seller')[]) =>
+      parseImportRow(
+        2,
+        { legalName: 'Synthetic Mills', country: 'CA', ...values },
+        { defaultTypes },
+      );
+    expect(row({ commodities: 'Yellow Peas, Oats' }, ['buyer'])).toMatchObject({
+      status: 'ok',
+      row: {
+        commodities: [
+          { commodity: 'yellow_peas', direction: 'buys' },
+          { commodity: 'oats', direction: 'buys' },
+        ],
+      },
+    });
+    expect(row({ commodities: 'durum' }, ['seller'])).toMatchObject({
+      status: 'ok',
+      row: { commodities: [{ commodity: 'durum_wheat', direction: 'sells' }] },
+    });
+  });
+
+  it('refuses commodity names off the list, and commodities for a carrier', () => {
+    expect(
+      parseImportRow(5, {
+        legalName: 'Synthetic Mills',
+        country: 'CA',
+        commodities: 'Wheat; Canola; Hemp',
+      }),
+    ).toEqual({
+      status: 'invalid',
+      issues: [
+        {
+          line: 5,
+          field: 'commodities',
+          message:
+            '"Wheat", "Hemp" are not on the list of commodities (for example Spring wheat, Feed barley, Yellow peas)',
+        },
+      ],
+    });
+    expect(
+      parseImportRow(6, {
+        legalName: 'Synthetic Haulers',
+        country: 'CA',
+        types: 'carrier',
+        commodities: 'Canola',
+      }),
+    ).toEqual({
+      status: 'invalid',
+      issues: [
+        {
+          line: 6,
+          field: 'commodities',
+          message: 'are for buyers, sellers and brokers, not carriers',
+        },
+      ],
     });
   });
 
@@ -212,6 +280,18 @@ describe('parseImportRow', () => {
 });
 
 describe('groupImportRows', () => {
+  it("keeps every row's commodities for one company, each once", () => {
+    const { groups } = groupImportRows([
+      ok({ legalName: 'Synthetic Mills', country: 'CA', commodities: 'Canola; Oats' }, 2),
+      ok({ legalName: 'Synthetic Mills', country: 'CA', commodities: 'oats, flax' }, 3),
+    ]);
+    expect(groups[0]?.commodities).toEqual([
+      { commodity: 'canola', direction: 'buys' },
+      { commodity: 'oats', direction: 'buys' },
+      { commodity: 'flaxseed', direction: 'buys' },
+    ]);
+  });
+
   it('merges rows for the same company, keeping each contact and location once', () => {
     const rows = [
       ok(

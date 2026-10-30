@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-10-30 — What counterparties buy and sell
+
+- `docs/DECISIONS.md`: the owner's answers (a list kept by hand, anyone can change it, the 20 commodities, a filter, an import column), the next follow-up and last contact in the header instead of four boxes, freight's Show and Hide in one place.
+- `docs/API.md`: `PATCH /api/v1/counterparties/{id}/commodities`; `buys`, `sells` and `commodities` in the responses.
+- `docs/DATA_MODEL.md`: `app.counterparty_commodities` and migration `20261030020000_counterparty_commodities.sql`.
+- `docs/PRODUCT.md`: the commodity filter and the counterparty page's top and Commodities box.
+
 ## 2026-10-30 — Handoff record of #77
 
 - `docs/HANDOFF.md`: ivanmueller/gss#77 (the race tests for the main contact) with its CI and Deploy staging runs.
