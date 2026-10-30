@@ -560,11 +560,15 @@ function readPhone(r: FieldReader, field: 'contactPhone' | 'companyPhone'): stri
   return phone;
 }
 
-/** Words of a market name, without case, spaces, hyphens or a plural s ("Small animals"). */
+/**
+ * Words of a market name, without case, spaces, hyphens or a plural ("Small animals",
+ * "Specialties"; Codex's review of ivanmueller/gss#85).
+ */
 function marketKey(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z]+/g, '')
+    .replace(/ies$/, 'y')
     .replace(/s$/, '');
 }
 

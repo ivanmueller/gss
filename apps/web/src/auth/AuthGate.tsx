@@ -67,7 +67,10 @@ export function AuthGate({
   useEffect(() => {
     // Supabase emits INITIAL_SESSION on subscribe, then every sign-in, MFA, refresh and
     // sign-out. It advises against calling auth methods inside this callback, so defer.
-    const { data } = auth.onAuthStateChange(() => {
+    const { data } = auth.onAuthStateChange((event) => {
+      // A sign-out here or in another tab: the answers kept for that person go at once
+      // (Codex's review of ivanmueller/gss#85).
+      if (event === 'SIGNED_OUT') clearApiCache();
       setTimeout(() => void evaluate(), 0);
     });
     return () => {

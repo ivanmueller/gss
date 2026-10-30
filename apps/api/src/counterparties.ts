@@ -298,6 +298,9 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           ? 'private, max-age=31536000, immutable'
           : 'private, no-cache',
       );
+      // Kept per sign-in: a browser never hands one person's kept logo to another login on the
+      // same computer, which the server would have refused (Codex's review of ivanmueller/gss#85).
+      c.header('Vary', 'Authorization');
       c.header('ETag', etag);
       c.header('X-Content-Type-Options', 'nosniff');
       c.header('Content-Security-Policy', "default-src 'none'; sandbox");

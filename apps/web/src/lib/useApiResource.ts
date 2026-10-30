@@ -12,14 +12,40 @@ export type Resource<T> =
  * emptied on sign-out.
  */
 const answers = new Map<string, unknown>();
+/**
+ * Moves on at each clearing, so an answer still on its way when the cache is emptied is not
+ * kept afterwards (Codex's review of ivanmueller/gss#85).
+ */
+let generation = 0;
+
+/**
+ * Whose sign-in a token is: the person's id from the token (its `sub`), so an hourly token
+ * renewal keeps the same person's answers and another person never gets them. Only the
+ * server checks tokens; this decides only what may be shown again. A token that cannot be
+ * read stands for itself.
+ */
+export function signedInAs(token: string): string {
+  try {
+    const payload = token.split('.')[1] ?? '';
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as unknown;
+    if (typeof claims === 'object' && claims !== null && 'sub' in claims) {
+      const sub = claims.sub;
+      if (typeof sub === 'string' && sub !== '') return `user:${sub}`;
+    }
+  } catch {
+    // Not a JWT: fall through.
+  }
+  return `token:${token}`;
+}
 
 function cacheKey(path: string, token: string): string {
-  return `${token}\n${path}`;
+  return `${signedInAs(token)}\n${path}`;
 }
 
 /** Forgets every kept answer: on sign-out, so the next person never sees them. */
 export function clearApiCache(): void {
   answers.clear();
+  generation += 1;
 }
 
 /**
@@ -35,6 +61,8 @@ export function useApiResource<T>(
 ): [Resource<T>, () => void] {
   const [state, setState] = useState<{
     path: string;
+    /** Whose answer it is (signedInAs). */
+    who: string;
     version: number;
     resource: Resource<T>;
   } | null>(null);
@@ -43,11 +71,12 @@ export function useApiResource<T>(
   useEffect(() => {
     if (path === null) return;
     const controller = new AbortController();
+    const started = generation;
     apiJson<T>(path, token, { signal: controller.signal })
       .then((data) => {
         if (controller.signal.aborted) return;
-        answers.set(cacheKey(path, token), data);
-        setState({ path, version, resource: { status: 'ok', data } });
+        if (started === generation) answers.set(cacheKey(path, token), data);
+        setState({ path, who: signedInAs(token), version, resource: { status: 'ok', data } });
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
@@ -55,7 +84,12 @@ export function useApiResource<T>(
           error instanceof ApiError
             ? error
             : new ApiError(0, 'NETWORK', 'The server could not be reached.', null);
-        setState({ path, version, resource: { status: 'error', error: apiError } });
+        setState({
+          path,
+          who: signedInAs(token),
+          version,
+          resource: { status: 'error', error: apiError },
+        });
       });
     return () => {
       controller.abort();
@@ -66,10 +100,13 @@ export function useApiResource<T>(
     setVersion((current) => current + 1);
   }, []);
 
-  // While a reload of the same path runs, keep showing the last result. A different path
-  // shows its kept answer if there is one, else loading (or, with keepPrevious, the last).
-  if (state?.path === path) return [state.resource, reload];
+  // While a reload of the same path for the same person runs (a renewed token included),
+  // keep showing the last result. A different path shows its kept answer if there is one,
+  // else loading (or, with keepPrevious, the person's last result). Another person's result
+  // is never shown (Codex's review of ivanmueller/gss#85).
+  const own = state?.who === signedInAs(token) ? state : null;
+  if (own?.path === path) return [own.resource, reload];
   const kept = path === null ? undefined : answers.get(cacheKey(path, token));
   if (kept !== undefined) return [{ status: 'ok', data: kept as T }, reload];
-  return [state && keepPrevious ? state.resource : { status: 'loading' }, reload];
+  return [own && keepPrevious ? own.resource : { status: 'loading' }, reload];
 }

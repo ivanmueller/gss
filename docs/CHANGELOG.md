@@ -1,5 +1,14 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Codex's review of #85
+
+- `docs/DECISIONS.md`: kept answers per person and forgotten on any sign-out; logos kept per sign-in.
+- `docs/API.md`: the logo's `Vary: Authorization`.
+
+## 2026-10-30 — Handoff record of #86
+
+- `docs/HANDOFF.md`: the documents update (ivanmueller/gss#86) with its CI and Deploy staging runs, and Codex's review of #85.
+
 ## 2026-10-30 — Handoff record of #85; documents brought up to date
 
 - `docs/HANDOFF.md`: the Counterparties changes (ivanmueller/gss#85) with their CI and Deploy staging runs; #84's `main` run settled by #186; the status summary, GT-020 and GT-021 and the owner's staging check brought up to #85.
