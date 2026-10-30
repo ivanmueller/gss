@@ -4,16 +4,23 @@ import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 
 // Logos need the bearer token, so they are fetched with it and shown from blob URLs.
-// A logo's checksum changes whenever it is replaced, so one fetch per checksum is enough.
+// A logo's checksum changes whenever it is replaced, so one fetch per checksum is enough:
+// asked for by checksum, the browser also keeps it across visits (owner's request,
+// 2026-10-30), and one already loaded shows at once when a page or view is opened again.
 const cache = new Map<string, Promise<string>>();
+const ready = new Map<string, string>();
 
 function loadLogo(counterpartyId: string, sha256: string, token: string): Promise<string> {
   const key = `${counterpartyId}:${sha256}`;
   let url = cache.get(key);
   if (!url) {
-    url = apiFetch(`/counterparties/${counterpartyId}/logo`, token)
+    url = apiFetch(`/counterparties/${counterpartyId}/logo?v=${sha256}`, token)
       .then((res) => res.blob())
-      .then((blob) => URL.createObjectURL(blob));
+      .then((blob) => {
+        const objectUrl = URL.createObjectURL(blob);
+        ready.set(key, objectUrl);
+        return objectUrl;
+      });
     url.catch(() => cache.delete(key));
     cache.set(key, url);
   }
@@ -84,7 +91,7 @@ export function CounterpartyLogo({
     };
   }, [visible, counterpartyId, sha256, token, key]);
 
-  const url = loaded?.key === key ? loaded.url : null;
+  const url = loaded?.key === key ? loaded.url : (ready.get(key) ?? null);
   return (
     <span
       ref={box}

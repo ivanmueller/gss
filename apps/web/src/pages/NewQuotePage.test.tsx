@@ -25,6 +25,8 @@ const BUYER: CounterpartySummary = {
   archivedAt: null,
   buys: [],
   sells: [],
+  markets: [],
+  tier: null,
 };
 const SELLER = {
   ...BUYER,

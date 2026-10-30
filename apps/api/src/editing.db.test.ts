@@ -53,6 +53,8 @@ function record(legalName: string, overrides: Partial<NewCounterparty> = {}): Ne
       verificationStatus: 'unverified',
       website: null,
       phone: null,
+      markets: [],
+      tier: null,
       notes: 'Synthetic record.\nSecond line.',
     },
     contacts: [contact('Synthetic Grower')],
@@ -170,6 +172,8 @@ describe('editing a counterparty as app_api', () => {
       verificationStatus: 'verified' as const,
       website: 'https://www.example.com/grain',
       phone: '403 555 0100 x7',
+      markets: ['equine' as const, 'aqua' as const],
+      tier: 'B' as const,
     };
 
     expect(
@@ -181,6 +185,8 @@ describe('editing a counterparty as app_api', () => {
       types: ['buyer', 'seller'],
       verificationStatus: 'verified',
       website: 'https://www.example.com/grain',
+      markets: ['equine', 'aqua'],
+      tier: 'B',
     });
     expect(after.version).not.toBe(before.version);
 

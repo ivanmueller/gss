@@ -41,6 +41,8 @@ function summary(name: string): CounterpartySummary {
     archivedAt: null,
     buys: [],
     sells: [],
+    markets: [],
+    tier: null,
   };
 }
 
@@ -195,6 +197,15 @@ describe('GET /api/v1/counterparties/:id/logo', () => {
       headers: { ...AUTH, 'If-None-Match': `"${'a'.repeat(64)}"` },
     });
     expect(res.status).toBe(304);
+  });
+
+  it('lets the browser keep a logo asked for by its checksum, and only that one', async () => {
+    db.getLogo.mockResolvedValue({ data: PNG, sha256: 'a'.repeat(64) });
+    const current = await request(`/${COUNTERPARTY}/logo?v=${'a'.repeat(64)}`, { headers: AUTH });
+    expect(current.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    // An old checksum (the logo was replaced since) is not kept.
+    const old = await request(`/${COUNTERPARTY}/logo?v=${'b'.repeat(64)}`, { headers: AUTH });
+    expect(old.headers.get('cache-control')).toBe('private, no-cache');
   });
 });
 

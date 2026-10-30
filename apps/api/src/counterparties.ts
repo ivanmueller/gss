@@ -231,10 +231,21 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       }
       const contentSha256 = await sha256Hex(
         JSON.stringify(
-          // Without commodities or a company phone, the same as before they could be imported.
+          // Without commodities, a company phone, markets or a tier, the same as before they
+          // could be imported.
           plan.groups.map(
-            ({ counterparty: { phone, ...counterparty }, contacts, facilities, commodities }) => ({
-              counterparty: phone === null ? counterparty : { ...counterparty, phone },
+            ({
+              counterparty: { phone, markets, tier, ...counterparty },
+              contacts,
+              facilities,
+              commodities,
+            }) => ({
+              counterparty: {
+                ...counterparty,
+                ...(phone !== null && { phone }),
+                ...(markets.length > 0 && { markets }),
+                ...(tier !== null && { tier }),
+              },
               contacts,
               facilities,
               ...(commodities.length > 0 && { commodities }),
@@ -278,8 +289,15 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       const logo = await db.getLogo(ctx, id);
       if (!logo) return apiError(c, 404, 'NOT_FOUND', 'No logo.');
       const etag = `"${logo.sha256}"`;
-      // Served only as a PNG that cannot be sniffed, framed or run as a document.
-      c.header('Cache-Control', 'private, no-cache');
+      // Asked for by its checksum (?v=), the logo never changes at that address: a new logo
+      // has a new checksum. So the browser keeps it, and switching pages does not fetch it
+      // again (owner's request, 2026-10-30). Without it, the browser checks each time.
+      c.header(
+        'Cache-Control',
+        c.req.query('v') === logo.sha256
+          ? 'private, max-age=31536000, immutable'
+          : 'private, no-cache',
+      );
       c.header('ETag', etag);
       c.header('X-Content-Type-Options', 'nosniff');
       c.header('Content-Security-Policy', "default-src 'none'; sandbox");

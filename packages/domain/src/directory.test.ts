@@ -87,6 +87,8 @@ describe('parseImportRow', () => {
         verificationStatus: 'verified',
         website: 'https://www.example.com',
         phone: null,
+        markets: [],
+        tier: null,
         notes: 'Prefers rail.\nCall mornings.',
       },
       contact: {
@@ -128,6 +130,8 @@ describe('parseImportRow', () => {
         verificationStatus: 'unverified',
         website: null,
         phone: null,
+        markets: [],
+        tier: null,
         notes: null,
       },
       contact: null,
@@ -606,6 +610,59 @@ describe('company phones', () => {
   });
 });
 
+describe('markets and tier', () => {
+  it('are read from Market and Tier columns, each market once in a fixed order', () => {
+    expect(
+      ok({
+        legalName: 'Synthetic Feeds',
+        country: 'CA',
+        markets: 'Birds; small animals, PET / Aquatic and horse; Pet',
+        tier: 'tier b',
+      }).counterparty,
+    ).toMatchObject({ markets: ['pet', 'bird', 'equine', 'small_animal', 'aqua'], tier: 'B' });
+    expect(suggestMapping(['Company', 'Country', 'Type', 'Market', 'Tier'])).toMatchObject({
+      types: 'Type',
+      markets: 'Market',
+      tier: 'Tier',
+    });
+  });
+
+  it('refuses names off the list and tiers other than A, B or C', () => {
+    expect(
+      issues({ legalName: 'Synthetic Feeds', country: 'CA', markets: 'Pet; Cattle', tier: 'D' }),
+    ).toEqual([
+      'markets: "Cattle" must be Pet, Bird, Equine, Specialty, Small Animal, Exotic, Wildlife, Aqua',
+      'tier: "D" must be A, B or C',
+    ]);
+  });
+
+  it('are part of the company’s details, so edited under Edit details', () => {
+    expect(
+      parseCounterpartyFields({
+        legalName: 'Synthetic Feeds',
+        country: 'CA',
+        types: 'buyer',
+        markets: 'wildlife,exotic',
+        tier: 'c',
+      }),
+    ).toMatchObject({ status: 'ok', value: { markets: ['exotic', 'wildlife'], tier: 'C' } });
+  });
+});
+
+describe('a Grains column', () => {
+  it('fills what a buyer buys, like a Commodities column', () => {
+    const mapping = suggestMapping(['Company', 'Country', 'Grains']);
+    expect(mapping).toMatchObject({ commodities: 'Grains' });
+    expect(suggestMapping(['Company', 'Country', 'Grain'])).toMatchObject({ commodities: 'Grain' });
+    expect(
+      ok({ legalName: 'Synthetic Feeds', country: 'CA', commodities: 'Oats, canola' }).commodities,
+    ).toEqual([
+      { commodity: 'canola', direction: 'buys' },
+      { commodity: 'oats', direction: 'buys' },
+    ]);
+  });
+});
+
 describe('rail and truck access', () => {
   it('is sent beside a location’s form values, never as a spreadsheet field', () => {
     expect(
@@ -702,6 +759,8 @@ describe('edit forms', () => {
         verificationStatus: 'unverified',
         website: null,
         phone: null,
+        markets: [],
+        tier: null,
         notes: null,
       },
     });

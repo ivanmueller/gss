@@ -36,6 +36,8 @@ const DETAIL: CounterpartyDetail = {
   archivedAt: null,
   buys: [],
   sells: [],
+  markets: [],
+  tier: null,
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [
     {

@@ -25,6 +25,8 @@ const CARRIER: CounterpartySummary = {
   archivedAt: null,
   buys: [],
   sells: [],
+  markets: [],
+  tier: null,
 };
 const OLD_CARRIER = {
   ...CARRIER,

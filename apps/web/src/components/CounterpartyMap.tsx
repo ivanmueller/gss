@@ -1,10 +1,17 @@
-import { formatBbox, type Bbox, type CounterpartyType } from '@grain/domain';
+import { formatBbox, type Bbox } from '@grain/domain';
 import { TriangleAlert } from 'lucide-react';
 import { lazy, Suspense, useMemo, useState } from 'react';
 
 import type { MapFacilities, MapFacility } from '../lib/api';
-import { canEditDirectory, countryName, facilityTypeLabel, typeLabel } from '../lib/directory';
-import { BASEMAPS, facilityPin, mapboxToken, type Basemap, type MapboxToken } from '../lib/mapbox';
+import { countryName, facilityTypeLabel, typeLabel } from '../lib/directory';
+import {
+  BASEMAPS,
+  facilityPin,
+  mapboxToken,
+  pinBounds,
+  type Basemap,
+  type MapboxToken,
+} from '../lib/mapbox';
 import { Link } from '../lib/router';
 import { useTheme } from '../lib/theme';
 import { useApiResource } from '../lib/useApiResource';
@@ -18,12 +25,6 @@ import { SegmentedControl } from './ui/segmented-control';
 const FacilityMap = lazy(() => import('./FacilityMap'));
 
 const WORLD: Bbox = { west: -180, south: -90, east: 180, north: 90 };
-/** Locations listed under the map; the map itself shows them all. */
-const LIST_LIMIT = 200;
-
-function count(n: number, one: string, many: string): string {
-  return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
-}
 
 function place(facility: MapFacility): string {
   return [facility.city, facility.region, countryName(facility.country)]
@@ -87,75 +88,74 @@ function SetupNote({ token }: { token: Exclude<MapboxToken['status'], 'ok'> | 'r
   }[token];
   return (
     <Callout variant="warning" icon={TriangleAlert}>
-      <p>{text} The locations are listed below.</p>
+      <p>{text}</p>
     </Callout>
   );
 }
 
 /**
- * The Counterparties page's map view: the organization's counterparty locations on a Mapbox
- * map, with a list. `type` shows only buyers' or sellers' locations; `only` (counterparty ids)
- * narrows it to the counterparties a search found. Archived counterparties are never shown.
+ * The Counterparties page's map view: every located place of the counterparties the page's
+ * filters leave (`only`, counterparty ids), whatever part of the map is in view, and the
+ * map fitted to them (owner's request, 2026-10-30: no count and no list under the map).
+ * Archived counterparties are never shown.
  */
 export function CounterpartyMap({
   session,
-  type,
   only,
   mapbox = mapboxToken(),
 }: {
   session: DirectorySession;
-  type: CounterpartyType | null;
-  only: ReadonlySet<string> | null;
+  only: ReadonlySet<string>;
   mapbox?: MapboxToken;
 }) {
   const { token, organization } = session;
   const [refused, setRefused] = useState(false);
-  const showMap = mapbox.status === 'ok' && !refused;
-  const [view, setView] = useState<Bbox | null>(null);
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Without a map, list every location of the organization.
-  const box = showMap ? view : WORLD;
+  // Every located place at once; the filters only choose which are shown.
   const [result] = useApiResource<MapFacilities>(
-    box
-      ? `/facilities?organization_id=${organization.id}&bbox=${formatBbox(box)}${type ? `&type=${type}` : ''}`
+    mapbox.status === 'ok' && !refused
+      ? `/facilities?organization_id=${organization.id}&bbox=${formatBbox(WORLD)}`
       : null,
     token,
-    { keepPrevious: true },
   );
   const data = result.status === 'ok' ? result.data : null;
   const facilities = useMemo(
-    () =>
-      (data?.facilities ?? []).filter(
-        (facility) => only === null || only.has(facility.counterpartyId),
-      ),
+    () => (data?.facilities ?? []).filter((facility) => only.has(facility.counterpartyId)),
     [data, only],
   );
   const selected = facilities.find((facility) => facility.id === selectedId) ?? null;
   const pins = useMemo(() => facilities.map(facilityPin), [facilities]);
+  const bounds = pinBounds(pins);
+
+  if (mapbox.status !== 'ok') return <SetupNote token={mapbox.status} />;
+  if (refused) return <SetupNote token="refused" />;
 
   return (
     <div className="flex flex-col gap-4">
-      {mapbox.status !== 'ok' && <SetupNote token={mapbox.status} />}
-      {mapbox.status === 'ok' && refused && <SetupNote token="refused" />}
-
-      {showMap && (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Legend />
-            <SegmentedControl
-              label="Map style"
-              options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
-                value: key,
-                label: BASEMAPS[key].label,
-              }))}
-              value={basemap}
-              onChange={setBasemap}
-            />
-          </div>
-          <div className="h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Legend />
+          <SegmentedControl
+            label="Map style"
+            options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
+              value: key,
+              label: BASEMAPS[key].label,
+            }))}
+            value={basemap}
+            onChange={setBasemap}
+          />
+        </div>
+        <div className="h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]">
+          {result.status === 'error' ? (
+            <p role="alert" className="p-4 text-sm text-danger">
+              The locations could not be loaded: {result.error.message}
+            </p>
+          ) : data === null ? (
+            <p className="p-4 text-sm text-muted-foreground">Loading map…</p>
+          ) : (
             <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Loading map…</p>}>
               <FacilityMap
                 token={mapbox.token}
@@ -163,18 +163,17 @@ export function CounterpartyMap({
                 theme={theme}
                 pins={pins}
                 selectedId={selectedId}
-                onViewChange={(bbox) => {
-                  if (bbox) setView(bbox);
-                }}
+                {...(bounds && { start: bounds, startMaxZoom: 12 })}
+                fitTo={bounds}
                 onSelect={setSelectedId}
                 onTokenRefused={() => {
                   setRefused(true);
                 }}
               />
             </Suspense>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {selected && (
         <Card asChild>
@@ -193,58 +192,6 @@ export function CounterpartyMap({
               {selected.longitude}
             </span>
           </section>
-        </Card>
-      )}
-
-      <p role="status" className="text-sm">
-        {result.status === 'error' && `The locations could not be loaded: ${result.error.message}`}
-        {result.status === 'loading' && box && 'Loading locations…'}
-        {data && (
-          <>
-            {showMap
-              ? `${count(facilities.length, 'location', 'locations')} in view.`
-              : `${count(facilities.length, 'location has', 'locations have')} coordinates.`}
-            {data.truncated &&
-              ` Only the first ${count(data.facilities.length, 'is', 'are')} shown; zoom in to see the rest.`}
-            {data.withoutCoordinates > 0 &&
-              ` ${count(data.withoutCoordinates, 'location has', 'locations have')} no coordinates yet, so ${data.withoutCoordinates === 1 ? 'it is' : 'they are'} not on the map${canEditDirectory(organization.role) ? ': use Find coordinates on the counterparty’s page' : ''}.`}
-          </>
-        )}
-      </p>
-
-      {facilities.length > 0 && (
-        <Card asChild>
-          <ul
-            aria-label={showMap ? 'Locations in view' : 'Locations'}
-            className="divide-y overflow-hidden"
-          >
-            {facilities.slice(0, LIST_LIMIT).map((facility) => (
-              <li
-                key={facility.id}
-                className={cn(
-                  'flex flex-col gap-0.5 px-4 py-2.5 text-sm',
-                  facility.id === selectedId && 'bg-accent',
-                )}
-              >
-                <Link
-                  href={`/counterparties/${facility.counterpartyId}`}
-                  className="w-fit rounded-xs font-medium underline-offset-4 hover:underline"
-                >
-                  {facility.legalName}
-                </Link>
-                <span className="text-xs text-muted-foreground">
-                  {whose(facility)} · {facilityLabel(facility)} · {place(facility)} ·{' '}
-                  <PrecisionNote precision={facility.locationPrecision} />
-                </span>
-              </li>
-            ))}
-            {facilities.length > LIST_LIMIT && (
-              <li className="px-4 py-2 text-sm text-muted-foreground">
-                And {count(facilities.length - LIST_LIMIT, 'more', 'more')}
-                {showMap ? '; zoom in to narrow the list.' : '.'}
-              </li>
-            )}
-          </ul>
         </Card>
       )}
     </div>

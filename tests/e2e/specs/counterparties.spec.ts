@@ -5,10 +5,10 @@ import { OTHER_ORG } from './supabase';
 
 // Synthetic, fictional companies only.
 const CSV = [
-  'Company Name,Country,Contact,E-mail,City,Prov,Commodities',
-  'Synthetic Mills,Canada,Ana Synthetic,ana@example.test,Alpha,SK,Canola',
-  'Synthetic Mills,Canada,,,Beta,Manitoba,',
-  'Synthetic Buyer LLC,USA,,,Gamma,ND,',
+  'Company Name,Country,Contact,E-mail,City,Prov,Grains,Market,Tier',
+  'Synthetic Mills,Canada,Ana Synthetic,ana@example.test,Alpha,SK,Canola,Pet; Bird,A',
+  'Synthetic Mills,Canada,,,Beta,Manitoba,,,',
+  'Synthetic Buyer LLC,USA,,,Gamma,ND,,,',
   '',
 ].join('\n');
 
@@ -17,6 +17,15 @@ const PNG = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63d0ab35fa0f00039701ddcce659270000000049454e44ae426082',
   'hex',
 );
+
+/** Opens a filter picker, ticks its items, and closes it (it stays open while choosing). */
+async function pick(page: Page, button: RegExp, ...ticked: string[]) {
+  await page.getByRole('button', { name: button }).click();
+  for (const item of ticked) {
+    await page.getByRole('menuitemcheckbox', { name: item }).click();
+  }
+  await page.keyboard.press('Escape');
+}
 
 function csvFile(name: string) {
   return { name, mimeType: 'text/csv', buffer: Buffer.from(CSV) };
@@ -29,10 +38,13 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await page.goto('/counterparties');
   await expect(page.getByText('No counterparties yet.')).toBeVisible();
 
-  // Imported in the + button's window (owner's request, 2026-10-30).
+  // The + button asks how, then the import's window rises in (owner's request, 2026-10-30).
   await page.getByRole('button', { name: 'Add counterparties' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Add counterparties' });
-  await dialog.getByRole('tab', { name: 'Import spreadsheet' }).click();
+  await page
+    .getByRole('dialog', { name: 'Add counterparties' })
+    .getByRole('button', { name: /^Import spreadsheet/ })
+    .click();
+  const dialog = page.getByRole('dialog', { name: 'Import counterparties' });
   await dialog.getByLabel('Choose CSV file').setInputFiles(csvFile('synthetic-buyers.csv'));
   await expect(dialog.getByLabel('Legal name (required)')).toContainText('Company Name');
   await dialog.getByRole('button', { name: 'Review import' }).click();
@@ -56,6 +68,9 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
 
   await table.getByRole('link', { name: 'Synthetic Mills' }).click();
   await expect(page.getByRole('heading', { name: 'Synthetic Mills' })).toBeVisible();
+  // From the spreadsheet's Market and Tier columns.
+  await expect(page.getByText('Tier A')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Markets' })).toHaveText('PetBird');
   await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
     'ana@example.test',
   );
@@ -112,11 +127,8 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await page.getByRole('tab', { name: 'Map' }).click();
   await expect(page).toHaveURL(/\/counterparties\?view=map$/);
   await expect(page.getByText(/The map is not set up yet/)).toBeVisible();
-  await expect(
-    page.getByText(
-      '0 locations have coordinates. 3 locations have no coordinates yet, so they are not on the map: use Find coordinates on the counterparty’s page.',
-    ),
-  ).toBeVisible();
+  // No count and no list under the map (owner's request, 2026-10-30).
+  await expect(page.getByText(/no coordinates yet/)).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });
@@ -127,11 +139,18 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
 
   await page.goto('/counterparties');
   await page.getByRole('button', { name: 'Add counterparties' }).click();
-  // The window opens on Add one.
-  const dialog = page.getByRole('dialog', { name: 'Add counterparties' });
+  await page
+    .getByRole('dialog', { name: 'Add counterparties' })
+    .getByRole('button', { name: /^Add by hand/ })
+    .click();
+  const dialog = page.getByRole('dialog', { name: 'Add a counterparty' });
   const company = dialog.getByRole('region', { name: 'Company' });
-  await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
+  // Type first, then the name; no trading name (owner's request, 2026-10-30).
   await company.getByRole('checkbox', { name: 'Seller' }).check();
+  await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
+  await expect(company.getByLabel('Trading name')).toHaveCount(0);
+  await company.getByRole('checkbox', { name: 'Equine' }).check();
+  await choose(company.getByLabel('Tier'), 'Tier B');
   await choose(company.getByLabel('Country (required)'), 'Canada');
   await company.getByLabel('Company phone').fill('306 555 0100 ext. 7');
   await dialog.getByRole('region', { name: 'Contact' }).getByLabel('Name').fill('Synthetic Farmer');
@@ -152,6 +171,8 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await expect(page.getByRole('region', { name: 'Locations (1)' })).toContainText(
     'Served by rail and truck',
   );
+  await expect(page.getByText('Tier B')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Markets' })).toHaveText('Equine');
   await expect(page.getByText('Entered by hand')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
     'Synthetic Farmer',
@@ -161,10 +182,11 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await page.getByRole('button', { name: 'More actions' }).click();
   await page.getByRole('menuitem', { name: 'Edit details' }).click();
   const details = page.getByRole('form', { name: 'Edit details' });
-  await details.getByLabel('Trading name').fill('Hand Grower');
+  await details.getByRole('checkbox', { name: 'Wildlife' }).check();
   await details.getByLabel('Website').fill('Example.com/');
   await page.getByRole('button', { name: 'Save details' }).click();
-  await expect(page.getByText('Trading as Hand Grower')).toBeVisible();
+  await expect(page.getByText('Details saved.')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Markets' })).toHaveText('EquineWildlife');
   // Saved as https://example.com and opened in a new tab; there is no preview.
   const website = page.getByRole('link', { name: 'example.com (opens in a new tab)' });
   await expect(website).toHaveAttribute('href', 'https://example.com');
@@ -213,12 +235,21 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   const table = page.getByRole('table', { name: 'Counterparties' });
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
   await expect(table.getByRole('link', { name: 'Synthetic Mills' })).toHaveCount(0);
-  // Sellers of oats, then of a commodity it does not sell.
-  await choose(page.getByRole('combobox', { name: 'Commodity' }), 'Oats');
+  // Sellers of oats, then of a commodity it does not sell (several can be chosen).
+  await pick(page, /^Commodities:/, 'All commodities', 'Oats');
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
-  await choose(page.getByRole('combobox', { name: 'Commodity' }), 'Rye');
+  await pick(page, /^Commodities:/, 'Oats', 'Rye');
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
-  await choose(page.getByRole('combobox', { name: 'Commodity' }), 'All commodities');
+  await pick(page, /^Commodities:/, 'All commodities');
+  // Its markets and tier narrow the list too.
+  await pick(page, /^Tier:/, 'All tiers', 'Tier A');
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
+  await pick(page, /^Tier:/, 'Tier B');
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
+  await pick(page, /^Tier:/, 'All tiers');
+  await pick(page, /^Market:/, 'All markets', 'Wildlife');
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
+  await pick(page, /^Market:/, 'All markets');
 
   // Archive: off the list until shown, then restored.
   await table.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
@@ -494,7 +525,13 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   // A carrier is a counterparty like any other, marked as a carrier; no location needed.
   await page.goto('/counterparties');
   await page.getByRole('button', { name: 'Add counterparties' }).click();
-  const company = page.getByRole('dialog').getByRole('region', { name: 'Company' });
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /^Add by hand/ })
+    .click();
+  const company = page
+    .getByRole('dialog', { name: 'Add a counterparty' })
+    .getByRole('region', { name: 'Company' });
   await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
   await company.getByRole('checkbox', { name: 'Carrier' }).check();
   await choose(company.getByLabel('Country (required)'), 'Canada');

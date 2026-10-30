@@ -2,10 +2,10 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { COMMODITIES, MARKETS } from '@grain/domain';
 import type { CounterpartySummary } from '../lib/api';
 import { mockApi, ORG, SESSION } from '../test/api';
-import { choose } from '../test/select';
-import { CounterpartiesPage, tradesCommodity } from './CounterpartiesPage';
+import { CounterpartiesPage, inTier, servesMarket, tradesCommodity } from './CounterpartiesPage';
 
 function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
   return {
@@ -25,6 +25,8 @@ function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
     archivedAt: null,
     buys: [],
     sells: [],
+    markets: [],
+    tier: null,
     ...overrides,
   };
 }
@@ -58,7 +60,7 @@ describe('CounterpartiesPage', () => {
     window.history.replaceState(null, '', '/counterparties?view=table');
     const calls = mockApi({
       [LIST]: () => Response.json({ counterparties: items, truncated: false }),
-      [`GET /counterparties/${items[1]?.id ?? ''}/logo`]: () =>
+      [`GET /counterparties/${items[1]?.id ?? ''}/logo?v=${'a'.repeat(64)}`]: () =>
         new Response(new Uint8Array([1, 2, 3])),
     });
     render(<CounterpartiesPage session={SESSION} />);
@@ -109,8 +111,10 @@ describe('CounterpartiesPage', () => {
     expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Logos', 'Table', 'Map']);
     expect(tabs.map((tab) => tab.getAttribute('title'))).toEqual(['Logos', 'Table', 'Map']);
     expect(tabs.map((tab) => tab.textContent)).toEqual(['', '', '']);
-    // The commodity comes before All / Buyers / Sellers / Carriers.
-    const commodity = screen.getByRole('combobox', { name: 'Commodity' });
+    // The commodity, market and tier come before All / Buyers / Sellers / Carriers.
+    const commodity = screen.getByRole('button', { name: 'Commodities: All' });
+    expect(screen.getByRole('button', { name: 'Market: All' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tier: All' })).toBeInTheDocument();
     const show = screen.getByRole('group', { name: 'Show' });
     expect(commodity.compareDocumentPosition(show) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Logos', selected: true })).toBeInTheDocument();
@@ -133,17 +137,28 @@ describe('CounterpartiesPage', () => {
     expect(dialog).toHaveAccessibleDescription(
       'Add one company yourself, or many at once from a spreadsheet.',
     );
-    // Adding happens in the window itself: one by hand, or a spreadsheet.
-    expect(within(dialog).getByRole('tab', { name: 'Add one' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    // First the choice; then the chosen window replaces it (owner's request, 2026-10-30).
+    const ways = within(dialog).getByRole('navigation', { name: 'Ways to add' });
+    await userEvent.click(within(ways).getByRole('button', { name: /^Add by hand/ }));
+    const form = screen.getByRole('dialog', { name: 'Add a counterparty' });
+    expect(form).toHaveClass('animate-dialog-in');
+    expect(within(form).getByRole('form', { name: 'Add one counterparty' })).toBeInTheDocument();
+    // Back to the choice, then the spreadsheet.
+    await userEvent.click(within(form).getByRole('button', { name: 'Ways to add' }));
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Add counterparties' })).getByRole('button', {
+        name: /^Import spreadsheet/,
+      }),
     );
-    expect(within(dialog).getByRole('form', { name: 'Add one counterparty' })).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole('tab', { name: 'Import spreadsheet' }));
-    expect(within(dialog).getByLabelText('Choose CSV file')).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    const importer = screen.getByRole('dialog', { name: 'Import counterparties' });
+    expect(within(importer).getByLabelText('Choose CSV file')).toBeInTheDocument();
+    await userEvent.click(within(importer).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add counterparties' })).toHaveFocus();
+    // Opened again, it starts on the choice.
+    await userEvent.click(screen.getByRole('button', { name: 'Add counterparties' }));
+    expect(screen.getByRole('dialog', { name: 'Add counterparties' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
     unmount();
 
     render(
@@ -159,11 +174,8 @@ describe('CounterpartiesPage', () => {
     mockApi({ [LIST]: () => Response.json({ counterparties: [], truncated: false }) });
     window.history.replaceState(null, '', '/counterparties?add=import');
     render(<CounterpartiesPage session={SESSION} />);
-    const dialog = await screen.findByRole('dialog', { name: 'Add counterparties' });
-    expect(within(dialog).getByRole('tab', { name: 'Import spreadsheet' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    const dialog = await screen.findByRole('dialog', { name: 'Import counterparties' });
+    expect(within(dialog).getByLabelText('Choose CSV file')).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(window.location.search).toBe('');
@@ -224,6 +236,8 @@ describe('CounterpartiesPage', () => {
       legalName: 'Synthetic Pea Grower',
       types: ['seller'],
       sells: ['yellow_peas'],
+      markets: [],
+      tier: null,
     });
     const oatBroker = summary({
       id: '00000000-0000-4000-8000-00000000c004',
@@ -231,6 +245,8 @@ describe('CounterpartiesPage', () => {
       types: ['broker'],
       buys: ['oats'],
       sells: ['canola'],
+      markets: [],
+      tier: null,
     });
     mockApi({
       [LIST]: () =>
@@ -239,7 +255,8 @@ describe('CounterpartiesPage', () => {
     window.history.replaceState(null, '', '/counterparties?view=table');
     render(<CounterpartiesPage session={SESSION} />);
 
-    await choose(await screen.findByRole('combobox', { name: 'Commodity' }), 'Yellow peas');
+    // Like the workspace's picker: from All, one is chosen by choosing none, then it.
+    await pick('Commodities: All', 'All commodities', 'Yellow peas');
     expect(window.location.search).toBe('?view=table&commodity=yellow_peas');
     expect(screen.getByText('2 of 3 shown')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Synthetic Oat Broker' })).toBeNull();
@@ -251,21 +268,70 @@ describe('CounterpartiesPage', () => {
     expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Synthetic Pea Buyer' })).toBeInTheDocument();
 
-    // Canola: the buyer buys it; the broker sells it, so among buyers only the buyer.
-    await choose(screen.getByRole('combobox', { name: 'Commodity' }), 'Canola');
-    expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
-    await choose(screen.getByRole('combobox', { name: 'Commodity' }), 'All commodities');
-    expect(window.location.search).toBe('?view=table&type=buyer');
+    // Several at once: yellow peas or oats, among all.
+    await pick('Commodities: Yellow peas', 'Oats');
+    expect(decodeURIComponent(window.location.search)).toBe(
+      '?view=table&commodity=yellow_peas,oats&type=buyer',
+    );
+    await userEvent.click(
+      within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'All' }),
+    );
+    expect(screen.getByText('3 of 3 shown')).toBeInTheDocument();
+    await pick(/^Commodities:/, 'All commodities');
+    expect(window.location.search).toBe('?view=table');
   });
 
-  it('decides who trades a commodity by the buyers or sellers chosen', () => {
+  it('narrows by market and tier, several at once, kept in the address', async () => {
+    const petA = summary({ legalName: 'Synthetic Pet Feeds', markets: ['pet', 'bird'], tier: 'A' });
+    const equineB = summary({
+      id: '00000000-0000-4000-8000-00000000c005',
+      legalName: 'Synthetic Stables',
+      markets: ['equine'],
+      tier: 'B',
+    });
+    const none = summary({
+      id: '00000000-0000-4000-8000-00000000c006',
+      legalName: 'Synthetic Other',
+    });
+    mockApi({
+      [LIST]: () => Response.json({ counterparties: [petA, equineB, none], truncated: false }),
+    });
+    window.history.replaceState(null, '', '/counterparties?view=table&market=bird,equine&tier=A');
+    render(<CounterpartiesPage session={SESSION} />);
+    expect(await screen.findByText('1 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Pet Feeds' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Market: Bird, Equine' })).toBeInTheDocument();
+    await pick('Tier: Tier A', 'Tier B');
+    expect(decodeURIComponent(window.location.search)).toBe(
+      '?view=table&market=bird,equine&tier=A,B',
+    );
+    expect(screen.getByText('2 of 3 shown')).toBeInTheDocument();
+    await pick(/^Market:/, 'All markets');
+    await pick(/^Tier:/, 'All tiers');
+    expect(window.location.search).toBe('?view=table');
+    expect(screen.getByText('3 of 3 shown')).toBeInTheDocument();
+  });
+
+  it('decides who trades the chosen commodities by the buyers or sellers chosen', () => {
     const both = { buys: ['canola'], sells: ['oats'] };
-    expect(tradesCommodity(both, null, 'all')).toBe(true);
-    expect(tradesCommodity(both, 'canola', 'all')).toBe(true);
-    expect(tradesCommodity(both, 'oats', 'all')).toBe(true);
-    expect(tradesCommodity(both, 'oats', 'buyer')).toBe(false);
-    expect(tradesCommodity(both, 'oats', 'seller')).toBe(true);
-    expect(tradesCommodity(both, 'rye', 'all')).toBe(false);
+    const every = COMMODITIES.map((item) => item.code);
+    expect(tradesCommodity(both, every, 'all')).toBe(true);
+    expect(tradesCommodity({ buys: [], sells: [] }, every, 'all')).toBe(true);
+    expect(tradesCommodity(both, ['canola'], 'all')).toBe(true);
+    expect(tradesCommodity(both, ['oats'], 'all')).toBe(true);
+    expect(tradesCommodity(both, ['oats'], 'buyer')).toBe(false);
+    expect(tradesCommodity(both, ['rye', 'oats'], 'seller')).toBe(true);
+    expect(tradesCommodity(both, ['rye'], 'all')).toBe(false);
+    expect(tradesCommodity(both, [], 'all')).toBe(false);
+  });
+
+  it('decides markets and tiers: all of them shows everyone, those unset too', () => {
+    expect(servesMarket({ markets: [] }, [...MARKETS])).toBe(true);
+    expect(servesMarket({ markets: [] }, ['pet'])).toBe(false);
+    expect(servesMarket({ markets: ['bird', 'aqua'] }, ['aqua'])).toBe(true);
+    expect(inTier({ tier: null }, ['A', 'B', 'C'])).toBe(true);
+    expect(inTier({ tier: null }, ['A'])).toBe(false);
+    expect(inTier({ tier: 'C' }, ['B', 'C'])).toBe(true);
   });
 
   it('leaves archived counterparties out unless asked', async () => {
@@ -287,20 +353,15 @@ describe('CounterpartiesPage', () => {
     expect(row).toHaveTextContent('Archived');
   });
 
-  it('shows the locations on the map view, which the address can open directly', async () => {
-    const world = `GET /facilities?organization_id=${ORG.id}&bbox=-180.000000,-90.000000,180.000000,90.000000`;
-    const calls = mockApi({
-      [LIST]: () => Response.json({ counterparties: items, truncated: false }),
-      [`${world}&type=buyer`]: () =>
-        Response.json({ facilities: [], truncated: false, withoutCoordinates: 2 }),
-    });
+  it('opens the map view from the address, and keeps the filters when changing view', async () => {
+    mockApi({ [LIST]: () => Response.json({ counterparties: items, truncated: false }) });
     window.history.replaceState(null, '', '/counterparties?view=map&type=buyer');
     render(<CounterpartiesPage session={SESSION} />);
 
     expect(await screen.findByRole('tab', { name: 'Map', selected: true })).toBeInTheDocument();
-    // Tests build without a Mapbox token, so the view lists the locations instead.
-    expect(await screen.findByText(/2 locations have no coordinates yet/)).toBeInTheDocument();
-    expect(calls.some((call) => call.path.endsWith('&type=buyer'))).toBe(true);
+    // Tests build without a Mapbox token: the view says so, with no count and no list.
+    expect(screen.getByText(/The map is not set up yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/no coordinates yet/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('tab', { name: 'Table' }));
     expect(window.location.search).toBe('?view=table&type=buyer');
@@ -310,3 +371,15 @@ describe('CounterpartiesPage', () => {
     expect(window.location.search).toBe('?type=buyer');
   });
 });
+
+/**
+ * Opens a picker, ticks its items, and closes it with Escape: as in the workspace, the menu
+ * stays open while several are chosen.
+ */
+async function pick(button: string | RegExp, ...ticked: string[]) {
+  await userEvent.click(await screen.findByRole('button', { name: button }));
+  for (const item of ticked) {
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: item }));
+  }
+  await userEvent.keyboard('{Escape}');
+}

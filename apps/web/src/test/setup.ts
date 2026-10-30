@@ -2,6 +2,8 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
+import { clearApiCache } from '../lib/useApiResource';
+
 // jsdom has no ResizeObserver; Radix menus measure their trigger with it.
 if (!('ResizeObserver' in window)) {
   Object.defineProperty(window, 'ResizeObserver', {
@@ -33,4 +35,6 @@ for (const name of ['hasPointerCapture', 'releasePointerCapture', 'scrollIntoVie
 
 afterEach(() => {
   cleanup();
+  // Each test starts with no kept API answers (lib/useApiResource.ts).
+  clearApiCache();
 });

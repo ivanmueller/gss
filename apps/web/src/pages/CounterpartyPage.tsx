@@ -5,8 +5,10 @@ import {
   parseContactFields,
   parseCounterpartyFields,
   parseFacilityFields,
+  MARKET_LABELS,
   TRANSPORT_ACCESS_LABELS,
   type FieldIssue,
+  type Market,
   type TransportAccess,
 } from '@grain/domain';
 import {
@@ -15,9 +17,11 @@ import {
   CalendarPlus,
   Ellipsis,
   ImageUp,
+  Layers,
   Mail,
   MapPin,
   MessageSquarePlus,
+  PawPrint,
   Pencil,
   Phone,
   Plus,
@@ -196,6 +200,8 @@ function companyValues(detail: CounterpartyDetail): FormValues {
     verificationStatus: detail.verificationStatus,
     website: detail.website ?? '',
     companyPhone: detail.phone ?? '',
+    markets: detail.markets.join(','),
+    tier: detail.tier ?? '',
     notes: detail.notes ?? '',
   };
 }
@@ -549,9 +555,6 @@ function CounterpartyView({
       <h1 id="counterparty-heading" className="text-2xl font-semibold tracking-tight">
         {detail.legalName}
       </h1>
-      {detail.tradingName && (
-        <p className="text-sm text-muted-foreground">Trading as {detail.tradingName}</p>
-      )}
     </>
   );
 
@@ -567,6 +570,7 @@ function CounterpartyView({
       />
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {name}
+        <MarketsAndTier detail={detail} />
         <WebsiteAndPhone detail={detail} />
         <div className="flex flex-wrap gap-1.5">
           <VerificationBadge status={detail.verificationStatus} />
@@ -630,6 +634,7 @@ function CounterpartyView({
             {archived && <Badge>Archived</Badge>}
             <span className="text-muted-foreground">{places.join(' · ')}</span>
           </div>
+          <MarketsAndTier detail={detail} />
           <WebsiteAndPhone detail={detail} />
           {logo}
         </div>
@@ -1371,5 +1376,32 @@ function AccessBadges({ access }: { access: TransportAccess }) {
         </Badge>
       )}
     </span>
+  );
+}
+
+/** The markets it serves and its tier, under its name; nothing when neither is set. */
+function MarketsAndTier({ detail }: { detail: CounterpartyDetail }) {
+  if (detail.markets.length === 0 && detail.tier === null) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
+      {detail.tier && (
+        <Badge variant="outline" title="Tier">
+          <Layers aria-hidden="true" />
+          Tier {detail.tier}
+        </Badge>
+      )}
+      {detail.markets.length > 0 && (
+        <ul aria-label="Markets" className="flex flex-wrap gap-1.5">
+          {detail.markets.map((market) => (
+            <li key={market}>
+              <Badge variant="neutral">
+                <PawPrint aria-hidden="true" />
+                {MARKET_LABELS[market as Market]}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

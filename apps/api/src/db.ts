@@ -56,6 +56,9 @@ export interface CounterpartySummary {
   /** The commodities it buys and sells (codes), in the commodity list's order. */
   buys: string[];
   sells: string[];
+  /** The markets it serves (pet, bird, …) and its tier (A, B, C or null). */
+  markets: string[];
+  tier: string | null;
 }
 
 export interface Contact extends ContactInput {
@@ -368,6 +371,8 @@ interface SummaryRow {
   archived_at: Date | null;
   buys: string[];
   sells: string[];
+  markets: string[];
+  tier: string | null;
 }
 
 function summary(row: SummaryRow): CounterpartySummary {
@@ -388,6 +393,8 @@ function summary(row: SummaryRow): CounterpartySummary {
     archivedAt: row.archived_at?.toISOString() ?? null,
     buys: row.buys,
     sells: row.sells,
+    markets: row.markets,
+    tier: row.tier,
   };
 }
 
@@ -550,7 +557,8 @@ export function createDatabase(sql: postgres.Sql): Database {
     to_jsonb(array(select k.commodity_code from app.counterparty_commodities k
                    join app.commodities m on m.code = k.commodity_code
                    where k.counterparty_id = c.id and k.direction = 'sells'
-                   order by m.sort_order)) as sells
+                   order by m.sort_order)) as sells,
+    to_jsonb(c.markets) as markets, c.tier
   `;
 
   return {
@@ -822,6 +830,8 @@ export function createDatabase(sql: postgres.Sql): Database {
             verification_status: c.verificationStatus,
             website: c.website,
             phone: c.phone,
+            markets: `{${c.markets.join(',')}}`,
+            tier: c.tier,
             notes: c.notes,
             source: 'file_import',
             import_batch_id: batchId,
@@ -981,10 +991,11 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.counterparties
             (organization_id, legal_name, trading_name, types, primary_country,
-             verification_status, website, phone, notes, source, created_by)
+             verification_status, website, phone, markets, tier, notes, source, created_by)
           values (${organizationId}, ${c.legalName}, ${c.tradingName},
                   ${enumArray(c.types)}::app.counterparty_type[], ${c.primaryCountry},
                   ${c.verificationStatus}::app.verification_status, ${c.website}, ${c.phone},
+                  ${`{${c.markets.join(',')}}`}::text[], ${c.tier},
                   ${c.notes}, 'manual', app.current_user_id())
           returning id
         `;
@@ -1018,7 +1029,9 @@ export function createDatabase(sql: postgres.Sql): Database {
               types = ${enumArray(input.types)}::app.counterparty_type[],
               primary_country = ${input.primaryCountry},
               verification_status = ${input.verificationStatus}::app.verification_status,
-              website = ${input.website}, phone = ${input.phone}, notes = ${input.notes}
+              website = ${input.website}, phone = ${input.phone},
+              markets = ${`{${input.markets.join(',')}}`}::text[], tier = ${input.tier},
+              notes = ${input.notes}
           where id = ${id} and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
           returning id
         `;

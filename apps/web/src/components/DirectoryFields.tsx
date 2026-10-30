@@ -3,8 +3,11 @@ import {
   COUNTRY_NAMES,
   FACILITY_TYPE_LABELS,
   normalizeCountry,
+  MARKET_LABELS,
+  MARKETS,
   REGIONS,
   SUPPORTED_COUNTRIES,
+  TIERS,
   TRANSPORT_ACCESS_LABELS,
   type FieldIssue,
   type ImportFieldId,
@@ -199,8 +202,8 @@ function CountrySelect({
 }
 
 /**
- * A counterparty's own details: names, buyer/seller, country, verification, website, the
- * company phone and notes.
+ * A counterparty's own details: buyer/seller, its name, markets and tier, country,
+ * verification, website, the company phone and notes.
  */
 export function CompanyFields(props: FieldsProps) {
   const f = useFieldHelpers(props);
@@ -216,12 +219,16 @@ export function CompanyFields(props: FieldsProps) {
   const notesError = f.error('notes', 'Notes');
   const statusError = f.error('verificationStatus', 'Verification');
 
+  const markets = new Set(f.value('markets').split(',').filter(Boolean));
+  const marketsError = f.error('markets', 'Market');
+  const tierError = f.error('tier', 'Tier');
+
+  // Type first, then the name, then markets and tier (owner's request, 2026-10-30). The
+  // trading name is no longer asked for; one already saved stays in the values and is kept.
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <TextField field="legalName" label="Legal name" props={props} required />
-      <TextField field="tradingName" label="Trading name" props={props} />
       <fieldset
-        className="flex flex-col gap-1.5"
+        className="flex flex-col gap-1.5 sm:col-span-2"
         aria-describedby={typesError ? `${typesId}-error` : undefined}
       >
         <legend className="text-sm font-medium">
@@ -255,6 +262,59 @@ export function CompanyFields(props: FieldsProps) {
           </p>
         )}
       </fieldset>
+      <TextField
+        field="legalName"
+        label="Legal name"
+        props={props}
+        required
+        className="sm:col-span-2"
+      />
+      <fieldset
+        className="flex flex-col gap-1.5 sm:col-span-2"
+        aria-describedby={marketsError ? `${f.id('markets')}-error` : undefined}
+      >
+        <legend className="text-sm font-medium">
+          Market <span className="font-normal text-muted-foreground">(any that apply)</span>
+        </legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+          {MARKETS.map((market) => (
+            <label key={market} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={markets.has(market)}
+                disabled={props.disabled}
+                onChange={(event) => {
+                  const next = new Set(markets);
+                  if (event.target.checked) next.add(market);
+                  else next.delete(market);
+                  props.onChange({
+                    markets: MARKETS.filter((item) => next.has(item)).join(','),
+                  });
+                }}
+              />
+              {MARKET_LABELS[market]}
+            </label>
+          ))}
+        </div>
+        {marketsError && (
+          <p id={`${f.id('markets')}-error`} className="text-xs text-danger">
+            {marketsError}
+          </p>
+        )}
+      </fieldset>
+      <Field id={f.id('tier')} label="Tier" error={tierError}>
+        <Select
+          {...controlProps(f.id('tier'), tierError)}
+          value={f.value('tier')}
+          onValueChange={f.choose('tier')}
+          disabled={props.disabled}
+          options={[
+            { value: '', label: 'No tier' },
+            ...TIERS.map((tier) => ({ value: tier, label: `Tier ${tier}` })),
+          ]}
+        />
+      </Field>
       <CountrySelect field="country" label="Country" props={props} required />
       <Field id={f.id('verificationStatus')} label="Verification" error={statusError}>
         <Select

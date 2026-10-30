@@ -52,6 +52,8 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           verificationStatus: 'pending',
           website: 'https://www.example.com',
           phone: '+1 306 555 0100',
+          markets: ['pet', 'bird'],
+          tier: 'A',
           notes: 'Synthetic record.',
         },
         contacts: [
@@ -102,6 +104,8 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           verificationStatus: 'unverified',
           website: null,
           phone: null,
+          markets: [],
+          tier: null,
           notes: null,
         },
         contacts: [],
@@ -199,6 +203,8 @@ describe('the counterparty directory as app_api', () => {
       verificationStatus: 'pending',
       website: 'https://www.example.com',
       phone: '+1 306 555 0100',
+      markets: ['pet', 'bird'],
+      tier: 'A',
       notes: 'Synthetic record.',
       // Buys first, each in the commodity list's order, with its name; from a spreadsheet,
       // so unverified.

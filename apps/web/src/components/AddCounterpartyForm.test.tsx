@@ -71,6 +71,8 @@ describe('AddCounterpartyForm', () => {
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Seller' }));
     await choose(within(company).getByLabelText('Country (required)'), 'Canada');
     await userEvent.type(within(company).getByLabelText('Company phone'), '306 555 0100');
+    await userEvent.click(within(company).getByRole('checkbox', { name: 'Small Animal' }));
+    await choose(within(company).getByLabelText('Tier'), 'Tier A');
     await userEvent.type(within(section('Contact')).getByLabelText('Name'), 'Synthetic Grower');
     const location = section('Location');
     // The location's country follows the company's.
@@ -93,6 +95,8 @@ describe('AddCounterpartyForm', () => {
           country: 'CA',
           verificationStatus: 'unverified',
           companyPhone: '306 555 0100',
+          markets: 'small_animal',
+          tier: 'A',
           contactName: 'Synthetic Grower',
           facilityCountry: 'CA',
           city: 'Synthetic Town',
@@ -121,7 +125,8 @@ describe('AddCounterpartyForm', () => {
     ]);
     await userEvent.click(screen.getByRole('button', { name: 'Open Synthetic Farms' }));
     expect(window.location.pathname).toBe(`/counterparties/${CREATED}`);
-  });
+    // Many steps through a form and three requests: more than the default 5 seconds in a full run.
+  }, 15_000);
 
   it('opens the new counterparty straight away when it needs no coordinates', async () => {
     const calls = mockApi({

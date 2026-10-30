@@ -1,15 +1,24 @@
-import { COMMODITIES } from '@grain/domain';
-import { LayoutGrid, List, Map as MapIcon, Search, Table2, Wheat } from 'lucide-react';
+import { COMMODITIES, MARKET_LABELS, MARKETS, TIERS } from '@grain/domain';
+import {
+  Layers,
+  LayoutGrid,
+  List,
+  Map as MapIcon,
+  PawPrint,
+  Search,
+  Table2,
+  Wheat,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { ADD_TABS, AddCounterpartiesDialog } from '../components/AddCounterpartiesDialog';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyMap } from '../components/CounterpartyMap';
+import { MultiPicker } from '../components/MultiPicker';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { SegmentedControl } from '../components/ui/segmented-control';
-import { Select } from '../components/ui/select';
 import {
   Table,
   TableBody,
@@ -98,11 +107,6 @@ function CounterpartyTable({ items, token }: { items: CounterpartySummary[]; tok
                       {counterparty.legalName}
                     </Link>
                     <ArchivedBadge counterparty={counterparty} />
-                    {counterparty.tradingName && (
-                      <span className="block text-xs font-normal text-muted-foreground">
-                        {counterparty.tradingName}
-                      </span>
-                    )}
                   </span>
                 </span>
               </TableRowHeader>
@@ -188,19 +192,63 @@ function LogoGrid({ items, token }: { items: CounterpartySummary[]; token: strin
 }
 
 /**
- * Whether a counterparty trades the chosen commodity: buys it among buyers, sells it among
- * sellers, either otherwise. No commodity chosen: every counterparty.
+ * Whether a counterparty trades any of the chosen commodities: buys one among buyers, sells
+ * one among sellers, either otherwise. All of them chosen: every counterparty, those with
+ * none listed too.
  */
 export function tradesCommodity(
   counterparty: Pick<CounterpartySummary, 'buys' | 'sells'>,
-  commodity: string | null,
+  commodities: readonly string[],
   side: string,
 ): boolean {
-  if (commodity === null) return true;
-  if (side === 'buyer') return counterparty.buys.includes(commodity);
-  if (side === 'seller') return counterparty.sells.includes(commodity);
-  return counterparty.buys.includes(commodity) || counterparty.sells.includes(commodity);
+  if (commodities.length === COMMODITIES.length) return true;
+  const listed =
+    side === 'buyer'
+      ? counterparty.buys
+      : side === 'seller'
+        ? counterparty.sells
+        : [...counterparty.buys, ...counterparty.sells];
+  return listed.some((code) => commodities.includes(code));
 }
+
+/** Whether it serves any of the chosen markets; all chosen: every counterparty. */
+export function servesMarket(
+  counterparty: Pick<CounterpartySummary, 'markets'>,
+  markets: readonly string[],
+): boolean {
+  return (
+    markets.length === MARKETS.length ||
+    counterparty.markets.some((market) => markets.includes(market))
+  );
+}
+
+/** Whether its tier is one of those chosen; all chosen: every counterparty, untiered too. */
+export function inTier(counterparty: Pick<CounterpartySummary, 'tier'>, tiers: readonly string[]) {
+  return (
+    tiers.length === TIERS.length ||
+    (counterparty.tier !== null && tiers.includes(counterparty.tier))
+  );
+}
+
+/**
+ * The values chosen in a filter kept in the address: absent means all of them;
+ * "?market=pet,bird" those; "?market=" none.
+ */
+function chosenFrom<T extends string>(param: string | null, all: readonly T[]): T[] {
+  if (param === null) return [...all];
+  const named = new Set(param.split(','));
+  return all.filter((value) => named.has(value));
+}
+
+/** The address value for a filter's choice: null (left out) when all are chosen. */
+function paramFor(chosen: readonly string[], all: readonly string[]): string | null {
+  return chosen.length === all.length ? null : chosen.join(',');
+}
+
+const COMMODITY_CODES = COMMODITIES.map((item) => item.code);
+const COMMODITY_OPTIONS = COMMODITIES.map(({ code, name }) => ({ value: code, label: name }));
+const MARKET_OPTIONS = MARKETS.map((market) => ({ value: market, label: MARKET_LABELS[market] }));
+const TIER_OPTIONS = TIERS.map((tier) => ({ value: tier, label: `Tier ${tier}` }));
 
 /** /counterparties: the organization's counterparties by logo (the default), as a table or on a map. */
 export function CounterpartiesPage({ session }: { session: DirectorySession }) {
@@ -220,10 +268,10 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'logos';
   const typeParam = params.get('type');
   const side: Side = SIDES.find((item) => item === typeParam) ?? 'all';
-  const commodityParam = params.get('commodity');
-  const commodity = COMMODITIES.some((item) => item.code === commodityParam)
-    ? commodityParam
-    : null;
+  // Several of each may be chosen (owner's request, 2026-10-30), kept in the address too.
+  const commodities = chosenFrom(params.get('commodity'), COMMODITY_CODES);
+  const markets = chosenFrom(params.get('market'), MARKETS);
+  const tiers = chosenFrom(params.get('tier'), TIERS);
   // ?add=one or ?add=import opens the + window on that tab (the old adding pages' addresses).
   const addTab = ADD_TABS.find((tab) => tab === params.get('add')) ?? null;
 
@@ -233,25 +281,13 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
     (counterparty) =>
       (showArchived || counterparty.archivedAt === null) &&
       (side === 'all' || counterparty.types.includes(side)) &&
-      tradesCommodity(counterparty, commodity, side) &&
+      tradesCommodity(counterparty, commodities, side) &&
+      servesMarket(counterparty, markets) &&
+      inTier(counterparty, tiers) &&
       matches(counterparty, query),
   );
-  // The map narrows to what the search and the commodity find; without them it shows every
-  // location.
-  const searched = useMemo(
-    () =>
-      query.trim() === '' && commodity === null
-        ? null
-        : new Set(
-            all
-              .filter(
-                (counterparty) =>
-                  matches(counterparty, query) && tradesCommodity(counterparty, commodity, side),
-              )
-              .map((item) => item.id),
-          ),
-    [all, query, commodity, side],
-  );
+  // The map shows the places of exactly the counterparties listed (2026-10-30).
+  const shownIds = new Set(shown.map((counterparty) => counterparty.id));
 
   return (
     <section aria-labelledby="counterparties-heading" className="flex flex-col gap-4">
@@ -287,18 +323,35 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                   className="pl-9"
                 />
               </label>
-              <Select
-                aria-label="Commodity"
-                className="w-52"
+              <MultiPicker
+                label="Commodities"
                 icon={<Wheat aria-hidden="true" className="text-muted-foreground" />}
-                value={commodity ?? ''}
-                onValueChange={(next) => {
-                  setSearchParams({ commodity: next || null });
+                options={COMMODITY_OPTIONS}
+                chosen={commodities}
+                allLabel="All commodities"
+                onChange={(next) => {
+                  setSearchParams({ commodity: paramFor(next, COMMODITY_CODES) });
                 }}
-                options={[
-                  { value: '', label: 'All commodities' },
-                  ...COMMODITIES.map(({ code, name }) => ({ value: code, label: name })),
-                ]}
+              />
+              <MultiPicker
+                label="Market"
+                icon={<PawPrint aria-hidden="true" className="text-muted-foreground" />}
+                options={MARKET_OPTIONS}
+                chosen={markets}
+                allLabel="All markets"
+                onChange={(next) => {
+                  setSearchParams({ market: paramFor(next, MARKETS) });
+                }}
+              />
+              <MultiPicker
+                label="Tier"
+                icon={<Layers aria-hidden="true" className="text-muted-foreground" />}
+                options={TIER_OPTIONS}
+                chosen={tiers}
+                allLabel="All tiers"
+                onChange={(next) => {
+                  setSearchParams({ tier: paramFor(next, TIERS) });
+                }}
               />
               <SegmentedControl
                 label="Show"
@@ -395,11 +448,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
               <LogoGrid items={shown} token={token} />
             </TabsContent>
             <TabsContent value="map">
-              <CounterpartyMap
-                session={session}
-                type={side === 'all' ? null : side}
-                only={searched}
-              />
+              <CounterpartyMap session={session} only={shownIds} />
             </TabsContent>
           </>
         )}

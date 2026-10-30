@@ -21,6 +21,9 @@ export interface CounterpartySummary {
   /** The commodities it buys and sells (codes), in the commodity list's order. */
   buys: string[];
   sells: string[];
+  /** The markets it serves (MARKETS in @grain/domain) and its tier (A, B, C or null). */
+  markets: string[];
+  tier: string | null;
 }
 
 export interface Contact {

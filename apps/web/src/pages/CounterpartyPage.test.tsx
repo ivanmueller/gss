@@ -31,6 +31,8 @@ const DETAIL: CounterpartyDetail = {
   archivedAt: null,
   buys: [],
   sells: [],
+  markets: [],
+  tier: null,
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [
     {
@@ -211,7 +213,8 @@ describe('CounterpartyPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Trading as Prairie Mills')).toBeInTheDocument();
+    // The trading name is no longer shown (owner's request, 2026-10-30).
+    expect(screen.queryByText(/Trading as/)).not.toBeInTheDocument();
     expect(screen.getByText('Verification pending')).toBeInTheDocument();
     expect(screen.getByText('Buyer, Seller')).toBeInTheDocument();
     expect(screen.getByText('Imported from a spreadsheet')).toBeInTheDocument();
@@ -336,7 +339,11 @@ describe('CounterpartyPage editing', () => {
     );
     expect(within(form).getByRole('checkbox', { name: 'Seller' })).toBeChecked();
     await userEvent.click(within(form).getByRole('checkbox', { name: 'Seller' }));
-    await userEvent.clear(within(form).getByLabelText('Trading name'));
+    // No trading name to edit; the saved one is sent back unchanged.
+    expect(within(form).queryByLabelText('Trading name')).not.toBeInTheDocument();
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'Pet' }));
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'Bird' }));
+    await choose(within(form).getByLabelText('Tier'), 'Tier B');
     await userEvent.type(within(form).getByLabelText('Website'), 'example.com/grain');
     await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
 
@@ -348,12 +355,14 @@ describe('CounterpartyPage editing', () => {
       version: DETAIL.version,
       values: {
         legalName: 'Synthetic Prairie Mills',
-        tradingName: '',
+        tradingName: 'Prairie Mills',
         types: 'buyer',
         country: 'CA',
         verificationStatus: 'pending',
         website: 'example.com/grain',
         companyPhone: '',
+        markets: 'pet,bird',
+        tier: 'B',
         notes: 'Synthetic record.',
       },
     });
