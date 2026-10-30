@@ -166,6 +166,62 @@ function planImport(
   return { parsed, emptyRows, issues, warnings, groups };
 }
 
+/** A file's companies matched against the list as it is: which are new, what others get. */
+function matchImport(
+  plan: ImportPlan,
+  rowCount: number,
+  companies: readonly ExistingCounterparty[],
+) {
+  // Companies already in the list, matched as the file's rows are (counterpartyKey).
+  const existing = new Map<string, ExistingCounterparty>();
+  for (const company of companies) {
+    const key = counterpartyKey(company.primaryCountry, company.legalName);
+    if (!existing.has(key)) existing.set(key, company);
+  }
+  const fresh = plan.groups.filter((group) => !existing.has(group.key));
+  const additions = plan.groups.flatMap((group) => {
+    const company = existing.get(group.key);
+    return company && !company.archived ? [{ group, addition: newFor(company, group) }] : [];
+  });
+  const adding = additions.filter(({ addition }) => hasAny(addition));
+  const result = {
+    committed: false,
+    importBatchId: null as string | null,
+    summary: {
+      rows: rowCount,
+      emptyRows: plan.emptyRows,
+      invalidRows: new Set(plan.issues.map((issue) => issue.line)).size,
+      counterparties: plan.groups.length,
+      newCounterparties: fresh.length,
+      existingCounterparties: plan.groups.length - fresh.length,
+      contacts: fresh.reduce((sum, group) => sum + group.contacts.length, 0),
+      facilities: fresh.reduce((sum, group) => sum + group.facilities.length, 0),
+      // What the file adds to companies already in the list (owner's answer, 2026-10-30).
+      existingWithAdditions: adding.length,
+      addedContacts: adding.reduce((sum, { addition }) => sum + addition.contacts.length, 0),
+      addedFacilities: adding.reduce((sum, { addition }) => sum + addition.facilities.length, 0),
+      addedCommodities: adding.reduce((sum, { addition }) => sum + addition.commodities.length, 0),
+    },
+    counterparties: plan.groups.map((group) => {
+      const company = existing.get(group.key);
+      const addition = additions.find((item) => item.group === group)?.addition;
+      return {
+        legalName: group.counterparty.legalName,
+        country: group.counterparty.primaryCountry,
+        lines: group.lines,
+        contacts: addition ? addition.contacts.length : group.contacts.length,
+        facilities: addition ? addition.facilities.length : group.facilities.length,
+        status: !company ? 'new' : company.archived ? 'archived' : 'existing',
+      };
+    }),
+    issues: plan.issues,
+    warnings: plan.warnings,
+  };
+  return { result, fresh, adding };
+}
+
+type ImportMatch = ReturnType<typeof matchImport>;
+
 /** /api/v1/counterparties. Mounted after requireUser, so every route needs a signed-in user. */
 export function counterpartyRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
@@ -219,71 +275,16 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           'Only operations and admin members can import counterparties.',
         );
       }
-      // Companies already in the list, matched as the file's rows are (counterpartyKey).
-      const existing = new Map<string, ExistingCounterparty>();
-      for (const company of await db.existingCounterparties(ctx, organizationId)) {
-        const key = counterpartyKey(company.primaryCountry, company.legalName);
-        if (!existing.has(key)) existing.set(key, company);
-      }
-      const fresh = plan.groups.filter((group) => !existing.has(group.key));
-      const additions = plan.groups.flatMap((group) => {
-        const company = existing.get(group.key);
-        return company && !company.archived ? [{ group, addition: newFor(company, group) }] : [];
-      });
-      const adding = additions.filter(({ addition }) => hasAny(addition));
-      const result = {
-        committed: false,
-        importBatchId: null as string | null,
-        summary: {
-          rows: rows.length,
-          emptyRows: plan.emptyRows,
-          invalidRows: new Set(plan.issues.map((issue) => issue.line)).size,
-          counterparties: plan.groups.length,
-          newCounterparties: fresh.length,
-          existingCounterparties: plan.groups.length - fresh.length,
-          contacts: fresh.reduce((sum, group) => sum + group.contacts.length, 0),
-          facilities: fresh.reduce((sum, group) => sum + group.facilities.length, 0),
-          // What the file adds to companies already in the list (owner's answer, 2026-10-30).
-          existingWithAdditions: adding.length,
-          addedContacts: adding.reduce((sum, { addition }) => sum + addition.contacts.length, 0),
-          addedFacilities: adding.reduce(
-            (sum, { addition }) => sum + addition.facilities.length,
-            0,
-          ),
-          addedCommodities: adding.reduce(
-            (sum, { addition }) => sum + addition.commodities.length,
-            0,
-          ),
-        },
-        counterparties: plan.groups.map((group) => {
-          const company = existing.get(group.key);
-          const addition = additions.find((item) => item.group === group)?.addition;
-          return {
-            legalName: group.counterparty.legalName,
-            country: group.counterparty.primaryCountry,
-            lines: group.lines,
-            contacts: addition ? addition.contacts.length : group.contacts.length,
-            facilities: addition ? addition.facilities.length : group.facilities.length,
-            status: !company ? 'new' : company.archived ? 'archived' : 'existing',
-          };
-        }),
-        issues: plan.issues,
-        warnings: plan.warnings,
-      };
-      if (!commit) return c.json(result);
-
-      if (plan.issues.length > 0) {
+      if (!commit || plan.issues.length > 0) {
+        const { result } = matchImport(
+          plan,
+          rows.length,
+          await db.existingCounterparties(ctx, organizationId),
+        );
+        if (!commit) return c.json(result);
         return apiError(c, 422, 'VALIDATION_FAILED', 'Fix the rows with problems first.', result);
       }
-      if (fresh.length === 0 && adding.length === 0) {
-        return apiError(
-          c,
-          409,
-          'NOTHING_TO_IMPORT',
-          'Every company in this file is already in the list, with nothing new to add.',
-          result,
-        );
-      }
+
       const contentSha256 = await sha256Hex(
         JSON.stringify(
           // Without commodities, a company phone, markets or a tier, the same as before they
@@ -308,20 +309,41 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           ),
         ),
       );
-      const importBatchId = await db.importCounterparties(ctx, {
-        organizationId,
-        fileName,
-        contentSha256,
-        rowCount: rows.length,
-        skippedCount: plan.groups.length - fresh.length,
-        counterparties: fresh.map(({ counterparty, contacts, facilities, commodities }) => ({
-          counterparty,
-          contacts,
-          facilities,
-          commodities,
-        })),
-        additions: adding.map(({ addition }) => addition),
+      // Matched again under the organization's import lock, against the list as it is then,
+      // so two files imported at once never create the same company twice and the answer says
+      // what was written (Codex's review of ivanmueller/gss#88).
+      let result: ImportMatch['result'] | undefined;
+      const importBatchId = await db.importCounterparties(ctx, organizationId, (companies) => {
+        const match = matchImport(plan, rows.length, companies);
+        result = match.result;
+        if (match.fresh.length === 0 && match.adding.length === 0) return null;
+        return {
+          organizationId,
+          fileName,
+          contentSha256,
+          rowCount: rows.length,
+          skippedCount: plan.groups.length - match.fresh.length,
+          counterparties: match.fresh.map(
+            ({ counterparty, contacts, facilities, commodities }) => ({
+              counterparty,
+              contacts,
+              facilities,
+              commodities,
+            }),
+          ),
+          additions: match.adding.map(({ addition }) => addition),
+        };
       });
+      if (result === undefined) throw new Error('the import was not planned');
+      if (importBatchId === null) {
+        return apiError(
+          c,
+          409,
+          'NOTHING_TO_IMPORT',
+          'Every company in this file is already in the list, with nothing new to add.',
+          result,
+        );
+      }
       return c.json({ ...result, committed: true, importBatchId }, 201);
     });
   });

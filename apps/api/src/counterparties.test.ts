@@ -326,6 +326,13 @@ function existing(
   };
 }
 
+/** What the import route asked to write, planned against `companies` as under the lock. */
+function planned(companies: ExistingCounterparty[] = [], call = 0) {
+  const plan = db.importCounterparties.mock.calls[call]?.[2];
+  if (!plan) throw new Error('nothing was imported');
+  return plan(companies);
+}
+
 describe('POST /api/v1/counterparties/import', () => {
   const rows = [
     {
@@ -403,7 +410,8 @@ describe('POST /api/v1/counterparties/import', () => {
   });
 
   it('imports the new companies only, in one call, as the verified user', async () => {
-    db.existingCounterparties.mockResolvedValueOnce([existing('Synthetic Existing Co', 'US')]);
+    const listed = [existing('Synthetic Existing Co', 'US')];
+    db.existingCounterparties.mockResolvedValueOnce(listed);
     const res = await postImport({ ...body, commit: true });
 
     expect(res.status).toBe(201);
@@ -412,8 +420,12 @@ describe('POST /api/v1/counterparties/import', () => {
       importBatchId: '00000000-0000-4000-8000-0000000ba7c4',
     });
     expect(db.importCounterparties).toHaveBeenCalledTimes(1);
-    const [ctx, batch] = db.importCounterparties.mock.calls[0] ?? [];
+    // Matched once, under the import's lock.
+    expect(db.existingCounterparties).toHaveBeenCalledTimes(1);
+    const [ctx, organizationId] = db.importCounterparties.mock.calls[0] ?? [];
     expect(ctx).toEqual({ userId: USER_ID, requestId: res.headers.get('x-request-id') });
+    expect(organizationId).toBe(ORG);
+    const batch = planned(listed);
     expect(batch).toMatchObject({
       organizationId: ORG,
       fileName: 'buyers.csv',
@@ -452,7 +464,7 @@ describe('POST /api/v1/counterparties/import', () => {
       ],
     });
     expect(res.status).toBe(201);
-    const [, batch] = db.importCounterparties.mock.calls[0] ?? [];
+    const batch = planned();
     expect(batch?.counterparties[0]?.commodities).toEqual([
       { commodity: 'flaxseed', direction: 'buys' },
       { commodity: 'yellow_peas', direction: 'buys' },
@@ -478,9 +490,7 @@ describe('POST /api/v1/counterparties/import', () => {
   it('gives the same content the same checksum, so a repeat import is refused', async () => {
     await postImport({ ...body, commit: true });
     await postImport({ ...body, commit: true, fileName: 'renamed.csv' });
-    const [first, second] = db.importCounterparties.mock.calls.map(
-      ([, batch]) => batch.contentSha256,
-    );
+    const [first, second] = [0, 1].map((call) => planned([], call)?.contentSha256);
     expect(first).toBe(second);
 
     db.importCounterparties.mockRejectedValueOnce(
@@ -509,7 +519,7 @@ describe('POST /api/v1/counterparties/import', () => {
   });
 
   it('adds new locations, contacts and grains to a company already in the list, matched loosely', async () => {
-    db.existingCounterparties.mockResolvedValueOnce([
+    const listed = [
       existing('Synthetic Mills Limited', 'CA', {
         facilities: [
           {
@@ -528,7 +538,8 @@ describe('POST /api/v1/counterparties/import', () => {
         commodities: [{ commodity: 'canola', direction: 'buys' }],
       }),
       existing('Synthetic Closed Co', 'US', { archived: true }),
-    ]);
+    ];
+    db.existingCounterparties.mockResolvedValueOnce(listed);
     const res = await postImport({
       ...body,
       commit: true,
@@ -584,8 +595,7 @@ describe('POST /api/v1/counterparties/import', () => {
     expect(answer.warnings).toContainEqual(
       expect.objectContaining({ line: 3, field: 'legalName' }),
     );
-    expect(db.importCounterparties).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(planned(listed)).toEqual(
       expect.objectContaining({
         counterparties: [],
         additions: [
@@ -600,8 +610,27 @@ describe('POST /api/v1/counterparties/import', () => {
     );
   });
 
+  // Codex's second review of ivanmueller/gss#88.
+  it('matches against the list as it is under the import lock, and says what was written', async () => {
+    // Another import created "SYNTHETIC MILLS" while this file was being checked.
+    db.importCounterparties.mockImplementationOnce((_ctx, _org, plan) =>
+      Promise.resolve(
+        plan([existing('SYNTHETIC MILLS', 'CA'), existing('Synthetic Existing Co', 'US')]) === null
+          ? null
+          : '00000000-0000-4000-8000-0000000ba7c5',
+      ),
+    );
+    const res = await postImport({ ...body, commit: true });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      importBatchId: '00000000-0000-4000-8000-0000000ba7c5',
+      summary: { newCounterparties: 0, existingWithAdditions: 1, addedFacilities: 1 },
+      counterparties: [{ legalName: 'Synthetic Mills', status: 'existing' }, {}],
+    });
+  });
+
   it('says when there is nothing new to import', async () => {
-    db.existingCounterparties.mockResolvedValueOnce([
+    const listed = [
       existing('Synthetic Mills', 'CA', {
         facilities: [
           {
@@ -618,11 +647,13 @@ describe('POST /api/v1/counterparties/import', () => {
         contacts: [{ name: 'Ana', email: null, phone: null }],
       }),
       existing('Synthetic Existing Co', 'US'),
-    ]);
+    ];
+    db.existingCounterparties.mockResolvedValueOnce(listed);
     const res = await postImport({ ...body, commit: true });
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: { code: 'NOTHING_TO_IMPORT' } });
-    expect(db.importCounterparties).not.toHaveBeenCalled();
+    // Nothing is written.
+    expect(planned(listed)).toBeNull();
   });
 
   it('refuses users who cannot edit the directory, before reading it', async () => {
@@ -685,7 +716,7 @@ describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
       ],
     });
     expect(res.status).toBe(201);
-    const batch = db.importCounterparties.mock.calls[0]?.[1];
+    const batch = planned();
     expect(batch?.counterparties.map((item) => item.counterparty.types)).toEqual([
       ['seller'],
       ['buyer'],

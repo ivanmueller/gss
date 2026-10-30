@@ -40,7 +40,7 @@ const saved = () => Promise.resolve({ status: 'saved' } as const);
 
 /** A Database whose every method is a mock; reads return empty results and writes succeed by default. */
 export function fakeDatabase(): Mocked<Database> {
-  return {
+  const db: Mocked<Database> = {
     memberships: vi.fn<Database['memberships']>(() =>
       Promise.resolve([
         { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'trader' },
@@ -61,8 +61,12 @@ export function fakeDatabase(): Mocked<Database> {
       Promise.resolve({ status: 'saved', sha256: 'f'.repeat(64) }),
     ),
     existingCounterparties: vi.fn<Database['existingCounterparties']>(() => Promise.resolve([])),
-    importCounterparties: vi.fn<Database['importCounterparties']>(() =>
-      Promise.resolve('00000000-0000-4000-8000-0000000ba7c4'),
+    // Plans against existingCounterparties, as the real one does under its lock.
+    importCounterparties: vi.fn<Database['importCounterparties']>(
+      async (ctx, organizationId, plan) =>
+        plan(await db.existingCounterparties(ctx, organizationId)) === null
+          ? null
+          : '00000000-0000-4000-8000-0000000ba7c4',
     ),
     isOrgAdmin: vi.fn<Database['isOrgAdmin']>(() => Promise.resolve(true)),
     setMemberNames: vi.fn<Database['setMemberNames']>(() => Promise.resolve(true)),
@@ -128,4 +132,5 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
+  return db;
 }

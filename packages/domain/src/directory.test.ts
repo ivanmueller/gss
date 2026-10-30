@@ -764,6 +764,18 @@ describe('companies with several locations', () => {
       ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555/010-0100' })
         .counterparty,
     ).toMatchObject({ phone: '555/010-0100', notes: null });
+    // Nor with a note or a second number after it (Codex's second review of ivanmueller/gss#88).
+    expect(
+      ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555/010-0100 (front desk)' })
+        .counterparty,
+    ).toMatchObject({ phone: '555/010-0100', notes: 'Company phone also: (front desk)' });
+    expect(
+      ok({
+        legalName: 'Synthetic Feeds',
+        country: 'US',
+        companyPhone: '555/010-0100; 555-010-0101',
+      }).counterparty,
+    ).toMatchObject({ phone: '555/010-0100', notes: 'Company phone also: 555-010-0101' });
   });
 });
 
