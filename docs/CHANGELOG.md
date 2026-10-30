@@ -6,6 +6,7 @@
 - `docs/API.md`: `PATCH /api/v1/counterparties/{id}/commodities`; `buys`, `sells` and `commodities` in the responses.
 - `docs/DATA_MODEL.md`: `app.counterparty_commodities` and migration `20261030020000_counterparty_commodities.sql`.
 - `docs/PRODUCT.md`: the commodity filter and the counterparty page's top and Commodities box.
+- `docs/DATA_MODEL.md`: after Codex's review of ivanmueller/gss#78, the commodity list's key and the one-main-contact index keyed by organization (migration `20261030030000_main_contact_index_by_organization.sql`), and the archived check reading only the caller's organization; `docs/DECISIONS.md`: Feed wheat not read as a commodity.
 
 ## 2026-10-30 — Handoff record of #77
 

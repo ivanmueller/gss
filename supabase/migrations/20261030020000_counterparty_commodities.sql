@@ -20,7 +20,10 @@ create table app.counterparty_commodities (
   direction text not null check (direction in ('buys', 'sells')),
   created_at timestamptz not null default now(),
   created_by uuid not null references auth.users (id),
-  unique (counterparty_id, commodity_code, direction),
+  -- Keyed by organization too, so another organization's attempt never meets this row:
+  -- its insert reaches the tenant-matching key and is refused there, telling it nothing
+  -- about what this counterparty lists (Codex's review of ivanmueller/gss#78).
+  unique (organization_id, counterparty_id, commodity_code, direction),
   -- The tenant-matching key: a row belongs to a counterparty of its own organization.
   foreign key (organization_id, counterparty_id) references app.counterparties (organization_id, id)
 );
@@ -31,6 +34,12 @@ create index counterparty_commodities_organization_idx
 -- Refuses a change to an archived counterparty's list, after waiting for any archiving or
 -- restoring of it under way (the share lock). SECURITY DEFINER: members who are not
 -- directory editors cannot lock a counterparty themselves, as its update policy is theirs.
+--
+-- It runs before row level security checks an insert, so it first makes sure the caller is
+-- an active member of the row's organization and reads only that organization's
+-- counterparty. Anyone else's row is left to the policies and the tenant-matching key to
+-- refuse, without this function reading or locking another organization's counterparty
+-- (Codex's review of ivanmueller/gss#78).
 create function app.check_counterparty_commodity()
 returns trigger
 language plpgsql
@@ -39,10 +48,15 @@ set search_path = ''
 as $$
 declare
   target uuid := case when tg_op = 'DELETE' then old.counterparty_id else new.counterparty_id end;
+  organization uuid :=
+    case when tg_op = 'DELETE' then old.organization_id else new.organization_id end;
   archived boolean;
 begin
+  if not app.is_active_member(organization) then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
   select c.archived_at is not null into archived
-    from app.counterparties c where c.id = target
+    from app.counterparties c where c.id = target and c.organization_id = organization
     for share;
   if archived then
     raise exception 'an archived counterparty''s commodities cannot be changed'

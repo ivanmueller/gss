@@ -297,6 +297,50 @@ describe('what a counterparty buys and sells, as app_api', () => {
     expect(audit?.count).toBeGreaterThanOrEqual(2);
   });
 
+  // Codex's review of ivanmueller/gss#78: another organization's attempt held open in a
+  // transaction must not lock this organization's counterparty and so hold up its archiving.
+  it('lets another organization hold nothing up with an attempt on its list', async () => {
+    const counterpartyId = await create('Synthetic Commodity Unlocked', { commodities: [canola] });
+    const bob = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    let finish: () => void = () => undefined;
+    let tried: (code: string | undefined) => void = () => undefined;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const attempted = new Promise<string | undefined>((resolve) => {
+      tried = resolve;
+    });
+    const holding = bob.begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.bob}, true)`;
+      // Its own organization, this counterparty, a commodity it already lists.
+      const code = await tx
+        .savepoint(
+          (sp) => sp`
+            insert into app.counterparty_commodities
+              (organization_id, counterparty_id, commodity_code, direction, created_by)
+            values (${orgs.b}, ${counterpartyId}, 'canola', 'buys', ${users.bob})
+            on conflict do nothing`,
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => (error as { code?: string }).code,
+        );
+      tried(code);
+      await done;
+    });
+    // Refused by the tenant-matching key, not skipped as a duplicate.
+    expect(await attempted).toBe('23503');
+    // Archiving does not wait for the other organization's open transaction.
+    await admin.begin(async (tx) => {
+      await tx`set local lock_timeout = '2s'`;
+      await tx`update app.counterparties set archived_at = now() where id = ${counterpartyId}`;
+    });
+    finish();
+    await holding;
+    await bob.end();
+    expect((await detail(counterpartyId)).archivedAt).not.toBeNull();
+  });
+
   it('is out of reach of another organization, and fixed while archived', async () => {
     const counterpartyId = await create('Synthetic Commodity Archived');
     const change = { add: [canola], remove: [] };

@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(30);
+select plan(35);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader),
@@ -150,6 +150,14 @@ select throws_ok(
     pg_temp.add('00000000-0000-4000-8000-0000000000bb', '00000000-0000-4000-8000-00000000c1aa',
                 'oats', 'buys', '00000000-0000-4000-8000-0000000011bb')),
   '23503', null, 'nor reaches them through its own organization');
+-- Codex's review of ivanmueller/gss#78: a row already listed by org A does not stop org B's
+-- attempt quietly (which would tell it the row exists); the tenant-matching key refuses it.
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011bb',
+    pg_temp.add('00000000-0000-4000-8000-0000000000bb', '00000000-0000-4000-8000-00000000c1aa',
+                'canola', 'buys', '00000000-0000-4000-8000-0000000011bb')
+      || ' on conflict do nothing'),
+  '23503', null, 'another organization learns nothing from a commodity this one lists');
 
 -- Refused values ------------------------------------------------------------------------
 select throws_ok(
@@ -188,6 +196,22 @@ select throws_ok(
   format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000022aa',
     $$delete from app.counterparty_commodities where commodity_code = 'canola'$$),
   'GS005', null, 'nor removed');
+-- Another organization learns nothing about the archiving either: it is refused as always.
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011bb',
+    pg_temp.add('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
+                'oats', 'buys', '00000000-0000-4000-8000-0000000011bb')),
+  '42501', null, 'another organization is refused by the policy, not told it is archived');
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011bb',
+    pg_temp.add('00000000-0000-4000-8000-0000000000bb', '00000000-0000-4000-8000-00000000c1aa',
+                'oats', 'buys', '00000000-0000-4000-8000-0000000011bb')),
+  '23503', null, 'nor through its own organization');
+select throws_ok(
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000055aa',
+    pg_temp.add('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
+                'oats', 'buys', '00000000-0000-4000-8000-0000000055aa')),
+  '42501', null, 'a suspended member is refused by the policy, not told it is archived');
 update app.counterparties set archived_at = null where id = '00000000-0000-4000-8000-00000000c1aa';
 select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000022aa',
   pg_temp.add('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
@@ -195,6 +219,9 @@ select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000022aa',
   'once restored, it can be changed again');
 select is(pg_temp.a_list(), array['buys canola', 'buys oats', 'buys yellow_peas', 'sells canola'],
   'the list after the changes');
+select col_is_unique('app', 'counterparty_commodities',
+  array['organization_id', 'counterparty_id', 'commodity_code', 'direction'],
+  'a commodity is listed once each way, keyed by organization');
 
 -- Audit -----------------------------------------------------------------------------------
 select is(

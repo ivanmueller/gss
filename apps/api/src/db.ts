@@ -1065,7 +1065,7 @@ export function createDatabase(sql: postgres.Sql): Database {
               (organization_id, counterparty_id, commodity_code, direction, created_by)
             values (${row.organization_id}, ${counterpartyId}, ${commodity}, ${direction},
                     app.current_user_id())
-            on conflict (counterparty_id, commodity_code, direction) do nothing`;
+            on conflict (organization_id, counterparty_id, commodity_code, direction) do nothing`;
         }
         return SAVED;
       });

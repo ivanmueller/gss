@@ -164,7 +164,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
     .getByRole('button', { name: 'Remove' })
     .click();
   await expect(page.getByRole('region', { name: 'Contacts (0)' })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Main contact' })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Main contact' })).toContainText('None yet');
 
   // Sellers only.
   await page.getByRole('link', { name: 'All counterparties' }).click();

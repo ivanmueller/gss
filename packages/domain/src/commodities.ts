@@ -99,7 +99,6 @@ const ALIASES: Record<string, CommodityCode> = {
   cwrs: 'spring_wheat',
   'hard red spring': 'spring_wheat',
   'hard red spring wheat': 'spring_wheat',
-  'feed wheat': 'winter_wheat',
   'fava bean': 'faba_beans',
   'faba bean': 'faba_beans',
   fababean: 'faba_beans',

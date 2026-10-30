@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(25);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader).
@@ -127,6 +127,15 @@ select throws_ok(
     values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
             'Synthetic Second Main', true, '00000000-0000-4000-8000-0000000011aa')$$,
   '23505', null, 'a new contact cannot be added as a second main contact');
+-- Codex's review of ivanmueller/gss#78: another organization's contact naming this
+-- counterparty as main is refused by the tenant-matching key, not the index, so it learns
+-- nothing about whether this counterparty has a main contact.
+select throws_ok(
+  $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000011bb',
+    'insert into app.counterparty_contacts (organization_id, counterparty_id, name, is_main, created_by)
+     values (''00000000-0000-4000-8000-0000000000bb'', ''00000000-0000-4000-8000-00000000c1aa'',
+             ''Synthetic Probe'', true, ''00000000-0000-4000-8000-0000000011bb'')')$$,
+  '23503', null, 'another organization learns nothing about the main contact');
 select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000022aa',
   pg_temp.mark('00000000-0000-4000-8000-00000000a3aa', true)), 1,
   'another counterparty has a main contact of its own');

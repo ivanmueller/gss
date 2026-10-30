@@ -28,7 +28,8 @@ describe('commodityFromName', () => {
     expect(commodityFromName('Fava beans')).toBe('faba_beans');
     expect(commodityFromName('Soy')).toBe('soybeans');
     expect(commodityFromName('Mustard')).toBe('mustard_seed');
-    for (const name of ['Wheat', 'Barley', 'Peas', 'Lentils', 'Hemp', '']) {
+    // Feed wheat names no class of wheat (Codex's review of ivanmueller/gss#78).
+    for (const name of ['Wheat', 'Feed wheat', 'Barley', 'Peas', 'Lentils', 'Hemp', '']) {
       expect(commodityFromName(name)).toBeNull();
     }
   });
