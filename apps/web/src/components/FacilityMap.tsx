@@ -10,6 +10,7 @@ import {
   pinFeatures,
   readMapColours,
   type Basemap,
+  type MapBounds,
   type MapColours,
   type MapPin,
   type PinFeatureCollection,
@@ -36,6 +37,12 @@ export interface FacilityMapProps {
   controls?: 'top-left' | 'top-right';
   /** Pixels on the right covered by a panel; the starting view keeps the pins clear of it. */
   coveredRight?: number;
+  /** The starting view [west, south, east, north]; western Canada and the plains by default. */
+  start?: MapBounds;
+  /** The closest the starting view zooms in, so one location is not shown at street level. */
+  startMaxZoom?: number;
+  /** A small map on a longer page: the page scrolls past it; two fingers or Ctrl+scroll zoom. */
+  cooperative?: boolean;
   /** The visible box after every move; null when none of it is on the map. */
   onViewChange?: (bbox: Bbox | null) => void;
   onSelect: (pinId: string) => void;
@@ -125,14 +132,17 @@ export default function FacilityMap(props: FacilityMapProps) {
   useEffect(() => {
     const element = container.current;
     if (!element) return;
+    const { start, startMaxZoom, cooperative } = latest.current;
     const instance = new mapboxgl.Map({
       container: element,
       accessToken: token,
       style: shownStyle.current,
-      bounds: START,
+      bounds: start ?? START,
       fitBoundsOptions: {
         padding: { top: 24, bottom: 24, left: 24, right: 24 + (latest.current.coveredRight ?? 0) },
+        ...(startMaxZoom !== undefined && { maxZoom: startMaxZoom }),
       },
+      cooperativeGestures: cooperative ?? false,
       projection: 'mercator',
       // Added below on the same side as the zoom buttons, so a panel never hides it.
       attributionControl: false,

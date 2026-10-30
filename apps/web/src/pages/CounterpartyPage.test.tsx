@@ -34,6 +34,7 @@ const DETAIL: CounterpartyDetail = {
       role: 'Grain buyer',
       email: 'merch@example.test',
       phone: '+1 (306) 555-0100',
+      isMain: false,
       version: '2026-10-27T14:05:00.000000Z',
     },
   ],
@@ -80,6 +81,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Edit details and Archive, under the "More actions" menu of a buyer's or seller's page. */
+async function chooseAction(name: 'Edit details' | 'Archive') {
+  await userEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+  await userEvent.click(await screen.findByRole('menuitem', { name }));
+}
+
 describe('CounterpartyPage', () => {
   it('lists its bids and offers and offers a new bid or offer to traders', async () => {
     const calls = mockApi({
@@ -99,11 +106,12 @@ describe('CounterpartyPage', () => {
       />,
     );
     const quotes = await screen.findByRole('region', { name: 'Bids and offers (1)' });
-    const table = within(quotes).getByRole('table', {
+    // A stacked list in its column, so the valid-until time is never cut off.
+    const list = within(quotes).getByRole('list', {
       name: 'Bids and offers of this counterparty',
     });
-    expect(within(table).getAllByRole('row')[1]).toHaveTextContent(
-      'BidFlaxseedNo. 1 CWUSD 730.50/MT',
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent(
+      /^BidFlaxseedNo\. 1 CWIndicativeUSD 730\.50\/MT.*valid until/,
     );
     // A buyer and seller can both bid and offer.
     expect(within(quotes).getByRole('link', { name: 'New bid' })).toHaveAttribute(
@@ -168,12 +176,20 @@ describe('CounterpartyPage', () => {
         id={ID}
       />,
     );
+    // Folded on a buyer's or seller's page, and loaded only when opened.
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Freight to and from its locations' }),
+    );
     const freight = await screen.findByRole('region', {
       name: 'Freight to and from its locations (0)',
     });
     expect(freight).toHaveTextContent('No live freight rates.');
     expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
     expect(calls.map((call) => call.path)).not.toContain(`/freight-quotes?carrier_id=${ID}`);
+    await userEvent.click(within(freight).getByRole('button', { name: 'Hide' }));
+    expect(
+      screen.getByRole('button', { name: 'Freight to and from its locations' }),
+    ).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('shows the counterparty, its contacts and its locations', async () => {
@@ -293,7 +309,7 @@ describe('CounterpartyPage editing', () => {
       [`PATCH ${PATH}`]: () => Response.json(DETAIL),
     });
     render(<CounterpartyPage session={SESSION} id={ID} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit details' }));
+    await chooseAction('Edit details');
 
     const form = screen.getByRole('form', { name: 'Edit details' });
     expect(within(form).getByLabelText('Legal name (required)')).toHaveValue(
@@ -330,7 +346,7 @@ describe('CounterpartyPage editing', () => {
   it('refuses a website that is not a web address before sending it', async () => {
     const calls = mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit details' }));
+    await chooseAction('Edit details');
     const form = screen.getByRole('form', { name: 'Edit details' });
     await userEvent.type(within(form).getByLabelText('Website'), 'javascript:alert(1)');
     await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
@@ -344,7 +360,7 @@ describe('CounterpartyPage editing', () => {
   it('checks the form before sending it', async () => {
     const calls = mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Edit details' }));
+    await chooseAction('Edit details');
     const form = screen.getByRole('form', { name: 'Edit details' });
     await userEvent.clear(within(form).getByLabelText('Legal name (required)'));
     await userEvent.click(within(form).getByRole('checkbox', { name: 'Buyer' }));
@@ -488,17 +504,17 @@ describe('CounterpartyPage editing', () => {
       },
     });
     render(<CounterpartyPage session={SESSION} id={ID} />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Archive' }));
+    await chooseAction('Archive');
     const confirm = screen.getByRole('group', { name: 'Archive this counterparty' });
     await userEvent.click(within(confirm).getByRole('button', { name: 'Archive' }));
 
     expect(await screen.findByText(/on Wed 28 Oct 2026, 4:00 am MT/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit details' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More actions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
-    expect(await screen.findByRole('button', { name: 'Edit details' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'More actions' })).toBeInTheDocument();
     expect(calls.filter((call) => call.method === 'POST').map((call) => call.path)).toEqual([
       `${PATH}/archive`,
       `${PATH}/restore`,
@@ -514,7 +530,7 @@ describe('CounterpartyPage editing', () => {
       />,
     );
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
-    for (const name of ['Edit details', 'Archive', 'Add contact', 'Add location']) {
+    for (const name of ['More actions', 'Edit details', 'Archive', 'Add contact', 'Add location']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: /^(Edit|Remove) / })).not.toBeInTheDocument();
@@ -526,7 +542,7 @@ describe('CounterpartyPage editing', () => {
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
     expect(screen.queryByText(/PNG only/)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+    await chooseAction('Edit details');
     expect(screen.getByLabelText('Change logo')).toHaveAttribute(
       'accept',
       'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp',

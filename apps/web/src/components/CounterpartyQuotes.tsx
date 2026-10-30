@@ -4,12 +4,32 @@ import { useState } from 'react';
 
 import { canEnterQuotes } from '../lib/quotes';
 import { Link } from '../lib/router';
-import { useApiResource } from '../lib/useApiResource';
+import { useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import type { QuoteListResponse } from '../pages/QuotesPage';
 import { QuoteList } from './QuoteList';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
+
+export interface CounterpartyQuotesState {
+  list: Resource<QuoteListResponse>;
+  /** Withdrawn and expired ones are listed too. */
+  everything: boolean;
+  setEverything: (everything: boolean) => void;
+}
+
+/** A counterparty's bids and offers, live ones unless `everything` is chosen. */
+export function useCounterpartyQuotes(
+  session: DirectorySession,
+  counterpartyId: string,
+): CounterpartyQuotesState {
+  const [everything, setEverything] = useState(false);
+  const [list] = useApiResource<QuoteListResponse>(
+    `/quotes?counterparty_id=${counterpartyId}${everything ? '&status=all' : ''}`,
+    session.token,
+  );
+  return { list, everything, setEverything };
+}
 
 /** A counterparty's bids and offers on its page, with buttons to enter new ones. */
 export function CounterpartyQuotes({
@@ -19,16 +39,33 @@ export function CounterpartyQuotes({
   session: DirectorySession;
   counterparty: { id: string; types: string[]; archived: boolean };
 }) {
-  const { token, organization } = session;
-  const [everything, setEverything] = useState(false);
-  const [list] = useApiResource<QuoteListResponse>(
-    `/quotes?counterparty_id=${counterparty.id}${everything ? '&status=all' : ''}`,
-    token,
+  const state = useCounterpartyQuotes(session, counterparty.id);
+  return <CounterpartyQuotesCard session={session} counterparty={counterparty} state={state} />;
+}
+
+/** The sides a counterparty can quote: bids from buyers, offers from sellers (brokers both). */
+export function quoteSides(types: readonly string[]): QuoteSide[] {
+  return (['bid', 'offer'] as const).filter((side: QuoteSide) =>
+    SIDE_COUNTERPARTY_TYPES[side].some((type) => types.includes(type)),
   );
+}
+
+export function CounterpartyQuotesCard({
+  session,
+  counterparty,
+  state,
+  stacked = false,
+}: {
+  session: DirectorySession;
+  counterparty: { id: string; types: string[]; archived: boolean };
+  state: CounterpartyQuotesState;
+  /** A stacked list instead of a table, for a narrow column. */
+  stacked?: boolean;
+}) {
+  const { organization } = session;
+  const { list, everything, setEverything } = state;
   const canAdd = canEnterQuotes(organization.role) && !counterparty.archived;
-  const sides = (['bid', 'offer'] as const).filter((side: QuoteSide) =>
-    SIDE_COUNTERPARTY_TYPES[side].some((type) => counterparty.types.includes(type)),
-  );
+  const sides = quoteSides(counterparty.types);
   const count = list.status === 'ok' ? list.data.quotes.length : null;
 
   return (
@@ -81,6 +118,7 @@ export function CounterpartyQuotes({
               quotes={list.data.quotes}
               caption={`Bids and offers of this counterparty`}
               showCounterparty={false}
+              stacked={stacked}
             />
           ))}
       </section>

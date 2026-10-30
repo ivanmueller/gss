@@ -762,6 +762,29 @@ describe('contacts', () => {
     expect((await send('DELETE', `/${COUNTERPARTY}/contacts/${CONTACT}`)).status).toBe(404);
     expect((await send('DELETE', `/${COUNTERPARTY}/contacts/nope`)).status).toBe(404);
   });
+
+  it('makes a contact the main contact, or none, and returns the counterparty', async () => {
+    db.getCounterparty.mockResolvedValue(detail());
+    const path = `/${COUNTERPARTY}/main-contact`;
+    expect((await send('PUT', path, { contactId: CONTACT })).status).toBe(200);
+    expect(db.setMainContact).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, CONTACT);
+    expect((await send('PUT', path, { contactId: null })).status).toBe(200);
+    expect(db.setMainContact).toHaveBeenLastCalledWith(expect.anything(), COUNTERPARTY, null);
+  });
+
+  it('refuses a malformed main contact, one that is not there and a reader', async () => {
+    const path = `/${COUNTERPARTY}/main-contact`;
+    expect((await send('PUT', path, { contactId: 'k1' })).status).toBe(422);
+    expect((await send('PUT', path, {})).status).toBe(422);
+    expect((await send('PUT', '/nope/main-contact', { contactId: null })).status).toBe(404);
+    expect(db.setMainContact).not.toHaveBeenCalled();
+    db.setMainContact.mockResolvedValueOnce({ status: 'not_found' });
+    expect((await send('PUT', path, { contactId: CONTACT })).status).toBe(404);
+    db.setMainContact.mockResolvedValueOnce({ status: 'forbidden' });
+    expect((await send('PUT', path, { contactId: CONTACT })).status).toBe(403);
+    db.setMainContact.mockResolvedValueOnce({ status: 'archived' });
+    expect((await send('PUT', path, { contactId: CONTACT })).status).toBe(409);
+  });
 });
 
 describe('locations', () => {

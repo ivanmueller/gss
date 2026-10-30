@@ -6,6 +6,7 @@ import {
   facilityPin,
   mapboxToken,
   mapPaint,
+  pinBounds,
   pinFeatures,
   readMapColours,
   type MapColours,
@@ -71,6 +72,25 @@ describe('map pins', () => {
     expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'seller'] }).tone).toBe('mixed');
     expect(facilityPin({ ...FACILITY, counterpartyTypes: ['broker'] }).tone).toBe('mixed');
     expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'broker'] }).tone).toBe('bid');
+  });
+});
+
+describe('pinBounds', () => {
+  it('holds every pin, west to east and south to north', () => {
+    expect(
+      pinBounds([
+        { latitude: 52.13, longitude: -106.67 },
+        { latitude: 49.5, longitude: -97.1 },
+        { latitude: 50.4, longitude: -104.6 },
+      ]),
+    ).toEqual([-106.67, 49.5, -97.1, 52.13]);
+  });
+
+  it('is a point for one pin, and nothing without pins', () => {
+    expect(pinBounds([{ latitude: 52.13, longitude: -106.67 }])).toEqual([
+      -106.67, 52.13, -106.67, 52.13,
+    ]);
+    expect(pinBounds([])).toBeNull();
   });
 });
 

@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-10-30 — A redesigned page for buyers and sellers
+
+- `docs/DECISIONS.md`: the owner's approved layout and answers (two columns, Log contact first, a main contact, a small satellite map, freight folded).
+- `docs/API.md`: `PUT /api/v1/counterparties/{id}/main-contact` and contacts' `isMain`.
+- `docs/DATA_MODEL.md`: `counterparty_contacts.is_main` and migration `20261030010000_counterparty_main_contact.sql`.
+- `docs/PRODUCT.md`: the counterparty page for buyers, sellers and brokers.
+
+## 2026-10-29 — Handoff record of #75
+
+- `docs/HANDOFF.md`: ivanmueller/gss#75 with its CI and Deploy staging runs; the next task, the owner's choice of a redesigned counterparty page for buyers and sellers.
+
 ## 2026-10-29 — Handoff record of #74
 
 - `docs/HANDOFF.md`: ivanmueller/gss#74 with its CI and Deploy staging runs; #73's runs on `main` green; the owner's check of times in MT on staging.
