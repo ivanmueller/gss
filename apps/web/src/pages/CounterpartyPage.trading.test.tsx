@@ -31,6 +31,7 @@ const DETAIL: CounterpartyDetail = {
   regions: ['MB', 'SK'],
   logoSha256: null,
   website: null,
+  phone: null,
   notes: null,
   archivedAt: null,
   buys: [],
@@ -70,6 +71,7 @@ const DETAIL: CounterpartyDetail = {
       longitude: '-106.670046',
       locationPrecision: 'exact',
       geocodingSource: 'manual',
+      transportAccess: null,
       version: '2026-10-27T14:05:00.000000Z',
     },
     {
@@ -85,6 +87,7 @@ const DETAIL: CounterpartyDetail = {
       longitude: null,
       locationPrecision: null,
       geocodingSource: null,
+      transportAccess: null,
       version: '2026-10-27T14:05:00.000000Z',
     },
   ],

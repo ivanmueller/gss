@@ -18,8 +18,13 @@ const BUYER: Detail = {
   types: ['buyer'],
   archivedAt: null,
   commodities: [
-    { code: 'canola', name: 'Canola', direction: 'buys' },
-    { code: 'yellow_peas', name: 'Yellow peas', direction: 'buys' },
+    { code: 'canola', name: 'Canola', direction: 'buys', verifiedAt: '2026-10-30T15:00:00.000Z' },
+    {
+      code: 'yellow_peas',
+      name: 'Yellow peas',
+      direction: 'buys',
+      verifiedAt: '2026-10-30T15:00:00.000Z',
+    },
   ],
 };
 
@@ -40,14 +45,64 @@ describe('CounterpartyCommodities', () => {
       within(card)
         .getAllByRole('listitem')
         .map((item) => item.textContent),
-    ).toEqual(['Canola', 'Yellow peas']);
+    ).toEqual(['Canola, verified', 'Yellow peas, verified']);
+    expect(within(card).queryByText(/Click one to verify/)).toBeNull();
+  });
+
+  it('shows a commodity from a spreadsheet as unverified, and verifies it after asking', async () => {
+    const calls = mockApi({
+      [`PATCH /counterparties/${ID}/commodities`]: () => Response.json({}),
+    });
+    const onSaved = show({
+      ...BUYER,
+      commodities: [
+        { code: 'canola', name: 'Canola', direction: 'buys', verifiedAt: null },
+        ...BUYER.commodities.slice(1),
+      ],
+    });
+    expect(screen.getByText(/Grey and dashed: unverified/)).toHaveTextContent(
+      'Click one to verify it.',
+    );
+    // Only the unverified one is a button.
+    expect(screen.queryByRole('button', { name: /Yellow peas/ })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Canola, unverified: verify' }));
+    const dialog = screen.getByRole('dialog', { name: 'Verify Canola?' });
+    expect(dialog).toHaveTextContent('Verify it once you know they buy it.');
+
+    // Not now closes it without a change.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Not now' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(calls).toEqual([]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Canola, unverified: verify' }));
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'Verify Canola?' })).getByRole('button', {
+        name: 'Verify',
+      }),
+    );
+    expect(calls.map((call) => call.body)).toEqual([
+      { add: [], remove: [], verify: [{ commodity: 'canola', direction: 'buys' }] },
+    ]);
+    expect(onSaved).toHaveBeenCalledWith('Canola verified.');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('cannot verify on an archived counterparty, but still says which are unverified', () => {
+    show({
+      ...BUYER,
+      archivedAt: '2026-10-28T10:00:00.000Z',
+      commodities: [{ code: 'canola', name: 'Canola', direction: 'buys', verifiedAt: null }],
+    });
+    expect(screen.queryByRole('button', { name: /Canola/ })).toBeNull();
+    expect(screen.getByRole('listitem')).toHaveTextContent('Canola, unverified');
+    expect(screen.getByText(/Grey and dashed/)).not.toHaveTextContent('Click one');
   });
 
   it('shows both lists for a buyer and seller, and says when one is empty', () => {
     show({ ...BUYER, types: ['buyer', 'seller'] });
     const card = screen.getByRole('region', { name: 'Commodities' });
     expect(within(card).getByRole('list', { name: 'What they buy' })).toHaveTextContent(
-      'CanolaYellow peas',
+      'Canola, verifiedYellow peas, verified',
     );
     expect(within(card).getByRole('heading', { name: 'What they sell' })).toBeInTheDocument();
     expect(within(card).getByText('None listed yet.')).toBeInTheDocument();

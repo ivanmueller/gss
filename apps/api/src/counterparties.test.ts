@@ -153,6 +153,7 @@ describe('GET /api/v1/counterparties/:id', () => {
     const detail = {
       ...summary('Synthetic Buyer LLC'),
       website: null,
+      phone: null,
       notes: null,
       version: VERSION,
       contacts: [],
@@ -549,6 +550,7 @@ function detail(overrides: Record<string, unknown> = {}) {
   return {
     ...summary('Synthetic Buyer LLC'),
     website: null,
+    phone: null,
     notes: null,
     version: VERSION,
     contacts: [],
@@ -600,6 +602,41 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
         commodities: [],
       },
     );
+  });
+
+  it('saves the company phone, and the location’s rail or truck access given beside it', async () => {
+    const res = await send('POST', '', {
+      organizationId: ORG,
+      values: { ...values, companyPhone: '306 555 0100 ext. 4' },
+      transportAccess: 'rail_and_truck',
+    });
+    expect(res.status).toBe(201);
+    expect(db.createCounterparty).toHaveBeenCalledWith(
+      expect.anything(),
+      ORG,
+      expect.objectContaining({
+        counterparty: expect.objectContaining({ phone: '306 555 0100 x4' }) as unknown,
+        facilities: [expect.objectContaining({ transportAccess: 'rail_and_truck' }) as unknown],
+      }),
+    );
+  });
+
+  it('refuses a company phone that is not one, and an unknown access', async () => {
+    const phone = await send('POST', '', {
+      organizationId: ORG,
+      values: { ...values, companyPhone: 'ask for Pat' },
+    });
+    expect(phone.status).toBe(422);
+    expect(await phone.json()).toMatchObject({
+      issues: [{ field: 'companyPhone', message: '"ask for Pat" is not a phone number' }],
+    });
+    const access = await send('POST', '', {
+      organizationId: ORG,
+      values,
+      transportAccess: 'barge',
+    });
+    expect(access.status).toBe(422);
+    expect(db.createCounterparty).not.toHaveBeenCalled();
   });
 
   it('takes a location with only the country the form filled in as no location', async () => {
@@ -848,7 +885,22 @@ describe('commodities', () => {
     };
     const res = await send('PATCH', path, change);
     expect(res.status).toBe(200);
-    expect(db.changeCommodities).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, change);
+    expect(db.changeCommodities).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, {
+      ...change,
+      verify: [],
+    });
+  });
+
+  it('verifies listed commodities', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    const verify = [{ commodity: 'canola', direction: 'buys' }];
+    const res = await send('PATCH', path, { add: [], remove: [], verify });
+    expect(res.status).toBe(200);
+    expect(db.changeCommodities).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, {
+      add: [],
+      remove: [],
+      verify,
+    });
   });
 
   it('refuses commodities off the list, other directions and an empty change', async () => {
@@ -856,6 +908,8 @@ describe('commodities', () => {
       { add: [{ commodity: 'hemp', direction: 'buys' }], remove: [] },
       { add: [{ commodity: 'canola', direction: 'trades' }], remove: [] },
       { add: [], remove: [] },
+      { add: [], remove: [], verify: [] },
+      { add: [], remove: [], verify: [{ commodity: 'hemp', direction: 'buys' }] },
       { add: [{ commodity: 'canola', direction: 'buys' }] },
     ]) {
       expect((await send('PATCH', path, body)).status).toBe(422);
@@ -893,6 +947,46 @@ describe('locations', () => {
       expect.anything(),
       COUNTERPARTY,
       expect.objectContaining({ city: 'Synthetic Falls', region: 'ND', country: 'US' }),
+    );
+  });
+
+  it('adds a location with its access, and keeps the access when a change leaves it out', async () => {
+    db.getCounterparty.mockResolvedValue(detail({ primaryCountry: 'CA' }));
+    const added = await send('POST', `/${COUNTERPARTY}/facilities`, {
+      values: { city: 'Synthetic Spur' },
+      transportAccess: 'rail',
+    });
+    expect(added.status).toBe(201);
+    expect(db.addFacility).toHaveBeenCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      expect.objectContaining({ city: 'Synthetic Spur', transportAccess: 'rail' }),
+    );
+    const path = `/${COUNTERPARTY}/facilities/${FACILITY}`;
+    const kept = await send('PATCH', path, {
+      version: VERSION,
+      values: { city: 'Synthetic Spur' },
+    });
+    expect(kept.status).toBe(200);
+    expect(db.updateFacility).toHaveBeenLastCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      FACILITY,
+      VERSION,
+      expect.objectContaining({ transportAccess: undefined }),
+    );
+    const cleared = await send('PATCH', path, {
+      version: VERSION,
+      values: { city: 'Synthetic Spur' },
+      transportAccess: null,
+    });
+    expect(cleared.status).toBe(200);
+    expect(db.updateFacility).toHaveBeenLastCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      FACILITY,
+      VERSION,
+      expect.objectContaining({ transportAccess: null }),
     );
   });
 

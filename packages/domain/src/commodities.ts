@@ -62,16 +62,24 @@ const interest = z.object({
   direction: z.enum(COMMODITY_DIRECTIONS),
 });
 
-/** PATCH /api/v1/counterparties/{id}/commodities: what to add and what to remove. */
+/**
+ * PATCH /api/v1/counterparties/{id}/commodities: what to add (verified by whoever adds it),
+ * what to remove, and which listed ones to verify (owner's request, 2026-10-30).
+ */
 export const commodityChangeSchema = z
   .object({
     add: z.array(interest).max(CODES.length * 2),
     remove: z.array(interest).max(CODES.length * 2),
+    verify: z
+      .array(interest)
+      .max(CODES.length * 2)
+      .default([]),
   })
-  .refine((change) => change.add.length + change.remove.length > 0, {
+  .refine((change) => change.add.length + change.remove.length + change.verify.length > 0, {
     message: 'nothing to change',
   });
-export type CommodityChange = z.infer<typeof commodityChangeSchema>;
+/** A change as sent; `verify` may be left out. */
+export type CommodityChange = z.input<typeof commodityChangeSchema>;
 
 /** Lower case, no accents, words separated by single spaces. */
 function normalize(text: string): string {

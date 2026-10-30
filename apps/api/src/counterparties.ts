@@ -231,13 +231,15 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       }
       const contentSha256 = await sha256Hex(
         JSON.stringify(
-          // Without commodities, the same as before they could be imported.
-          plan.groups.map(({ counterparty, contacts, facilities, commodities }) => ({
-            counterparty,
-            contacts,
-            facilities,
-            ...(commodities.length > 0 && { commodities }),
-          })),
+          // Without commodities or a company phone, the same as before they could be imported.
+          plan.groups.map(
+            ({ counterparty: { phone, ...counterparty }, contacts, facilities, commodities }) => ({
+              counterparty: phone === null ? counterparty : { ...counterparty, phone },
+              contacts,
+              facilities,
+              ...(commodities.length > 0 && { commodities }),
+            }),
+          ),
         ),
       );
       const importBatchId = await db.importCounterparties(ctx, {
@@ -347,7 +349,9 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       const created = await db.createCounterparty(ctx, request.data.organizationId, {
         counterparty,
         contacts: contact ? [contact] : [],
-        facilities: facility ? [facility] : [],
+        facilities: facility
+          ? [{ ...facility, transportAccess: request.data.transportAccess ?? null }]
+          : [],
         commodities,
       });
       if (created.status === 'forbidden') return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_EDIT);
@@ -475,7 +479,10 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         normalizeCountry(counterparty.primaryCountry) ?? 'CA',
       );
       if (parsed.status === 'invalid') return invalid(c, parsed.issues);
-      const result = await db.addFacility(ctx, id, parsed.value);
+      const result = await db.addFacility(ctx, id, {
+        ...parsed.value,
+        transportAccess: request.data.transportAccess ?? null,
+      });
       return savedDetail(c, db, ctx, id, result, 'counterparty', 201);
     });
   });
@@ -497,13 +504,10 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         normalizeCountry(counterparty.primaryCountry) ?? 'CA',
       );
       if (parsed.status === 'invalid') return invalid(c, parsed.issues);
-      const result = await db.updateFacility(
-        ctx,
-        id,
-        facilityId,
-        request.data.version,
-        parsed.value,
-      );
+      const result = await db.updateFacility(ctx, id, facilityId, request.data.version, {
+        ...parsed.value,
+        transportAccess: request.data.transportAccess,
+      });
       return savedDetail(c, db, ctx, id, result, 'location');
     });
   });

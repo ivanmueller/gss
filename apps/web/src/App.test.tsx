@@ -329,7 +329,7 @@ describe('navigation', () => {
   });
 
   it('keeps the menu entry lit on the pages below it', () => {
-    window.history.replaceState(null, '', '/counterparties/coordinates');
+    window.history.replaceState(null, '', '/counterparties/00000000-0000-4000-8000-00000000c001');
     render(<App />);
     const nav = screen.getByRole('navigation', { name: 'Main' });
     expect(within(nav).getByRole('link', { name: 'Counterparties' })).toHaveAttribute(
@@ -353,7 +353,7 @@ describe('navigation', () => {
     window.history.replaceState(null, '', '/map/coordinates');
     render(<App />);
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/counterparties/coordinates');
+      expect(window.location.pathname + window.location.search).toBe('/counterparties');
     });
   });
 

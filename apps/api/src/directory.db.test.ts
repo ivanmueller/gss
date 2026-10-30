@@ -51,6 +51,7 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           primaryCountry: 'CA',
           verificationStatus: 'pending',
           website: 'https://www.example.com',
+          phone: '+1 306 555 0100',
           notes: 'Synthetic record.',
         },
         contacts: [
@@ -100,6 +101,7 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           primaryCountry: 'US',
           verificationStatus: 'unverified',
           website: null,
+          phone: null,
           notes: null,
         },
         contacts: [],
@@ -196,11 +198,13 @@ describe('the counterparty directory as app_api', () => {
       tradingName: 'Prairie Mills',
       verificationStatus: 'pending',
       website: 'https://www.example.com',
+      phone: '+1 306 555 0100',
       notes: 'Synthetic record.',
-      // Buys first, each in the commodity list's order, with its name.
+      // Buys first, each in the commodity list's order, with its name; from a spreadsheet,
+      // so unverified.
       commodities: [
-        { code: 'canola', name: 'Canola', direction: 'buys' },
-        { code: 'yellow_peas', name: 'Yellow peas', direction: 'sells' },
+        { code: 'canola', name: 'Canola', direction: 'buys', verifiedAt: null },
+        { code: 'yellow_peas', name: 'Yellow peas', direction: 'sells', verifiedAt: null },
       ],
       contacts: [
         {

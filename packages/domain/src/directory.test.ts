@@ -86,6 +86,7 @@ describe('parseImportRow', () => {
         primaryCountry: 'CA',
         verificationStatus: 'verified',
         website: 'https://www.example.com',
+        phone: null,
         notes: 'Prefers rail.\nCall mornings.',
       },
       contact: {
@@ -126,6 +127,7 @@ describe('parseImportRow', () => {
         primaryCountry: 'US',
         verificationStatus: 'unverified',
         website: null,
+        phone: null,
         notes: null,
       },
       contact: null,
@@ -551,6 +553,93 @@ describe('websites', () => {
   });
 });
 
+describe('company phones', () => {
+  it('are read from a row and a form apart from the contact’s phone, and checked the same way', () => {
+    expect(
+      ok({
+        legalName: 'Synthetic Mill',
+        country: 'CA',
+        companyPhone: '306-555-0100 extension 2',
+        contactName: 'Synthetic Merchandiser',
+        // "extension" was once read as "ext" and left "ension": a bug fix for contacts too.
+        contactPhone: '306 555 0199 extension 3',
+      }),
+    ).toMatchObject({
+      counterparty: { phone: '306-555-0100 x2' },
+      contact: { phone: '306 555 0199 x3' },
+    });
+    expect(
+      parseCounterpartyFields({
+        legalName: 'Synthetic Mill',
+        country: 'CA',
+        types: 'buyer',
+        companyPhone: 'reception',
+      }),
+    ).toEqual({
+      status: 'invalid',
+      issues: [{ field: 'companyPhone', message: '"reception" is not a phone number' }],
+    });
+  });
+
+  it('are matched from company phone columns, while a plain Phone column stays the contact’s', () => {
+    expect(suggestMapping(['Company', 'Country', 'Phone', 'Main phone'])).toMatchObject({
+      contactPhone: 'Phone',
+      companyPhone: 'Main phone',
+    });
+    expect(suggestMapping(['Company', 'Company phone'])).toMatchObject({
+      companyPhone: 'Company phone',
+    });
+  });
+
+  it('warn when a later row of the same company disagrees', () => {
+    const { warnings } = groupImportRows([
+      ok({ legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0100' }, 2),
+      ok({ legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0101' }, 3),
+    ]);
+    expect(warnings).toEqual([
+      {
+        line: 3,
+        field: 'companyPhone',
+        message: "differs from line 2 for the same company; line 2's value is used",
+      },
+    ]);
+  });
+});
+
+describe('rail and truck access', () => {
+  it('is sent beside a location’s form values, never as a spreadsheet field', () => {
+    expect(
+      createCounterpartySchema.safeParse({
+        organizationId: '00000000-0000-4000-8000-0000000000aa',
+        values: { legalName: 'Synthetic Mill' },
+        transportAccess: 'rail_and_truck',
+      }).success,
+    ).toBe(true);
+    expect(
+      updateFacilitySchema.safeParse({
+        version: '2026-10-30T14:05:09.123456Z',
+        values: { city: 'Synthetic Spur' },
+        transportAccess: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      updateFacilitySchema.safeParse({
+        version: '2026-10-30T14:05:09.123456Z',
+        values: { city: 'Synthetic Spur' },
+        transportAccess: 'barge',
+      }).success,
+    ).toBe(false);
+    expect(
+      importRequestSchema.safeParse({
+        organizationId: '00000000-0000-4000-8000-0000000000aa',
+        fileName: 'synthetic.csv',
+        commit: false,
+        rows: [{ line: 2, values: { legalName: 'Synthetic Mill', transportAccess: 'rail' } }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('notes', () => {
   it('keep their line breaks, with at most one blank line between paragraphs', () => {
     expect(
@@ -612,6 +701,7 @@ describe('edit forms', () => {
         primaryCountry: 'US',
         verificationStatus: 'unverified',
         website: null,
+        phone: null,
         notes: null,
       },
     });

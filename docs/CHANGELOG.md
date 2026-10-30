@@ -1,5 +1,17 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Company phone, rail and truck, coordinates when adding, the + window, verified commodities
+
+- `docs/DECISIONS.md`: the owner's request and answers: a company phone; rail or truck access by location, never from a spreadsheet; coordinates found when counterparties and locations are added, sure results saved, doubtful ones asked; adding and importing in the + window; commodities from a spreadsheet unverified until anyone on the team verifies them.
+- `docs/DATA_MODEL.md`: migration `20261030040000_phone_access_verified_commodities.sql`; `counterparties.phone`, `facilities.transport_access`, `counterparty_commodities.verified_by`/`verified_at`.
+- `docs/API.md`: `companyPhone`, `transportAccess`, `verify` and `verifiedAt`; `counterpartyId` and `importBatchId` on the geocoding lookup.
+- `docs/PRODUCT.md`, `README.md`: the + window's two tabs, the company page's phone, badges and Find coordinates; the coordinates page gone.
+- `AGENTS.md`: the geocoding line.
+
+## 2026-10-30 — Handoff record of #81
+
+- `docs/HANDOFF.md`: the handoff record of #80 (ivanmueller/gss#81) with its CI and Deploy staging runs; the owner's next request (company phone, coordinates at add and import, rail and truck access, adding in the + window, verified commodities) in the next task.
+
 ## 2026-10-30 — Handoff record of #80
 
 - `docs/HANDOFF.md`: the Counterparties toolbar (ivanmueller/gss#80) with its CI and Deploy staging runs; the owner's check on staging extended to #79 and #80.

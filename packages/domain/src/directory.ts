@@ -23,6 +23,15 @@ export const FACILITY_TYPES = [
 export type FacilityType = (typeof FACILITY_TYPES)[number];
 export const LOCATION_PRECISIONS = ['exact', 'approximate'] as const;
 export type LocationPrecision = (typeof LOCATION_PRECISIONS)[number];
+/** How a location is served (owner's request, 2026-10-30); never read from a spreadsheet. */
+export const TRANSPORT_ACCESS = ['rail', 'truck', 'rail_and_truck'] as const;
+export type TransportAccess = (typeof TRANSPORT_ACCESS)[number];
+
+export const TRANSPORT_ACCESS_LABELS: Record<TransportAccess, string> = {
+  rail: 'Rail',
+  truck: 'Truck',
+  rail_and_truck: 'Rail and truck',
+};
 
 export const FACILITY_TYPE_LABELS: Record<FacilityType, string> = {
   elevator: 'Elevator',
@@ -94,6 +103,20 @@ export const IMPORT_FIELDS = [
     label: 'Website',
     required: false,
     headers: ['website', 'web site', 'web', 'url', 'homepage', 'home page', 'web address'],
+  },
+  {
+    id: 'companyPhone',
+    label: 'Company phone',
+    required: false,
+    headers: [
+      'company phone',
+      'main phone',
+      'office phone',
+      'business phone',
+      'company telephone',
+      'main line',
+      'phone (company)',
+    ],
   },
   {
     id: 'commodities',
@@ -210,6 +233,7 @@ export const COUNTERPARTY_FIELD_IDS = [
   'types',
   'verificationStatus',
   'website',
+  'companyPhone',
   'notes',
 ] as const satisfies readonly ImportFieldId[];
 export const CONTACT_FIELD_IDS = [
@@ -262,10 +286,17 @@ export const importRequestSchema = z.object({
 });
 export type ImportRequest = z.infer<typeof importRequestSchema>;
 
-/** POST /api/v1/counterparties: one counterparty entered by hand, with an optional first contact and location. */
+/** A location's rail or truck access, sent beside its form values; null when not known. */
+const transportAccess = z.enum(TRANSPORT_ACCESS).nullable().optional();
+
+/**
+ * POST /api/v1/counterparties: one counterparty entered by hand, with an optional first
+ * contact and location (and that location's access).
+ */
 export const createCounterpartySchema = z.object({
   organizationId: z.uuid(),
   values: fieldValues(FIELD_IDS),
+  transportAccess,
 });
 
 /**
@@ -288,9 +319,16 @@ export const updateContactSchema = z.object({ version, values: fieldValues(CONTA
 /** PUT /api/v1/counterparties/{id}/main-contact: one of its contacts, or null for none. */
 export const mainContactSchema = z.object({ contactId: z.uuid().nullable() });
 /** POST /api/v1/counterparties/{id}/facilities. */
-export const createFacilitySchema = z.object({ values: fieldValues(FACILITY_FIELD_IDS) });
-/** PATCH /api/v1/counterparties/{id}/facilities/{facilityId}. */
-export const updateFacilitySchema = z.object({ version, values: fieldValues(FACILITY_FIELD_IDS) });
+export const createFacilitySchema = z.object({
+  values: fieldValues(FACILITY_FIELD_IDS),
+  transportAccess,
+});
+/** PATCH /api/v1/counterparties/{id}/facilities/{facilityId}; access left out is kept. */
+export const updateFacilitySchema = z.object({
+  version,
+  values: fieldValues(FACILITY_FIELD_IDS),
+  transportAccess,
+});
 
 export interface CounterpartyInput {
   legalName: string;
@@ -300,6 +338,8 @@ export interface CounterpartyInput {
   verificationStatus: VerificationStatus;
   /** A public http or https address, tidied by parseWebsite. */
   website: string | null;
+  /** The company's main phone number, apart from its contacts' own. */
+  phone: string | null;
   notes: string | null;
 }
 
@@ -322,6 +362,8 @@ export interface FacilityInput {
   latitude: string | null;
   longitude: string | null;
   locationPrecision: LocationPrecision | null;
+  /** Rail, truck or both; never from a spreadsheet. Left out (undefined) on a change: kept. */
+  transportAccess?: TransportAccess | null | undefined;
 }
 
 /** A problem with one field of a form or spreadsheet row; field null for the record as a whole. */
@@ -465,6 +507,13 @@ class FieldReader {
   }
 }
 
+/** A phone number field, with "ext." or "extension" written as x; null when empty. */
+function readPhone(r: FieldReader, field: 'contactPhone' | 'companyPhone'): string | null {
+  const phone = r.value(field)?.replace(/\s*(extension|ext\.?)\s*/i, ' x') ?? null;
+  if (phone !== null && !PHONE.test(phone)) r.issue(field, `"${phone}" is not a phone number`);
+  return phone;
+}
+
 function readCounterparty(
   r: FieldReader,
   defaultTypes: readonly CounterpartyType[] | undefined,
@@ -514,6 +563,7 @@ function readCounterparty(
     else r.issue('website', parsed.message);
   }
 
+  const phone = readPhone(r, 'companyPhone');
   const notes = cleanLines(r.raw('notes'));
 
   if (legalName === null || country === null || types.length === 0) return null;
@@ -524,6 +574,7 @@ function readCounterparty(
     primaryCountry: country,
     verificationStatus,
     website,
+    phone,
     notes,
   };
 }
@@ -556,13 +607,11 @@ function readContact(r: FieldReader): ContactInput | null {
   if (!CONTACT_FIELD_IDS.some((field) => r.value(field) !== null)) return null;
   const name = r.label('contactName');
   const email = r.value('contactEmail');
-  const phone = r.value('contactPhone')?.replace(/\s*(ext\.?|extension)\s*/i, ' x') ?? null;
   if (r.value('contactName') === null)
     r.issue('contactName', 'is required when other contact details are given');
   if (email !== null && (email.length > 254 || !EMAIL.test(email)))
     r.issue('contactEmail', `"${email}" is not an email address`);
-  if (phone !== null && !PHONE.test(phone))
-    r.issue('contactPhone', `"${phone}" is not a phone number`);
+  const phone = readPhone(r, 'contactPhone');
   return name === null ? null : { name, role: r.label('contactRole'), email, phone };
 }
 
@@ -826,6 +875,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         ['types', first.types.join(', '), row.counterparty.types.join(', ')],
         ['verificationStatus', first.verificationStatus, row.counterparty.verificationStatus],
         ['website', first.website, row.counterparty.website],
+        ['companyPhone', first.phone, row.counterparty.phone],
         ['notes', first.notes, row.counterparty.notes],
       ];
       for (const [field, kept, ignored] of compare) {

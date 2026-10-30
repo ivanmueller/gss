@@ -87,16 +87,19 @@ The CAD/USD rate is the Bank of Canada's daily average (series FXUSDCAD), publis
 
 Signed-in members see their organization's buyers, sellers and carriers under **Counterparties**, by logo (the default), as a table or on a map (the three icons in the toolbar), with a commodity and **All / Buyers / Sellers / Carriers** to narrow the list. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
 
-Operations and admin members add counterparties with the **+** button at the end of the toolbar, which offers two ways:
+Operations and admin members add counterparties with the **+** button at the end of the toolbar. It opens a window with two tabs:
 
-- **Add by hand:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
-- **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped. A **Commodities** column ("Canola; Yellow peas") fills what each buyer buys or seller sells.
+- **Add one:** the company (with its **Company phone**, the main number, apart from a contact's own), and optionally a first contact and location; for a buyer's or seller's location, **Served by**: Rail, Truck or Rail and truck.
+- **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"), in four steps: choose the file, match the columns (columns with known names are chosen already, and the unused ones are listed; say whether the file holds buyers or sellers), check, and coordinates. Companies already in the list are skipped. A **Commodities** column ("Canola; Yellow peas") fills what each buyer buys or seller sells, **unverified** until someone on the team verifies it; a **Company phone** column (also Main phone, Office phone) fills the company phone, while a plain **Phone** column stays the contact's. Rail or truck access is never read from a spreadsheet; it is set by hand on the location.
+
+Either way, each new location without coordinates gets them from its address at the end (see "Finding coordinates").
 
 Operations and admin members can also:
 
 - **Website:** entered under **Edit details** (or when adding a counterparty, or from a "Website" column in a spreadsheet); `example.com` is saved as `https://example.com`. The site name must be in plain letters (no accents). On the counterparty's page it is a link that opens in a new tab.
 - On a counterparty's page: **Edit details**, **Archive** (and **Restore**; on a buyer's or seller's page the first two are under **⋯**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 - On a buyer's or seller's page: **Make main** on a contact, shown at the top with the next follow-up and the last contact.
+- **Verified commodities:** a commodity from a spreadsheet shows grey and dashed (unverified); anyone on the team clicks it and chooses **Verify** to make it verified, shown in the buy or sell colour. Ticked by hand under **Edit**, a commodity is verified at once.
 
 Anyone on the team can change **What they buy** or **What they sell** on a counterparty's page, from the 20 commodities; the commodity dropdown on **Counterparties** finds who buys or sells one.
 
@@ -149,7 +152,7 @@ Without the token, the page lists the locations and explains what is missing. To
 
 ### Finding coordinates
 
-Operations and admin members can turn addresses into map points: **Counterparties → Map → Find coordinates from addresses → Look up addresses**. The app sends only the addresses of locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio, shows what it found as exact or approximate, and saves only the results you leave ticked. Results in another province or state, or with low confidence, start unticked. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
+Coordinates are found from the address when counterparties are added (owner's request, 2026-10-30): at the end of **Add one** when its location has none, at the last step of **Import spreadsheet**, after **Add location** on a counterparty's page, and with **Find coordinates** in a counterparty's **Locations** box. The app sends only the addresses of those locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio. Sure results (in the address's province or state, 80% confidence or more) are saved straight away; the others are listed to save or skip, and the ones not found are listed with what to do. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
 
 The lookup needs a Geocodio API key, kept as a secret of the staging Worker in Cloudflare (the server does the lookups, so the key never reaches a browser):
 

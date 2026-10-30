@@ -51,10 +51,7 @@ export function setSearchParams(changes: Record<string, string | null>) {
 
 export type Route =
   | { page: 'workspace' }
-  | { page: 'coordinates' }
   | { page: 'counterparties' }
-  | { page: 'new-counterparty' }
-  | { page: 'import' }
   | { page: 'counterparty'; id: string }
   | { page: 'team' }
   | { page: 'quotes' }
@@ -73,13 +70,15 @@ export function matchRoute(path: string): Route {
   if (trimmed === '/') return { page: 'workspace' };
   // The map moved into Counterparties (owner's request, 2026-10-28).
   if (trimmed === '/map') return { page: 'redirect', to: '/counterparties?view=map' };
-  if (trimmed === '/map/coordinates')
-    return { page: 'redirect', to: '/counterparties/coordinates' };
+  // Coordinates are found when counterparties are added, and on their pages (2026-10-30).
+  if (trimmed === '/map/coordinates' || trimmed === '/counterparties/coordinates')
+    return { page: 'redirect', to: '/counterparties' };
   if (trimmed === '/team') return { page: 'team' };
   if (trimmed === '/counterparties') return { page: 'counterparties' };
-  if (trimmed === '/counterparties/new') return { page: 'new-counterparty' };
-  if (trimmed === '/counterparties/import') return { page: 'import' };
-  if (trimmed === '/counterparties/coordinates') return { page: 'coordinates' };
+  // Adding moved into the + button's window (owner's request, 2026-10-30).
+  if (trimmed === '/counterparties/new') return { page: 'redirect', to: '/counterparties?add=one' };
+  if (trimmed === '/counterparties/import')
+    return { page: 'redirect', to: '/counterparties?add=import' };
   const match = /^\/counterparties\/([0-9a-f-]{36})$/i.exec(trimmed);
   if (match?.[1]) return { page: 'counterparty', id: match[1] };
   if (trimmed === '/quotes') return { page: 'quotes' };

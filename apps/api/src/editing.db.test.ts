@@ -52,6 +52,7 @@ function record(legalName: string, overrides: Partial<NewCounterparty> = {}): Ne
       primaryCountry: 'CA',
       verificationStatus: 'unverified',
       website: null,
+      phone: null,
       notes: 'Synthetic record.\nSecond line.',
     },
     contacts: [contact('Synthetic Grower')],
@@ -168,6 +169,7 @@ describe('editing a counterparty as app_api', () => {
       types: ['buyer' as const, 'seller' as const],
       verificationStatus: 'verified' as const,
       website: 'https://www.example.com/grain',
+      phone: '403 555 0100 x7',
     };
 
     expect(
@@ -268,9 +270,51 @@ describe('what a counterparty buys and sells, as app_api', () => {
   const listed = async (counterpartyId: string) =>
     (await detail(counterpartyId)).commodities.map((k) => `${k.direction} ${k.name}`);
 
-  it('is added with a counterparty entered by hand', async () => {
+  it('is added with a counterparty entered by hand, verified by whoever added it', async () => {
     const counterpartyId = await create('Synthetic Commodity Grower', { commodities: [oats] });
     expect(await listed(counterpartyId)).toEqual(['sells Oats']);
+    expect((await detail(counterpartyId)).commodities[0]?.verifiedAt).toEqual(expect.any(String));
+  });
+
+  it('is verified by anyone on the team when it came unverified, once', async () => {
+    const counterpartyId = await create('Synthetic Commodity Verified');
+    // As a spreadsheet import leaves it: unverified.
+    await admin`
+      insert into app.counterparty_commodities
+        (organization_id, counterparty_id, commodity_code, direction, created_by)
+      values (${orgs.a}, ${counterpartyId}, 'canola', 'buys', ${users.olivia})`;
+    const verifiedAt = async () => (await detail(counterpartyId)).commodities[0]?.verifiedAt;
+    expect(await verifiedAt()).toBeNull();
+    expect(
+      await db.changeCommodities(as(users.bob), counterpartyId, {
+        add: [],
+        remove: [],
+        verify: [canola],
+      }),
+    ).toEqual({ status: 'not_found' });
+    expect(await verifiedAt()).toBeNull();
+    expect(
+      await db.changeCommodities(as(users.victor), counterpartyId, {
+        add: [],
+        remove: [],
+        verify: [canola],
+      }),
+    ).toEqual({ status: 'saved' });
+    const first = await verifiedAt();
+    expect(first).toEqual(expect.any(String));
+    const [row] = await admin<{ verified_by: string }[]>`
+      select verified_by from app.counterparty_commodities where counterparty_id = ${counterpartyId}`;
+    expect(row?.verified_by).toBe(users.victor);
+    // Verifying it again, or one not listed, changes nothing.
+    expect(
+      await db.changeCommodities(as(users.olivia), counterpartyId, {
+        add: [],
+        remove: [],
+        verify: [canola, oats],
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(await verifiedAt()).toBe(first);
+    expect(await listed(counterpartyId)).toEqual(['buys Canola']);
   });
 
   it('is changed by anyone on the team, a viewer too; repeats change nothing', async () => {
@@ -636,6 +680,48 @@ describe('contacts and locations as app_api', () => {
         moved,
       ),
     ).toEqual({ status: 'changed' });
+  });
+
+  it('keeps a location’s rail or truck access, changed only when given', async () => {
+    const counterpartyId = await create('Synthetic Rail Buyer', { facilities: [] });
+    const ctx = as(users.olivia);
+    expect(
+      await db.addFacility(ctx, counterpartyId, facility({ transportAccess: 'rail_and_truck' })),
+    ).toEqual({ status: 'saved' });
+    const current = async () => {
+      const [found] = (await detail(counterpartyId)).facilities;
+      if (!found) throw new Error('location not added');
+      return found;
+    };
+    const added = await current();
+    expect(added.transportAccess).toBe('rail_and_truck');
+
+    // Left out: kept, as an edit from a form without the choice would send it.
+    const renamed = facility({ name: 'Synthetic Renamed Rail Elevator' });
+    expect(await db.updateFacility(ctx, counterpartyId, added.id, added.version, renamed)).toEqual({
+      status: 'saved',
+    });
+    const kept = await current();
+    expect(kept).toMatchObject({
+      name: 'Synthetic Renamed Rail Elevator',
+      transportAccess: 'rail_and_truck',
+    });
+
+    expect(
+      await db.updateFacility(ctx, counterpartyId, kept.id, kept.version, {
+        ...renamed,
+        transportAccess: 'truck',
+      }),
+    ).toEqual({ status: 'saved' });
+    const truck = await current();
+    expect(truck.transportAccess).toBe('truck');
+    expect(
+      await db.updateFacility(ctx, counterpartyId, truck.id, truck.version, {
+        ...renamed,
+        transportAccess: null,
+      }),
+    ).toEqual({ status: 'saved' });
+    expect((await current()).transportAccess).toBeNull();
   });
 
   it('adds and removes a location for editors of the organization only', async () => {

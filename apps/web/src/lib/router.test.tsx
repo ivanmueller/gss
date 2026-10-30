@@ -25,9 +25,6 @@ describe('matchRoute', () => {
       page: 'freight-rate',
       id: '00000000-0000-4000-8000-00000000e001',
     });
-    expect(matchRoute('/counterparties/new')).toEqual({ page: 'new-counterparty' });
-    expect(matchRoute('/counterparties/import')).toEqual({ page: 'import' });
-    expect(matchRoute('/counterparties/coordinates')).toEqual({ page: 'coordinates' });
     expect(matchRoute('/counterparties/00000000-0000-4000-8000-00000000c001')).toEqual({
       page: 'counterparty',
       id: '00000000-0000-4000-8000-00000000c001',
@@ -36,9 +33,22 @@ describe('matchRoute', () => {
 
   it('sends the old map addresses to the counterparties page', () => {
     expect(matchRoute('/map')).toEqual({ page: 'redirect', to: '/counterparties?view=map' });
-    expect(matchRoute('/map/coordinates/')).toEqual({
+    expect(matchRoute('/map/coordinates/')).toEqual({ page: 'redirect', to: '/counterparties' });
+  });
+
+  it('sends the old adding pages to the + button’s window (2026-10-30)', () => {
+    expect(matchRoute('/counterparties/new')).toEqual({
       page: 'redirect',
-      to: '/counterparties/coordinates',
+      to: '/counterparties?add=one',
+    });
+    expect(matchRoute('/counterparties/import')).toEqual({
+      page: 'redirect',
+      to: '/counterparties?add=import',
+    });
+    // Coordinates are found when adding and on a counterparty's page now.
+    expect(matchRoute('/counterparties/coordinates')).toEqual({
+      page: 'redirect',
+      to: '/counterparties',
     });
   });
 

@@ -12,7 +12,9 @@ import type {
   CounterpartyInput,
   FacilityInput,
   FacilityType,
+  GeocodeScope,
   LocationPrecision,
+  TransportAccess,
 } from '@grain/domain';
 import postgres from 'postgres';
 
@@ -78,12 +80,16 @@ export interface Facility {
   locationPrecision: LocationPrecision | null;
   /** Where the coordinates came from: 'geocodio', 'manual' or 'file_import'. */
   geocodingSource: string | null;
+  /** Rail, truck or both; null when not known. */
+  transportAccess: TransportAccess | null;
   version: string;
 }
 
 export interface CounterpartyDetail extends CounterpartySummary {
   /** A public http or https address (parseWebsite in @grain/domain). */
   website: string | null;
+  /** The company's main phone number. */
+  phone: string | null;
   notes: string | null;
   version: string;
   contacts: Contact[];
@@ -96,6 +102,8 @@ export interface CounterpartyCommodity {
   code: string;
   name: string;
   direction: CommodityDirection;
+  /** When someone on the team verified it; null while unverified (e.g. from a spreadsheet). */
+  verifiedAt: string | null;
 }
 
 /** The outcome of a change to a counterparty, its contacts or its locations. */
@@ -206,11 +214,15 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     bbox: Bbox,
     type: CounterpartyType | null,
   ) => Promise<MapFacilities>;
-  /** The organization's facilities without coordinates, up to `limit` + 1, by counterparty. */
+  /**
+   * The organization's facilities without coordinates, up to `limit` + 1, by counterparty;
+   * only one counterparty's or one import's when `scope` says so.
+   */
   facilitiesWithoutCoordinates: (
     ctx: RequestContext,
     organizationId: string,
     limit: number,
+    scope?: GeocodeScope,
   ) => Promise<FacilityAddress[]>;
   /**
    * Saves geocoded coordinates for facilities of the organization that still have none;
@@ -287,8 +299,9 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     contactId: string,
   ) => Promise<WriteResult>;
   /**
-   * Adds and removes commodities a counterparty buys or sells; any active member of its
-   * organization may. Adding one already listed, or removing one that is not, changes nothing.
+   * Adds, removes and verifies commodities a counterparty buys or sells; any active member
+   * of its organization may. One added is verified by whoever adds it. Adding one already
+   * listed, removing one that is not, or verifying one already verified, changes nothing.
    */
   changeCommodities: (
     ctx: RequestContext,
@@ -468,13 +481,14 @@ async function insertFacility(
     insert into app.facilities
       (organization_id, counterparty_id, name, facility_type, address_line, city, region,
        postal_code, country, latitude, longitude, location_precision, geocoding_source,
-       created_by)
+       transport_access, created_by)
     values (${organizationId}, ${counterpartyId}, ${facility.name},
             ${facility.facilityType}::app.facility_type, ${facility.addressLine},
             ${facility.city}, ${facility.region}, ${facility.postalCode}, ${facility.country},
             ${facility.latitude}::numeric, ${facility.longitude}::numeric,
             ${facility.locationPrecision}::app.location_precision,
-            ${enteredSource(facility, 'manual')}, app.current_user_id())
+            ${enteredSource(facility, 'manual')}, ${facility.transportAccess ?? null},
+            app.current_user_id())
   `;
 }
 
@@ -588,9 +602,14 @@ export function createDatabase(sql: postgres.Sql): Database {
     getCounterparty(ctx, id) {
       return asUser(ctx, async (tx) => {
         const [row] = await tx<
-          (SummaryRow & { website: string | null; notes: string | null; version: string })[]
+          (SummaryRow & {
+            website: string | null;
+            phone: string | null;
+            notes: string | null;
+            version: string;
+          })[]
         >`
-          select ${summaryColumns(tx)}, c.website, c.notes,
+          select ${summaryColumns(tx)}, c.website, c.phone, c.notes,
                  to_char(c.updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.counterparties c
           left join app.counterparty_logos l on l.counterparty_id = c.id
@@ -609,12 +628,17 @@ export function createDatabase(sql: postgres.Sql): Database {
                  latitude::text as latitude, longitude::text as longitude,
                  location_precision::text as "locationPrecision",
                  geocoding_source as "geocodingSource",
+                 transport_access as "transportAccess",
                  to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.facilities where counterparty_id = ${id}
           order by country, region nulls last, city nulls last, id
         `;
-        const commodities = await tx<CounterpartyCommodity[]>`
-          select k.commodity_code as code, m.display_name as name, k.direction
+        const commodities = await tx<
+          (Omit<CounterpartyCommodity, 'verifiedAt'> & {
+            verified_at: Date | null;
+          })[]
+        >`
+          select k.commodity_code as code, m.display_name as name, k.direction, k.verified_at
           from app.counterparty_commodities k
           join app.commodities m on m.code = k.commodity_code
           where k.counterparty_id = ${id}
@@ -623,11 +647,15 @@ export function createDatabase(sql: postgres.Sql): Database {
         return {
           ...summary(row),
           website: row.website,
+          phone: row.phone,
           notes: row.notes,
           version: row.version,
           contacts: [...contacts],
           facilities: [...facilities],
-          commodities: [...commodities],
+          commodities: commodities.map(({ verified_at, ...item }) => ({
+            ...item,
+            verifiedAt: verified_at?.toISOString() ?? null,
+          })),
         };
       });
     },
@@ -664,7 +692,7 @@ export function createDatabase(sql: postgres.Sql): Database {
       });
     },
 
-    facilitiesWithoutCoordinates(ctx, organizationId, limit) {
+    facilitiesWithoutCoordinates(ctx, organizationId, limit, scope = null) {
       return asUser(ctx, async (tx) => {
         const rows = await tx<FacilityAddress[]>`
           select f.id as "facilityId", f.counterparty_id as "counterpartyId",
@@ -676,6 +704,13 @@ export function createDatabase(sql: postgres.Sql): Database {
           join app.counterparties c on c.id = f.counterparty_id
           where f.organization_id = ${organizationId} and f.latitude is null
             and c.archived_at is null
+            and ${
+              scope === null
+                ? tx`true`
+                : 'counterpartyId' in scope
+                  ? tx`c.id = ${scope.counterpartyId}`
+                  : tx`c.import_batch_id = ${scope.importBatchId}`
+            }
           order by lower(c.legal_name), c.id, lower(f.name), f.id
           limit ${limit + 1}
         `;
@@ -786,6 +821,7 @@ export function createDatabase(sql: postgres.Sql): Database {
             primary_country: c.primaryCountry,
             verification_status: c.verificationStatus,
             website: c.website,
+            phone: c.phone,
             notes: c.notes,
             source: 'file_import',
             import_batch_id: batchId,
@@ -945,12 +981,11 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.counterparties
             (organization_id, legal_name, trading_name, types, primary_country,
-             verification_status, website, notes, source, created_by)
+             verification_status, website, phone, notes, source, created_by)
           values (${organizationId}, ${c.legalName}, ${c.tradingName},
                   ${enumArray(c.types)}::app.counterparty_type[], ${c.primaryCountry},
-                  ${c.verificationStatus}::app.verification_status, ${c.website}, ${c.notes},
-                  'manual',
-                  app.current_user_id())
+                  ${c.verificationStatus}::app.verification_status, ${c.website}, ${c.phone},
+                  ${c.notes}, 'manual', app.current_user_id())
           returning id
         `;
         if (!created) throw new Error('counterparty was not created');
@@ -960,12 +995,14 @@ export function createDatabase(sql: postgres.Sql): Database {
         for (const facility of record.facilities) {
           await insertFacility(tx, organizationId, created.id, facility);
         }
+        // Chosen by the person adding it, so verified by them.
         for (const interest of record.commodities) {
           await tx`
             insert into app.counterparty_commodities
-              (organization_id, counterparty_id, commodity_code, direction, created_by)
+              (organization_id, counterparty_id, commodity_code, direction, created_by,
+               verified_by)
             values (${organizationId}, ${created.id}, ${interest.commodity}, ${interest.direction},
-                    app.current_user_id())`;
+                    app.current_user_id(), app.current_user_id())`;
         }
         return { status: 'created', id: created.id };
       });
@@ -981,7 +1018,7 @@ export function createDatabase(sql: postgres.Sql): Database {
               types = ${enumArray(input.types)}::app.counterparty_type[],
               primary_country = ${input.primaryCountry},
               verification_status = ${input.verificationStatus}::app.verification_status,
-              website = ${input.website}, notes = ${input.notes}
+              website = ${input.website}, phone = ${input.phone}, notes = ${input.notes}
           where id = ${id} and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
           returning id
         `;
@@ -1059,13 +1096,21 @@ export function createDatabase(sql: postgres.Sql): Database {
             where counterparty_id = ${counterpartyId} and commodity_code = ${commodity}
               and direction = ${direction}`;
         }
+        // Ticked by hand, so verified by whoever ticked it.
         for (const { commodity, direction } of change.add) {
           await tx`
             insert into app.counterparty_commodities
-              (organization_id, counterparty_id, commodity_code, direction, created_by)
+              (organization_id, counterparty_id, commodity_code, direction, created_by,
+               verified_by)
             values (${row.organization_id}, ${counterpartyId}, ${commodity}, ${direction},
-                    app.current_user_id())
+                    app.current_user_id(), app.current_user_id())
             on conflict (organization_id, counterparty_id, commodity_code, direction) do nothing`;
+        }
+        for (const { commodity, direction } of change.verify ?? []) {
+          await tx`
+            update app.counterparty_commodities set verified_by = app.current_user_id()
+            where counterparty_id = ${counterpartyId} and commodity_code = ${commodity}
+              and direction = ${direction} and verified_by is null`;
         }
         return SAVED;
       });
@@ -1127,6 +1172,11 @@ export function createDatabase(sql: postgres.Sql): Database {
               country = ${input.country},
               latitude = ${latitude}::numeric, longitude = ${longitude}::numeric,
               location_precision = ${input.locationPrecision}::app.location_precision,
+              transport_access = ${
+                input.transportAccess === undefined
+                  ? tx`transport_access`
+                  : tx`${input.transportAccess}`
+              },
               geocoding_source = case
                 when ${latitude}::numeric is null then null
                 when ${sameSpot()} then geocoding_source

@@ -101,7 +101,7 @@ describe('CounterpartyMap with a Mapbox token', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Move to the prairies' }));
     expect(
       await screen.findByText(
-        '2 locations in view. 1 location has no coordinates yet, so it is not on the map.',
+        '2 locations in view. 1 location has no coordinates yet, so it is not on the map: use Find coordinates on the counterparty’s page.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('Stand-in map: map, light, 2 pins')).toBeInTheDocument();
@@ -208,7 +208,7 @@ describe('CounterpartyMap without a usable Mapbox token', () => {
     expect(screen.getByText(/The map is not set up yet/)).toBeInTheDocument();
     expect(
       await screen.findByText(
-        '2 locations have coordinates. 1 location has no coordinates yet, so it is not on the map.',
+        '2 locations have coordinates. 1 location has no coordinates yet, so it is not on the map: use Find coordinates on the counterparty’s page.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Locations' })).toHaveTextContent(
@@ -227,24 +227,26 @@ describe('CounterpartyMap without a usable Mapbox token', () => {
 });
 
 describe('CounterpartyMap and locations without coordinates', () => {
-  it('offers operations and admin members to find coordinates', async () => {
+  // Coordinates are found when counterparties are added and on their pages (2026-10-30).
+  it('points operations and admin members to the counterparty’s page, with no link here', async () => {
     mockApi({ [WORLD]: answer() });
     render(
       <CounterpartyMap session={SESSION} type={null} only={null} mapbox={{ status: 'missing' }} />,
     );
     expect(
-      await screen.findByRole('link', { name: 'Find coordinates from addresses' }),
-    ).toHaveAttribute('href', '/counterparties/coordinates');
+      await screen.findByText(/use Find coordinates on the counterparty’s page\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Find coordinates/ })).not.toBeInTheDocument();
   });
 
-  it('does not offer it to other members, or when every location has coordinates', async () => {
+  it('says only what is missing to other members, and nothing when every location has coordinates', async () => {
     mockApi({ [WORLD]: answer() });
     const viewer = { ...SESSION, organization: { ...ORG, role: 'viewer' } };
     const { unmount } = render(
       <CounterpartyMap session={viewer} type={null} only={null} mapbox={{ status: 'missing' }} />,
     );
     await screen.findByText(/2 locations have coordinates/);
-    expect(screen.queryByRole('link', { name: /Find coordinates/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/use Find coordinates/)).not.toBeInTheDocument();
     unmount();
 
     mockApi({ [WORLD]: answer({ withoutCoordinates: 0 }) });
@@ -252,7 +254,6 @@ describe('CounterpartyMap and locations without coordinates', () => {
       <CounterpartyMap session={SESSION} type={null} only={null} mapbox={{ status: 'missing' }} />,
     );
     await screen.findByText('2 locations have coordinates.');
-    expect(screen.queryByRole('link', { name: /Find coordinates/ })).not.toBeInTheDocument();
   });
 });
 

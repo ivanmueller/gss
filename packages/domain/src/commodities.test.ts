@@ -78,6 +78,26 @@ describe('commodityChangeSchema', () => {
     expect(one('canola', 'trades')).toBe(false);
     expect(commodityChangeSchema.safeParse({ add: [], remove: [] }).success).toBe(false);
   });
+
+  it('takes commodities to verify, alone or with other changes', () => {
+    const verify = [{ commodity: 'canola', direction: 'buys' }];
+    expect(commodityChangeSchema.parse({ add: [], remove: [], verify })).toEqual({
+      add: [],
+      remove: [],
+      verify,
+    });
+    expect(
+      commodityChangeSchema.parse({ add: [{ commodity: 'oats', direction: 'sells' }], remove: [] })
+        .verify,
+    ).toEqual([]);
+    expect(
+      commodityChangeSchema.safeParse({
+        add: [],
+        remove: [],
+        verify: [{ commodity: 'hemp', direction: 'buys' }],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('commodityName', () => {

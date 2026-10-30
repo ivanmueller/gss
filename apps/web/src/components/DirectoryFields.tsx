@@ -5,6 +5,7 @@ import {
   normalizeCountry,
   REGIONS,
   SUPPORTED_COUNTRIES,
+  TRANSPORT_ACCESS_LABELS,
   type FieldIssue,
   type ImportFieldId,
 } from '@grain/domain';
@@ -19,7 +20,24 @@ import { Select } from './ui/select';
 // field ids, so a form is checked by the same rules (and gives the same messages) as a
 // spreadsheet row (packages/domain/src/directory.ts).
 
-export type FormValues = Partial<Record<ImportFieldId, string>>;
+/**
+ * A form's values by field. transportAccess is a location's rail or truck access: no
+ * spreadsheet column fills it (owner's answer, 2026-10-30), so it is sent beside the values
+ * (splitAccess) rather than among them.
+ */
+export type FormValues = Partial<Record<ImportFieldId | 'transportAccess', string>>;
+
+/** The values to send, and the location's access beside them ('' is not known: null). */
+export function splitAccess({ transportAccess, ...values }: FormValues): {
+  values: Partial<Record<ImportFieldId, string>>;
+  transportAccess: string | null;
+} {
+  return {
+    values,
+    transportAccess:
+      transportAccess === undefined || transportAccess === '' ? null : transportAccess,
+  };
+}
 
 export interface FieldsProps {
   values: FormValues;
@@ -93,8 +111,8 @@ export function controlProps(id: string, error: string | undefined) {
 function useFieldHelpers({ values, issues, onChange }: FieldsProps) {
   const baseId = useId();
   return {
-    id: (field: ImportFieldId) => `${baseId}-${field}`,
-    value: (field: ImportFieldId) => values[field] ?? '',
+    id: (field: ImportFieldId | 'transportAccess') => `${baseId}-${field}`,
+    value: (field: ImportFieldId | 'transportAccess') => values[field] ?? '',
     error: (field: ImportFieldId, label: string) => {
       const issue = issues.find((item) => item.field === field);
       return issue && issueText(label, issue.message);
@@ -102,7 +120,7 @@ function useFieldHelpers({ values, issues, onChange }: FieldsProps) {
     set: (field: ImportFieldId) => (event: { target: { value: string } }) => {
       onChange({ [field]: event.target.value });
     },
-    choose: (field: ImportFieldId) => (value: string) => {
+    choose: (field: ImportFieldId | 'transportAccess') => (value: string) => {
       onChange({ [field]: value });
     },
   };
@@ -180,7 +198,10 @@ function CountrySelect({
   );
 }
 
-/** A counterparty's own details: names, buyer/seller, country, verification, website and notes. */
+/**
+ * A counterparty's own details: names, buyer/seller, country, verification, website, the
+ * company phone and notes.
+ */
 export function CompanyFields(props: FieldsProps) {
   const f = useFieldHelpers(props);
   const chosen = new Set(
@@ -258,6 +279,13 @@ export function CompanyFields(props: FieldsProps) {
         inputMode="url"
         hint="For example example.com."
       />
+      <TextField
+        field="companyPhone"
+        label="Company phone"
+        type="tel"
+        props={props}
+        hint="The company's main number. A person's own number goes with their contact."
+      />
       <Field id={f.id('notes')} label="Notes" error={notesError} className="sm:col-span-2">
         <Textarea
           {...controlProps(f.id('notes'), notesError)}
@@ -283,8 +311,11 @@ export function ContactFields(props: FieldsProps & { required?: boolean | undefi
   );
 }
 
-/** One location: what and where it is, and optionally its coordinates. */
-export function LocationFields(props: FieldsProps) {
+/**
+ * One location: what and where it is, whether rail or trucks serve it (for a buyer's or
+ * seller's location, `access`), and optionally its coordinates.
+ */
+export function LocationFields({ access = false, ...props }: FieldsProps & { access?: boolean }) {
   const f = useFieldHelpers(props);
   const country = normalizeCountry(f.value('facilityCountry')) ?? 'CA';
   const regions = Object.entries(REGIONS[country]);
@@ -324,6 +355,28 @@ export function LocationFields(props: FieldsProps) {
           ]}
         />
       </Field>
+      {access && (
+        <Field
+          id={f.id('transportAccess')}
+          label="Served by"
+          error={undefined}
+          hint="Whether grain moves in and out by rail, by truck or both."
+        >
+          <Select
+            id={f.id('transportAccess')}
+            value={f.value('transportAccess')}
+            onValueChange={f.choose('transportAccess')}
+            disabled={props.disabled}
+            options={[
+              { value: '', label: 'Not known' },
+              ...Object.entries(TRANSPORT_ACCESS_LABELS).map(([value, label]) => ({
+                value,
+                label,
+              })),
+            ]}
+          />
+        </Field>
+      )}
       <TextField field="addressLine" label="Address" props={props} className="sm:col-span-2" />
       <TextField field="city" label="City or town" props={props} />
       <CountrySelect field="facilityCountry" label="Country" props={props} />
@@ -363,7 +416,7 @@ export function LocationFields(props: FieldsProps) {
         hint={
           hasCoordinates
             ? 'Exact: the site itself. Approximate: for example the town.'
-            : 'Enter coordinates first, or leave them empty and use Find coordinates later.'
+            : 'Leave them empty to have them found from the address when you save.'
         }
       >
         <Select

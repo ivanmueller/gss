@@ -8,14 +8,11 @@ import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { useFollowUpCount } from './lib/useFollowUpCount';
 import { useMe } from './lib/useMe';
-import { CoordinatesPage } from './pages/CoordinatesPage';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { FollowUpsPage } from './pages/FollowUpsPage';
 import { FreightPage } from './pages/FreightPage';
 import { FreightRatePage } from './pages/FreightRatePage';
-import { ImportPage } from './pages/ImportPage';
-import { NewCounterpartyPage } from './pages/NewCounterpartyPage';
 import { NewFreightPage } from './pages/NewFreightPage';
 import { NewQuotePage } from './pages/NewQuotePage';
 import { QuotePage } from './pages/QuotePage';
@@ -37,9 +34,6 @@ function section(route: Route): NavSection | null {
     case 'workspace':
       return 'workspace';
     case 'counterparties':
-    case 'new-counterparty':
-    case 'import':
-    case 'coordinates':
     case 'counterparty':
       return 'counterparties';
     case 'team':
@@ -105,17 +99,8 @@ export function App({ account }: { account?: Account }) {
         />
       );
       break;
-    case 'coordinates':
-      page = directory((session) => <CoordinatesPage session={session} />);
-      break;
     case 'counterparties':
       page = directory((session) => <CounterpartiesPage session={session} />);
-      break;
-    case 'new-counterparty':
-      page = directory((session) => <NewCounterpartyPage session={session} />);
-      break;
-    case 'import':
-      page = directory((session) => <ImportPage session={session} />);
       break;
     case 'team':
       page = directory((session) => <TeamPage session={session} />);

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CounterpartyDetail } from '../lib/api';
 import { mockApi as mockBaseApi, ORG, PNG, SESSION } from '../test/api';
+import { choose } from '../test/select';
 import { FREIGHT } from '../test/freight';
 import { BID } from '../test/quotes';
 import { CounterpartyPage } from './CounterpartyPage';
@@ -25,6 +26,7 @@ const DETAIL: CounterpartyDetail = {
   regions: ['SK'],
   logoSha256: null,
   website: null,
+  phone: null,
   notes: 'Synthetic record.',
   archivedAt: null,
   buys: [],
@@ -55,6 +57,7 @@ const DETAIL: CounterpartyDetail = {
       longitude: '-106.670046',
       locationPrecision: 'approximate',
       geocodingSource: 'geocodio',
+      transportAccess: null,
       version: '2026-10-27T14:05:00.000000Z',
     },
   ],
@@ -343,6 +346,7 @@ describe('CounterpartyPage editing', () => {
         country: 'CA',
         verificationStatus: 'pending',
         website: 'example.com/grain',
+        companyPhone: '',
         notes: 'Synthetic record.',
       },
     });
@@ -477,6 +481,7 @@ describe('CounterpartyPage editing', () => {
     await userEvent.type(postal, 's4p3y2');
     await userEvent.clear(within(form).getByLabelText('Latitude'));
     await userEvent.clear(within(form).getByLabelText('Longitude'));
+    await choose(within(form).getByLabelText('Served by'), 'Rail');
     await userEvent.click(within(form).getByRole('button', { name: 'Save location' }));
     await waitFor(() => {
       expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
@@ -494,6 +499,8 @@ describe('CounterpartyPage editing', () => {
           // Clearing the coordinates clears their precision too.
           locationPrecision: '',
         },
+        // Beside the values: no spreadsheet column fills it.
+        transportAccess: 'rail',
       });
     });
   });
@@ -585,5 +592,123 @@ describe('CounterpartyPage website', () => {
     render(<CounterpartyPage session={SESSION} id={ID} />);
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(screen.queryByRole('link', { name: /opens in a new tab/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('company phone, rail or truck, and coordinates', () => {
+  const NO_COORDINATES = {
+    ...DETAIL,
+    facilities: DETAIL.facilities.map((facility) => ({
+      ...facility,
+      latitude: null,
+      longitude: null,
+      locationPrecision: null,
+      geocodingSource: null,
+    })),
+  };
+  const LOOKUP = {
+    truncated: false,
+    proposals: [
+      {
+        facilityId: 'f1',
+        counterpartyId: ID,
+        legalName: DETAIL.legalName,
+        facilityName: 'Synthetic Elevator',
+        address: {
+          addressLine: '1 Synthetic Road',
+          city: 'Synthetic Town',
+          region: 'SK',
+          postalCode: 'S4P 3Y2',
+          country: 'CA',
+        },
+        match: {
+          latitude: '52.133214',
+          longitude: '-106.670046',
+          precision: 'exact',
+          accuracyType: 'rooftop',
+          confidence: '0.97',
+          formattedAddress: '1 Synthetic Rd, Synthetic Town, SK',
+          regionMatches: true,
+          facilityVersion: '2026-10-27T14:05:00.000000Z',
+          expiresAt: '2026-10-27T15:05:00.000Z',
+          signature: 'a'.repeat(64),
+        },
+        miss: null,
+      },
+    ],
+  };
+
+  it('shows the company phone to call, and how each location is served', async () => {
+    mockApi({
+      [`GET /counterparties/${ID}`]: () =>
+        Response.json({
+          ...DETAIL,
+          phone: '+1 (306) 555-0100 x12',
+          facilities: [{ ...DETAIL.facilities[0], transportAccess: 'rail_and_truck' }],
+        }),
+    });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    expect(
+      await screen.findByRole('link', { name: 'Company phone +1 (306) 555-0100 x12' }),
+    ).toHaveAttribute('href', 'tel:+13065550100;ext=12');
+    const locations = screen.getByRole('region', { name: /^Locations/ });
+    expect(within(locations).getByText('Served by rail and truck')).toBeInTheDocument();
+    // Every location has coordinates: nothing to find.
+    expect(within(locations).queryByRole('button', { name: 'Find coordinates' })).toBeNull();
+  });
+
+  it('finds coordinates for its locations without any, from their addresses', async () => {
+    let located = false;
+    const calls = mockApi({
+      [`GET /counterparties/${ID}`]: () => Response.json(located ? DETAIL : NO_COORDINATES),
+      'POST /facilities/geocode': () => Response.json(LOOKUP),
+      'POST /facilities/coordinates': () => {
+        located = true;
+        return Response.json({ saved: 1, skipped: 0 });
+      },
+    });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    const locations = await screen.findByRole('region', { name: /^Locations/ });
+    await userEvent.click(within(locations).getByRole('button', { name: 'Find coordinates' }));
+    const dialog = screen.getByRole('dialog', { name: 'Find coordinates' });
+    expect(
+      await within(dialog).findByText('Coordinates found and saved for 1 location.'),
+    ).toBeInTheDocument();
+    expect(calls.find((call) => call.path === '/facilities/geocode')?.body).toEqual({
+      organizationId: ORG.id,
+      counterpartyId: ID,
+    });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Reloaded: the location now has coordinates, so the button goes.
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('region', { name: /^Locations/ })).queryByRole('button', {
+          name: 'Find coordinates',
+        }),
+      ).toBeNull();
+    });
+  });
+
+  it('finds the coordinates of a location added without them straight away', async () => {
+    const calls = mockApi({
+      [`GET /counterparties/${ID}`]: () => Response.json(DETAIL),
+      [`POST /counterparties/${ID}/facilities`]: () => Response.json(DETAIL, { status: 201 }),
+      'POST /facilities/geocode': () => Response.json({ truncated: false, proposals: [] }),
+    });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    const locations = await screen.findByRole('region', { name: /^Locations/ });
+    await userEvent.click(within(locations).getByRole('button', { name: 'Add location' }));
+    const form = screen.getByRole('form', { name: 'New location' });
+    await userEvent.type(within(form).getByLabelText('City or town'), 'Synthetic Spur');
+    await choose(within(form).getByLabelText('Served by'), 'Truck');
+    await userEvent.click(within(form).getByRole('button', { name: 'Add location' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Find coordinates' });
+    expect(
+      await within(dialog).findByText('No location is waiting for coordinates.'),
+    ).toBeInTheDocument();
+    expect(
+      calls.find((call) => call.path === `/counterparties/${ID}/facilities`)?.body,
+    ).toMatchObject({ values: { city: 'Synthetic Spur' }, transportAccess: 'truck' });
   });
 });
