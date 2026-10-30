@@ -288,23 +288,26 @@ describe('the counterparty directory as app_api', () => {
       locationPrecision: null,
     } as const;
 
-    const batchId = await db.importCounterparties(ctx, orgs.a, () =>
+    // As the route plans: archived companies get nothing.
+    const batchId = await db.importCounterparties(ctx, orgs.a, (existing) =>
       batch({
         contentSha256: 'd'.repeat(64),
         counterparties: [],
-        additions: [
-          {
-            counterpartyId: mills.id,
-            facilities: [spur],
-            contacts: [{ name: 'Synthetic Second Buyer', role: null, email: null, phone: null }],
-            // Canola is listed already: it stays as it was.
-            commodities: [
-              { commodity: 'canola', direction: 'buys' },
-              { commodity: 'oats', direction: 'buys' },
-            ],
-          },
-          { counterpartyId: closed.id, facilities: [spur], contacts: [], commodities: [] },
-        ],
+        additions: (
+          [
+            {
+              counterpartyId: mills.id,
+              facilities: [spur],
+              contacts: [{ name: 'Synthetic Second Buyer', role: null, email: null, phone: null }],
+              // Canola is listed already: it stays as it was.
+              commodities: [
+                { commodity: 'canola', direction: 'buys' },
+                { commodity: 'oats', direction: 'buys' },
+              ],
+            },
+            { counterpartyId: closed.id, facilities: [spur], contacts: [], commodities: [] },
+          ] satisfies ImportBatchInput['additions']
+        ).filter((item) => existing.some((c) => c.id === item.counterpartyId && !c.archived)),
       }),
     );
     if (batchId === null) throw new Error('nothing was imported');
@@ -429,6 +432,105 @@ describe('the counterparty directory as app_api', () => {
     expect(after?.facilities.filter((f) => f.name === 'Synthetic Siding')).toHaveLength(1);
     expect(after?.facilities.filter((f) => f.latitude === '51.000000')).toHaveLength(1);
     expect(after?.contacts.filter((k) => k.name === 'Synthetic Third Buyer')).toHaveLength(1);
+  });
+
+  // Codex's third review of ivanmueller/gss#88: a company archived after the import read the
+  // list but before it locked the company. The archive is held uncommitted until the import
+  // waits on the company's row, then committed.
+  it('plans again when a company is archived while the import waits for it', async () => {
+    const ctx = as(users.olivia);
+    const template = batch().counterparties[1];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      counterparty: { ...template.counterparty, legalName: 'Synthetic Archived Meanwhile' },
+      contacts: [],
+      facilities: [],
+      commodities: [],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const target = created.id;
+    const depot = {
+      name: 'Synthetic Depot',
+      facilityType: null,
+      addressLine: null,
+      city: 'Synthetic Depot',
+      region: 'SK',
+      postalCode: null,
+      country: 'CA',
+      latitude: null,
+      longitude: null,
+      locationPrecision: null,
+    } as const;
+    // What the route plans: the location for the company unless it is archived, and
+    // optionally a new company; nothing at all is null (NOTHING_TO_IMPORT).
+    const plan =
+      (letter: string, newName: string | null) =>
+      (existing: ExistingCounterparty[]): ImportBatchInput | null => {
+        const company = existing.find((c) => c.id === target);
+        const additions =
+          company && !company.archived && !company.facilities.some((f) => f.name === depot.name)
+            ? [{ counterpartyId: target, facilities: [depot], contacts: [], commodities: [] }]
+            : [];
+        const counterparties =
+          newName === null || existing.some((c) => c.legalName === newName)
+            ? []
+            : [{ ...template, counterparty: { ...template.counterparty, legalName: newName } }];
+        if (additions.length === 0 && counterparties.length === 0) return null;
+        return batch({ contentSha256: letter.repeat(64), counterparties, additions });
+      };
+    const archivedWhileWaiting = (run: () => Promise<string | null>) =>
+      admin
+        .begin(async (tx) => {
+          await tx`select set_config('app.user_id', ${users.olivia}, true)`;
+          await tx`update app.counterparties set archived_at = now()
+                   where id = ${target}`;
+          const running = run();
+          void running.catch(() => undefined);
+          for (let waited = 0; ; waited += 1) {
+            await tx`select pg_stat_clear_snapshot()`;
+            const [row] = await tx<{ count: number }[]>`
+              select count(*)::int as count from pg_stat_activity
+              where usename = 'app_api' and wait_event_type = 'Lock'
+                and query like '%for no key update%'`;
+            if (row?.count === 1) break;
+            if (waited > 40) throw new Error('the import did not wait for the company');
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return { running };
+        })
+        .then(({ running }) => running);
+    const batchesOf = async (letter: string) =>
+      (
+        await admin<{ count: number }[]>`
+          select count(*)::int as count from app.import_batches
+          where organization_id = ${orgs.a} and content_sha256 = ${letter.repeat(64)}`
+      )[0]?.count;
+
+    // Only that company: nothing to write, and no import recorded.
+    expect(
+      await archivedWhileWaiting(() => db.importCounterparties(ctx, orgs.a, plan('1', null))),
+    ).toBeNull();
+    expect(await batchesOf('1')).toBe(0);
+    expect((await db.getCounterparty(ctx, target))?.facilities).toEqual([]);
+
+    // Restored, the same file imports its location.
+    await db.setArchived(ctx, target, false);
+    expect(await db.importCounterparties(ctx, orgs.a, plan('1', null))).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await db.getCounterparty(ctx, target))?.facilities.map((f) => f.name)).toEqual([
+      'Synthetic Depot',
+    ]);
+
+    // With a new company too: the new company only, recorded as such.
+    await admin`delete from app.facilities where counterparty_id = ${target}`;
+    await db.setArchived(ctx, target, false);
+    const second = await archivedWhileWaiting(() =>
+      db.importCounterparties(ctx, orgs.a, plan('2', 'Synthetic Newcomer Co')),
+    );
+    expect(second).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await db.getCounterparty(ctx, target))?.facilities).toEqual([]);
+    const [recorded] = await admin<{ created_count: number; skipped_count: number }[]>`
+      select created_count, skipped_count from app.import_batches where id = ${second}`;
+    expect(recorded?.created_count).toBe(1);
   });
 
   it('refuses the same content twice', async () => {

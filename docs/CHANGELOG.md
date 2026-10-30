@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Codex's third review of #88
+
+- `docs/DECISIONS.md`: a company archived during an import makes it plan again; no empty import recorded.
+
 ## 2026-10-30 — Codex's second review of #88
 
 - `docs/DECISIONS.md`: one import at a time per organization, matched under the lock; a slash splits only two whole numbers; the race test on two connections.

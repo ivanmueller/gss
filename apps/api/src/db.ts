@@ -902,11 +902,29 @@ export function createDatabase(sql: postgres.Sql): Database {
         // Matching and writing happen under the lock, so an import running at the same time
         // waits and then sees this one's companies (Codex's review of ivanmueller/gss#88).
         await tx`select app.lock_counterparty_import(${organizationId})`;
-        const batch = plan(await readExisting(tx, organizationId));
-        if (batch === null) return null;
-        if (batch.organizationId !== organizationId)
-          throw new Error('import for another organization');
         const org = organizationId;
+        // The companies it adds to are locked before anything is written, so archiving one
+        // waits for this import. One archived before its lock was taken changes the plan:
+        // planned again, so what is written, the answer and NOTHING_TO_IMPORT agree, and no
+        // empty import is recorded (Codex's third review of ivanmueller/gss#88).
+        let batch: ImportBatchInput | null;
+        for (let attempt = 1; ; attempt += 1) {
+          batch = plan(await readExisting(tx, org));
+          if (batch === null) return null;
+          if (batch.organizationId !== org) throw new Error('import for another organization');
+          const additionIds = batch.additions.map((item) => item.counterpartyId);
+          const open =
+            additionIds.length === 0
+              ? []
+              : await tx<{ id: string }[]>`
+                  select id from app.counterparties
+                  where organization_id = ${org} and id in ${tx(additionIds)}
+                    and archived_at is null
+                  order by id
+                  for no key update`;
+          if (open.length === additionIds.length) break;
+          if (attempt === 5) throw new Error('companies kept being archived during the import');
+        }
         const [created] = await tx<{ id: string }[]>`
           insert into app.import_batches
             (organization_id, kind, file_name, content_sha256, row_count, created_count,
@@ -941,27 +959,12 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.counterparties ${tx(rows)}`;
         }
 
-        // Companies already in the list get only what is new to them, and nothing once archived;
-        // they are locked, so archiving one waits for this import or this import sees it.
-        const additionIds = batch.additions.map((item) => item.counterpartyId);
-        const open =
-          additionIds.length === 0
-            ? new Set<string>()
-            : new Set(
-                (
-                  await tx<{ id: string }[]>`
-                    select id from app.counterparties
-                    where organization_id = ${org} and id in ${tx(additionIds)}
-                      and archived_at is null
-                    order by id
-                    for no key update`
-                ).map((row) => row.id),
-              );
         const targets = [
           ...withIds,
-          ...batch.additions
-            .filter((item) => open.has(item.counterpartyId))
-            .map(({ counterpartyId, ...item }) => ({ id: counterpartyId, ...item })),
+          ...batch.additions.map(({ counterpartyId, ...item }) => ({
+            id: counterpartyId,
+            ...item,
+          })),
         ];
 
         const contacts = targets.flatMap(({ id, contacts: list }) =>
