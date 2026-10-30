@@ -5,7 +5,9 @@ import {
   parseContactFields,
   parseCounterpartyFields,
   parseFacilityFields,
+  TRANSPORT_ACCESS_LABELS,
   type FieldIssue,
+  type TransportAccess,
 } from '@grain/domain';
 import {
   Archive,
@@ -14,13 +16,16 @@ import {
   Ellipsis,
   ImageUp,
   Mail,
+  MapPin,
   MessageSquarePlus,
   Pencil,
   Phone,
   Plus,
   Star,
   StarOff,
+  TrainFront,
   Trash2,
+  Truck,
 } from 'lucide-react';
 import { useMemo, useState, type ChangeEvent, type ReactNode, type SyntheticEvent } from 'react';
 
@@ -49,13 +54,16 @@ import {
   ContactFields,
   FormIssues,
   LocationFields,
+  splitAccess,
   type FieldsProps,
   type FormValues,
 } from '../components/DirectoryFields';
+import { FindCoordinates } from '../components/FindCoordinates';
 import { Badge, type BadgeVariant } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Callout } from '../components/ui/callout';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
+import { Dialog, DialogContent } from '../components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -188,6 +196,7 @@ function companyValues(detail: CounterpartyDetail): FormValues {
     country: detail.primaryCountry,
     verificationStatus: detail.verificationStatus,
     website: detail.website ?? '',
+    companyPhone: detail.phone ?? '',
     notes: detail.notes ?? '',
   };
 }
@@ -213,6 +222,7 @@ function locationValues(facility: Facility | null, country: string): FormValues 
     latitude: facility?.latitude ?? '',
     longitude: facility?.longitude ?? '',
     locationPrecision: facility?.locationPrecision ?? '',
+    transportAccess: facility?.transportAccess ?? '',
   };
 }
 
@@ -239,7 +249,8 @@ function EditForm({
   check: Check;
   save: (values: FormValues) => Promise<unknown>;
   submitLabel: string;
-  onSaved: () => void;
+  /** After a save, with the values saved. */
+  onSaved: (values: FormValues) => void;
   onCancel: () => void;
   onReload: () => void;
   children: (fields: FieldsProps) => ReactNode;
@@ -258,7 +269,7 @@ function EditForm({
     setBusy(true);
     try {
       await save(values);
-      onSaved();
+      onSaved(values);
     } catch (failure) {
       setIssues(fieldIssues(failure));
       setError({
@@ -362,6 +373,7 @@ type Editing =
   | { kind: 'remove-contact'; id: string }
   | { kind: 'remove-location'; id: string }
   | { kind: 'archive' }
+  | { kind: 'coordinates' }
   | null;
 
 /** The problems a form check found; none when it passed. */
@@ -556,7 +568,7 @@ function CounterpartyView({
       />
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {name}
-        {detail.website && <CounterpartyWebsite website={detail.website} />}
+        <WebsiteAndPhone detail={detail} />
         <div className="flex flex-wrap gap-1.5">
           <VerificationBadge status={detail.verificationStatus} />
           {archived && <Badge>Archived</Badge>}
@@ -619,7 +631,7 @@ function CounterpartyView({
             {archived && <Badge>Archived</Badge>}
             <span className="text-muted-foreground">{places.join(' · ')}</span>
           </div>
-          {detail.website && <CounterpartyWebsite website={detail.website} />}
+          <WebsiteAndPhone detail={detail} />
           {logo}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -893,18 +905,52 @@ function CounterpartyView({
         <CardHeader>
           <CardTitle id="locations-heading">Locations ({detail.facilities.length})</CardTitle>
           {canChange && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                start({ kind: 'location', id: null });
-              }}
-            >
-              <Plus aria-hidden="true" />
-              Add location
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {detail.facilities.some((facility) => facility.latitude === null) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    start({ kind: 'coordinates' });
+                  }}
+                >
+                  <MapPin aria-hidden="true" />
+                  Find coordinates
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  start({ kind: 'location', id: null });
+                }}
+              >
+                <Plus aria-hidden="true" />
+                Add location
+              </Button>
+            </div>
           )}
         </CardHeader>
+        <Dialog
+          open={editing?.kind === 'coordinates'}
+          onOpenChange={(open) => {
+            if (!open) reloadAndClose();
+          }}
+        >
+          {editing?.kind === 'coordinates' && (
+            <DialogContent
+              title="Find coordinates"
+              description={`For ${detail.legalName}'s locations without coordinates, from their addresses.`}
+            >
+              <FindCoordinates
+                session={session}
+                scope={{ counterpartyId: detail.id }}
+                doneLabel="Done"
+                onDone={reloadAndClose}
+              />
+            </DialogContent>
+          )}
+        </Dialog>
         {trading && (
           <CounterpartyLocationsMap
             facilities={detail.facilities}
@@ -918,17 +964,26 @@ function CounterpartyView({
             label="New location"
             initial={locationValues(null, country)}
             check={(values) => issuesOf(parseFacilityFields(values, country))}
-            save={(values) => sendJson(`${path}/facilities`, token, 'POST', { values })}
+            save={async (values) => {
+              await sendJson(`${path}/facilities`, token, 'POST', splitAccess(values));
+              return values;
+            }}
             submitLabel="Add location"
-            onSaved={() => {
-              done('Location added.');
+            onSaved={(values) => {
+              // Without coordinates, they are found from its address straight away.
+              if (!values.latitude?.trim()) {
+                setNotice(null);
+                setEditing({ kind: 'coordinates' });
+              } else {
+                done('Location added.');
+              }
             }}
             onCancel={() => {
               setEditing(null);
             }}
             onReload={reloadAndClose}
           >
-            {(fields) => <LocationFields {...fields} />}
+            {(fields) => <LocationFields {...fields} access={trading} />}
           </EditForm>
         )}
         {detail.facilities.length === 0 ? (
@@ -945,7 +1000,7 @@ function CounterpartyView({
                     save={(values) =>
                       sendJson(`${path}/facilities/${facility.id}`, token, 'PATCH', {
                         version: facility.version,
-                        values,
+                        ...splitAccess(values),
                       })
                     }
                     submitLabel="Save location"
@@ -957,7 +1012,7 @@ function CounterpartyView({
                     }}
                     onReload={reloadAndClose}
                   >
-                    {(fields) => <LocationFields {...fields} />}
+                    {(fields) => <LocationFields {...fields} access={trading} />}
                   </EditForm>
                 </li>
               ) : (
@@ -979,6 +1034,7 @@ function CounterpartyView({
                       )}
                     </span>
                     <span>{address(facility)}</span>
+                    {facility.transportAccess && <AccessBadges access={facility.transportAccess} />}
                     {facility.latitude && facility.longitude ? (
                       <span className="text-xs text-muted-foreground">
                         {facility.latitude}, {facility.longitude} ·{' '}
@@ -1269,5 +1325,54 @@ function ItemActions({
         Remove
       </Button>
     </div>
+  );
+}
+
+/** "tel:" for a phone as saved, e.g. "+1 (403) 555-0100 x12" → tel:+14035550100;ext=12. */
+export function telHref(phone: string): string {
+  const [number = '', extension] = phone.split('x');
+  const digits = number.replace(/[^0-9+]/g, '');
+  const ext = extension?.replace(/[^0-9]/g, '');
+  return `tel:${digits}${ext ? `;ext=${ext}` : ''}`;
+}
+
+/** The company's website and main phone, side by side under its name. */
+function WebsiteAndPhone({ detail }: { detail: CounterpartyDetail }) {
+  if (!detail.website && !detail.phone) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+      {detail.website && <CounterpartyWebsite website={detail.website} />}
+      {detail.phone && (
+        <a
+          href={telHref(detail.phone)}
+          className="flex w-fit items-center gap-1.5 underline underline-offset-4"
+          aria-label={`Company phone ${detail.phone}`}
+        >
+          <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
+          {detail.phone}
+        </a>
+      )}
+    </div>
+  );
+}
+
+/** Whether rail, trucks or both serve a location, as badges with their icons. */
+function AccessBadges({ access }: { access: TransportAccess }) {
+  return (
+    <span className="flex flex-wrap items-center gap-1.5 py-0.5">
+      <span className="sr-only">Served by {TRANSPORT_ACCESS_LABELS[access].toLowerCase()}</span>
+      {(access === 'rail' || access === 'rail_and_truck') && (
+        <Badge variant="info" aria-hidden="true">
+          <TrainFront />
+          Rail
+        </Badge>
+      )}
+      {(access === 'truck' || access === 'rail_and_truck') && (
+        <Badge variant="neutral" aria-hidden="true">
+          <Truck />
+          Truck
+        </Badge>
+      )}
+    </span>
   );
 }

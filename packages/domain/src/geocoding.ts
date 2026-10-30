@@ -90,8 +90,27 @@ export const saveCoordinatesRequestSchema = z.object({
 export type SaveCoordinatesRequest = z.infer<typeof saveCoordinatesRequestSchema>;
 export type SignedMatch = SaveCoordinatesRequest['matches'][number];
 
-/** Asks the API to look up the organization's facilities without coordinates. */
-export const geocodeRequestSchema = z.object({ organizationId: z.uuid() });
+/**
+ * Asks the API to look up facilities without coordinates: one counterparty's (after it is
+ * added by hand, or from its page), one import's (after a spreadsheet import), or else all
+ * of the organization's.
+ */
+export const geocodeRequestSchema = z
+  .object({
+    organizationId: z.uuid(),
+    counterpartyId: z.uuid().optional(),
+    importBatchId: z.uuid().optional(),
+  })
+  .refine((request) => !(request.counterpartyId && request.importBatchId), {
+    message: 'one counterparty or one import, not both',
+  });
+
+export type GeocodeScope = { counterpartyId: string } | { importBatchId: string } | null;
+
+/** Whether a match is saved without asking: in the facility's province or state, and confident. */
+export function isConfidentMatch(match: GeocodeMatch): boolean {
+  return match.regionMatches && Number(match.confidence) >= LOW_CONFIDENCE;
+}
 
 export interface SaveCoordinatesResult {
   saved: number;

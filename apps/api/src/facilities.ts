@@ -5,6 +5,7 @@ import {
   parseBbox,
   saveCoordinatesRequestSchema,
   type GeocodeLookup,
+  type GeocodeScope,
   type SaveCoordinatesResult,
 } from '@grain/domain';
 import { Hono } from 'hono';
@@ -97,24 +98,40 @@ export function facilityRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
-  // Looks the organization's facilities without coordinates up with Geocodio and returns
-  // signed matches for review. Nothing is saved (GT-021).
+  // Looks facilities without coordinates up with Geocodio (one counterparty's, one import's,
+  // or all of the organization's) and returns signed matches. Nothing is saved here: the
+  // app saves the confident ones and asks about the rest (GT-021; owner's answer, 2026-10-30).
   routes.post('/geocode', async (c) => {
     c.header('Cache-Control', 'no-store');
     const body = await readJson(c, 10_000);
     if (!body.ok) return body.response;
     const request = geocodeRequestSchema.safeParse(body.value);
     if (!request.success) {
-      return apiError(c, 422, 'VALIDATION_FAILED', 'organizationId must be a UUID.');
+      return apiError(
+        c,
+        422,
+        'VALIDATION_FAILED',
+        'organizationId, and counterpartyId or importBatchId when given, must be UUIDs.',
+      );
     }
-    const { organizationId } = request.data;
+    const { organizationId, counterpartyId, importBatchId } = request.data;
+    const scope: GeocodeScope = counterpartyId
+      ? { counterpartyId }
+      : importBatchId
+        ? { importBatchId }
+        : null;
     const apiKey = c.env.GEOCODIO_API_KEY?.trim();
     return withDatabase(c, openDatabase, async (db, ctx) => {
       if (!(await db.canEditDirectory(ctx, organizationId))) {
         return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_MESSAGE);
       }
       if (!apiKey) return notConfigured(c);
-      const facilities = await db.facilitiesWithoutCoordinates(ctx, organizationId, GEOCODE_LIMIT);
+      const facilities = await db.facilitiesWithoutCoordinates(
+        ctx,
+        organizationId,
+        GEOCODE_LIMIT,
+        scope,
+      );
       try {
         const proposals = await proposeCoordinates(
           apiKey,

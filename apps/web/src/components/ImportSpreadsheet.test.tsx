@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImportResult } from '../lib/api';
 import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
-import { ImportPage } from './ImportPage';
+import { ImportSpreadsheet } from './ImportSpreadsheet';
 
 // Synthetic, fictional companies only.
 const CSV = [
@@ -65,10 +65,44 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('ImportPage', () => {
+function importer() {
+  const onImported = vi.fn();
+  const onClose = vi.fn();
+  render(<ImportSpreadsheet session={SESSION} onImported={onImported} onClose={onClose} />);
+  return { onImported, onClose };
+}
+
+const BATCH = '00000000-0000-4000-8000-00000000ba7c';
+
+/** A Geocodio result for one of the import's locations, as the API signs it. */
+function proposal(n: number, city: string, match: Record<string, unknown> | null) {
+  return {
+    facilityId: `00000000-0000-4000-8000-00000000fac${String(n)}`,
+    counterpartyId: '00000000-0000-4000-8000-00000000c001',
+    legalName: 'Synthetic Mills',
+    facilityName: null,
+    address: { addressLine: null, city, region: 'SK', postalCode: null, country: 'CA' },
+    match: match && {
+      latitude: '52.133214',
+      longitude: '-106.670046',
+      precision: 'approximate',
+      accuracyType: 'place',
+      confidence: '0.97',
+      formattedAddress: `${city}, SK`,
+      regionMatches: true,
+      facilityVersion: '2026-10-30T18:00:00.000000Z',
+      expiresAt: '2026-10-30T19:00:00.000Z',
+      signature: String(n).repeat(64),
+      ...match,
+    },
+    miss: match ? null : 'NOT_FOUND',
+  };
+}
+
+describe('ImportSpreadsheet', () => {
   it('imports a file of sellers and lists the columns that are not used', async () => {
     const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
-    render(<ImportPage session={SESSION} />);
+    importer();
     await chooseFile(
       ['Grower,Country,Bushels,Notes', 'Synthetic Grower,Canada,5000,Synthetic', ''].join('\n'),
     );
@@ -95,11 +129,25 @@ describe('ImportPage', () => {
       'POST /counterparties/import': (call) => {
         const { commit } = call.body as { commit: boolean };
         return commit
-          ? Response.json(result({ committed: true, importBatchId: 'batch-1' }), { status: 201 })
+          ? Response.json(result({ committed: true, importBatchId: BATCH }), { status: 201 })
           : Response.json(result());
       },
+      'POST /facilities/geocode': () =>
+        Response.json({
+          truncated: false,
+          proposals: [
+            proposal(1, 'Alpha', {}),
+            proposal(2, 'Beta', { regionMatches: false, formattedAddress: 'Beta, MB' }),
+            proposal(3, 'Gamma', null),
+          ],
+        }),
+      'POST /facilities/coordinates': (call) =>
+        Response.json({
+          saved: (call.body as { matches: unknown[] }).matches.length,
+          skipped: 0,
+        }),
     });
-    render(<ImportPage session={SESSION} />);
+    const { onImported, onClose } = importer();
     await chooseFile(CSV);
 
     expect(await screen.findByText(/3 rows, 6 columns/)).toBeInTheDocument();
@@ -164,14 +212,39 @@ describe('ImportPage', () => {
     ).toBeInTheDocument();
     expect(
       calls
-        .filter((call) => call.method === 'POST')
+        .filter((call) => call.path === '/counterparties/import')
         .map((call) => (call.body as { commit: boolean }).commit),
     ).toEqual([false, true]);
+    expect(onImported).toHaveBeenCalledTimes(1);
+
+    // Coordinates for this import's locations: the sure one saved, the doubtful one asked.
+    const results = await screen.findByRole('list', { name: 'Results to check' });
+    expect(
+      within(results).getByText('In another province or state than your address.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Coordinates found and saved for 1 location\./)).toBeInTheDocument();
+    const lookups = calls.filter((call) => call.path.startsWith('/facilities/'));
+    expect(lookups.map((call) => call.path)).toEqual([
+      '/facilities/geocode',
+      '/facilities/coordinates',
+    ]);
+    expect(lookups[0]?.body).toEqual({ organizationId: ORG.id, importBatchId: BATCH });
+    expect(
+      (lookups[1]?.body as { matches: { facilityId: string }[] }).matches.map((m) => m.facilityId),
+    ).toEqual(['00000000-0000-4000-8000-00000000fac1']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Skip it' }));
+    // Skipped and not found: listed, with what to do.
+    const without = screen.getByRole('list', { name: 'Locations without coordinates' });
+    expect(within(without).getAllByRole('listitem')).toHaveLength(2);
+    expect(calls.filter((call) => call.path === '/facilities/coordinates')).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('shows row problems before sending anything', async () => {
     const calls = mockApi({});
-    render(<ImportPage session={SESSION} />);
+    importer();
     await chooseFile('Company,Country,Prov\nSynthetic Mills,Mexico,SK\n,Canada,SK\n');
 
     expect(await screen.findByRole('status')).toHaveTextContent(
@@ -186,7 +259,7 @@ describe('ImportPage', () => {
 
   it('asks for the required columns', async () => {
     mockApi({});
-    render(<ImportPage session={SESSION} />);
+    importer();
     await chooseFile('Firm,Nation\nSynthetic Mills,Canada\n');
 
     expect(await screen.findByRole('status')).toHaveTextContent(
@@ -201,7 +274,7 @@ describe('ImportPage', () => {
 
   it('refuses a file that is not UTF-8', async () => {
     mockApi({});
-    render(<ImportPage session={SESSION} />);
+    importer();
     await userEvent.upload(
       screen.getByLabelText('Choose CSV file'),
       new File(
@@ -219,7 +292,7 @@ describe('ImportPage', () => {
 
   it('refuses a file with no data rows', async () => {
     mockApi({});
-    render(<ImportPage session={SESSION} />);
+    importer();
     await chooseFile('Company,Country\n');
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The file has a header row but no data rows.',
@@ -245,7 +318,7 @@ describe('ImportPage', () => {
               }),
             ),
     });
-    render(<ImportPage session={SESSION} />);
+    importer();
     await chooseFile(CSV);
     await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
     expect(await screen.findByText('Row 3, Trading name: differs from line 2')).toBeInTheDocument();
@@ -253,13 +326,6 @@ describe('ImportPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Import 2 new counterparties' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'This file has already been imported.',
-    );
-  });
-
-  it('is only for editors', () => {
-    render(<ImportPage session={{ ...SESSION, organization: { ...ORG, role: 'trader' } }} />);
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Only operations and admin members of Synthetic Org A can import counterparties.',
     );
   });
 });

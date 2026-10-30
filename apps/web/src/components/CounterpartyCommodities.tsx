@@ -4,19 +4,24 @@ import {
   type CommodityDirection,
   type CommodityInterest,
 } from '@grain/domain';
-import { Pencil, Wheat } from 'lucide-react';
+import { CircleDashed, Pencil, Wheat } from 'lucide-react';
 import { useState } from 'react';
 
 import { ApiError, sendJson, type CounterpartyDetail } from '../lib/api';
+import { cn } from '../lib/utils';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
+import { Dialog, DialogClose, DialogContent } from './ui/dialog';
 
 const HEADINGS: Record<CommodityDirection, string> = {
   buys: 'What they buy',
   sells: 'What they sell',
 };
 const SHORT: Record<CommodityDirection, string> = { buys: 'Buys', sells: 'Sells' };
+const VERB: Record<CommodityDirection, string> = { buys: 'buy', sells: 'sell' };
+
+type Listed = CounterpartyDetail['commodities'][number];
 
 const key = ({ commodity, direction }: CommodityInterest) => `${direction}:${commodity}`;
 
@@ -51,9 +56,86 @@ export function commodityChange(
 }
 
 /**
+ * "Verify Canola?" in a small window, from an unverified commodity's badge: one that came
+ * from a spreadsheet and has not been checked (owner's request, 2026-10-30).
+ */
+function VerifyCommodity({
+  token,
+  counterpartyId,
+  item,
+  onClose,
+  onSaved,
+}: {
+  token: string;
+  counterpartyId: string;
+  item: Listed | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function verify(chosen: Listed) {
+    setBusy(true);
+    setError(null);
+    try {
+      await sendJson(`/counterparties/${counterpartyId}/commodities`, token, 'PATCH', {
+        add: [],
+        remove: [],
+        verify: [{ commodity: chosen.code, direction: chosen.direction }],
+      });
+      onClose();
+      onSaved(`${chosen.name} verified.`);
+    } catch (failure) {
+      setError(failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={item !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          setError(null);
+          onClose();
+        }
+      }}
+    >
+      {item && (
+        <DialogContent
+          title={`Verify ${item.name}?`}
+          description={`${item.name} came from a spreadsheet and has not been checked yet. Verify it once you know they ${VERB[item.direction]} it.`}
+          className="max-w-sm"
+        >
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={busy} onClick={() => void verify(item)}>
+              {busy ? 'Verifying…' : 'Verify'}
+            </Button>
+            <DialogClose asChild>
+              <Button variant="outline" disabled={busy}>
+                Not now
+              </Button>
+            </DialogClose>
+          </div>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+/**
  * What a counterparty buys and sells, on its page (owner's request, 2026-10-30): a list kept
  * by hand from the shared list of commodities. Anyone on the team can change it; nothing
- * changes on an archived counterparty.
+ * changes on an archived counterparty. Commodities from a spreadsheet show unverified (grey,
+ * dashed) until someone verifies one by clicking it; verified ones are in the buy or sell
+ * colour. Ticked by hand, a commodity is verified at once.
  */
 export function CounterpartyCommodities({
   token,
@@ -69,6 +151,7 @@ export function CounterpartyCommodities({
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState<Listed | null>(null);
   const directions = shownDirections(detail.types, detail.commodities);
   if (directions.length === 0) return null;
   const listed = new Set(
@@ -197,13 +280,31 @@ export function CounterpartyCommodities({
                     <ul aria-label={HEADINGS[direction]} className="flex flex-wrap gap-1.5">
                       {items.map((item) => (
                         <li key={item.code}>
-                          <Badge
-                            variant={direction === 'buys' ? 'bid' : 'offer'}
-                            className="px-2 py-1 text-sm"
-                          >
-                            <Wheat aria-hidden="true" />
-                            {item.name}
-                          </Badge>
+                          {item.verifiedAt !== null ? (
+                            <Badge
+                              variant={direction === 'buys' ? 'bid' : 'offer'}
+                              className="px-2 py-1 text-sm"
+                              title="Verified"
+                            >
+                              <Wheat aria-hidden="true" />
+                              {item.name}
+                              <span className="sr-only">, verified</span>
+                            </Badge>
+                          ) : canChange ? (
+                            <button
+                              type="button"
+                              aria-label={`${item.name}, unverified: verify`}
+                              title="Unverified: click to verify"
+                              className="rounded-badge focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                              onClick={() => {
+                                setVerifying(item);
+                              }}
+                            >
+                              <UnverifiedBadge name={item.name} interactive />
+                            </button>
+                          ) : (
+                            <UnverifiedBadge name={item.name} />
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -211,9 +312,41 @@ export function CounterpartyCommodities({
                 </div>
               );
             })}
+            {detail.commodities.some((item) => item.verifiedAt === null) && (
+              <p className="text-xs text-muted-foreground">
+                Grey and dashed: unverified, from a spreadsheet.
+                {canChange && ' Click one to verify it.'}
+              </p>
+            )}
           </div>
         )}
+        <VerifyCommodity
+          token={token}
+          counterpartyId={detail.id}
+          item={verifying}
+          onClose={() => {
+            setVerifying(null);
+          }}
+          onSaved={onSaved}
+        />
       </section>
     </Card>
+  );
+}
+
+function UnverifiedBadge({ name, interactive = false }: { name: string; interactive?: boolean }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        'border-dashed px-2 py-1 text-sm text-muted-foreground',
+        interactive && 'cursor-pointer hover:bg-accent',
+      )}
+    >
+      <CircleDashed aria-hidden="true" />
+      {name}
+      {/* A button names itself; a plain badge says it here. */}
+      {!interactive && <span className="sr-only">, unverified</span>}
+    </Badge>
   );
 }

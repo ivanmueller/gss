@@ -10,7 +10,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - Supabase Postgres/PostGIS, Supabase Auth, private Storage, organization-aware access.
 - Shared domain/validation packages and a pure TypeScript trading-engine package using **decimal**, never JS float, for monetary arithmetic.
 - Mapbox GL JS with Mapbox map tiles (owner's decision, `docs/DECISIONS.md`); keep Mapbox calls in one map component so the provider can be changed later. Overlay layers from ArcGIS services are requested (GT-026, not started); each needs its terms of use recorded, and a secured one is fetched by the Worker, never with a key in the browser.
-- Geocoding with Geocodio's free plan, from the Worker only, with every result reviewed before saving (owner's decision, `docs/DECISIONS.md`).
+- Geocoding with Geocodio's free plan, from the Worker only, when counterparties and locations are added (owner's decisions, `docs/DECISIONS.md`): sure results are saved, doubtful ones are reviewed before saving.
 - FX: the Bank of Canada's daily USD/CAD rate, fetched once a day by the Worker and stored per day with its source, stale after four days (owner's decision, `docs/DECISIONS.md`). Built (GT-052): the Worker's scheduled job stores it at 14:15 and 22:15 UTC; without a current rate, USD bids and offers stay out of the workspace's order book with a note.
 - Python is out of scope until analytics or optimization justifies it.
 

@@ -12,14 +12,15 @@ import { FileSpreadsheet } from 'lucide-react';
 import Papa from 'papaparse';
 import { useId, useMemo, useState, type ChangeEvent } from 'react';
 
-import { BackLink } from '../components/BackLink';
-import { PageHeader } from '../components/PageHeader';
-import { RealDataNote } from '../components/RealDataNote';
-import { Button } from '../components/ui/button';
-import { Card, CardHeader, CardTitle } from '../components/ui/card';
-import { FileButton } from '../components/ui/file-button';
-import { Select } from '../components/ui/select';
-import { SegmentedControl } from '../components/ui/segmented-control';
+import { apiJson, ApiError, type ImportResult } from '../lib/api';
+import { countryName } from '../lib/directory';
+import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { FindCoordinates } from './FindCoordinates';
+import { Button } from './ui/button';
+import { Card, CardHeader, CardTitle } from './ui/card';
+import { FileButton } from './ui/file-button';
+import { Select } from './ui/select';
+import { SegmentedControl } from './ui/segmented-control';
 import {
   Table,
   TableBody,
@@ -29,13 +30,10 @@ import {
   TableHeader,
   TableRow,
   TableRowHeader,
-} from '../components/ui/table';
-import { apiJson, ApiError, type ImportResult } from '../lib/api';
-import { canEditDirectory, countryName } from '../lib/directory';
-import { Link } from '../lib/router';
-import type { DirectorySession } from './CounterpartiesPage';
+} from './ui/table';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const STEPS = ['Choose the file', 'Match the columns', 'Check', 'Coordinates'] as const;
 const SHOWN_ISSUES = 50;
 
 interface Sheet {
@@ -66,6 +64,8 @@ type Step =
       busy: boolean;
     } & Plan)
   | { kind: 'done'; result: ImportResult };
+
+const STEP_INDEX: Record<Step['kind'], number> = { choose: 0, map: 1, review: 2, done: 3 };
 
 const FIELD_LABELS = Object.fromEntries(
   IMPORT_FIELDS.map((field) => [field.id, field.label]),
@@ -245,8 +245,20 @@ function ColumnMapping({
   );
 }
 
-/** /counterparties/import: CSV → column mapping → server review → import. */
-export function ImportPage({ session }: { session: DirectorySession }) {
+/**
+ * Counterparties from a spreadsheet, in the + button's window (owner's request,
+ * 2026-10-30): CSV → column mapping → server review → import → coordinates from the
+ * addresses. `onImported` lets the list reload; `onClose` closes the window.
+ */
+export function ImportSpreadsheet({
+  session,
+  onImported,
+  onClose,
+}: {
+  session: DirectorySession;
+  onImported: () => void;
+  onClose: () => void;
+}) {
   const { token, organization } = session;
   const [step, setStep] = useState<Step>({ kind: 'choose', error: null });
 
@@ -261,14 +273,6 @@ export function ImportPage({ session }: { session: DirectorySession }) {
     }
     return { issues, valid };
   }, [step]);
-
-  if (!canEditDirectory(organization.role)) {
-    return (
-      <p role="alert" className="text-sm">
-        Only operations and admin members of {organization.name} can import counterparties.
-      </p>
-    );
-  }
 
   async function choose(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -322,6 +326,7 @@ export function ImportPage({ session }: { session: DirectorySession }) {
     setStep({ kind: 'review', ...plan, result, error: null, busy: true });
     try {
       setStep({ kind: 'done', result: await send(plan, true) });
+      onImported();
     } catch (error) {
       setStep({ kind: 'review', ...plan, result, error: messageOf(error), busy: false });
     }
@@ -337,24 +342,32 @@ export function ImportPage({ session }: { session: DirectorySession }) {
       : [];
 
   return (
-    <section aria-labelledby="import-heading" className="flex flex-col gap-4">
-      <PageHeader
-        id="import-heading"
-        back={<BackLink href="/counterparties">All counterparties</BackLink>}
-        title="Import counterparties from a spreadsheet"
-        description={
-          <>
-            Buyers or sellers, into {organization.name}. In Excel, use File → Save As → “CSV UTF-8
-            (Comma delimited)”. One row per company or per location; rows with the same legal name
-            and country become one counterparty. Your columns can have any names: you choose which
-            column fills which field. Companies already in the list are skipped, not changed.
-          </>
-        }
-      />
-      <RealDataNote organization={organization.name} />
+    <section aria-label="Import spreadsheet" className="flex flex-col gap-4">
+      <ol
+        aria-label="Steps"
+        className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"
+      >
+        {STEPS.map((label, index) => (
+          <li
+            key={label}
+            aria-current={STEP_INDEX[step.kind] === index ? 'step' : undefined}
+            className={
+              STEP_INDEX[step.kind] === index ? 'font-semibold text-foreground' : undefined
+            }
+          >
+            {index + 1}. {label}
+          </li>
+        ))}
+      </ol>
 
       {step.kind === 'choose' && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm">
+            Buyers or sellers, one row per company or per location. In Excel, use File → Save As →
+            “CSV UTF-8 (Comma delimited)”. Rows with the same legal name and country become one
+            counterparty; companies already in the list are skipped, not changed. Commodities from
+            the file are listed as unverified until someone on the team verifies them.
+          </p>
           <FileButton
             variant="primary"
             accept=".csv,text/csv"
@@ -485,21 +498,33 @@ export function ImportPage({ session }: { session: DirectorySession }) {
       )}
 
       {step.kind === 'done' && (
-        <Card role="status" className="flex flex-col gap-2 p-4 text-sm">
-          <p className="font-medium">
-            Imported {step.result.summary.newCounterparties} counterparties with{' '}
-            {step.result.summary.contacts} contacts and {step.result.summary.facilities} locations.
-          </p>
-          {step.result.summary.existingCounterparties > 0 && (
-            <p>
-              {step.result.summary.existingCounterparties} were already in the list and were left
-              unchanged.
+        <div className="flex flex-col gap-3">
+          <Card role="status" className="flex flex-col gap-1 p-4 text-sm">
+            <p className="font-medium">
+              Imported {step.result.summary.newCounterparties} counterparties with{' '}
+              {step.result.summary.contacts} contacts and {step.result.summary.facilities}{' '}
+              locations.
             </p>
+            {step.result.summary.existingCounterparties > 0 && (
+              <p>
+                {step.result.summary.existingCounterparties} were already in the list and were left
+                unchanged.
+              </p>
+            )}
+          </Card>
+          {step.result.importBatchId !== null && step.result.summary.facilities > 0 ? (
+            <FindCoordinates
+              session={session}
+              scope={{ importBatchId: step.result.importBatchId }}
+              doneLabel="Done"
+              onDone={onClose}
+            />
+          ) : (
+            <Button className="w-fit" onClick={onClose}>
+              Done
+            </Button>
           )}
-          <Button asChild variant="outline" className="mt-1 w-fit">
-            <Link href="/counterparties">See the counterparties</Link>
-          </Button>
-        </Card>
+        </div>
       )}
     </section>
   );

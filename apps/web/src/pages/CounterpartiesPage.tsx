@@ -1,23 +1,12 @@
 import { COMMODITIES } from '@grain/domain';
-import {
-  FileUp,
-  LayoutGrid,
-  List,
-  Map as MapIcon,
-  PencilLine,
-  Plus,
-  Search,
-  Table2,
-  Wheat,
-} from 'lucide-react';
+import { LayoutGrid, List, Map as MapIcon, Search, Table2, Wheat } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { ADD_TABS, AddCounterpartiesDialog } from '../components/AddCounterpartiesDialog';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyMap } from '../components/CounterpartyMap';
 import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
-import { Dialog, DialogContent, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { Select } from '../components/ui/select';
@@ -199,57 +188,6 @@ function LogoGrid({ items, token }: { items: CounterpartySummary[]; token: strin
 }
 
 /**
- * One + button for operations and admins that opens a window to choose how to add
- * counterparties: one by hand, or many from a spreadsheet (owner's request, 2026-10-30).
- */
-function AddCounterparties() {
-  const choice =
-    'flex items-start gap-3 rounded-card border bg-card p-4 text-left transition-colors hover:bg-accent';
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          size="icon"
-          className="ml-auto"
-          aria-label="Add counterparties"
-          title="Add counterparties"
-        >
-          <Plus aria-hidden="true" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent
-        title="Add counterparties"
-        description="Add one company yourself, or many at once from a spreadsheet."
-      >
-        <nav aria-label="Ways to add" className="grid gap-3 sm:grid-cols-2">
-          <Link href="/counterparties/new" className={choice}>
-            <PencilLine
-              aria-hidden="true"
-              className="mt-0.5 size-5 shrink-0 text-muted-foreground"
-            />
-            <span className="flex flex-col gap-0.5">
-              <span className="font-medium">Add by hand</span>
-              <span className="text-sm text-muted-foreground">
-                One company, with its first contact and location.
-              </span>
-            </span>
-          </Link>
-          <Link href="/counterparties/import" className={choice}>
-            <FileUp aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-            <span className="flex flex-col gap-0.5">
-              <span className="font-medium">Import spreadsheet</span>
-              <span className="text-sm text-muted-foreground">
-                Many companies from a CSV file, checked before anything is saved.
-              </span>
-            </span>
-          </Link>
-        </nav>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
  * Whether a counterparty trades the chosen commodity: buys it among buyers, sells it among
  * sellers, either otherwise. No commodity chosen: every counterparty.
  */
@@ -267,7 +205,7 @@ export function tradesCommodity(
 /** /counterparties: the organization's counterparties by logo (the default), as a table or on a map. */
 export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
-  const [list] = useApiResource<CounterpartyList>(
+  const [list, reloadList] = useApiResource<CounterpartyList>(
     `/counterparties?organization_id=${organization.id}`,
     token,
   );
@@ -286,6 +224,8 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const commodity = COMMODITIES.some((item) => item.code === commodityParam)
     ? commodityParam
     : null;
+  // ?add=one or ?add=import opens the + window on that tab (the old adding pages' addresses).
+  const addTab = ADD_TABS.find((tab) => tab === params.get('add')) ?? null;
 
   const all = useMemo(() => (list.status === 'ok' ? list.data.counterparties : []), [list]);
   const archivedCount = all.filter((counterparty) => counterparty.archivedAt !== null).length;
@@ -409,7 +349,13 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
               )}
             </>
           )}
-          {editor && <AddCounterparties />}
+          {editor && (
+            <AddCounterpartiesDialog
+              session={session}
+              initialTab={addTab}
+              onImported={reloadList}
+            />
+          )}
         </div>
 
         {list.status === 'loading' && (

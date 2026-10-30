@@ -5,10 +5,10 @@ import { OTHER_ORG } from './supabase';
 
 // Synthetic, fictional companies only.
 const CSV = [
-  'Company Name,Country,Contact,E-mail,City,Prov',
-  'Synthetic Mills,Canada,Ana Synthetic,ana@example.test,Alpha,SK',
-  'Synthetic Mills,Canada,,,Beta,Manitoba',
-  'Synthetic Buyer LLC,USA,,,Gamma,ND',
+  'Company Name,Country,Contact,E-mail,City,Prov,Commodities',
+  'Synthetic Mills,Canada,Ana Synthetic,ana@example.test,Alpha,SK,Canola',
+  'Synthetic Mills,Canada,,,Beta,Manitoba,',
+  'Synthetic Buyer LLC,USA,,,Gamma,ND,',
   '',
 ].join('\n');
 
@@ -29,21 +29,24 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await page.goto('/counterparties');
   await expect(page.getByText('No counterparties yet.')).toBeVisible();
 
+  // Imported in the + button's window (owner's request, 2026-10-30).
   await page.getByRole('button', { name: 'Add counterparties' }).click();
-  await page
-    .getByRole('dialog')
-    .getByRole('link', { name: /^Import spreadsheet/ })
-    .click();
-  await page.getByLabel('Choose CSV file').setInputFiles(csvFile('synthetic-buyers.csv'));
-  await expect(page.getByLabel('Legal name (required)')).toContainText('Company Name');
-  await page.getByRole('button', { name: 'Review import' }).click();
-  await expect(page.getByRole('table', { name: 'Counterparties in this import' })).toBeVisible();
-  await page.getByRole('button', { name: 'Import 2 new counterparties' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add counterparties' });
+  await dialog.getByRole('tab', { name: 'Import spreadsheet' }).click();
+  await dialog.getByLabel('Choose CSV file').setInputFiles(csvFile('synthetic-buyers.csv'));
+  await expect(dialog.getByLabel('Legal name (required)')).toContainText('Company Name');
+  await dialog.getByRole('button', { name: 'Review import' }).click();
+  await expect(dialog.getByRole('table', { name: 'Counterparties in this import' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Import 2 new counterparties' }).click();
   await expect(
-    page.getByText('Imported 2 counterparties with 1 contacts and 3 locations.'),
+    dialog.getByText('Imported 2 counterparties with 1 contacts and 3 locations.'),
   ).toBeVisible();
+  // Coordinates are looked up next; CI has no Geocodio key, so the step says what is
+  // missing and lets the import finish.
+  await expect(dialog.getByRole('alert')).toContainText('Finding coordinates is not set up');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(dialog).toHaveCount(0);
 
-  await page.getByRole('link', { name: 'See the counterparties' }).click();
   // The page opens on the logos (owner's request, 2026-10-29); the table is one click away.
   await expect(page.getByRole('tab', { name: 'Logos', selected: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Table' }).click();
@@ -63,6 +66,24 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page.getByText('Logo saved.')).toBeVisible();
   await expect(page.getByRole('img', { name: 'Synthetic Mills logo' })).toBeVisible();
 
+  // Canola came from the spreadsheet: unverified until someone verifies it.
+  await page.getByRole('button', { name: 'Canola, unverified: verify' }).click();
+  const verify = page.getByRole('dialog', { name: 'Verify Canola?' });
+  await verify.getByRole('button', { name: 'Verify' }).click();
+  await expect(page.getByText('Canola verified.')).toBeVisible();
+  await expect(page.getByRole('list', { name: 'What they buy' })).toContainText('Canola, verified');
+  await expect(page.getByRole('button', { name: /Canola/ })).toHaveCount(0);
+
+  // Finding coordinates from the counterparty's page; again not set up in CI.
+  await page
+    .getByRole('region', { name: 'Locations (2)' })
+    .getByRole('button', { name: 'Find coordinates' })
+    .click();
+  const find = page.getByRole('dialog', { name: 'Find coordinates' });
+  await expect(find.getByRole('alert')).toContainText('Finding coordinates is not set up');
+  await find.getByRole('button', { name: 'Done' }).click();
+  await expect(find).toHaveCount(0);
+
   await page.getByRole('link', { name: 'All counterparties' }).click();
   await page.getByRole('tab', { name: 'Logos' }).click();
   await expect(
@@ -71,12 +92,16 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
       .getByRole('img', { name: 'Synthetic Mills logo' }),
   ).toBeVisible();
 
-  // The same companies again are reported as already listed, and nothing is imported.
+  // The same companies again are reported as already listed, and nothing is imported. The
+  // old import page's address opens the window on its tab.
   await page.goto('/counterparties/import');
-  await page.getByLabel('Choose CSV file').setInputFiles(csvFile('again.csv'));
-  await page.getByRole('button', { name: 'Review import' }).click();
-  await expect(page.getByText('Already in the list; skipped')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: 'Import 0 new counterparties' })).toBeDisabled();
+  await expect(page).toHaveURL(/\/counterparties\?add=import$/);
+  await dialog.getByLabel('Choose CSV file').setInputFiles(csvFile('again.csv'));
+  await dialog.getByRole('button', { name: 'Review import' }).click();
+  await expect(dialog.getByText('Already in the list; skipped')).toHaveCount(2);
+  await expect(dialog.getByRole('button', { name: 'Import 0 new counterparties' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
 
   // The map view of the Counterparties page. CI builds without a Mapbox token, so it lists
   // the locations instead, and none of the imported ones has coordinates.
@@ -89,15 +114,9 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page.getByText(/The map is not set up yet/)).toBeVisible();
   await expect(
     page.getByText(
-      '0 locations have coordinates. 3 locations have no coordinates yet, so they are not on the map.',
+      '0 locations have coordinates. 3 locations have no coordinates yet, so they are not on the map: use Find coordinates on the counterparty’s page.',
     ),
   ).toBeVisible();
-
-  // Finding coordinates. CI has no Geocodio key, so the lookup says what is missing.
-  await page.getByRole('link', { name: 'Find coordinates from addresses' }).click();
-  await expect(page.getByRole('heading', { name: 'Find coordinates' })).toBeVisible();
-  await page.getByRole('button', { name: 'Look up addresses' }).click();
-  await expect(page.getByRole('alert')).toContainText('Finding coordinates is not set up');
 
   expect(errors).toEqual([]);
 });
@@ -108,21 +127,31 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
 
   await page.goto('/counterparties');
   await page.getByRole('button', { name: 'Add counterparties' }).click();
-  await page
-    .getByRole('dialog')
-    .getByRole('link', { name: /^Add by hand/ })
-    .click();
-  const company = page.getByRole('region', { name: 'Company' });
+  // The window opens on Add one.
+  const dialog = page.getByRole('dialog', { name: 'Add counterparties' });
+  const company = dialog.getByRole('region', { name: 'Company' });
   await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
   await company.getByRole('checkbox', { name: 'Seller' }).check();
   await choose(company.getByLabel('Country (required)'), 'Canada');
-  await page.getByRole('region', { name: 'Contact' }).getByLabel('Name').fill('Synthetic Farmer');
-  const location = page.getByRole('region', { name: 'Location' });
+  await company.getByLabel('Company phone').fill('306 555 0100 ext. 7');
+  await dialog.getByRole('region', { name: 'Contact' }).getByLabel('Name').fill('Synthetic Farmer');
+  const location = dialog.getByRole('region', { name: 'Location', exact: true });
   await location.getByLabel('City or town').fill('Synthetic Town');
   await choose(location.getByLabel('Province or territory'), 'Saskatchewan');
-  await page.getByRole('button', { name: 'Add counterparty' }).click();
+  await choose(location.getByLabel('Served by'), 'Rail and truck');
+  await dialog.getByRole('button', { name: 'Add counterparty' }).click();
+  // Its location has no coordinates, so they are looked up; not set up in CI.
+  await expect(dialog.getByRole('alert')).toContainText('Finding coordinates is not set up');
+  await dialog.getByRole('button', { name: 'Open Synthetic Hand Grower' }).click();
 
   await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Company phone 306 555 0100 x7' })).toHaveAttribute(
+    'href',
+    'tel:3065550100;ext=7',
+  );
+  await expect(page.getByRole('region', { name: 'Locations (1)' })).toContainText(
+    'Served by rail and truck',
+  );
   await expect(page.getByText('Entered by hand')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
     'Synthetic Farmer',
@@ -159,7 +188,10 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await sells.getByRole('checkbox', { name: 'Yellow peas' }).check();
   await sells.getByRole('checkbox', { name: 'Oats' }).check();
   await sells.getByRole('button', { name: 'Save commodities' }).click();
-  await expect(page.getByRole('list', { name: 'What they sell' })).toHaveText(/Yellow peas\s*Oats/);
+  // Ticked by hand, so verified at once.
+  await expect(page.getByRole('list', { name: 'What they sell' })).toHaveText(
+    /Yellow peas, verified\s*Oats, verified/,
+  );
 
   // The main contact, shown at the top with a link to call.
   await page.getByRole('button', { name: 'Make Synthetic Farmer the main contact' }).click();
@@ -462,11 +494,7 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   // A carrier is a counterparty like any other, marked as a carrier; no location needed.
   await page.goto('/counterparties');
   await page.getByRole('button', { name: 'Add counterparties' }).click();
-  await page
-    .getByRole('dialog')
-    .getByRole('link', { name: /^Add by hand/ })
-    .click();
-  const company = page.getByRole('region', { name: 'Company' });
+  const company = page.getByRole('dialog').getByRole('region', { name: 'Company' });
   await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
   await company.getByRole('checkbox', { name: 'Carrier' }).check();
   await choose(company.getByLabel('Country (required)'), 'Canada');

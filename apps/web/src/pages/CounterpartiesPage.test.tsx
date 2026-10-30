@@ -133,14 +133,14 @@ describe('CounterpartiesPage', () => {
     expect(dialog).toHaveAccessibleDescription(
       'Add one company yourself, or many at once from a spreadsheet.',
     );
-    expect(within(dialog).getByRole('link', { name: /^Add by hand/ })).toHaveAttribute(
-      'href',
-      '/counterparties/new',
+    // Adding happens in the window itself: one by hand, or a spreadsheet.
+    expect(within(dialog).getByRole('tab', { name: 'Add one' })).toHaveAttribute(
+      'aria-selected',
+      'true',
     );
-    expect(within(dialog).getByRole('link', { name: /^Import spreadsheet/ })).toHaveAttribute(
-      'href',
-      '/counterparties/import',
-    );
+    expect(within(dialog).getByRole('form', { name: 'Add one counterparty' })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Import spreadsheet' }));
+    expect(within(dialog).getByLabelText('Choose CSV file')).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add counterparties' })).toHaveFocus();
@@ -153,6 +153,20 @@ describe('CounterpartiesPage', () => {
       await screen.findByText('An operations or admin member can add them.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add counterparties' })).not.toBeInTheDocument();
+  });
+
+  it('opens the window on a tab from the address, as the old pages’ addresses do', async () => {
+    mockApi({ [LIST]: () => Response.json({ counterparties: [], truncated: false }) });
+    window.history.replaceState(null, '', '/counterparties?add=import');
+    render(<CounterpartiesPage session={SESSION} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Add counterparties' });
+    expect(within(dialog).getByRole('tab', { name: 'Import spreadsheet' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(window.location.search).toBe('');
   });
 
   it('says when the list cannot be loaded', async () => {

@@ -44,6 +44,7 @@ function facility(id: string, changes: Partial<Facility> = {}): Facility {
     longitude: '-106.670046',
     locationPrecision: 'exact',
     geocodingSource: 'manual',
+    transportAccess: null,
     version: '2026-10-27T14:05:00.000000Z',
     ...changes,
   };

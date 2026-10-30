@@ -81,6 +81,7 @@ afterAll(async () => {
   const both = admin([orgs.a, orgs.b]);
   await admin`delete from app.facilities where organization_id in ${both}`;
   await admin`delete from app.counterparties where organization_id in ${both}`;
+  await admin`delete from app.import_batches where organization_id in ${both}`;
   await admin`delete from app.organization_members where organization_id in ${both}`;
   // Deleting the records and memberships above writes audit events too, so the audit trail goes last.
   await admin`delete from app.audit_events where organization_id in ${both}`;
@@ -125,6 +126,51 @@ describe('geocoding as app_api', () => {
     ]);
     expect(await db.facilitiesWithoutCoordinates(as(users.victor), orgs.a, 0)).toHaveLength(1);
     expect(await db.facilitiesWithoutCoordinates(as(users.bob), orgs.a, 10)).toEqual([]);
+  });
+
+  it('lists only one counterparty’s, or one import’s, when asked', async () => {
+    const batch = id();
+    const imported = id();
+    const importedFacility = id();
+    await admin`insert into app.import_batches
+      (id, organization_id, kind, file_name, content_sha256, row_count, created_count,
+       skipped_count, created_by)
+      values (${batch}, ${orgs.a}, 'counterparties', 'synthetic.csv', ${'0'.repeat(64)}, 1, 1, 0,
+              ${users.olivia})`;
+    await admin`insert into app.counterparties
+      (id, organization_id, legal_name, primary_country, source, import_batch_id, created_by)
+      values (${imported}, ${orgs.a}, 'Synthetic Imported Buyer', 'CA', 'file_import', ${batch},
+              ${users.olivia})`;
+    await admin`insert into app.facilities (id, organization_id, counterparty_id, city, region, country, created_by)
+      values (${importedFacility}, ${orgs.a}, ${imported}, 'Synthetic Spur', 'SK', 'CA', ${users.olivia})`;
+    const ids = (rows: { facilityId: string }[]) => rows.map((row) => row.facilityId);
+
+    expect(ids(await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10))).toHaveLength(
+      3,
+    );
+    expect(
+      ids(
+        await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10, {
+          counterpartyId: counterparties.a,
+        }),
+      ),
+    ).toEqual([facilities.street, facilities.town]);
+    expect(
+      ids(
+        await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10, {
+          importBatchId: batch,
+        }),
+      ),
+    ).toEqual([importedFacility]);
+    // Another organization's counterparty, asked for under this one, gives nothing.
+    expect(
+      await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10, {
+        counterpartyId: counterparties.b,
+      }),
+    ).toEqual([]);
+
+    await admin`delete from app.facilities where id = ${importedFacility}`;
+    await admin`delete from app.counterparties where id = ${imported}`;
   });
 
   it('saves nothing for a viewer', async () => {

@@ -10,7 +10,6 @@ import { useTheme } from '../lib/theme';
 import { useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
-import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { Card } from './ui/card';
 import { SegmentedControl } from './ui/segmented-control';
@@ -208,15 +207,10 @@ export function CounterpartyMap({
             {data.truncated &&
               ` Only the first ${count(data.facilities.length, 'is', 'are')} shown; zoom in to see the rest.`}
             {data.withoutCoordinates > 0 &&
-              ` ${count(data.withoutCoordinates, 'location has', 'locations have')} no coordinates yet, so ${data.withoutCoordinates === 1 ? 'it is' : 'they are'} not on the map.`}
+              ` ${count(data.withoutCoordinates, 'location has', 'locations have')} no coordinates yet, so ${data.withoutCoordinates === 1 ? 'it is' : 'they are'} not on the map${canEditDirectory(organization.role) ? ': use Find coordinates on the counterparty’s page' : ''}.`}
           </>
         )}
       </p>
-      {data && data.withoutCoordinates > 0 && canEditDirectory(organization.role) && (
-        <Button asChild className="w-fit">
-          <Link href="/counterparties/coordinates">Find coordinates from addresses</Link>
-        </Button>
-      )}
 
       {facilities.length > 0 && (
         <Card asChild>

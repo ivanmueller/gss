@@ -1,4 +1,4 @@
-import type { CommodityDirection, FieldIssue, ImportIssue } from '@grain/domain';
+import type { CommodityDirection, FieldIssue, ImportIssue, TransportAccess } from '@grain/domain';
 
 // Types of the API's responses (apps/api/src/db.ts and counterparties.ts).
 
@@ -49,18 +49,30 @@ export interface Facility {
   locationPrecision: string | null;
   /** Where the coordinates came from: 'geocodio', 'manual' or 'file_import'. */
   geocodingSource: string | null;
+  /** Rail, truck or both (TRANSPORT_ACCESS in @grain/domain); null when not known. */
+  transportAccess: TransportAccess | null;
   version: string;
 }
 
 export interface CounterpartyDetail extends CounterpartySummary {
   /** A public http or https address, or null. */
   website: string | null;
+  /** The company's main phone number, apart from its contacts' own. */
+  phone: string | null;
   notes: string | null;
   version: string;
   contacts: Contact[];
   facilities: Facility[];
-  /** What it buys and sells, buys first, each in the commodity list's order. */
-  commodities: { code: string; name: string; direction: CommodityDirection }[];
+  /**
+   * What it buys and sells, buys first, each in the commodity list's order; verifiedAt is
+   * null until someone on the team verifies one that came from a spreadsheet.
+   */
+  commodities: {
+    code: string;
+    name: string;
+    direction: CommodityDirection;
+    verifiedAt: string | null;
+  }[];
 }
 
 export interface CounterpartyList {

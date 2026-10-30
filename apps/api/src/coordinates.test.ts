@@ -118,6 +118,7 @@ describe('POST /api/v1/facilities/geocode', () => {
       expect.objectContaining({ userId: USER_ID }),
       ORG,
       GEOCODE_LIMIT,
+      null,
     );
     expect(lookup.truncated).toBe(false);
     expect(lookup.proposals).toMatchObject([
@@ -169,8 +170,41 @@ describe('POST /api/v1/facilities/geocode', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'GEOCODING_NOT_CONFIGURED' } });
   });
 
+  it('looks up only one counterparty’s, or one import’s, locations when asked', async () => {
+    const counterpartyId = '00000000-0000-4000-8000-00000000c0de';
+    const importBatchId = '00000000-0000-4000-8000-00000000ba7c';
+    db.facilitiesWithoutCoordinates.mockResolvedValue([]);
+    expect((await post('geocode', { organizationId: ORG, counterpartyId })).status).toBe(200);
+    expect(db.facilitiesWithoutCoordinates).toHaveBeenLastCalledWith(
+      expect.anything(),
+      ORG,
+      GEOCODE_LIMIT,
+      { counterpartyId },
+    );
+    expect((await post('geocode', { organizationId: ORG, importBatchId })).status).toBe(200);
+    expect(db.facilitiesWithoutCoordinates).toHaveBeenLastCalledWith(
+      expect.anything(),
+      ORG,
+      GEOCODE_LIMIT,
+      { importBatchId },
+    );
+    expect(db.saveCoordinates).not.toHaveBeenCalled();
+  });
+
   it('refuses a malformed request', async () => {
     expect((await post('geocode', { organizationId: 'org-a' })).status).toBe(422);
+    expect(
+      (await post('geocode', { organizationId: ORG, counterpartyId: 'synthetic-buyer' })).status,
+    ).toBe(422);
+    expect(
+      (
+        await post('geocode', {
+          organizationId: ORG,
+          counterpartyId: '00000000-0000-4000-8000-00000000c0de',
+          importBatchId: '00000000-0000-4000-8000-00000000ba7c',
+        })
+      ).status,
+    ).toBe(422);
     expect(openDatabase).not.toHaveBeenCalled();
   });
 
