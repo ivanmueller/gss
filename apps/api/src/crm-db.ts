@@ -118,6 +118,11 @@ export interface CrmDatabase {
     id: string,
     doneByName: string,
   ) => Promise<FollowUpWriteResult>;
+  /**
+   * Removes a follow-up, open or done, for an admin of its organization: kept in the
+   * database with who removed it and when, and left out of every list and count.
+   */
+  removeFollowUp: (ctx: RequestContext, id: string) => Promise<FollowUpWriteResult>;
 }
 
 type AsUser = <T>(
@@ -404,6 +409,7 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
                   ? tx`f.assigned_to = app.current_user_id()`
                   : tx`f.assigned_to = ${filter.assignedTo}`
             }
+            and f.removed_at is null
             and ${
               filter.status === 'open'
                 ? tx`f.done_at is null`
@@ -426,7 +432,7 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
                  )::int as due_today
           from app.follow_ups f
           where f.organization_id = ${organizationId} and f.assigned_to = app.current_user_id()
-            and f.done_at is null`;
+            and f.done_at is null and f.removed_at is null`;
         return { overdue: row?.overdue ?? 0, dueToday: row?.due_today ?? 0 };
       });
     },
@@ -441,7 +447,8 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
 
     getFollowUp(ctx, id) {
       return asUser(ctx, async (tx) => {
-        const [row] = await tx<FollowUpRow[]>`${followUpSelect(tx)} where f.id = ${id}`;
+        const [row] = await tx<FollowUpRow[]>`
+          ${followUpSelect(tx)} where f.id = ${id} and f.removed_at is null`;
         return row ? followUp(row) : null;
       });
     },
@@ -473,7 +480,7 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
           select f.organization_id, app.can_log_contacts(f.organization_id) as allowed,
                  f.done_at is not null as done, c.archived_at is not null as archived
           from app.follow_ups f join app.counterparties c on c.id = f.counterparty_id
-          where f.id = ${id}`;
+          where f.id = ${id} and f.removed_at is null`;
         if (!row) return { status: 'not_found' };
         if (!row.allowed) return { status: 'forbidden' };
         if (row.done) return { status: 'done' };
@@ -501,13 +508,28 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
         const [row] = await tx<{ allowed: boolean }[]>`
           select app.can_log_contacts(organization_id)
                  or assigned_to = app.current_user_id() as allowed
-          from app.follow_ups where id = ${id}`;
+          from app.follow_ups where id = ${id} and removed_at is null`;
         if (!row) return { status: 'not_found' };
         if (!row.allowed) return { status: 'forbidden' };
         await tx`
           update app.follow_ups
           set done_at = now(), done_by = app.current_user_id(), done_by_name = ${doneByName}
           where id = ${id} and done_at is null`;
+        return { status: 'saved' };
+      });
+    },
+
+    removeFollowUp(ctx, id) {
+      return asUser(ctx, async (tx): Promise<FollowUpWriteResult> => {
+        const [row] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(organization_id) as allowed
+          from app.follow_ups where id = ${id} and removed_at is null`;
+        if (!row) return { status: 'not_found' };
+        if (!row.allowed) return { status: 'forbidden' };
+        // The database fills in when and the admin's name, and checks they are an admin.
+        await tx`
+          update app.follow_ups set removed_by = app.current_user_id()
+          where id = ${id} and removed_by is null`;
         return { status: 'saved' };
       });
     },

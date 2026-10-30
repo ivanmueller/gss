@@ -16,9 +16,12 @@ import { SegmentedControl } from './ui/segmented-control';
 // Mapbox GL JS is large, so it is fetched only when a map is shown.
 const FacilityMap = lazy(() => import('./FacilityMap'));
 
-/** Starting zoom limits: an exact site close enough to see its bins, a town as a town. */
-const EXACT_MAX_ZOOM = 15;
-const APPROXIMATE_MAX_ZOOM = 11;
+/**
+ * Starting zoom limits: an exact site close enough to see its bins and rail spur, an
+ * approximate one (a town's centre) at street level (owner's request, 2026-10-30: closer).
+ */
+export const EXACT_MAX_ZOOM = 17;
+export const APPROXIMATE_MAX_ZOOM = 14;
 
 /** A location with coordinates as a map pin, in its counterparty's colour. */
 export function locationPins(facilities: readonly Facility[], types: readonly string[]): MapPin[] {
@@ -40,7 +43,8 @@ export function locationPins(facilities: readonly Facility[], types: readonly st
 
 /**
  * A small map of one counterparty's locations on its page, in satellite view unless Map is
- * chosen (owner's request, 2026-10-30). It starts on the locations that have coordinates;
+ * chosen (owner's request, 2026-10-30), kept simple: no road names, highway numbers or points
+ * of interest. It starts on the locations that have coordinates;
  * without any, or without a Mapbox token, it is not shown (the list says which have none).
  */
 export function CounterpartyLocationsMap({
@@ -83,6 +87,7 @@ export function CounterpartyLocationsMap({
             start={bounds}
             startMaxZoom={maxZoom}
             cooperative
+            simple
             onSelect={onSelect}
             onTokenRefused={() => {
               setRefused(true);

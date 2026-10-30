@@ -111,7 +111,7 @@ Traders, operations and admin members can:
 
 - **Log contact:** when it happened (now unless changed), how (call, email, meeting or visit), who you spoke to (pick one of the counterparty's contacts or type a name) and notes; tick **Plan a follow-up** to plan one in the same step.
 - **Correct:** a correction is saved as a new version; the entry as it was stays under **Show earlier versions**. Nothing is ever deleted.
-- **Plan follow-up:** what to do, when it is due and who is responsible (anyone on the team; you unless changed). **Edit** changes these while it is open; **Mark done** finishes it for good. The person responsible can mark their own follow-up done whatever their role.
+- **Plan follow-up:** what to do, when it is due and who is responsible (anyone on the team; you unless changed). **Edit** changes these while it is open; **Mark done** finishes it for good. The person responsible can mark their own follow-up done whatever their role. Admins also **Remove** a follow-up, open or done, after a confirmation: it leaves every list and count, and the audit trail keeps it with who removed it and when.
 
 Viewers and analysts read both. Nothing new is logged or planned for an archived counterparty, but its follow-ups can still be marked done.
 

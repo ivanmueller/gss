@@ -142,13 +142,17 @@ export function endOfAlbertaDay(now: Date): string {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** "Fri 30 Oct 2026, 2:00 pm MT": an instant in Alberta time, the same for every viewer. */
-export function formatAlberta(iso: string): string {
+/**
+ * "Fri 30 Oct 2026, 2:00 pm MT": an instant in Alberta time, the same for every viewer;
+ * "30 Oct 2026, 2:00 pm MT" without the weekday.
+ */
+export function formatAlberta(iso: string, { weekday: withWeekday = true } = {}): string {
   const time = Date.parse(iso);
   if (Number.isNaN(time)) throw new Error(`Not a timestamp: "${iso}"`);
   const clock = wallClock(new Date(time));
   const weekday = WEEKDAYS[new Date(Date.UTC(clock.year, clock.month - 1, clock.day)).getUTCDay()];
   const hour12 = clock.hour % 12 === 0 ? 12 : clock.hour % 12;
   const half = clock.hour < 12 ? 'am' : 'pm';
-  return `${weekday ?? ''} ${String(clock.day)} ${MONTHS[clock.month - 1] ?? ''} ${String(clock.year)}, ${String(hour12)}:${two(clock.minute)} ${half} ${ALBERTA_TIME_LABEL}`;
+  const day = withWeekday ? `${weekday ?? ''} ${String(clock.day)}` : String(clock.day);
+  return `${day} ${MONTHS[clock.month - 1] ?? ''} ${String(clock.year)}, ${String(hour12)}:${two(clock.minute)} ${half} ${ALBERTA_TIME_LABEL}`;
 }

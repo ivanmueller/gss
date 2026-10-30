@@ -96,6 +96,9 @@ describe('albertaDay and formatAlberta', () => {
 
   it('formats an instant in Alberta time with its label', () => {
     expect(formatAlberta('2026-10-30T20:00:00.000Z')).toBe('Fri 30 Oct 2026, 2:00 pm MT');
+    expect(formatAlberta('2026-10-30T20:00:00.000Z', { weekday: false })).toBe(
+      '30 Oct 2026, 2:00 pm MT',
+    );
     expect(formatAlberta('2026-12-15T06:05:00.000Z')).toBe('Tue 15 Dec 2026, 12:05 am MT');
     expect(formatAlberta('2025-12-15T07:05:00.000Z')).toBe('Mon 15 Dec 2025, 12:05 am MT');
     // A timestamp with another offset is the same instant.

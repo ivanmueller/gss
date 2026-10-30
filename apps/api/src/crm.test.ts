@@ -402,6 +402,25 @@ describe('/api/v1/follow-ups', () => {
     });
   });
 
+  it('removes a follow-up for an admin, and says when someone else may not', async () => {
+    const res = await request('POST', `/follow-ups/${FOLLOW_UP}/remove`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: FOLLOW_UP, removed: true });
+    expect(db.removeFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      FOLLOW_UP,
+    );
+    db.removeFollowUp.mockResolvedValueOnce({ status: 'forbidden' });
+    const refused = await request('POST', `/follow-ups/${FOLLOW_UP}/remove`);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({
+      error: { message: 'Only admins remove follow-ups.' },
+    });
+    db.removeFollowUp.mockResolvedValueOnce({ status: 'not_found' });
+    expect((await request('POST', `/follow-ups/${FOLLOW_UP}/remove`)).status).toBe(404);
+    expect((await request('POST', '/follow-ups/not-an-id/remove')).status).toBe(404);
+  });
+
   it('maps the database’s refusal of a responsible person who is not on the team', async () => {
     db.updateFollowUp.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'GS004' }));
     const res = await request('PATCH', `/follow-ups/${FOLLOW_UP}`, {
