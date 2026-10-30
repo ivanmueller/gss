@@ -1,4 +1,5 @@
 import {
+  commodityChangeSchema,
   createContactSchema,
   createCounterpartySchema,
   createFacilitySchema,
@@ -230,10 +231,12 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       }
       const contentSha256 = await sha256Hex(
         JSON.stringify(
-          plan.groups.map(({ counterparty, contacts, facilities }) => ({
+          // Without commodities, the same as before they could be imported.
+          plan.groups.map(({ counterparty, contacts, facilities, commodities }) => ({
             counterparty,
             contacts,
             facilities,
+            ...(commodities.length > 0 && { commodities }),
           })),
         ),
       );
@@ -243,10 +246,11 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         contentSha256,
         rowCount: rows.length,
         skippedCount: plan.groups.length - fresh.length,
-        counterparties: fresh.map(({ counterparty, contacts, facilities }) => ({
+        counterparties: fresh.map(({ counterparty, contacts, facilities, commodities }) => ({
           counterparty,
           contacts,
           facilities,
+          commodities,
         })),
       });
       return c.json({ ...result, committed: true, importBatchId }, 201);
@@ -338,12 +342,13 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     if (parsed.status === 'empty')
       return invalid(c, [{ field: null, message: 'The form is empty.' }]);
     if (parsed.status === 'invalid') return invalid(c, parsed.issues);
-    const { counterparty, contact, facility } = parsed.record;
+    const { counterparty, contact, facility, commodities } = parsed.record;
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const created = await db.createCounterparty(ctx, request.data.organizationId, {
         counterparty,
         contacts: contact ? [contact] : [],
         facilities: facility ? [facility] : [],
+        commodities,
       });
       if (created.status === 'forbidden') return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_EDIT);
       return c.json({ id: created.id }, 201);
@@ -421,6 +426,21 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const result = await db.removeContact(ctx, id, contactId);
       return savedDetail(c, db, ctx, id, result, 'contact');
+    });
+  });
+
+  // What it buys and sells: anyone on the team may change it (owner's answer, 2026-10-30).
+  routes.patch('/:id/commodities', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = commodityChangeSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.changeCommodities(ctx, id, request.data);
+      return savedDetail(c, db, ctx, id, result, 'counterparty');
     });
   });
 

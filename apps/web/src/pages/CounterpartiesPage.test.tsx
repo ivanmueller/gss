@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CounterpartySummary } from '../lib/api';
 import { mockApi, ORG, SESSION } from '../test/api';
-import { CounterpartiesPage } from './CounterpartiesPage';
+import { choose } from '../test/select';
+import { CounterpartiesPage, tradesCommodity } from './CounterpartiesPage';
 
 function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
   return {
@@ -22,6 +23,8 @@ function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
     regions: ['MB', 'SK'],
     logoSha256: null,
     archivedAt: null,
+    buys: [],
+    sells: [],
     ...overrides,
   };
 }
@@ -185,6 +188,57 @@ describe('CounterpartiesPage', () => {
     await userEvent.click(within(show).getByRole('button', { name: 'All' }));
     expect(window.location.search).toBe('?view=table');
     expect(screen.getByText('4 of 4 shown')).toBeInTheDocument();
+  });
+
+  it('finds who buys or sells a commodity, as buyers or sellers, and keeps it in the address', async () => {
+    const peaBuyer = summary({ legalName: 'Synthetic Pea Buyer', buys: ['canola', 'yellow_peas'] });
+    const peaGrower = summary({
+      id: '00000000-0000-4000-8000-00000000c003',
+      legalName: 'Synthetic Pea Grower',
+      types: ['seller'],
+      sells: ['yellow_peas'],
+    });
+    const oatBroker = summary({
+      id: '00000000-0000-4000-8000-00000000c004',
+      legalName: 'Synthetic Oat Broker',
+      types: ['broker'],
+      buys: ['oats'],
+      sells: ['canola'],
+    });
+    mockApi({
+      [LIST]: () =>
+        Response.json({ counterparties: [peaBuyer, peaGrower, oatBroker], truncated: false }),
+    });
+    window.history.replaceState(null, '', '/counterparties?view=table');
+    render(<CounterpartiesPage session={SESSION} />);
+
+    await choose(await screen.findByRole('combobox', { name: 'Commodity' }), 'Yellow peas');
+    expect(window.location.search).toBe('?view=table&commodity=yellow_peas');
+    expect(screen.getByText('2 of 3 shown')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Synthetic Oat Broker' })).toBeNull();
+
+    // Among buyers, only those who buy it.
+    await userEvent.click(
+      within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Buyers' }),
+    );
+    expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Pea Buyer' })).toBeInTheDocument();
+
+    // Canola: the buyer buys it; the broker sells it, so among buyers only the buyer.
+    await choose(screen.getByRole('combobox', { name: 'Commodity' }), 'Canola');
+    expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
+    await choose(screen.getByRole('combobox', { name: 'Commodity' }), 'All commodities');
+    expect(window.location.search).toBe('?view=table&type=buyer');
+  });
+
+  it('decides who trades a commodity by the buyers or sellers chosen', () => {
+    const both = { buys: ['canola'], sells: ['oats'] };
+    expect(tradesCommodity(both, null, 'all')).toBe(true);
+    expect(tradesCommodity(both, 'canola', 'all')).toBe(true);
+    expect(tradesCommodity(both, 'oats', 'all')).toBe(true);
+    expect(tradesCommodity(both, 'oats', 'buyer')).toBe(false);
+    expect(tradesCommodity(both, 'oats', 'seller')).toBe(true);
+    expect(tradesCommodity(both, 'rye', 'all')).toBe(false);
   });
 
   it('leaves archived counterparties out unless asked', async () => {

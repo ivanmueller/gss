@@ -23,6 +23,8 @@ const CARRIER: CounterpartySummary = {
   regions: [],
   logoSha256: null,
   archivedAt: null,
+  buys: [],
+  sells: [],
 };
 const OLD_CARRIER = {
   ...CARRIER,
@@ -54,6 +56,7 @@ function location(
 ) {
   return {
     ...owner,
+    commodities: [],
     website: null,
     notes: null,
     version: '2026-10-29T14:05:00.000000Z',

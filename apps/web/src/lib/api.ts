@@ -1,4 +1,4 @@
-import type { FieldIssue, ImportIssue } from '@grain/domain';
+import type { CommodityDirection, FieldIssue, ImportIssue } from '@grain/domain';
 
 // Types of the API's responses (apps/api/src/db.ts and counterparties.ts).
 
@@ -18,6 +18,9 @@ export interface CounterpartySummary {
   logoSha256: string | null;
   /** When it was archived (ISO 8601), or null. */
   archivedAt: string | null;
+  /** The commodities it buys and sells (codes), in the commodity list's order. */
+  buys: string[];
+  sells: string[];
 }
 
 export interface Contact {
@@ -56,6 +59,8 @@ export interface CounterpartyDetail extends CounterpartySummary {
   version: string;
   contacts: Contact[];
   facilities: Facility[];
+  /** What it buys and sells, buys first, each in the commodity list's order. */
+  commodities: { code: string; name: string; direction: CommodityDirection }[];
 }
 
 export interface CounterpartyList {

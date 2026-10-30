@@ -39,6 +39,8 @@ function summary(name: string): CounterpartySummary {
     regions: ['ND'],
     logoSha256: null,
     archivedAt: null,
+    buys: [],
+    sells: [],
   };
 }
 
@@ -155,6 +157,7 @@ describe('GET /api/v1/counterparties/:id', () => {
       version: VERSION,
       contacts: [],
       facilities: [],
+      commodities: [],
     };
     db.getCounterparty.mockResolvedValueOnce(detail);
     const res = await request(`/${COUNTERPARTY}`, { headers: AUTH });
@@ -386,6 +389,51 @@ describe('POST /api/v1/counterparties/import', () => {
     expect(batch?.contentSha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('imports a Commodities column as what the companies buy', async () => {
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'buyers.csv',
+      commit: true,
+      defaultTypes: ['buyer'],
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Peas Inc',
+            country: 'CA',
+            commodities: 'Yellow peas; Flax',
+          },
+        },
+        {
+          line: 3,
+          values: { legalName: 'Synthetic Peas Inc', country: 'CA', commodities: 'Green peas' },
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const [, batch] = db.importCounterparties.mock.calls[0] ?? [];
+    expect(batch?.counterparties[0]?.commodities).toEqual([
+      { commodity: 'flaxseed', direction: 'buys' },
+      { commodity: 'yellow_peas', direction: 'buys' },
+      { commodity: 'green_peas', direction: 'buys' },
+    ]);
+  });
+
+  it('refuses a row whose commodities are not on the list', async () => {
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'buyers.csv',
+      commit: true,
+      rows: [
+        { line: 4, values: { legalName: 'Synthetic Co', country: 'CA', commodities: 'Wheat' } },
+      ],
+    });
+    expect(await res.json()).toMatchObject({
+      issues: [{ line: 4, field: 'commodities' }],
+    });
+    expect(db.importCounterparties).not.toHaveBeenCalled();
+  });
+
   it('gives the same content the same checksum, so a repeat import is refused', async () => {
     await postImport({ ...body, commit: true });
     await postImport({ ...body, commit: true, fileName: 'renamed.csv' });
@@ -505,6 +553,7 @@ function detail(overrides: Record<string, unknown> = {}) {
     version: VERSION,
     contacts: [],
     facilities: [],
+    commodities: [],
     ...overrides,
   };
 }
@@ -548,6 +597,7 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
             country: 'CA',
           }) as unknown,
         ],
+        commodities: [],
       },
     );
   });
@@ -784,6 +834,51 @@ describe('contacts', () => {
     expect((await send('PUT', path, { contactId: CONTACT })).status).toBe(403);
     db.setMainContact.mockResolvedValueOnce({ status: 'archived' });
     expect((await send('PUT', path, { contactId: CONTACT })).status).toBe(409);
+  });
+});
+
+describe('commodities', () => {
+  const path = `/${COUNTERPARTY}/commodities`;
+
+  it('adds and removes what a counterparty buys or sells, and returns the counterparty', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail());
+    const change = {
+      add: [{ commodity: 'canola', direction: 'buys' }],
+      remove: [{ commodity: 'oats', direction: 'sells' }],
+    };
+    const res = await send('PATCH', path, change);
+    expect(res.status).toBe(200);
+    expect(db.changeCommodities).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, change);
+  });
+
+  it('refuses commodities off the list, other directions and an empty change', async () => {
+    for (const body of [
+      { add: [{ commodity: 'hemp', direction: 'buys' }], remove: [] },
+      { add: [{ commodity: 'canola', direction: 'trades' }], remove: [] },
+      { add: [], remove: [] },
+      { add: [{ commodity: 'canola', direction: 'buys' }] },
+    ]) {
+      expect((await send('PATCH', path, body)).status).toBe(422);
+    }
+    expect(db.changeCommodities).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for a counterparty out of reach and 409 for an archived one', async () => {
+    const body = { add: [{ commodity: 'canola', direction: 'buys' }], remove: [] };
+    expect((await send('PATCH', '/nope/commodities', body)).status).toBe(404);
+    db.changeCommodities.mockResolvedValueOnce({ status: 'not_found' });
+    expect((await send('PATCH', path, body)).status).toBe(404);
+    db.changeCommodities.mockResolvedValueOnce({ status: 'archived' });
+    const archived = await send('PATCH', path, body);
+    expect(archived.status).toBe(409);
+    expect(await archived.json()).toMatchObject({ error: { code: 'ARCHIVED' } });
+    // Archived while the change waited: the database's refusal.
+    db.changeCommodities.mockRejectedValueOnce(
+      Object.assign(new Error('archived'), { code: 'GS005' }),
+    );
+    const late = await send('PATCH', path, body);
+    expect(late.status).toBe(409);
+    expect(await late.json()).toMatchObject({ error: { code: 'ARCHIVED' } });
   });
 });
 

@@ -1,5 +1,17 @@
 # Documentation pack changelog
 
+## 2026-10-30 — What counterparties buy and sell
+
+- `docs/DECISIONS.md`: the owner's answers (a list kept by hand, anyone can change it, the 20 commodities, a filter, an import column), the next follow-up and last contact in the header instead of four boxes, freight's Show and Hide in one place.
+- `docs/API.md`: `PATCH /api/v1/counterparties/{id}/commodities`; `buys`, `sells` and `commodities` in the responses.
+- `docs/DATA_MODEL.md`: `app.counterparty_commodities` and migration `20261030020000_counterparty_commodities.sql`.
+- `docs/PRODUCT.md`: the commodity filter and the counterparty page's top and Commodities box.
+- `docs/DATA_MODEL.md`: after Codex's review of ivanmueller/gss#78, the commodity list's key and the one-main-contact index keyed by organization (migration `20261030030000_main_contact_index_by_organization.sql`), and the archived check reading only the caller's organization; `docs/DECISIONS.md`: Feed wheat not read as a commodity.
+
+## 2026-10-30 — Handoff record of #77
+
+- `docs/HANDOFF.md`: ivanmueller/gss#77 (the race tests for the main contact) with its CI and Deploy staging runs.
+
 ## 2026-10-30 — Handoff record of #76
 
 - `docs/HANDOFF.md`: the redesigned page for buyers and sellers with a main contact (ivanmueller/gss#76), its CI and Deploy staging runs and Codex's review; the next task, the owner's check on staging.

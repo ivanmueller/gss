@@ -11,6 +11,7 @@ import { CounterpartyPage } from './CounterpartyPage';
 const ID = '00000000-0000-4000-8000-00000000c001';
 const DETAIL: CounterpartyDetail = {
   id: ID,
+  commodities: [],
   organizationId: ORG.id,
   legalName: 'Synthetic Prairie Mills',
   tradingName: 'Prairie Mills',
@@ -26,6 +27,8 @@ const DETAIL: CounterpartyDetail = {
   website: null,
   notes: 'Synthetic record.',
   archivedAt: null,
+  buys: [],
+  sells: [],
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [
     {
@@ -186,7 +189,13 @@ describe('CounterpartyPage', () => {
     expect(freight).toHaveTextContent('No live freight rates.');
     expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
     expect(calls.map((call) => call.path)).not.toContain(`/freight-quotes?carrier_id=${ID}`);
-    await userEvent.click(within(freight).getByRole('button', { name: 'Hide' }));
+    // Hide is in the heading row, where Show was.
+    const toggle = within(freight).getByRole('button', {
+      name: 'Freight to and from its locations (0)',
+    });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveTextContent(/Hide$/);
+    await userEvent.click(toggle);
     expect(
       screen.getByRole('button', { name: 'Freight to and from its locations' }),
     ).toHaveAttribute('aria-expanded', 'false');
@@ -533,7 +542,11 @@ describe('CounterpartyPage editing', () => {
     for (const name of ['More actions', 'Edit details', 'Archive', 'Add contact', 'Add location']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
-    expect(screen.queryByRole('button', { name: /^(Edit|Remove) / })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /^(Edit|Remove) (?!commodities)/ }),
+    ).not.toBeInTheDocument();
+    // What it buys and sells is anyone's to change (owner's answer, 2026-10-30).
+    expect(screen.getByRole('button', { name: 'Edit commodities' })).toBeInTheDocument();
   });
 
   it('changes an existing logo under Edit details, not at the top', async () => {

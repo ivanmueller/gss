@@ -56,6 +56,7 @@ function record(legalName: string, overrides: Partial<NewCounterparty> = {}): Ne
     },
     contacts: [contact('Synthetic Grower')],
     facilities: [facility({ latitude: '52.133214', longitude: '-106.670046' })],
+    commodities: [],
     ...overrides,
   };
 }
@@ -91,6 +92,9 @@ afterAll(async () => {
   await db.close();
   const both = admin([orgs.a, orgs.b]);
   await admin`delete from app.facilities where organization_id in ${both}`;
+  // An archived counterparty's commodities cannot be removed, so restore them all first.
+  await admin`update app.counterparties set archived_at = null where organization_id in ${both}`;
+  await admin`delete from app.counterparty_commodities where organization_id in ${both}`;
   await admin`delete from app.counterparty_contacts where organization_id in ${both}`;
   await admin`delete from app.counterparties where organization_id in ${both}`;
   await admin`delete from app.organization_members where organization_id in ${both}`;
@@ -255,6 +259,99 @@ describe('editing a counterparty as app_api', () => {
       select count(*)::int as count from app.audit_events
       where entity_id = ${counterpartyId} and changed_fields = array['archived_at']`;
     expect(audit?.count).toBe(2);
+  });
+});
+
+describe('what a counterparty buys and sells, as app_api', () => {
+  const canola = { commodity: 'canola', direction: 'buys' } as const;
+  const oats = { commodity: 'oats', direction: 'sells' } as const;
+  const listed = async (counterpartyId: string) =>
+    (await detail(counterpartyId)).commodities.map((k) => `${k.direction} ${k.name}`);
+
+  it('is added with a counterparty entered by hand', async () => {
+    const counterpartyId = await create('Synthetic Commodity Grower', { commodities: [oats] });
+    expect(await listed(counterpartyId)).toEqual(['sells Oats']);
+  });
+
+  it('is changed by anyone on the team, a viewer too; repeats change nothing', async () => {
+    const counterpartyId = await create('Synthetic Commodity Buyer');
+    expect(
+      await db.changeCommodities(as(users.victor), counterpartyId, {
+        add: [canola, oats],
+        remove: [],
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(await listed(counterpartyId)).toEqual(['buys Canola', 'sells Oats']);
+    // Adding one listed already and removing one not listed change nothing.
+    expect(
+      await db.changeCommodities(as(users.olivia), counterpartyId, {
+        add: [canola],
+        remove: [{ commodity: 'rye', direction: 'buys' }, oats],
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(await listed(counterpartyId)).toEqual(['buys Canola']);
+    const [audit] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.audit_events
+      where entity = 'counterparty_commodities' and organization_id = ${orgs.a}
+        and actor_id = ${users.victor} and action = 'insert'`;
+    expect(audit?.count).toBeGreaterThanOrEqual(2);
+  });
+
+  // Codex's review of ivanmueller/gss#78: another organization's attempt held open in a
+  // transaction must not lock this organization's counterparty and so hold up its archiving.
+  it('lets another organization hold nothing up with an attempt on its list', async () => {
+    const counterpartyId = await create('Synthetic Commodity Unlocked', { commodities: [canola] });
+    const bob = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    let finish: () => void = () => undefined;
+    let tried: (code: string | undefined) => void = () => undefined;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const attempted = new Promise<string | undefined>((resolve) => {
+      tried = resolve;
+    });
+    const holding = bob.begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.bob}, true)`;
+      // Its own organization, this counterparty, a commodity it already lists.
+      const code = await tx
+        .savepoint(
+          (sp) => sp`
+            insert into app.counterparty_commodities
+              (organization_id, counterparty_id, commodity_code, direction, created_by)
+            values (${orgs.b}, ${counterpartyId}, 'canola', 'buys', ${users.bob})
+            on conflict do nothing`,
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => (error as { code?: string }).code,
+        );
+      tried(code);
+      await done;
+    });
+    // Refused by the tenant-matching key, not skipped as a duplicate.
+    expect(await attempted).toBe('23503');
+    // Archiving does not wait for the other organization's open transaction.
+    await admin.begin(async (tx) => {
+      await tx`set local lock_timeout = '2s'`;
+      await tx`update app.counterparties set archived_at = now() where id = ${counterpartyId}`;
+    });
+    finish();
+    await holding;
+    await bob.end();
+    expect((await detail(counterpartyId)).archivedAt).not.toBeNull();
+  });
+
+  it('is out of reach of another organization, and fixed while archived', async () => {
+    const counterpartyId = await create('Synthetic Commodity Archived');
+    const change = { add: [canola], remove: [] };
+    expect(await db.changeCommodities(as(users.bob), counterpartyId, change)).toEqual({
+      status: 'not_found',
+    });
+    await db.setArchived(as(users.olivia), counterpartyId, true);
+    expect(await db.changeCommodities(as(users.victor), counterpartyId, change)).toEqual({
+      status: 'archived',
+    });
+    expect(await listed(counterpartyId)).toEqual([]);
   });
 });
 

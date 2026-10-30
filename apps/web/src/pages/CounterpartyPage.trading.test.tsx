@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CounterpartyDetail } from '../lib/api';
 import { mockApi as mockBaseApi, ORG, SESSION } from '../test/api';
-import { BID, OFFER } from '../test/quotes';
 import { CounterpartyPage, tradingLayout } from './CounterpartyPage';
 
 // A buyer's or seller's page (owner's approved layout, 2026-10-30). Synthetic values only;
@@ -18,6 +17,7 @@ const K2 = '00000000-0000-4000-8000-00000000a002';
 
 const DETAIL: CounterpartyDetail = {
   id: ID,
+  commodities: [],
   organizationId: ORG.id,
   legalName: 'Synthetic Prairie Mills',
   tradingName: null,
@@ -33,6 +33,8 @@ const DETAIL: CounterpartyDetail = {
   website: null,
   notes: null,
   archivedAt: null,
+  buys: [],
+  sells: [],
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [
     {
@@ -133,13 +135,6 @@ const LATER: FollowUp = {
   dueAt: '2026-11-03T15:00:00.000Z',
 };
 
-const ours = { ...BID.counterparty, id: ID };
-const QUOTES = [
-  { ...BID, counterparty: ours },
-  { ...OFFER, counterparty: ours },
-  { ...BID, id: '00000000-0000-4000-8000-00000000a009', status: 'withdrawn', counterparty: ours },
-];
-
 function mockApi(handlers: Parameters<typeof mockBaseApi>[0] = {}) {
   return mockBaseApi({
     [`GET ${PATH}`]: () => Response.json(DETAIL),
@@ -178,7 +173,7 @@ function headerCard(): HTMLElement {
 function headings(): string[] {
   return screen
     .getAllByRole('heading', { level: 2 })
-    .map((heading) => heading.textContent.replace(/ \(.*\)$/, ''));
+    .map((heading) => heading.textContent.replace(/(Show|Hide)$/, '').replace(/ \(.*\)$/, ''));
 }
 
 beforeEach(() => {
@@ -256,7 +251,7 @@ describe('a buyer’s or seller’s page', () => {
     expect(within(followUps).getByRole('button', { name: 'Save follow-up' })).toBeInTheDocument();
   });
 
-  it('logs a contact from the header and counts it as the last contact', async () => {
+  it('logs a contact from the header and shows it as the last contact', async () => {
     let entries: ContactLogEntry[] = [];
     const calls = mockApi({
       [`GET /contact-log?counterparty_id=${ID}`]: () =>
@@ -268,8 +263,8 @@ describe('a buyer’s or seller’s page', () => {
     });
     show('trader');
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
-    const glance = screen.getByRole('region', { name: 'At a glance' });
-    expect(await within(glance).findByText('None logged')).toBeInTheDocument();
+    const last = within(headerCard()).getByRole('group', { name: 'Last contact' });
+    expect(await within(last).findByText('None logged.')).toBeInTheDocument();
 
     await userEvent.click(within(headerCard()).getByRole('button', { name: 'Log contact' }));
     const history = screen.getByRole('region', { name: 'Contact history (0)' });
@@ -283,13 +278,11 @@ describe('a buyer’s or seller’s page', () => {
       counterpartyId: ID,
       values: { channel: 'call', contactName: 'Synthetic Merchandiser' },
     });
-    expect(await within(glance).findByText('Call with Synthetic Merchandiser')).toBeInTheDocument();
+    expect(await within(last).findByText('Call with Synthetic Merchandiser')).toBeInTheDocument();
   });
 
-  it('shows at a glance its live bids and offers, next follow-up, last contact and locations', async () => {
+  it('shows the next follow-up and the last contact in the header, no boxes of facts', async () => {
     mockApi({
-      [`GET /quotes?counterparty_id=${ID}`]: () =>
-        Response.json({ quotes: QUOTES, truncated: false }),
       [`GET /follow-ups?counterparty_id=${ID}&status=all`]: () =>
         Response.json({
           followUps: [
@@ -303,33 +296,31 @@ describe('a buyer’s or seller’s page', () => {
         Response.json({ entries: [OLDER, ENTRY], truncated: false }),
     });
     show('viewer');
-    const glance = await screen.findByRole('region', { name: 'At a glance' });
-    const fact = (label: string) =>
-      within(glance).getByText(label).closest('[data-slot="card"]')?.textContent;
-    await waitFor(() => {
-      expect(fact('Live bids and offers')).toBe('Live bids and offers21 bid · 1 offer');
-    });
+    await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
+    const header = headerCard();
     // The soonest open one, overdue since 9 am MT.
+    const next = within(header).getByRole('group', { name: 'Next follow-up' });
     await waitFor(() => {
-      expect(fact('Next follow-up')).toBe(
-        'Next follow-upFri 30 Oct 2026, 9:00 am MTOverdue · Send the bid sheet',
+      expect(next).toHaveTextContent(
+        'Next follow-upOverdueFri 30 Oct 2026, 9:00 am MTSend the bid sheet · Tess Trader',
       );
     });
+    const last = within(header).getByRole('group', { name: 'Last contact' });
     await waitFor(() => {
-      expect(fact('Last contact')).toBe(
+      expect(last).toHaveTextContent(
         'Last contactThu 29 Oct 2026, 8:30 am MTCall with Synthetic Merchandiser',
       );
     });
-    expect(fact('Locations')).toBe('Locations21 with coordinates');
+    expect(screen.queryByText('Live bids and offers')).toBeNull();
   });
 
-  it('says when there is nothing yet', async () => {
-    mockApi({ [`GET ${PATH}`]: () => Response.json({ ...DETAIL, facilities: [] }) });
+  it('says when nothing is planned or logged yet', async () => {
+    mockApi();
     show('viewer');
-    const glance = await screen.findByRole('region', { name: 'At a glance' });
-    expect(await within(glance).findByText('None planned')).toBeInTheDocument();
-    expect(await within(glance).findByText('None logged')).toBeInTheDocument();
-    expect(within(glance).getAllByText('0')).toHaveLength(2);
+    await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
+    const header = headerCard();
+    expect(await within(header).findByText('None planned.')).toBeInTheDocument();
+    expect(await within(header).findByText('None logged.')).toBeInTheDocument();
   });
 
   it('makes a contact the main contact, and no longer main', async () => {
@@ -349,7 +340,7 @@ describe('a buyer’s or seller’s page', () => {
       },
     });
     show('operations');
-    await screen.findByText(/No main contact yet/);
+    await screen.findByText(/None yet: choose one under Contacts/);
     await userEvent.click(
       screen.getByRole('button', { name: 'Make Synthetic Accountant the main contact' }),
     );
@@ -362,7 +353,7 @@ describe('a buyer’s or seller’s page', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Synthetic Accountant is no longer the main contact' }),
     );
-    expect(await screen.findByText(/No main contact yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/None yet: choose one under Contacts/)).toBeInTheDocument();
     expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([
       { contactId: K2 },
       { contactId: null },
@@ -398,7 +389,7 @@ describe('a buyer’s or seller’s page', () => {
     for (const name of [/^Make /, 'Log contact', 'Plan follow-up', 'More actions']) {
       expect(screen.queryByRole('button', { name })).toBeNull();
     }
-    expect(screen.queryByText(/No main contact yet/)).toBeNull();
+    expect(screen.queryByText(/choose one under Contacts/)).toBeNull();
     expect(screen.queryByRole('link', { name: 'New bid' })).toBeNull();
   });
 
@@ -411,6 +402,7 @@ describe('a buyer’s or seller’s page', () => {
       'Follow-ups',
       'Contact history',
       'Contacts',
+      'What they buy',
       'Locations',
       'Freight to and from its locations',
     ]);
@@ -431,6 +423,7 @@ describe('a buyer’s or seller’s page', () => {
       'Bids and offers',
       'Contacts',
       'Contact history',
+      'What they buy',
       'Locations',
       'Freight to and from its locations',
     ]);
@@ -438,7 +431,7 @@ describe('a buyer’s or seller’s page', () => {
 });
 
 describe('a carrier’s page', () => {
-  it('keeps the plain layout, with Edit details and Archive at the top and no glance', async () => {
+  it('keeps the plain layout, with Edit details and Archive at the top', async () => {
     mockApi({
       [`GET ${PATH}`]: () => Response.json({ ...DETAIL, types: ['carrier'] }),
       [`GET /freight-quotes?carrier_id=${ID}`]: () =>
@@ -447,7 +440,6 @@ describe('a carrier’s page', () => {
     show('operations');
     expect(await screen.findByRole('button', { name: 'Edit details' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'At a glance' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
     // Its freight rates are open, not folded.
     expect(await screen.findByRole('region', { name: 'Freight rates (0)' })).toBeInTheDocument();

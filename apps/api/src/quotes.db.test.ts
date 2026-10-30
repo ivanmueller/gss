@@ -1,4 +1,4 @@
-import type { QuoteTerms } from '@grain/domain';
+import { COMMODITIES, type QuoteTerms } from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -370,5 +370,7 @@ describe('bids and offers as app_api', () => {
     const commodities = await db.listCommodities(as(users.victor));
     expect(commodities[0]).toEqual({ code: 'canola', name: 'Canola' });
     expect(commodities).toHaveLength(20);
+    // The shared code's copy, which reads spreadsheet names, is the database's list.
+    expect(commodities).toEqual(COMMODITIES.map(({ code, name }) => ({ code, name })));
   });
 });
