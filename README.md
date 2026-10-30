@@ -101,7 +101,7 @@ Operations and admin members can also:
 - On a buyer's or seller's page: **Make main** on a contact, shown at the top with the next follow-up and the last contact.
 - **Verified commodities:** a commodity from a spreadsheet shows grey and dashed (unverified); anyone on the team clicks it and chooses **Verify** to make it verified, shown in the buy or sell colour. Ticked by hand under **Edit**, a commodity is verified at once.
 
-Anyone on the team can change **What they buy** or **What they sell** on a counterparty's page, from the 20 commodities; the commodity dropdown on **Counterparties** finds who buys or sells one.
+Anyone on the team can change **What they buy** or **What they sell** on a counterparty's page, from the 20 commodities; the **Commodities** picker on **Counterparties** finds who buys or sells any of those chosen. Commodities from a spreadsheet show unverified (grey, dashed) until someone clicks one and verifies it.
 
 ## Contact log and follow-ups
 
@@ -152,7 +152,7 @@ Without the token, the page lists the locations and explains what is missing. To
 
 ### Finding coordinates
 
-Coordinates are found from the address when counterparties are added (owner's request, 2026-10-30): at the end of **Add one** when its location has none, at the last step of **Import spreadsheet**, after **Add location** on a counterparty's page, and with **Find coordinates** in a counterparty's **Locations** box. The app sends only the addresses of those locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio. Sure results (in the address's province or state, 80% confidence or more) are saved straight away; the others are listed to save or skip, and the ones not found are listed with what to do. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
+Coordinates are found from the address when counterparties are added (owner's request, 2026-10-30): at the end of **Add by hand** when its location has none, at the last step of **Import spreadsheet**, after **Add location** on a counterparty's page, and with **Find coordinates** in a counterparty's **Locations** box. The app sends only the addresses of those locations without coordinates (street, town, province or state, postal code, country; never names or contacts) to Geocodio. Sure results (in the address's province or state, 80% confidence or more) are saved straight away; the others are listed to save or skip, and the ones not found are listed with what to do. Locations that already have coordinates are never changed. Geocodio's free plan covers 2,500 lookups a day.
 
 The lookup needs a Geocodio API key, kept as a secret of the staging Worker in Cloudflare (the server does the lookups, so the key never reaches a browser):
 

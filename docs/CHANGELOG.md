@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #85; documents brought up to date
+
+- `docs/HANDOFF.md`: the Counterparties changes (ivanmueller/gss#85) with their CI and Deploy staging runs; #84's `main` run settled by #186; the status summary, GT-020 and GT-021 and the owner's staging check brought up to #85.
+- `AGENTS.md`: the status line with the company phone, rail or truck access, verified commodities, markets and tiers, and follow-up removal.
+- `README.md`: the Commodities picker and verified commodities; Add by hand.
+- `docs/DESIGN_SYSTEM.md`: dropdowns: `MultiPicker`.
+
 ## 2026-10-30 — Counterparties: pickers, markets and tiers, the map, the + window, kept answers
 
 - `docs/DECISIONS.md`: the owner's eight changes and answers (markets and tiers; several commodities; the map without a list; the + window in two steps; no trading name; kept answers; grains from a spreadsheet).
