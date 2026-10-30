@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #76
+
+- `docs/HANDOFF.md`: the redesigned page for buyers and sellers with a main contact (ivanmueller/gss#76), its CI and Deploy staging runs and Codex's review; the next task, the owner's check on staging.
+
 ## 2026-10-30 — A redesigned page for buyers and sellers
 
 - `docs/DECISIONS.md`: the owner's approved layout and answers (two columns, Log contact first, a main contact, a small satellite map, freight folded).
