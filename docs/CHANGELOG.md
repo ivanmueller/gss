@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Codex's fourth review of #88
+
+- `docs/DECISIONS.md`: the plan kept only once made with its companies locked; the same file may be imported again.
+- `docs/DATA_MODEL.md`: migration `20261030090000_import_content_repeatable.sql`.
+- `docs/API.md`: no `ALREADY_IMPORTED`; a repeated file adds only what the list lacks.
+
 ## 2026-10-30 — Codex's third review of #88
 
 - `docs/DECISIONS.md`: a company archived during an import makes it plan again; no empty import recorded.

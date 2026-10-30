@@ -487,21 +487,12 @@ describe('POST /api/v1/counterparties/import', () => {
     expect(db.importCounterparties).not.toHaveBeenCalled();
   });
 
-  it('gives the same content the same checksum, so a repeat import is refused', async () => {
+  it('records the same checksum for the same content, whatever the file is called', async () => {
     await postImport({ ...body, commit: true });
     await postImport({ ...body, commit: true, fileName: 'renamed.csv' });
     const [first, second] = [0, 1].map((call) => planned([], call)?.contentSha256);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
     expect(first).toBe(second);
-
-    db.importCounterparties.mockRejectedValueOnce(
-      Object.assign(new Error('duplicate key'), {
-        code: '23505',
-        constraint_name: 'import_batches_organization_id_kind_content_sha256_key',
-      }),
-    );
-    const res = await postImport({ ...body, commit: true });
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: { code: 'ALREADY_IMPORTED' } });
   });
 
   it('refuses to commit while any row has a problem', async () => {

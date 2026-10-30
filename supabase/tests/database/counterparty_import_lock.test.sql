@@ -1,10 +1,10 @@
 -- One counterparty import at a time per organization: the lock only those who may import
--- can take, and only in their own organization. Runs in one transaction that is rolled back.
+-- can take, and only in their own organization; the same file may be imported again. Runs in one transaction that is rolled back.
 -- All fixtures are synthetic.
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(7);
+select plan(9);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader).
@@ -72,6 +72,18 @@ select throws_ok(pg_temp.lock_as('00000000-0000-4000-8000-0000000044aa', '000000
   '42501', null, 'nor a trader');
 select throws_ok(pg_temp.lock_as('00000000-0000-4000-8000-0000000011bb', '00000000-0000-4000-8000-0000000000aa'),
   '42501', null, 'nor another organization''s admin');
+
+-- The same file may be imported again: the import's matching, not its checksum, keeps a
+-- repeat from adding anything twice.
+select ok(
+  not exists (select from pg_constraint
+              where conname = 'import_batches_organization_id_kind_content_sha256_key'),
+  'an import''s checksum is no longer unique');
+select lives_ok(format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011aa',
+  $$insert into app.import_batches (organization_id, kind, file_name, content_sha256, row_count, created_count, skipped_count, created_by)
+    values ('00000000-0000-4000-8000-0000000000aa', 'counterparties', 'synthetic.csv', repeat('c', 64), 1, 1, 0, app.current_user_id()),
+           ('00000000-0000-4000-8000-0000000000aa', 'counterparties', 'synthetic.csv', repeat('c', 64), 1, 0, 1, app.current_user_id())$$),
+  'so operations records the same file twice');
 
 select * from finish();
 rollback;

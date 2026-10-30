@@ -11,6 +11,7 @@ import {
   type ImportBatchInput,
   type RequestContext,
 } from './db';
+import { importBatchFor, matchImport, planImport } from './counterparties';
 
 // Integration test of the counterparty directory: the real driver, as `app_api`, against
 // the real migrations, row level security and audit trigger. Fixtures are synthetic and
@@ -121,6 +122,58 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
 }
 
 let db: Database;
+
+/**
+ * Runs `change` in an admin transaction as olivia, starts the import, and commits the change
+ * only once the import waits for a company's row lock: a change made after the import read
+ * the list but before it locked the company.
+ */
+function whileImportWaits(
+  change: (tx: postgres.TransactionSql) => Promise<void>,
+  run: () => Promise<string | null>,
+): Promise<string | null> {
+  return admin
+    .begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.olivia}, true)`;
+      await change(tx);
+      const running = run();
+      void running.catch(() => undefined);
+      for (let waited = 0; ; waited += 1) {
+        // pg_stat_activity is read once per transaction unless its snapshot is cleared.
+        await tx`select pg_stat_clear_snapshot()`;
+        const [row] = await tx<{ count: number }[]>`
+          select count(*)::int as count from pg_stat_activity
+          where usename = 'app_api' and wait_event_type = 'Lock'
+            and query like '%for no key update%'`;
+        if (row?.count === 1) break;
+        if (waited > 40) throw new Error('the import did not wait for the company');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      // In an object: postgres.js would wait for a returned promise inside the transaction.
+      return { running };
+    })
+    .then(({ running }) => running);
+}
+
+/**
+ * Imports rows as the route does, with the route's own matching (matchImport) made under the
+ * import's lock.
+ */
+function importRows(
+  ctx: RequestContext,
+  rows: { line: number; values: Record<string, string> }[],
+  contentSha256: string,
+): Promise<string | null> {
+  const plan = planImport(rows, ['buyer']);
+  return db.importCounterparties(ctx, orgs.a, (companies) =>
+    importBatchFor(plan, matchImport(plan, rows.length, companies), {
+      organizationId: orgs.a,
+      fileName: 'synthetic-buyers.csv',
+      contentSha256,
+      rowCount: rows.length,
+    }),
+  );
+}
 
 beforeAll(async () => {
   for (const [name, userId] of Object.entries(users)) {
@@ -479,26 +532,9 @@ describe('the counterparty directory as app_api', () => {
         return batch({ contentSha256: letter.repeat(64), counterparties, additions });
       };
     const archivedWhileWaiting = (run: () => Promise<string | null>) =>
-      admin
-        .begin(async (tx) => {
-          await tx`select set_config('app.user_id', ${users.olivia}, true)`;
-          await tx`update app.counterparties set archived_at = now()
-                   where id = ${target}`;
-          const running = run();
-          void running.catch(() => undefined);
-          for (let waited = 0; ; waited += 1) {
-            await tx`select pg_stat_clear_snapshot()`;
-            const [row] = await tx<{ count: number }[]>`
-              select count(*)::int as count from pg_stat_activity
-              where usename = 'app_api' and wait_event_type = 'Lock'
-                and query like '%for no key update%'`;
-            if (row?.count === 1) break;
-            if (waited > 40) throw new Error('the import did not wait for the company');
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }
-          return { running };
-        })
-        .then(({ running }) => running);
+      whileImportWaits(async (tx) => {
+        await tx`update app.counterparties set archived_at = now() where id = ${target}`;
+      }, run);
     const batchesOf = async (letter: string) =>
       (
         await admin<{ count: number }[]>`
@@ -533,13 +569,106 @@ describe('the counterparty directory as app_api', () => {
     expect(recorded?.created_count).toBe(1);
   });
 
-  it('refuses the same content twice', async () => {
-    await expect(
-      db.importCounterparties(as(users.olivia), orgs.a, () => batch({ counterparties: [] })),
-    ).rejects.toMatchObject({
-      code: '23505',
-      constraint_name: 'import_batches_organization_id_kind_content_sha256_key',
+  // Codex's fourth review of ivanmueller/gss#88.
+  it('imports again what a file skipped while a company was archived, once it is restored', async () => {
+    const ctx = as(users.olivia);
+    const template = batch().counterparties[1];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      counterparty: {
+        ...template.counterparty,
+        legalName: 'Synthetic Paused Co',
+        primaryCountry: 'CA',
+      },
+      contacts: [],
+      facilities: [],
+      commodities: [],
     });
+    if (created.status !== 'created') throw new Error('not created');
+    await db.setArchived(ctx, created.id, true);
+    const rows = [
+      {
+        line: 2,
+        values: {
+          legalName: 'Synthetic Paused Co',
+          country: 'CA',
+          city: 'Synthetic Halt',
+          region: 'SK',
+        },
+      },
+      { line: 3, values: { legalName: 'Synthetic Newcomer Two', country: 'CA' } },
+    ];
+    const file = '9'.repeat(64);
+
+    // The new company is imported; the archived one gets nothing.
+    expect(await importRows(ctx, rows, file)).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await db.getCounterparty(ctx, created.id))?.facilities).toEqual([]);
+
+    // Restored, the same file adds its location, and nothing twice.
+    await db.setArchived(ctx, created.id, false);
+    expect(await importRows(ctx, rows, file)).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await db.getCounterparty(ctx, created.id))?.facilities.map((f) => f.city)).toEqual([
+      'Synthetic Halt',
+    ]);
+    const newcomers = (await db.listCounterparties(ctx, orgs.a)).filter(
+      (c) => c.legalName === 'Synthetic Newcomer Two',
+    );
+    expect(newcomers).toHaveLength(1);
+    // A third time there is nothing new: nothing is written or recorded.
+    expect(await importRows(ctx, rows, file)).toBeNull();
+    const [recorded] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.import_batches
+      where organization_id = ${orgs.a} and content_sha256 = ${file}`;
+    expect(recorded?.count).toBe(2);
+  });
+
+  it('plans again when a commodity is added by hand while the import waits for the company', async () => {
+    const ctx = as(users.olivia);
+    const template = batch().counterparties[1];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      counterparty: {
+        ...template.counterparty,
+        legalName: 'Synthetic Busy Co',
+        primaryCountry: 'CA',
+      },
+      contacts: [],
+      facilities: [],
+      commodities: [],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const file = '8'.repeat(64);
+
+    // As changeCommodities does: the company locked, then Canola added.
+    const imported = await whileImportWaits(
+      async (tx) => {
+        await tx`select id from app.counterparties where id = ${created.id} for no key update`;
+        await tx`insert into app.counterparty_commodities
+                   (organization_id, counterparty_id, commodity_code, direction, created_by)
+                 values (${orgs.a}, ${created.id}, 'canola', 'buys', ${users.olivia})`;
+      },
+      () =>
+        importRows(
+          ctx,
+          [
+            {
+              line: 2,
+              values: { legalName: 'Synthetic Busy Co', country: 'CA', commodities: 'Canola' },
+            },
+          ],
+          file,
+        ),
+    );
+
+    // Canola is there already: nothing to write, and no import recorded.
+    expect(imported).toBeNull();
+    const [recorded] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.import_batches
+      where organization_id = ${orgs.a} and content_sha256 = ${file}`;
+    expect(recorded?.count).toBe(0);
+    expect((await db.getCounterparty(ctx, created.id))?.commodities.map((k) => k.code)).toEqual([
+      'canola',
+    ]);
   });
 
   it('leaves no user or request id on the connection after writes and refused writes', async () => {

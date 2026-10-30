@@ -375,8 +375,9 @@ describe('ImportSpreadsheet', () => {
           ? Response.json(
               {
                 error: {
-                  code: 'ALREADY_IMPORTED',
-                  message: 'This file has already been imported.',
+                  code: 'NOTHING_TO_IMPORT',
+                  message:
+                    'Every company in this file is already in the list, with nothing new to add.',
                 },
               },
               { status: 409 },
@@ -394,7 +395,7 @@ describe('ImportSpreadsheet', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Import 2 new counterparties' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'This file has already been imported.',
+      'Every company in this file is already in the list, with nothing new to add.',
     );
   });
 });
