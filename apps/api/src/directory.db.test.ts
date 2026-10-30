@@ -1,3 +1,4 @@
+import { companyNameKey, contactKey, facilityKey } from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -6,6 +7,7 @@ import {
   createDatabase,
   postgresDatabase,
   type Database,
+  type ExistingCounterparty,
   type ImportBatchInput,
   type RequestContext,
 } from './db';
@@ -159,14 +161,16 @@ describe('the counterparty directory as app_api', () => {
   });
 
   it('refuses an import by a viewer', async () => {
-    await expect(db.importCounterparties(as(users.victor), batch())).rejects.toMatchObject({
+    await expect(
+      db.importCounterparties(as(users.victor), orgs.a, () => batch()),
+    ).rejects.toMatchObject({
       code: '42501',
     });
   });
 
   it('imports counterparties with contacts and facilities, audited with the request id', async () => {
     const ctx = as(users.olivia);
-    const batchId = await db.importCounterparties(ctx, batch());
+    const batchId = await db.importCounterparties(ctx, orgs.a, () => batch());
     expect(batchId).toMatch(/^[0-9a-f-]{36}$/);
 
     const [audit] = await admin<{ count: number }[]>`
@@ -284,8 +288,7 @@ describe('the counterparty directory as app_api', () => {
       locationPrecision: null,
     } as const;
 
-    const batchId = await db.importCounterparties(
-      ctx,
+    const batchId = await db.importCounterparties(ctx, orgs.a, () =>
       batch({
         contentSha256: 'd'.repeat(64),
         counterparties: [],
@@ -304,6 +307,7 @@ describe('the counterparty directory as app_api', () => {
         ],
       }),
     );
+    if (batchId === null) throw new Error('nothing was imported');
 
     const after = await db.getCounterparty(ctx, mills.id);
     expect(after?.facilities.map((facility) => facility.name)).toContain('Synthetic Spur');
@@ -320,14 +324,12 @@ describe('the counterparty directory as app_api', () => {
     expect(looked.map((facility) => facility.facilityName)).toEqual(['Synthetic Spur']);
   });
 
-  // Codex's review of ivanmueller/gss#88: additions are worked out before the import locks
-  // the company, so two imports of the same file both found the location missing.
-  it('adds a location or contact once when two imports race to add it', async () => {
+  // Codex's reviews of ivanmueller/gss#88: two imports run side by side, on separate
+  // connections, must not create the same company twice nor add the same location or contact
+  // twice. Each plans against the list it reads; both are held at the import lock until both
+  // are waiting there, so they truly overlap.
+  it('lets two imports of one organization run side by side without duplicating anything', async () => {
     const ctx = as(users.olivia);
-    const [mills] = (await db.existingCounterparties(ctx, orgs.a)).filter(
-      (company) => company.legalName === 'Synthetic Prairie Mills',
-    );
-    if (!mills) throw new Error('fixture missing');
     const siding = {
       name: 'Synthetic Siding',
       facilityType: null,
@@ -349,22 +351,81 @@ describe('the counterparty directory as app_api', () => {
       longitude: '-105.000000',
       locationPrecision: 'approximate',
     } as const;
-    const addition = {
-      counterpartyId: mills.id,
-      facilities: [siding, field],
-      contacts: [{ name: 'Synthetic Third Buyer', role: null, email: null, phone: null }],
-      commodities: [],
-    };
-    await Promise.all(
-      ['e', 'f'].map((letter) =>
-        db.importCounterparties(
-          ctx,
-          batch({ contentSha256: letter.repeat(64), counterparties: [], additions: [addition] }),
-        ),
-      ),
-    );
+    const template = batch().counterparties[1];
+    if (!template) throw new Error('fixture missing');
+    // What the route plans (matchImport): the company is new unless the list has it, and the
+    // listed one gets only what it lacks.
+    const plan =
+      (legalName: string, letter: string) =>
+      (existing: ExistingCounterparty[]): ImportBatchInput | null => {
+        const mills = existing.find((c) => c.legalName === 'Synthetic Prairie Mills');
+        if (!mills) throw new Error('fixture missing');
+        const has = new Set(mills.facilities.map(facilityKey));
+        const known = new Set(mills.contacts.map(contactKey));
+        const contact = { name: 'Synthetic Third Buyer', role: null, email: null, phone: null };
+        const listed = existing.some(
+          (c) =>
+            c.primaryCountry === 'US' && companyNameKey(c.legalName) === companyNameKey(legalName),
+        );
+        return batch({
+          contentSha256: letter.repeat(64),
+          counterparties: listed
+            ? []
+            : [{ ...template, counterparty: { ...template.counterparty, legalName } }],
+          additions: [
+            {
+              counterpartyId: mills.id,
+              facilities: [siding, field].filter((f) => !has.has(facilityKey(f))),
+              contacts: [contact].filter((k) => !known.has(contactKey(k))),
+              commodities: [],
+            },
+          ],
+        });
+      };
 
-    const after = await db.getCounterparty(ctx, mills.id);
+    const one = postgresDatabase(API_URL);
+    const two = postgresDatabase(API_URL);
+    try {
+      await admin
+        .begin(async (tx) => {
+          await tx`select pg_advisory_xact_lock(
+          hashtextextended(${`app.counterparty_import:${orgs.a}`}, 0))`;
+          const imports = [
+            one.importCounterparties(ctx, orgs.a, plan('Synthetic Fresh Concurrent Ltd.', 'e')),
+            two.importCounterparties(ctx, orgs.a, plan('SYNTHETIC FRESH CONCURRENT LIMITED', 'f')),
+          ];
+          // Both wait at the lock before either goes on.
+          for (let waited = 0; ; waited += 1) {
+            // pg_stat_activity is read once per transaction unless its snapshot is cleared.
+            await tx`select pg_stat_clear_snapshot()`;
+            const [row] = await tx<{ count: number }[]>`
+            select count(*)::int as count from pg_stat_activity
+            where usename = 'app_api' and wait_event_type = 'Lock' and wait_event = 'advisory'
+              and query like '%lock_counterparty_import%'`;
+            if (row?.count === 2) break;
+            if (waited > 40) throw new Error('the imports did not both wait at the import lock');
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          // Released when this transaction ends; the imports then run one after the other.
+          void Promise.all(imports).catch(() => undefined);
+          // In an object: postgres.js would wait for a returned array inside the transaction.
+          return { imports };
+        })
+        .then(({ imports }) => Promise.all(imports));
+    } finally {
+      await one.close();
+      await two.close();
+    }
+
+    const fresh = (await db.listCounterparties(ctx, orgs.a)).filter(
+      (c) => companyNameKey(c.legalName) === companyNameKey('Synthetic Fresh Concurrent Ltd.'),
+    );
+    // One company, in the spelling of whichever import went first.
+    expect(fresh).toHaveLength(1);
+    const [mills] = (await db.listCounterparties(ctx, orgs.a)).filter(
+      (c) => c.legalName === 'Synthetic Prairie Mills',
+    );
+    const after = await db.getCounterparty(ctx, mills?.id ?? '');
     expect(after?.facilities.filter((f) => f.name === 'Synthetic Siding')).toHaveLength(1);
     expect(after?.facilities.filter((f) => f.latitude === '51.000000')).toHaveLength(1);
     expect(after?.contacts.filter((k) => k.name === 'Synthetic Third Buyer')).toHaveLength(1);
@@ -372,7 +433,7 @@ describe('the counterparty directory as app_api', () => {
 
   it('refuses the same content twice', async () => {
     await expect(
-      db.importCounterparties(as(users.olivia), batch({ counterparties: [] })),
+      db.importCounterparties(as(users.olivia), orgs.a, () => batch({ counterparties: [] })),
     ).rejects.toMatchObject({
       code: '23505',
       constraint_name: 'import_batches_organization_id_kind_content_sha256_key',
@@ -391,7 +452,9 @@ describe('the counterparty directory as app_api', () => {
     try {
       await own.putLogo(as(users.olivia), id(), PNG);
       expect(await context()).toEqual(['', '']);
-      await expect(own.importCounterparties(as(users.victor), batch())).rejects.toThrow();
+      await expect(
+        own.importCounterparties(as(users.victor), orgs.a, () => batch()),
+      ).rejects.toThrow();
       expect(await context()).toEqual(['', '']);
       await own.listCounterparties(as(users.victor), null);
       expect(await context()).toEqual(['', '']);

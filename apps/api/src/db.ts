@@ -16,7 +16,6 @@ import type {
   LocationPrecision,
   TransportAccess,
 } from '@grain/domain';
-import { contactKey, facilityKey } from '@grain/domain';
 import postgres from 'postgres';
 
 import { crmQueries, type CrmDatabase } from './crm-db';
@@ -279,7 +278,16 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     organizationId: string,
   ) => Promise<ExistingCounterparty[]>;
   /** Creates the batch and its counterparties in one transaction; returns the batch id. */
-  importCounterparties: (ctx: RequestContext, batch: ImportBatchInput) => Promise<string>;
+  /**
+   * Imports a file, one import at a time per organization: under the organization's import
+   * lock it reads the companies already listed, asks `plan` what to write given them, and
+   * writes it, all in one transaction. Null when `plan` finds nothing to write.
+   */
+  importCounterparties: (
+    ctx: RequestContext,
+    organizationId: string,
+    plan: (existing: ExistingCounterparty[]) => ImportBatchInput | null,
+  ) => Promise<string | null>;
   isOrgAdmin: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   /** Sets a member's names (null removes one); false when not allowed or not a member. */
   setMemberNames: (
@@ -574,6 +582,63 @@ export function createDatabase(sql: postgres.Sql): Database {
     }) as Promise<T>;
   }
 
+  /** The companies already in an organization's list, with what each has. */
+  async function readExisting(
+    tx: postgres.TransactionSql,
+    organizationId: string,
+  ): Promise<ExistingCounterparty[]> {
+    const companies = await tx<
+      { id: string; primary_country: string; legal_name: string; archived: boolean }[]
+    >`
+      select id, primary_country, legal_name, archived_at is not null as archived
+      from app.counterparties where organization_id = ${organizationId}`;
+    const facilities = await tx<
+      (ExistingCounterparty['facilities'][number] & { counterparty_id: string })[]
+    >`
+      select counterparty_id, name, address_line as "addressLine", city, region,
+             postal_code as "postalCode", country, latitude::text as latitude,
+             longitude::text as longitude
+      from app.facilities where organization_id = ${organizationId}`;
+    const contacts = await tx<
+      (ExistingCounterparty['contacts'][number] & { counterparty_id: string })[]
+    >`
+      select counterparty_id, name, email, phone
+      from app.counterparty_contacts where organization_id = ${organizationId}`;
+    const commodities = await tx<
+      {
+        counterparty_id: string;
+        commodity: CommodityInterest['commodity'];
+        direction: CommodityDirection;
+      }[]
+    >`
+      select counterparty_id, commodity_code as commodity, direction
+      from app.counterparty_commodities where organization_id = ${organizationId}`;
+    const byId = new Map<string, ExistingCounterparty>(
+      companies.map((row) => [
+        row.id,
+        {
+          id: row.id,
+          primaryCountry: row.primary_country,
+          legalName: row.legal_name,
+          archived: row.archived,
+          facilities: [],
+          contacts: [],
+          commodities: [],
+        },
+      ]),
+    );
+    for (const { counterparty_id, ...facility } of facilities) {
+      byId.get(counterparty_id)?.facilities.push(facility);
+    }
+    for (const { counterparty_id, ...contact } of contacts) {
+      byId.get(counterparty_id)?.contacts.push(contact);
+    }
+    for (const { counterparty_id, ...interest } of commodities) {
+      byId.get(counterparty_id)?.commodities.push(interest);
+    }
+    return [...byId.values()];
+  }
+
   // Arrays come back as JSON: without fetch_types, postgres.js returns array columns as text.
   const summaryColumns = (tx: postgres.TransactionSql) => tx`
     c.id, c.organization_id, c.legal_name, c.trading_name, to_jsonb(c.types::text[]) as types,
@@ -829,63 +894,19 @@ export function createDatabase(sql: postgres.Sql): Database {
     },
 
     existingCounterparties(ctx, organizationId) {
-      return asUser(ctx, async (tx) => {
-        const companies = await tx<
-          { id: string; primary_country: string; legal_name: string; archived: boolean }[]
-        >`
-          select id, primary_country, legal_name, archived_at is not null as archived
-          from app.counterparties where organization_id = ${organizationId}`;
-        const facilities = await tx<
-          (ExistingCounterparty['facilities'][number] & { counterparty_id: string })[]
-        >`
-          select counterparty_id, name, address_line as "addressLine", city, region,
-                 postal_code as "postalCode", country, latitude::text as latitude,
-                 longitude::text as longitude
-          from app.facilities where organization_id = ${organizationId}`;
-        const contacts = await tx<
-          (ExistingCounterparty['contacts'][number] & { counterparty_id: string })[]
-        >`
-          select counterparty_id, name, email, phone
-          from app.counterparty_contacts where organization_id = ${organizationId}`;
-        const commodities = await tx<
-          {
-            counterparty_id: string;
-            commodity: CommodityInterest['commodity'];
-            direction: CommodityDirection;
-          }[]
-        >`
-          select counterparty_id, commodity_code as commodity, direction
-          from app.counterparty_commodities where organization_id = ${organizationId}`;
-        const byId = new Map<string, ExistingCounterparty>(
-          companies.map((row) => [
-            row.id,
-            {
-              id: row.id,
-              primaryCountry: row.primary_country,
-              legalName: row.legal_name,
-              archived: row.archived,
-              facilities: [],
-              contacts: [],
-              commodities: [],
-            },
-          ]),
-        );
-        for (const { counterparty_id, ...facility } of facilities) {
-          byId.get(counterparty_id)?.facilities.push(facility);
-        }
-        for (const { counterparty_id, ...contact } of contacts) {
-          byId.get(counterparty_id)?.contacts.push(contact);
-        }
-        for (const { counterparty_id, ...interest } of commodities) {
-          byId.get(counterparty_id)?.commodities.push(interest);
-        }
-        return [...byId.values()];
-      });
+      return asUser(ctx, (tx) => readExisting(tx, organizationId));
     },
 
-    importCounterparties(ctx, batch) {
+    importCounterparties(ctx, organizationId, plan) {
       return asUser(ctx, async (tx) => {
-        const org = batch.organizationId;
+        // Matching and writing happen under the lock, so an import running at the same time
+        // waits and then sees this one's companies (Codex's review of ivanmueller/gss#88).
+        await tx`select app.lock_counterparty_import(${organizationId})`;
+        const batch = plan(await readExisting(tx, organizationId));
+        if (batch === null) return null;
+        if (batch.organizationId !== organizationId)
+          throw new Error('import for another organization');
+        const org = organizationId;
         const [created] = await tx<{ id: string }[]>`
           insert into app.import_batches
             (organization_id, kind, file_name, content_sha256, row_count, created_count,
@@ -936,44 +957,11 @@ export function createDatabase(sql: postgres.Sql): Database {
                     for no key update`
                 ).map((row) => row.id),
               );
-        // What they had was read before the lock: another import may have added the same
-        // locations and contacts since, so they are matched again now (Codex's review of
-        // ivanmueller/gss#88). Commodities are unique in the table.
-        const lockedIds = [...open];
-        const hasFacility = new Set<string>();
-        const hasContact = new Set<string>();
-        if (lockedIds.length > 0) {
-          const facilities = await tx<(ExistingFacility & { counterparty_id: string })[]>`
-            select counterparty_id, name, address_line as "addressLine", city, region,
-                   postal_code as "postalCode", country, latitude::text as latitude,
-                   longitude::text as longitude
-            from app.facilities
-            where organization_id = ${org} and counterparty_id in ${tx(lockedIds)}`;
-          for (const { counterparty_id, ...facility } of facilities) {
-            hasFacility.add(`${counterparty_id}\n${facilityKey(facility)}`);
-          }
-          const contacts = await tx<
-            (Pick<ContactInput, 'name' | 'email' | 'phone'> & { counterparty_id: string })[]
-          >`
-            select counterparty_id, name, email, phone
-            from app.counterparty_contacts
-            where organization_id = ${org} and counterparty_id in ${tx(lockedIds)}`;
-          for (const { counterparty_id, ...contact } of contacts) {
-            hasContact.add(`${counterparty_id}\n${contactKey(contact)}`);
-          }
-        }
         const targets = [
           ...withIds,
           ...batch.additions
             .filter((item) => open.has(item.counterpartyId))
-            .map(({ counterpartyId: id, ...item }) => ({
-              id,
-              ...item,
-              facilities: item.facilities.filter(
-                (f) => !hasFacility.has(`${id}\n${facilityKey(f)}`),
-              ),
-              contacts: item.contacts.filter((k) => !hasContact.has(`${id}\n${contactKey(k)}`)),
-            })),
+            .map(({ counterpartyId, ...item }) => ({ id: counterpartyId, ...item })),
         ];
 
         const contacts = targets.flatMap(({ id, contacts: list }) =>

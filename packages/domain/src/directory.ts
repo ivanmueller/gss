@@ -593,7 +593,12 @@ function readCompanyPhone(r: FieldReader): { phone: string | null; more: string 
     slashed.length > 1 && slashed.every((part) => part.replace(/\D/g, '').length >= 7);
   if ((PHONE.test(whole) && !twoNumbers) || !r.importing)
     return { phone: readPhone(r, 'companyPhone'), more: null };
-  const split = /^(.+?)(?:\s*[;,|\n/]\s*|\s+(?=\([^)]*[a-z]))(.+)$/i.exec(text);
+  // A slash splits only two whole numbers, so "780/555-0100 (front desk)" keeps 780/555-0100.
+  const split = (
+    twoNumbers
+      ? /^(.+?)(?:\s*[;,|\n/]\s*|\s+(?=\([^)]*[a-z]))(.+)$/i
+      : /^(.+?)(?:\s*[;,|\n]\s*|\s+(?=\([^)]*[a-z]))(.+)$/i
+  ).exec(text);
   const first = split?.[1]?.replace(/\s*(extension|ext\.?)\s*/i, ' x') ?? '';
   const rest = split?.[2]?.trim() ?? '';
   if (!PHONE.test(first) || rest === '') return { phone: readPhone(r, 'companyPhone'), more: null };

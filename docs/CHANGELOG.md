@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Codex's second review of #88
+
+- `docs/DECISIONS.md`: one import at a time per organization, matched under the lock; a slash splits only two whole numbers; the race test on two connections.
+- `docs/DATA_MODEL.md`: migration `20261030080000_counterparty_import_lock.sql`.
+- `docs/API.md`: the import matched again under the lock.
+
 ## 2026-10-30 — Handoff record of #88
 
 - `docs/HANDOFF.md`: companies with several locations in an import (ivanmueller/gss#88) with their CI and Deploy staging runs, and Codex's review of it.
