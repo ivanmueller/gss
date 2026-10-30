@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #87
+
+- `docs/HANDOFF.md`: Codex's findings on #85 fixed (ivanmueller/gss#87) with their CI and Deploy staging runs.
+
 ## 2026-10-30 — Codex's review of #85
 
 - `docs/DECISIONS.md`: kept answers per person and forgotten on any sign-out; logos kept per sign-in.
