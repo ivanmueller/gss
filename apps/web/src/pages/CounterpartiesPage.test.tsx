@@ -122,14 +122,24 @@ describe('CounterpartiesPage', () => {
     expect(
       await screen.findByText('Add one by hand or import your spreadsheet.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Import spreadsheet' })).toHaveAttribute(
-      'href',
-      '/counterparties/import',
+    // One + button opens a window with the two ways to add (owner's request, 2026-10-30).
+    expect(screen.queryByRole('link', { name: /Import spreadsheet/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add counterparties' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add counterparties' });
+    expect(dialog).toHaveAccessibleDescription(
+      'Add one company yourself, or many at once from a spreadsheet.',
     );
-    expect(screen.getByRole('link', { name: 'Add counterparty' })).toHaveAttribute(
+    expect(within(dialog).getByRole('link', { name: /^Add by hand/ })).toHaveAttribute(
       'href',
       '/counterparties/new',
     );
+    expect(within(dialog).getByRole('link', { name: /^Import spreadsheet/ })).toHaveAttribute(
+      'href',
+      '/counterparties/import',
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add counterparties' })).toHaveFocus();
     unmount();
 
     render(
@@ -138,8 +148,7 @@ describe('CounterpartiesPage', () => {
     expect(
       await screen.findByText('An operations or admin member can add them.'),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Import spreadsheet' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Add counterparty' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add counterparties' })).not.toBeInTheDocument();
   });
 
   it('says when the list cannot be loaded', async () => {

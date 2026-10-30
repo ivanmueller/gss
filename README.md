@@ -87,12 +87,18 @@ The CAD/USD rate is the Bank of Canada's daily average (series FXUSDCAD), publis
 
 Signed-in members see their organization's buyers, sellers and carriers under **Counterparties**, by logo (the default), as a table or on a map, with **All / Buyers / Sellers / Carriers** to show one kind. Archived counterparties are hidden unless **Show archived** is ticked. Real records go only into the database, never into Git.
 
-Operations and admin members can:
+Operations and admin members add counterparties with the **+** button at the end of the toolbar, which offers two ways:
 
-- **Add counterparty:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
-- **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped.
+- **Add by hand:** enter one by hand with the same details as the import (company, and optionally a first contact and location).
+- **Import spreadsheet:** a CSV file (in Excel: Save As → "CSV UTF-8 (Comma delimited)"). Choose which of your columns fills each field (columns with known names are chosen already; the page lists the columns left unused), say whether the file holds buyers or sellers, review the result and import. Companies already in the list are skipped. A **Commodities** column ("Canola; Yellow peas") fills what each buyer buys or seller sells.
+
+Operations and admin members can also:
+
 - **Website:** entered under **Edit details** (or when adding a counterparty, or from a "Website" column in a spreadsheet); `example.com` is saved as `https://example.com`. The site name must be in plain letters (no accents). On the counterparty's page it is a link that opens in a new tab.
-- On a counterparty's page: **Edit details**, **Archive** (and **Restore**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
+- On a counterparty's page: **Edit details**, **Archive** (and **Restore**; on a buyer's or seller's page the first two are under **⋯**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
+- On a buyer's or seller's page: **Make main** on a contact, shown at the top with the next follow-up and the last contact.
+
+Anyone on the team can change **What they buy** or **What they sell** on a counterparty's page, from the 20 commodities; the commodity dropdown on **Counterparties** finds who buys or sells one.
 
 ## Contact log and follow-ups
 
