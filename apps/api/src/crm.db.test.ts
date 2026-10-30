@@ -25,7 +25,7 @@ if (!ADMIN_URL || !API_URL) {
 
 const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
 const id = () => crypto.randomUUID();
-const users = { tess: id(), victor: id(), val: id(), sue: id(), bob: id() };
+const users = { tess: id(), victor: id(), val: id(), sue: id(), bob: id(), ada: id() };
 const orgs = { a: id(), b: id() };
 const counterparties = { buyer: id(), archived: id(), other: id() };
 const as = (userId: string): RequestContext => ({ userId, requestId: id() });
@@ -60,6 +60,7 @@ beforeAll(async () => {
     val: {},
     sue: { first_name: 'Sue' },
     bob: { first_name: 'Bob' },
+    ada: { first_name: 'Ada', last_name: 'Admin' },
   };
   for (const [name, userId] of Object.entries(users)) {
     await admin`insert into auth.users (id, email, raw_user_meta_data)
@@ -73,6 +74,7 @@ beforeAll(async () => {
     (${orgs.a}, ${users.victor}, 'viewer', 'active', now()),
     (${orgs.a}, ${users.val}, 'viewer', 'active', now()),
     (${orgs.a}, ${users.sue}, 'operations', 'suspended', now()),
+    (${orgs.a}, ${users.ada}, 'org_admin', 'active', now()),
     (${orgs.b}, ${users.bob}, 'org_admin', 'active', now())`;
   await admin`insert into app.counterparties
       (id, organization_id, legal_name, types, primary_country, source, created_by, archived_at) values
@@ -279,6 +281,7 @@ describe('follow-ups as app_api', () => {
   it('lists the active team by name for any member, and nothing for another organization', async () => {
     const team = await db.teamNames(as(users.val), orgs.a);
     expect(team.map((member) => member.name)).toEqual([
+      'Ada Admin',
       'Tess Trader',
       `val-${users.val}@example.test`,
       'Victor',
@@ -344,5 +347,50 @@ describe('follow-ups as app_api', () => {
     expect(
       (await db.countFollowUps(as(users.val), orgs.a, endOfAlbertaDay(new Date()))).overdue,
     ).toBe(0);
+  });
+});
+
+describe('removing follow-ups, as app_api', () => {
+  it('lets only an admin of its organization remove one, which then leaves every list', async () => {
+    const created = await db.createFollowUp(
+      as(users.tess),
+      counterparties.buyer,
+      plan({ assignedTo: users.tess, dueAt: minutesFromNow(-60) }),
+      'Tess Trader',
+    );
+    if (created.status !== 'created') throw new Error(created.status);
+    const followUpId = created.id;
+    const open = () =>
+      db.listFollowUps(as(users.tess), {
+        organizationId: orgs.a,
+        counterpartyId: counterparties.buyer,
+        assignedTo: null,
+        status: 'all',
+      });
+    expect((await open()).map((item) => item.id)).toContain(followUpId);
+    const overdueBefore = (
+      await db.countFollowUps(as(users.tess), orgs.a, endOfAlbertaDay(new Date()))
+    ).overdue;
+
+    expect(await db.removeFollowUp(as(users.tess), followUpId)).toEqual({ status: 'forbidden' });
+    expect(await db.removeFollowUp(as(users.bob), followUpId)).toEqual({ status: 'not_found' });
+    expect(await db.removeFollowUp(as(users.ada), followUpId)).toEqual({ status: 'saved' });
+
+    // Gone from the lists, the count and single reads, and no longer changed or finished.
+    expect((await open()).map((item) => item.id)).not.toContain(followUpId);
+    expect(await db.getFollowUp(as(users.ada), followUpId)).toBeNull();
+    expect(
+      (await db.countFollowUps(as(users.tess), orgs.a, endOfAlbertaDay(new Date()))).overdue,
+    ).toBe(overdueBefore - 1);
+    expect(await db.finishFollowUp(as(users.tess), followUpId, 'Tess Trader')).toEqual({
+      status: 'not_found',
+    });
+    expect(await db.removeFollowUp(as(users.ada), followUpId)).toEqual({ status: 'not_found' });
+
+    // Kept in the database with who removed it and when.
+    const [row] = await admin<{ removed_by: string; removed_by_name: string; removed: boolean }[]>`
+      select removed_by, removed_by_name, removed_at is not null as removed
+      from app.follow_ups where id = ${followUpId}`;
+    expect(row).toEqual({ removed_by: users.ada, removed_by_name: 'Ada Admin', removed: true });
   });
 });

@@ -179,7 +179,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await choose(edit.getByLabel('Precision'), 'Exact');
   await page.getByRole('button', { name: 'Save location' }).click();
   await expect(page.getByRole('region', { name: 'Locations (1)' })).toContainText(
-    '52.133214, -106.670046 · exact location · entered by hand',
+    '52.133214, -106.670046 · exact location',
   );
 
   // What the seller sells: ticked from the list of commodities, then shown on its page.
@@ -698,6 +698,23 @@ test('logs a contact with a follow-up, corrects it, and marks the follow-up done
   await expect(nav.getByRole('link', { name: 'Follow-ups', exact: true })).toBeVisible();
   await page.getByLabel('Include done').check();
   await expect(page.getByRole('region', { name: 'Done (1)' })).toContainText('by Synthetic Trader');
+
+  // An admin removes it from the counterparty's page; it leaves every list (2026-10-30).
+  await page.goto(`/counterparties/${id}`);
+  const finished = page.getByRole('region', { name: 'Follow-ups (0 open)' });
+  await finished.getByRole('button', { name: 'Show done (1)' }).click();
+  await finished
+    .getByRole('button', { name: 'Remove follow-up: Send the synthetic bid sheet' })
+    .click();
+  await finished
+    .getByRole('group', { name: 'Remove follow-up: Send the synthetic bid sheet' })
+    .getByRole('button', { name: 'Remove' })
+    .click();
+  await expect(page.getByText('Follow-up removed.')).toBeVisible();
+  await expect(finished.getByRole('button', { name: /^Show done/ })).toHaveCount(0);
+  await nav.getByRole('link', { name: /^Follow-ups/ }).click();
+  await page.getByLabel('Include done').check();
+  await expect(page.getByText('Send the synthetic bid sheet')).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });

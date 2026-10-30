@@ -135,6 +135,21 @@ export function mapPaint(layer: StyleLayer, colours: MapColours): [string, strin
   return [];
 }
 
+/**
+ * Whether a layer is left out of a simple map (a counterparty's page, owner's request of
+ * 2026-10-30): road names and highway numbers, points of interest, transit and airport
+ * labels, and house numbers. Towns, water and borders stay, so the map still says where it is.
+ */
+export function isClutterLayer(layer: Pick<StyleLayer, 'id' | 'type'>): boolean {
+  return (
+    layer.type === 'symbol' &&
+    // Whole words of the layer's id, so "natural-point-label" is not taken for a "poi".
+    /(^|-)(road|shield|street|motorway|highway|path|poi|transit|airport|aerialway|ferry|housenum|building)(-|$)/.test(
+      layer.id,
+    )
+  );
+}
+
 /** A buyer's (bid), a seller's (offer), or one that is both or neither (mixed). */
 export type PinTone = 'bid' | 'offer' | 'mixed';
 

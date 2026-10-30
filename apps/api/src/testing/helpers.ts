@@ -121,6 +121,7 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     updateFollowUp: vi.fn<Database['updateFollowUp']>(() => saved()),
     finishFollowUp: vi.fn<Database['finishFollowUp']>(() => saved()),
+    removeFollowUp: vi.fn<Database['removeFollowUp']>(() => saved()),
     listFxQuotes: vi.fn<Database['listFxQuotes']>(() => Promise.resolve([])),
     storeBankOfCanadaRates: vi.fn<Database['storeBankOfCanadaRates']>((rates) =>
       Promise.resolve(rates.map((rate) => ({ rate, outcome: 'stored' as const }))),

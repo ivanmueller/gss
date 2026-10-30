@@ -4,6 +4,7 @@ import type { MapFacility } from './api';
 import {
   basemapStyle,
   facilityPin,
+  isClutterLayer,
   mapboxToken,
   mapPaint,
   pinBounds,
@@ -138,6 +139,34 @@ describe('mapPaint', () => {
     [{ id: 'facilities', type: 'circle' }, []],
   ])('paints %o', (layer, paint) => {
     expect(mapPaint(layer, COLOURS)).toEqual(paint);
+  });
+});
+
+describe('isClutterLayer', () => {
+  it('leaves road names, highway numbers and points of interest off a simple map, and keeps towns', () => {
+    const hidden = [
+      'road-label',
+      'road-number-shield',
+      'road-exit-shield',
+      'path-pedestrian-label',
+      'poi-label',
+      'transit-label',
+      'airport-label',
+      'ferry-aerialway-label',
+      'building-number-label',
+    ];
+    const kept = [
+      'settlement-major-label',
+      'settlement-minor-label',
+      'state-label',
+      'country-label',
+      'water-line-label',
+      'natural-point-label',
+    ];
+    expect(hidden.filter((id) => !isClutterLayer({ id, type: 'symbol' }))).toEqual([]);
+    expect(kept.filter((id) => isClutterLayer({ id, type: 'symbol' }))).toEqual([]);
+    // Only labels go: the roads themselves stay drawn.
+    expect(isClutterLayer({ id: 'road-primary', type: 'line' })).toBe(false);
   });
 });
 

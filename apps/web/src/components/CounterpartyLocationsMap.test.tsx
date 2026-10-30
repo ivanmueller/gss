@@ -13,6 +13,7 @@ vi.mock('./FacilityMap', () => ({
       <p>{`Stand-in map: ${props.basemap}, ${String(props.pins.length)} pins`}</p>
       <p>{`Starts on ${props.start?.join(' ') ?? 'the default view'}, at most zoom ${String(props.startMaxZoom)}`}</p>
       <p>{props.cooperative ? 'Two fingers to move' : 'Moves with the page'}</p>
+      <p>{props.simple ? 'No road names or numbers' : 'Every label'}</p>
       <button
         type="button"
         onClick={() => {
@@ -86,8 +87,9 @@ describe('CounterpartyLocationsMap', () => {
     );
     expect(await screen.findByText('Stand-in map: satellite, 1 pins')).toBeInTheDocument();
     expect(
-      screen.getByText('Starts on -106.670046 52.133214 -106.670046 52.133214, at most zoom 15'),
+      screen.getByText('Starts on -106.670046 52.133214 -106.670046 52.133214, at most zoom 17'),
     ).toBeInTheDocument();
+    expect(screen.getByText('No road names or numbers')).toBeInTheDocument();
     // A small map on a long page: the page scrolls past it.
     expect(screen.getByText('Two fingers to move')).toBeInTheDocument();
     expect(screen.getByText('Its location on the map.')).toBeInTheDocument();
@@ -121,7 +123,7 @@ describe('CounterpartyLocationsMap', () => {
       />,
     );
     expect(
-      await screen.findByText('Starts on -106.670046 49.5 -97.1 52.133214, at most zoom 11'),
+      await screen.findByText('Starts on -106.670046 49.5 -97.1 52.133214, at most zoom 14'),
     ).toBeInTheDocument();
     expect(
       screen.getByText('2 of 3 locations on the map; the others have no coordinates yet.'),

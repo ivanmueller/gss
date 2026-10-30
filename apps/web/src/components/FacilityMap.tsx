@@ -6,6 +6,7 @@ import { useEffect, useRef } from 'react';
 
 import {
   basemapStyle,
+  isClutterLayer,
   mapPaint,
   pinFeatures,
   readMapColours,
@@ -43,6 +44,8 @@ export interface FacilityMapProps {
   startMaxZoom?: number;
   /** A small map on a longer page: the page scrolls past it; two fingers or Ctrl+scroll zoom. */
   cooperative?: boolean;
+  /** Without road names, highway numbers and points of interest (isClutterLayer). */
+  simple?: boolean;
   /** The visible box after every move; null when none of it is on the map. */
   onViewChange?: (bbox: Bbox | null) => void;
   onSelect: (pinId: string) => void;
@@ -72,6 +75,13 @@ function pinPaint(colours: MapColours): {
     'circle-color': ['case', ['get', 'hollow'], colours.hollow, tone],
     'circle-stroke-color': tone,
   };
+}
+
+/** Hides road names, highway numbers and points of interest on a simple map. */
+function hideClutter(map: mapboxgl.Map) {
+  for (const layer of map.getStyle().layers) {
+    if (isClutterLayer(layer)) map.setLayoutProperty(layer.id, 'visibility', 'none');
+  }
 }
 
 /** Repaints the base map (for the "Map" style only) and the pins in the theme's colours. */
@@ -165,6 +175,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('moveend', report);
     // Also after a basemap or theme change, which replaces the whole style.
     instance.on('style.load', () => {
+      if (latest.current.simple) hideClutter(instance);
       paintTheme(instance, latest.current.basemap);
       addPinLayers(instance, latest.current.data, latest.current.selectedId);
     });

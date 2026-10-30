@@ -364,6 +364,7 @@ export function FollowUpsCard({ crm }: { crm: CounterpartyCrmState }) {
                 session={session}
                 followUp={followUp}
                 team={team}
+                removable
                 onChanged={changed}
               />
             ))}
@@ -391,6 +392,7 @@ export function FollowUpsCard({ crm }: { crm: CounterpartyCrmState }) {
                 session={session}
                 followUp={followUp}
                 team={team}
+                removable
                 onChanged={changed}
               />
             ))}

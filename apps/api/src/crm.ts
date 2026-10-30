@@ -332,5 +332,21 @@ export function followUpRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
+  // Removed by an admin (owner's request, 2026-10-30): kept with who removed it and when,
+  // and left out of every list and count from then on.
+  routes.post('/:id/remove', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', NO_FOLLOW_UP);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.removeFollowUp(ctx, id);
+      if (result.status === 'saved') return c.json({ id, removed: true });
+      if (result.status === 'forbidden') {
+        return apiError(c, 403, 'FORBIDDEN', 'Only admins remove follow-ups.');
+      }
+      return apiError(c, 404, 'NOT_FOUND', NO_FOLLOW_UP);
+    });
+  });
+
   return routes;
 }

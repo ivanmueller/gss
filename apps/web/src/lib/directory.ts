@@ -25,20 +25,6 @@ export function sourceLabel(source: string): string {
   return source === 'file_import' ? 'Imported from a spreadsheet' : 'Entered by hand';
 }
 
-/** Where a location's coordinates came from, in words; null when unknown. */
-export function coordinatesSourceLabel(source: string | null): string | null {
-  switch (source) {
-    case 'geocodio':
-      return 'found from the address (Geocodio)';
-    case 'manual':
-      return 'entered by hand';
-    case 'file_import':
-      return 'from the spreadsheet';
-    default:
-      return null;
-  }
-}
-
 /** Organization roles allowed to add, change and archive counterparties (spec section 2.1). */
 export function canEditDirectory(role: string): boolean {
   return role === 'operations' || role === 'org_admin';

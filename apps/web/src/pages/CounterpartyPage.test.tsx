@@ -215,7 +215,7 @@ describe('CounterpartyPage', () => {
     expect(screen.getByText('Verification pending')).toBeInTheDocument();
     expect(screen.getByText('Buyer, Seller')).toBeInTheDocument();
     expect(screen.getByText('Imported from a spreadsheet')).toBeInTheDocument();
-    expect(screen.getByText('Tue 27 Oct 2026, 8:05 am MT')).toBeInTheDocument();
+    expect(screen.getByText('27 Oct 2026, 8:05 am MT')).toBeInTheDocument();
 
     const contacts = screen.getByRole('region', { name: 'Contacts (1)' });
     expect(within(contacts).getByRole('link', { name: 'merch@example.test' })).toHaveAttribute(
@@ -304,11 +304,18 @@ describe('CounterpartyPage', () => {
     expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
   });
 
-  it('shows where a location’s coordinates came from', async () => {
+  it('shows a location’s coordinates and precision only, and when it was added without the weekday', async () => {
     mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
     const locations = await screen.findByRole('region', { name: 'Locations (1)' });
-    expect(locations).toHaveTextContent('found from the address (Geocodio)');
+    // Owner's request, 2026-10-30: no "found from the address (Geocodio)".
+    expect(within(locations).getByText(/^52\.133214, -106\.670046/)).toHaveTextContent(
+      /^52\.133214, -106\.670046 · approximate location$/,
+    );
+    expect(locations).not.toHaveTextContent('Geocodio');
+    expect(screen.getByText('Added').nextElementSibling).toHaveTextContent(
+      /^27 Oct 2026, 8:05 am MT$/,
+    );
   });
 });
 

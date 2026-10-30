@@ -84,7 +84,6 @@ import {
 import { dueState } from '../lib/crm';
 import {
   canEditDirectory,
-  coordinatesSourceLabel,
   countryName,
   facilityTypeLabel,
   sourceLabel,
@@ -743,7 +742,7 @@ function CounterpartyView({
           <Field label="Type">{detail.types.map(typeLabel).join(', ')}</Field>
           <Field label="Country">{countryName(detail.primaryCountry)}</Field>
           <Field label="Source">{sourceLabel(detail.source)}</Field>
-          <Field label="Added">{formatAlberta(detail.createdAt)}</Field>
+          <Field label="Added">{formatAlberta(detail.createdAt, { weekday: false })}</Field>
           {detail.notes && (
             <div className="sm:col-span-2">
               <Field label="Notes">
@@ -1041,8 +1040,6 @@ function CounterpartyView({
                         {facility.locationPrecision === 'exact'
                           ? 'exact location'
                           : 'approximate location'}
-                        {coordinatesSourceLabel(facility.geocodingSource) &&
-                          ` · ${coordinatesSourceLabel(facility.geocodingSource) ?? ''}`}
                       </span>
                     ) : (
                       <span className="text-xs text-muted-foreground">No coordinates yet</span>

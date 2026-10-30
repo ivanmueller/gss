@@ -276,4 +276,53 @@ describe('CounterpartyCrm', () => {
       screen.getByRole('button', { name: 'Mark done: Send the bid sheet' }),
     ).toBeInTheDocument();
   });
+
+  it('lets an admin remove a follow-up, open or done, after asking', async () => {
+    let removed = false;
+    const calls = api({
+      [`GET /follow-ups?counterparty_id=${ID}&status=all`]: () =>
+        Response.json({ followUps: removed ? [FOLLOW_UP] : [FOLLOW_UP, DONE], truncated: false }),
+      [`POST /follow-ups/${DONE.id}/remove`]: () => {
+        removed = true;
+        return Response.json({ id: DONE.id, removed: true });
+      },
+    });
+    show('org_admin', ADAM);
+    const section = await screen.findByRole('region', { name: 'Follow-ups (1 open)' });
+    expect(
+      within(section).getByRole('button', { name: 'Remove follow-up: Send the bid sheet' }),
+    ).toBeInTheDocument();
+    await userEvent.click(within(section).getByRole('button', { name: 'Show done (1)' }));
+    const done = within(section).getByRole('list', { name: 'Done follow-ups' });
+    await userEvent.click(
+      within(done).getByRole('button', { name: 'Remove follow-up: Call about October' }),
+    );
+    const confirm = within(done).getByRole('group', {
+      name: 'Remove follow-up: Call about October',
+    });
+    // Keep it changes nothing.
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Keep it' }));
+    expect(calls.some((call) => call.path.endsWith('/remove'))).toBe(false);
+
+    await userEvent.click(
+      within(done).getByRole('button', { name: 'Remove follow-up: Call about October' }),
+    );
+    await userEvent.click(within(done).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Follow-up removed.')).toBeInTheDocument();
+    expect(calls.filter((call) => call.path.endsWith('/remove')).map((call) => call.path)).toEqual([
+      `/follow-ups/${DONE.id}/remove`,
+    ]);
+    await waitFor(() => {
+      expect(screen.queryByText('Call about October')).not.toBeInTheDocument();
+    });
+  });
+
+  it('gives traders and operations no Remove', async () => {
+    api();
+    show('trader');
+    const section = await screen.findByRole('region', { name: 'Follow-ups (1 open)' });
+    expect(within(section).queryByRole('button', { name: /^Remove follow-up/ })).toBeNull();
+    await userEvent.click(within(section).getByRole('button', { name: 'Show done (1)' }));
+    expect(within(section).queryByRole('button', { name: /^Remove follow-up/ })).toBeNull();
+  });
 });

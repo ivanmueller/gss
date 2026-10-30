@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Removing follow-ups, a simpler locations map, shorter coordinates and Added
+
+- `docs/DECISIONS.md`: the owner's request: admins remove follow-ups (kept, never deleted); the small locations map without road names and highway numbers, closer; coordinates without their source; Added without the weekday.
+- `docs/DATA_MODEL.md`: migration `20261030050000_follow_up_removal.sql`; `follow_ups.removed_*`.
+- `docs/API.md`: `POST /api/v1/follow-ups/{id}/remove`.
+- `docs/PRODUCT.md`, `README.md`: Remove on a follow-up; the counterparty page's map, coordinates and Added.
+
+## 2026-10-30 — Handoff record of #82
+
+- `docs/HANDOFF.md`: the company phone, rail and truck, coordinates when adding, the + window and verified commodities (ivanmueller/gss#82) with their CI and Deploy staging runs; the owner's check on staging and next request in the next task.
+
 ## 2026-10-30 — Company phone, rail and truck, coordinates when adding, the + window, verified commodities
 
 - `docs/DECISIONS.md`: the owner's request and answers: a company phone; rail or truck access by location, never from a spreadsheet; coordinates found when counterparties and locations are added, sure results saved, doubtful ones asked; adding and importing in the + window; commodities from a spreadsheet unverified until anyone on the team verifies them.
