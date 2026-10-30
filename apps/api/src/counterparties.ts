@@ -33,6 +33,7 @@ import {
   type Database,
   type ExistingCounterparty,
   type ImportAddition,
+  type ImportBatchInput,
   type RequestContext,
   type WriteResult,
 } from './db';
@@ -141,7 +142,7 @@ function hasAny(addition: ImportAddition): boolean {
   return addition.facilities.length + addition.contacts.length + addition.commodities.length > 0;
 }
 
-interface ImportPlan {
+export interface ImportPlan {
   parsed: ParsedImportRow[];
   emptyRows: number;
   issues: ImportIssue[];
@@ -149,7 +150,8 @@ interface ImportPlan {
   groups: ImportGroup[];
 }
 
-function planImport(
+/** A file's rows read and grouped into companies, before matching them to the list. */
+export function planImport(
   rows: { line: number; values: Record<string, string | undefined> }[],
   defaultTypes: readonly CounterpartyType[] | undefined,
 ): ImportPlan {
@@ -167,7 +169,7 @@ function planImport(
 }
 
 /** A file's companies matched against the list as it is: which are new, what others get. */
-function matchImport(
+export function matchImport(
   plan: ImportPlan,
   rowCount: number,
   companies: readonly ExistingCounterparty[],
@@ -221,6 +223,26 @@ function matchImport(
 }
 
 type ImportMatch = ReturnType<typeof matchImport>;
+
+/** What an import writes, given how its file matched the list; null when nothing is new. */
+export function importBatchFor(
+  plan: ImportPlan,
+  match: ImportMatch,
+  file: Pick<ImportBatchInput, 'organizationId' | 'fileName' | 'contentSha256' | 'rowCount'>,
+): ImportBatchInput | null {
+  if (match.fresh.length === 0 && match.adding.length === 0) return null;
+  return {
+    ...file,
+    skippedCount: plan.groups.length - match.fresh.length,
+    counterparties: match.fresh.map(({ counterparty, contacts, facilities, commodities }) => ({
+      counterparty,
+      contacts,
+      facilities,
+      commodities,
+    })),
+    additions: match.adding.map(({ addition }) => addition),
+  };
+}
 
 /** /api/v1/counterparties. Mounted after requireUser, so every route needs a signed-in user. */
 export function counterpartyRoutes(openDatabase: DatabaseFactory) {
@@ -316,23 +338,12 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       const importBatchId = await db.importCounterparties(ctx, organizationId, (companies) => {
         const match = matchImport(plan, rows.length, companies);
         result = match.result;
-        if (match.fresh.length === 0 && match.adding.length === 0) return null;
-        return {
+        return importBatchFor(plan, match, {
           organizationId,
           fileName,
           contentSha256,
           rowCount: rows.length,
-          skippedCount: plan.groups.length - match.fresh.length,
-          counterparties: match.fresh.map(
-            ({ counterparty, contacts, facilities, commodities }) => ({
-              counterparty,
-              contacts,
-              facilities,
-              commodities,
-            }),
-          ),
-          additions: match.adding.map(({ addition }) => addition),
-        };
+        });
       });
       if (result === undefined) throw new Error('the import was not planned');
       if (importBatchId === null) {

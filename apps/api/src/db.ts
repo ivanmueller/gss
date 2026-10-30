@@ -903,28 +903,32 @@ export function createDatabase(sql: postgres.Sql): Database {
         // waits and then sees this one's companies (Codex's review of ivanmueller/gss#88).
         await tx`select app.lock_counterparty_import(${organizationId})`;
         const org = organizationId;
-        // The companies it adds to are locked before anything is written, so archiving one
-        // waits for this import. One archived before its lock was taken changes the plan:
-        // planned again, so what is written, the answer and NOTHING_TO_IMPORT agree, and no
-        // empty import is recorded (Codex's third review of ivanmueller/gss#88).
+        // The companies it adds to are locked before anything is written: archiving one and
+        // every change to its locations, contacts and commodities lock it too (editable()), so
+        // none can change under the import. The plan is kept only once it was made from a
+        // read taken with all its companies already locked; otherwise their locks are taken
+        // and it is made again. What is written, the answer and NOTHING_TO_IMPORT then agree,
+        // and an import that would write nothing records nothing (Codex's third and fourth
+        // reviews of ivanmueller/gss#88).
+        const locked = new Set<string>();
         let batch: ImportBatchInput | null;
         for (let attempt = 1; ; attempt += 1) {
           batch = plan(await readExisting(tx, org));
           if (batch === null) return null;
           if (batch.organizationId !== org) throw new Error('import for another organization');
-          const additionIds = batch.additions.map((item) => item.counterpartyId);
-          const open =
-            additionIds.length === 0
-              ? []
-              : await tx<{ id: string }[]>`
-                  select id from app.counterparties
-                  where organization_id = ${org} and id in ${tx(additionIds)}
-                    and archived_at is null
-                  order by id
-                  for no key update`;
-          if (open.length === additionIds.length) break;
-          if (attempt === 5) throw new Error('companies kept being archived during the import');
+          const unlocked = batch.additions
+            .map((item) => item.counterpartyId)
+            .filter((counterpartyId) => !locked.has(counterpartyId));
+          if (unlocked.length === 0) break;
+          if (attempt === 10) throw new Error('the companies kept changing during the import');
+          const open = await tx<{ id: string }[]>`
+            select id from app.counterparties
+            where organization_id = ${org} and id in ${tx(unlocked)} and archived_at is null
+            order by id
+            for no key update`;
+          for (const row of open) locked.add(row.id);
         }
+
         const [created] = await tx<{ id: string }[]>`
           insert into app.import_batches
             (organization_id, kind, file_name, content_sha256, row_count, created_count,
