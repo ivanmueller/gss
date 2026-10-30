@@ -4,6 +4,7 @@ import {
   companyNameKey,
   counterpartyKey,
   createCounterpartySchema,
+  facilityKey,
   groupImportRows,
   importRequestSchema,
   mainContactSchema,
@@ -694,6 +695,75 @@ describe('companies with several locations', () => {
         companyPhone: '555-010-0100; 555-010-0101',
       }).status,
     ).toBe('invalid');
+  });
+
+  // Codex's review of ivanmueller/gss#88.
+  it('keeps names in other scripts apart, while accents still do not count', () => {
+    expect(companyNameKey('北京 Grain')).not.toBe(companyNameKey('上海 Grain'));
+    expect(companyNameKey('Ελληνικά Grain')).not.toBe(companyNameKey('Grain'));
+    expect(companyNameKey('Céréales Prairie Ltée')).toBe(companyNameKey('CEREALES PRAIRIE LTEE'));
+    const { groups } = groupImportRows([
+      ok({ legalName: '北京 Grain', country: 'US' }, 2),
+      ok({ legalName: '上海 Grain', country: 'US' }, 3),
+    ]);
+    expect(groups.map((group) => group.counterparty.legalName)).toEqual([
+      '北京 Grain',
+      '上海 Grain',
+    ]);
+  });
+
+  it('keeps locations given only by coordinates apart', () => {
+    const { groups } = groupImportRows([
+      ok({ legalName: 'Synthetic Feeds', country: 'CA', latitude: '52', longitude: '-106' }, 2),
+      ok({ legalName: 'Synthetic Feeds', country: 'CA', latitude: '53', longitude: '-107' }, 3),
+      ok({ legalName: 'Synthetic Feeds', country: 'CA', latitude: '52.0', longitude: '-106' }, 4),
+    ]);
+    expect(groups[0]?.facilities.map((f) => [f.latitude, f.longitude])).toEqual([
+      ['52.000000', '-106.000000'],
+      ['53.000000', '-107.000000'],
+    ]);
+    // A location with a name or address is the same place whether or not it has coordinates.
+    const place = {
+      name: null,
+      addressLine: null,
+      city: 'Alpha',
+      region: 'SK',
+      postalCode: null,
+      country: 'CA' as const,
+    };
+    expect(facilityKey({ ...place, latitude: '50.45', longitude: '-104.6' })).toBe(
+      facilityKey({ ...place, latitude: null, longitude: null }),
+    );
+  });
+
+  it('refuses a row whose notes would be too long once the second phone number is added', () => {
+    expect(
+      issues({
+        legalName: 'Synthetic Feeds',
+        country: 'US',
+        companyPhone: '555-010-0100; 555-010-0101',
+        notes: 'x'.repeat(1990),
+      }),
+    ).toEqual([
+      "notes: with the company phone's other numbers added, is longer than 2000 characters",
+    ]);
+  });
+
+  it('splits two company phone numbers written with a slash, but not an area code', () => {
+    const row = ok({
+      legalName: 'Synthetic Feeds',
+      country: 'US',
+      companyPhone: '555-010-0100 / 555-010-0101',
+    });
+    expect(row.counterparty).toMatchObject({
+      phone: '555-010-0100',
+      notes: 'Company phone also: 555-010-0101',
+    });
+    expect(row.notices).toHaveLength(1);
+    expect(
+      ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555/010-0100' })
+        .counterparty,
+    ).toMatchObject({ phone: '555/010-0100', notes: null });
   });
 });
 

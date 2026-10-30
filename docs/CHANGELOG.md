@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Codex's review of #88
+
+- `docs/DECISIONS.md`: names in other scripts kept apart; locations without a name or address matched by coordinates; additions matched again under the import's lock; notes too long refused on the Check step; two numbers with a slash split.
+- `README.md`: a slash between two company phone numbers.
+
 ## 2026-10-30 — Companies with several locations in an import
 
 - `docs/DECISIONS.md`: names matched loosely; a later file's new locations, contacts and grains added to companies already listed; Canada and the US left as they are; City or Town and two-phone cells.

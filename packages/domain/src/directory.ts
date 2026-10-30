@@ -586,8 +586,14 @@ function readCompanyPhone(r: FieldReader): { phone: string | null; more: string 
   const text = r.value('companyPhone');
   if (text === null) return { phone: null, more: null };
   const whole = text.replace(/\s*(extension|ext\.?)\s*/i, ' x');
-  if (PHONE.test(whole) || !r.importing) return { phone: readPhone(r, 'companyPhone'), more: null };
-  const split = /^(.+?)(?:\s*[;,|\n]\s*|\s+(?=\([^)]*[a-z]))(.+)$/i.exec(text);
+  // "403-555-0100 / 403-555-0101" fits a phone's characters but is two numbers; "780/555-0100"
+  // is one (Codex's review of ivanmueller/gss#88).
+  const slashed = whole.split('/');
+  const twoNumbers =
+    slashed.length > 1 && slashed.every((part) => part.replace(/\D/g, '').length >= 7);
+  if ((PHONE.test(whole) && !twoNumbers) || !r.importing)
+    return { phone: readPhone(r, 'companyPhone'), more: null };
+  const split = /^(.+?)(?:\s*[;,|\n/]\s*|\s+(?=\([^)]*[a-z]))(.+)$/i.exec(text);
   const first = split?.[1]?.replace(/\s*(extension|ext\.?)\s*/i, ' x') ?? '';
   const rest = split?.[2]?.trim() ?? '';
   if (!PHONE.test(first) || rest === '') return { phone: readPhone(r, 'companyPhone'), more: null };
@@ -701,6 +707,13 @@ function readCounterparty(
     more === null
       ? written
       : `${written === null ? '' : `${written}\n`}Company phone also: ${more}`;
+  // Checked here, so a row the check step passes is not refused when imported (Codex's review
+  // of ivanmueller/gss#88).
+  if (more !== null && notes !== null && notes.length > MAX_IMPORT_VALUE_LENGTH)
+    r.issue(
+      'notes',
+      `with the company phone's other numbers added, is longer than ${String(MAX_IMPORT_VALUE_LENGTH)} characters`,
+    );
 
   if (legalName === null || country === null || types.length === 0) return null;
   return {
@@ -983,16 +996,21 @@ const NAME_ENDINGS: Record<string, string> = {
  * are one company.
  */
 export function companyNameKey(legalName: string): string {
-  return legalName
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .split(' ')
-    .map((word) => NAME_ENDINGS[word] ?? word)
-    .join(' ');
+  return (
+    legalName
+      .normalize('NFD')
+      // Accents only: other scripts keep their marks and letters, so "北京 Grain" and
+      // "上海 Grain" stay two companies (Codex's review of ivanmueller/gss#88).
+      .replace(/[\u0300-\u036f]/g, '')
+      .normalize('NFC')
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
+      .trim()
+      .split(' ')
+      .map((word) => NAME_ENDINGS[word] ?? word)
+      .join(' ')
+  );
 }
 
 /**
@@ -1003,23 +1021,31 @@ export function counterpartyKey(country: string, legalName: string): string {
   return `${country}:${companyNameKey(legalName)}`;
 }
 
-/** A location as it is matched: its name and where it is, ignoring case and spacing. */
+/**
+ * A location as it is matched: its name and where it is, ignoring case and spacing. One with
+ * no name or address is matched by its coordinates, so two such places stay two (Codex's
+ * review of ivanmueller/gss#88); one with a name or address is the same place whether or not
+ * its coordinates were found since.
+ */
 export function facilityKey(
   facility: Pick<
     FacilityInput,
-    'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country'
+    'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country' | 'latitude' | 'longitude'
   >,
 ): string {
-  return [
+  const words = [
     facility.name,
     facility.addressLine,
     facility.city,
     facility.region,
     facility.postalCode,
-    facility.country,
-  ]
-    .map((part) => (part ?? '').toLowerCase().replace(/\s+/g, ' ').trim())
-    .join('|');
+  ].map((part) => (part ?? '').toLowerCase().replace(/\s+/g, ' ').trim());
+  const at = words.every((part) => part === '')
+    ? [facility.latitude, facility.longitude].map((part) =>
+        part === null ? '' : Number(part).toFixed(6),
+      )
+    : [];
+  return [...words, facility.country.toLowerCase(), ...at].join('|');
 }
 
 /** A contact as it is matched: by email when it has one, else by name and phone. */

@@ -519,6 +519,9 @@ describe('POST /api/v1/counterparties/import', () => {
             region: 'SK',
             postalCode: null,
             country: 'CA',
+            // Found since: a file row without coordinates is still the same place.
+            latitude: '50.450000',
+            longitude: '-104.600000',
           },
         ],
         contacts: [{ name: 'Ana', email: null, phone: null }],
@@ -608,6 +611,8 @@ describe('POST /api/v1/counterparties/import', () => {
             region: 'SK',
             postalCode: null,
             country: 'CA',
+            latitude: null,
+            longitude: null,
           },
         ],
         contacts: [{ name: 'Ana', email: null, phone: null }],
