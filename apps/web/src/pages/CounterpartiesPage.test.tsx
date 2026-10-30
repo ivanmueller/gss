@@ -104,11 +104,15 @@ describe('CounterpartiesPage', () => {
     render(<CounterpartiesPage session={SESSION} />);
 
     const views = await screen.findByRole('tablist', { name: 'Counterparty view' });
-    expect(
-      within(views)
-        .getAllByRole('tab')
-        .map((tab) => tab.textContent),
-    ).toEqual(['Logos', 'Table', 'Map']);
+    const tabs = within(views).getAllByRole('tab');
+    // Icons, named for screen readers and on hover (owner's request, 2026-10-30).
+    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Logos', 'Table', 'Map']);
+    expect(tabs.map((tab) => tab.getAttribute('title'))).toEqual(['Logos', 'Table', 'Map']);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['', '', '']);
+    // The commodity comes before All / Buyers / Sellers / Carriers.
+    const commodity = screen.getByRole('combobox', { name: 'Commodity' });
+    const show = screen.getByRole('group', { name: 'Show' });
+    expect(commodity.compareDocumentPosition(show) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Logos', selected: true })).toBeInTheDocument();
     expect(screen.queryByRole('table', { name: 'Counterparties' })).not.toBeInTheDocument();
     const grid = screen.getByRole('list', { name: 'Counterparties by logo' });
