@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #77
+
+- `docs/HANDOFF.md`: ivanmueller/gss#77 (the race tests for the main contact) with its CI and Deploy staging runs.
+
 ## 2026-10-30 — Handoff record of #76
 
 - `docs/HANDOFF.md`: the redesigned page for buyers and sellers with a main contact (ivanmueller/gss#76), its CI and Deploy staging runs and Codex's review; the next task, the owner's check on staging.
