@@ -29,7 +29,11 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await page.goto('/counterparties');
   await expect(page.getByText('No counterparties yet.')).toBeVisible();
 
-  await page.getByRole('link', { name: 'Import spreadsheet' }).click();
+  await page.getByRole('button', { name: 'Add counterparties' }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('link', { name: /^Import spreadsheet/ })
+    .click();
   await page.getByLabel('Choose CSV file').setInputFiles(csvFile('synthetic-buyers.csv'));
   await expect(page.getByLabel('Legal name (required)')).toContainText('Company Name');
   await page.getByRole('button', { name: 'Review import' }).click();
@@ -103,7 +107,11 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   page.on('pageerror', (error) => errors.push(String(error)));
 
   await page.goto('/counterparties');
-  await page.getByRole('link', { name: 'Add counterparty' }).click();
+  await page.getByRole('button', { name: 'Add counterparties' }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('link', { name: /^Add by hand/ })
+    .click();
   const company = page.getByRole('region', { name: 'Company' });
   await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
   await company.getByRole('checkbox', { name: 'Seller' }).check();
@@ -453,7 +461,11 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
 
   // A carrier is a counterparty like any other, marked as a carrier; no location needed.
   await page.goto('/counterparties');
-  await page.getByRole('link', { name: 'Add counterparty' }).click();
+  await page.getByRole('button', { name: 'Add counterparties' }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('link', { name: /^Add by hand/ })
+    .click();
   const company = page.getByRole('region', { name: 'Company' });
   await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
   await company.getByRole('checkbox', { name: 'Carrier' }).check();
