@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #80
+
+- `docs/HANDOFF.md`: the Counterparties toolbar (ivanmueller/gss#80) with its CI and Deploy staging runs; the owner's check on staging extended to #79 and #80.
+- `AGENTS.md`: the status line with the main contact, the next follow-up and last contact, and what each counterparty buys or sells.
+
 ## 2026-10-30 — Counterparties toolbar: commodity first, views as icons
 
 - `docs/DECISIONS.md` and `docs/PRODUCT.md`: the commodity dropdown before All / Buyers / Sellers / Carriers; Logos, Table and Map as icons; `README.md` likewise.
