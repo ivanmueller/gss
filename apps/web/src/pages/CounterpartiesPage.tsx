@@ -1,5 +1,15 @@
 import { COMMODITIES } from '@grain/domain';
-import { FileUp, PencilLine, Plus, Search, Wheat } from 'lucide-react';
+import {
+  FileUp,
+  LayoutGrid,
+  List,
+  Map as MapIcon,
+  PencilLine,
+  Plus,
+  Search,
+  Table2,
+  Wheat,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
@@ -337,19 +347,6 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                   className="pl-9"
                 />
               </label>
-              <SegmentedControl
-                label="Show"
-                options={[
-                  { value: 'all', label: 'All' },
-                  { value: 'buyer', label: 'Buyers' },
-                  { value: 'seller', label: 'Sellers' },
-                  { value: 'carrier', label: 'Carriers' },
-                ]}
-                value={side}
-                onChange={(next) => {
-                  setSearchParams({ type: next === 'all' ? null : next });
-                }}
-              />
               <Select
                 aria-label="Commodity"
                 className="w-52"
@@ -363,10 +360,39 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                   ...COMMODITIES.map(({ code, name }) => ({ value: code, label: name })),
                 ]}
               />
+              <SegmentedControl
+                label="Show"
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'buyer', label: 'Buyers' },
+                  { value: 'seller', label: 'Sellers' },
+                  { value: 'carrier', label: 'Carriers' },
+                ]}
+                value={side}
+                onChange={(next) => {
+                  setSearchParams({ type: next === 'all' ? null : next });
+                }}
+              />
               <TabsList aria-label="Counterparty view">
-                <TabsTrigger value="logos">Logos</TabsTrigger>
-                <TabsTrigger value="table">{wide ? 'Table' : 'List'}</TabsTrigger>
-                <TabsTrigger value="map">Map</TabsTrigger>
+                {/* Icons only (owner's request, 2026-10-30); the name is read out and shown on hover. */}
+                <TabsTrigger value="logos" aria-label="Logos" title="Logos" className="px-2.5">
+                  <LayoutGrid aria-hidden="true" className="size-4" />
+                </TabsTrigger>
+                <TabsTrigger
+                  value="table"
+                  aria-label={wide ? 'Table' : 'List'}
+                  title={wide ? 'Table' : 'List'}
+                  className="px-2.5"
+                >
+                  {wide ? (
+                    <Table2 aria-hidden="true" className="size-4" />
+                  ) : (
+                    <List aria-hidden="true" className="size-4" />
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="map" aria-label="Map" title="Map" className="px-2.5">
+                  <MapIcon aria-hidden="true" className="size-4" />
+                </TabsTrigger>
               </TabsList>
               {archivedCount > 0 && (
                 <label className="flex items-center gap-2 text-sm">

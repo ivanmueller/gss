@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Counterparties toolbar: commodity first, views as icons
+
+- `docs/DECISIONS.md` and `docs/PRODUCT.md`: the commodity dropdown before All / Buyers / Sellers / Carriers; Logos, Table and Map as icons; `README.md` likewise.
+
 ## 2026-10-30 — Handoff record of #79
 
 - `docs/HANDOFF.md`: the + button for adding counterparties (ivanmueller/gss#79) with its CI and Deploy staging runs.
