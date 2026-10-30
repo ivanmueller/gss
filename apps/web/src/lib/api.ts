@@ -119,14 +119,20 @@ export interface ImportResult {
     existingCounterparties: number;
     contacts: number;
     facilities: number;
+    /** Companies already in the list that the file adds to, and what it adds to them. */
+    existingWithAdditions: number;
+    addedContacts: number;
+    addedFacilities: number;
+    addedCommodities: number;
   };
   counterparties: {
     legalName: string;
     country: string;
     lines: number[];
+    /** For a company already in the list, only the new ones. */
     contacts: number;
     facilities: number;
-    status: 'new' | 'existing';
+    status: 'new' | 'existing' | 'archived';
   }[];
   issues: ImportIssue[];
   warnings: ImportIssue[];

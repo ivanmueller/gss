@@ -486,13 +486,12 @@ export function ImportSpreadsheet({
               disabled={
                 step.busy ||
                 step.result.issues.length > 0 ||
-                step.result.summary.newCounterparties === 0
+                (step.result.summary.newCounterparties === 0 &&
+                  step.result.summary.existingWithAdditions === 0)
               }
               onClick={() => void commit(planOf(step), step.result)}
             >
-              {step.busy
-                ? 'Importing…'
-                : `Import ${String(step.result.summary.newCounterparties)} new counterparties`}
+              {step.busy ? 'Importing…' : importLabel(step.result)}
             </Button>
             <Button
               variant="outline"
@@ -510,19 +509,25 @@ export function ImportSpreadsheet({
       {step.kind === 'done' && (
         <div className="flex flex-col gap-3">
           <Card role="status" className="flex flex-col gap-1 p-4 text-sm">
-            <p className="font-medium">
-              Imported {step.result.summary.newCounterparties} counterparties with{' '}
-              {step.result.summary.contacts} contacts and {step.result.summary.facilities}{' '}
-              locations.
-            </p>
+            {step.result.summary.newCounterparties > 0 && (
+              <p className="font-medium">
+                Imported {step.result.summary.newCounterparties} counterparties with{' '}
+                {step.result.summary.contacts} contacts and {step.result.summary.facilities}{' '}
+                locations.
+              </p>
+            )}
+            {step.result.summary.existingWithAdditions > 0 && (
+              <p className="font-medium">Added {added(step.result)}.</p>
+            )}
             {step.result.summary.existingCounterparties > 0 && (
               <p>
-                {step.result.summary.existingCounterparties} were already in the list and were left
-                unchanged.
+                {step.result.summary.existingCounterparties} were already in the list; their own
+                details were left unchanged.
               </p>
             )}
           </Card>
-          {step.result.importBatchId !== null && step.result.summary.facilities > 0 ? (
+          {step.result.importBatchId !== null &&
+          step.result.summary.facilities + step.result.summary.addedFacilities > 0 ? (
             <FindCoordinates
               session={session}
               scope={{ importBatchId: step.result.importBatchId }}
@@ -545,6 +550,48 @@ function messageOf(error: unknown): string {
   return 'Something went wrong. Try again.';
 }
 
+function plural(n: number, one: string, many: string): string {
+  return `${String(n)} ${n === 1 ? one : many}`;
+}
+
+/**
+ * What the file adds to companies already in the list, e.g. "2 new locations and 1 new
+ * contact for 1 company already in the list".
+ */
+function added({ summary }: ImportResult): string {
+  const parts = [
+    summary.addedFacilities > 0 && plural(summary.addedFacilities, 'new location', 'new locations'),
+    summary.addedContacts > 0 && plural(summary.addedContacts, 'new contact', 'new contacts'),
+    summary.addedCommodities > 0 && plural(summary.addedCommodities, 'new grain', 'new grains'),
+  ].filter((part): part is string => part !== false);
+  const list =
+    parts.length > 1
+      ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`
+      : (parts[0] ?? '');
+  return `${list} for ${plural(summary.existingWithAdditions, 'company', 'companies')} already in the list`;
+}
+
+/** The import button: new companies, new locations for listed ones, or both. */
+function importLabel(result: ImportResult): string {
+  const { newCounterparties, existingWithAdditions } = result.summary;
+  if (existingWithAdditions === 0) return `Import ${String(newCounterparties)} new counterparties`;
+  if (newCounterparties === 0) return 'Add to the companies already in the list';
+  return `Import ${String(newCounterparties)} new counterparties and add to listed ones`;
+}
+
+/** One company's line on the check step. */
+function resultText(item: ImportResult['counterparties'][number]): string {
+  if (item.status === 'new') return 'Will be added';
+  if (item.status === 'archived') return 'Archived; skipped';
+  const parts = [
+    item.facilities > 0 && plural(item.facilities, 'location', 'locations'),
+    item.contacts > 0 && plural(item.contacts, 'contact', 'contacts'),
+  ].filter((part): part is string => part !== false);
+  return parts.length > 0
+    ? `Already in the list; adds ${parts.join(' and ')}`
+    : 'Already in the list; nothing new';
+}
+
 function ReviewSummary({ result }: { result: ImportResult }) {
   const { summary } = result;
   return (
@@ -554,6 +601,7 @@ function ReviewSummary({ result }: { result: ImportResult }) {
         {summary.facilities} locations)
         {summary.existingCounterparties > 0 &&
           ` · ${String(summary.existingCounterparties)} already in the list`}
+        {summary.existingWithAdditions > 0 && `; ${added(result)}`}
         {summary.emptyRows > 0 && ` · ${String(summary.emptyRows)} empty rows skipped`}.
       </p>
       <Card className="overflow-hidden">
@@ -580,9 +628,7 @@ function ReviewSummary({ result }: { result: ImportResult }) {
                 <TableCell className="py-1.5">{item.lines.join(', ')}</TableCell>
                 <TableCell className="py-1.5">{item.contacts}</TableCell>
                 <TableCell className="py-1.5">{item.facilities}</TableCell>
-                <TableCell className="py-1.5">
-                  {item.status === 'new' ? 'Will be added' : 'Already in the list; skipped'}
-                </TableCell>
+                <TableCell className="py-1.5">{resultText(item)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

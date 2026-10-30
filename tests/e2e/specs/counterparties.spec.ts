@@ -113,9 +113,29 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await expect(page).toHaveURL(/\/counterparties\?add=import$/);
   await dialog.getByLabel('Choose CSV file').setInputFiles(csvFile('again.csv'));
   await dialog.getByRole('button', { name: 'Review import' }).click();
-  await expect(dialog.getByText('Already in the list; skipped')).toHaveCount(2);
+  await expect(dialog.getByText('Already in the list; nothing new')).toHaveCount(2);
   await expect(dialog.getByRole('button', { name: 'Import 0 new counterparties' })).toBeDisabled();
-  await page.keyboard.press('Escape');
+
+  // A later file with a new site for a company already listed, spelled differently, adds the
+  // site to that company instead of making a second one (owner's answer, 2026-10-30).
+  await dialog.getByRole('button', { name: 'Back to columns' }).click();
+  await dialog.getByRole('button', { name: 'Choose another file' }).click();
+  await dialog.getByLabel('Choose CSV file').setInputFiles({
+    name: 'more.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      ['Legal Name,Country,City or Town,State', 'SYNTHETIC MILLS.,Canada,Delta,SK', ''].join('\n'),
+    ),
+  });
+  await dialog.getByRole('button', { name: 'Review import' }).click();
+  await expect(dialog.getByText('Already in the list; adds 1 location')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Add to the companies already in the list' }).click();
+  await expect(
+    dialog.getByText('Added 1 new location for 1 company already in the list.'),
+  ).toBeVisible();
+  // Its coordinates are looked up too; not set up in CI.
+  await expect(dialog.getByRole('alert')).toContainText('Finding coordinates is not set up');
+  await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(dialog).toHaveCount(0);
 
   // The map view of the Counterparties page. CI builds without a Mapbox token, so it lists

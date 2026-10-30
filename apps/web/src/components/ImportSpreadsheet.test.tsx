@@ -29,6 +29,10 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
       existingCounterparties: 0,
       contacts: 1,
       facilities: 3,
+      existingWithAdditions: 0,
+      addedContacts: 0,
+      addedFacilities: 0,
+      addedCommodities: 0,
     },
     counterparties: [
       {
@@ -300,6 +304,68 @@ describe('ImportSpreadsheet', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The file has a header row but no data rows.',
     );
+  });
+
+  it('adds new locations to companies already in the list when nothing else is new', async () => {
+    const adding = result({
+      summary: {
+        ...result().summary,
+        newCounterparties: 0,
+        existingCounterparties: 2,
+        contacts: 0,
+        facilities: 0,
+        existingWithAdditions: 1,
+        addedContacts: 1,
+        addedFacilities: 2,
+        addedCommodities: 0,
+      },
+      counterparties: [
+        {
+          legalName: 'Synthetic Mills',
+          country: 'CA',
+          lines: [2, 3],
+          contacts: 1,
+          facilities: 2,
+          status: 'existing',
+        },
+        {
+          legalName: 'Synthetic Buyer LLC',
+          country: 'US',
+          lines: [4],
+          contacts: 0,
+          facilities: 0,
+          status: 'archived',
+        },
+      ],
+    });
+    mockApi({
+      'POST /counterparties/import': (call) =>
+        (call.body as { commit: boolean }).commit
+          ? Response.json({ ...adding, committed: true, importBatchId: BATCH }, { status: 201 })
+          : Response.json(adding),
+      'POST /facilities/geocode': () => Response.json({ truncated: false, proposals: [] }),
+    });
+    importer();
+    await chooseFile(CSV);
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    const table = await screen.findByRole('table', { name: 'Counterparties in this import' });
+    expect(
+      within(table).getByText('Already in the list; adds 2 locations and 1 contact'),
+    ).toBeInTheDocument();
+    expect(within(table).getByText('Archived; skipped')).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 new locations and 1 new contact for 1 company already in the list/),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add to the companies already in the list' }),
+    );
+    const done = await screen.findByText(/^Added /);
+    expect(done).toHaveTextContent(
+      'Added 2 new locations and 1 new contact for 1 company already in the list.',
+    );
+    expect(screen.queryByText(/^Imported 0/)).not.toBeInTheDocument();
+    // The added locations get coordinates too.
+    expect(await screen.findByText('No location is waiting for coordinates.')).toBeInTheDocument();
   });
 
   it('keeps the import blocked while the server reports problems and shows its message on failure', async () => {

@@ -222,7 +222,12 @@ export const IMPORT_FIELDS = [
     required: false,
     headers: ['address', 'street', 'street address', 'address line 1', 'address 1'],
   },
-  { id: 'city', label: 'City', required: false, headers: ['city', 'town', 'municipality'] },
+  {
+    id: 'city',
+    label: 'City',
+    required: false,
+    headers: ['city', 'town', 'municipality', 'city or town', 'town or city', 'city/town'],
+  },
   {
     id: 'region',
     label: 'Province or state',
@@ -433,6 +438,8 @@ export interface DirectoryRecord {
 
 export interface ParsedImportRow extends DirectoryRecord {
   line: number;
+  /** What was read differently from how the row put it, e.g. a second phone number moved to the notes. */
+  notices: ImportIssue[];
 }
 
 export type ParseRowResult =
@@ -517,8 +524,14 @@ function postalCode(country: CountryCode, value: string): string | null {
 /** Reads the values of one form or row, collecting every problem with its field. */
 class FieldReader {
   readonly issues: FieldIssue[] = [];
+  /** Not problems: what was read differently, said on the import's check step. */
+  readonly notices: FieldIssue[] = [];
 
-  constructor(private readonly values: ImportRowValues) {}
+  /** `importing`: a spreadsheet row, read more leniently than a form someone is filling in. */
+  constructor(
+    private readonly values: ImportRowValues,
+    readonly importing = false,
+  ) {}
 
   /** The cleaned value, or null when empty. */
   value(field: ImportFieldId): string | null {
@@ -531,6 +544,10 @@ class FieldReader {
 
   issue(field: ImportFieldId | null, message: string): void {
     this.issues.push({ field, message });
+  }
+
+  notice(field: ImportFieldId | null, message: string): void {
+    this.notices.push({ field, message });
   }
 
   /** Reports values longer than the import limit, which are refused rather than cut. */
@@ -558,6 +575,27 @@ function readPhone(r: FieldReader, field: 'contactPhone' | 'companyPhone'): stri
   const phone = r.value(field)?.replace(/\s*(extension|ext\.?)\s*/i, ' x') ?? null;
   if (phone !== null && !PHONE.test(phone)) r.issue(field, `"${phone}" is not a phone number`);
   return phone;
+}
+
+/**
+ * A spreadsheet's company phone cell may hold two numbers ("403-555-0100; 403-555-0101") or
+ * a number and a note ("403-555-0100 (front desk)"). From a spreadsheet the first number is
+ * the company phone and the rest goes to the notes, with a notice; a form still refuses it.
+ */
+function readCompanyPhone(r: FieldReader): { phone: string | null; more: string | null } {
+  const text = r.value('companyPhone');
+  if (text === null) return { phone: null, more: null };
+  const whole = text.replace(/\s*(extension|ext\.?)\s*/i, ' x');
+  if (PHONE.test(whole) || !r.importing) return { phone: readPhone(r, 'companyPhone'), more: null };
+  const split = /^(.+?)(?:\s*[;,|\n]\s*|\s+(?=\([^)]*[a-z]))(.+)$/i.exec(text);
+  const first = split?.[1]?.replace(/\s*(extension|ext\.?)\s*/i, ' x') ?? '';
+  const rest = split?.[2]?.trim() ?? '';
+  if (!PHONE.test(first) || rest === '') return { phone: readPhone(r, 'companyPhone'), more: null };
+  r.notice(
+    'companyPhone',
+    `holds more than one number or a note: "${first}" is the company phone, and "${rest}" is added to the notes`,
+  );
+  return { phone: first, more: rest };
 }
 
 /**
@@ -650,7 +688,7 @@ function readCounterparty(
     else r.issue('website', parsed.message);
   }
 
-  const phone = readPhone(r, 'companyPhone');
+  const { phone, more } = readCompanyPhone(r);
   const markets = readMarkets(r);
   const tierText = r.value('tier');
   const tier =
@@ -658,7 +696,11 @@ function readCounterparty(
       ? null
       : (TIERS.find((item) => item === tierText.replace(/^tier\s*/i, '').toUpperCase()) ?? null);
   if (tierText !== null && tier === null) r.issue('tier', `"${tierText}" must be A, B or C`);
-  const notes = cleanLines(r.raw('notes'));
+  const written = cleanLines(r.raw('notes'));
+  const notes =
+    more === null
+      ? written
+      : `${written === null ? '' : `${written}\n`}Company phone also: ${more}`;
 
   if (legalName === null || country === null || types.length === 0) return null;
   return {
@@ -813,12 +855,12 @@ function readFacility(r: FieldReader, fallbackCountry: CountryCode | null): Faci
  */
 export function parseDirectoryRecord(
   values: ImportRowValues,
-  options: { defaultTypes?: readonly CounterpartyType[] } = {},
+  options: { defaultTypes?: readonly CounterpartyType[]; importing?: boolean } = {},
 ):
-  | { status: 'ok'; record: DirectoryRecord }
+  | { status: 'ok'; record: DirectoryRecord; notices: FieldIssue[] }
   | { status: 'empty' }
   | { status: 'invalid'; issues: FieldIssue[] } {
-  const r = new FieldReader(values);
+  const r = new FieldReader(values, options.importing === true);
   if (FIELD_IDS.every((field) => r.value(field) === null)) return { status: 'empty' };
   r.checkLengths(FIELD_IDS);
   const counterparty = readCounterparty(r, options.defaultTypes);
@@ -827,7 +869,11 @@ export function parseDirectoryRecord(
   const facility = readFacility(r, countryText === null ? null : normalizeCountry(countryText));
   const commodities = readCommodities(r, counterparty?.types ?? []);
   if (r.issues.length > 0 || counterparty === null) return { status: 'invalid', issues: r.issues };
-  return { status: 'ok', record: { counterparty, contact, facility, commodities } };
+  return {
+    status: 'ok',
+    record: { counterparty, contact, facility, commodities },
+    notices: r.notices,
+  };
 }
 
 /** Validates one mapped spreadsheet row; rows without a type are buyers unless `defaultTypes` says otherwise. */
@@ -838,12 +884,16 @@ export function parseImportRow(
 ): ParseRowResult {
   const result = parseDirectoryRecord(values, {
     defaultTypes: options.defaultTypes ?? ['buyer'],
+    importing: true,
   });
   if (result.status === 'empty') return result;
   if (result.status === 'invalid') {
     return { status: 'invalid', issues: result.issues.map((issue) => ({ line, ...issue })) };
   }
-  return { status: 'ok', row: { line, ...result.record } };
+  return {
+    status: 'ok',
+    row: { line, ...result.record, notices: result.notices.map((notice) => ({ line, ...notice })) },
+  };
 }
 
 /** A counterparty's own details from its edit form. A type is required. */
@@ -918,9 +968,63 @@ export function parseFacilityFields(
     : { status: 'ok', value: facility };
 }
 
-/** Matches the database's unique key: organization, country and legal name ignoring case. */
+/** Company name endings written several ways, each read as one. */
+const NAME_ENDINGS: Record<string, string> = {
+  limited: 'ltd',
+  incorporated: 'inc',
+  corporation: 'corp',
+  company: 'co',
+};
+
+/**
+ * A company's name as it is matched (owner's answer, 2026-10-30): without case, accents,
+ * punctuation or extra spaces, "&" read as "and", and Limited, Incorporated, Corporation and
+ * Company read as Ltd, Inc, Corp and Co. So "Prairie Feeds Ltd." and "PRAIRIE FEEDS LIMITED"
+ * are one company.
+ */
+export function companyNameKey(legalName: string): string {
+  return legalName
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((word) => NAME_ENDINGS[word] ?? word)
+    .join(' ');
+}
+
+/**
+ * The key a company is matched by in an import, within the file and against the list:
+ * its country and its name as companyNameKey reads it.
+ */
 export function counterpartyKey(country: string, legalName: string): string {
-  return `${country}:${legalName.toLowerCase()}`;
+  return `${country}:${companyNameKey(legalName)}`;
+}
+
+/** A location as it is matched: its name and where it is, ignoring case and spacing. */
+export function facilityKey(
+  facility: Pick<
+    FacilityInput,
+    'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country'
+  >,
+): string {
+  return [
+    facility.name,
+    facility.addressLine,
+    facility.city,
+    facility.region,
+    facility.postalCode,
+    facility.country,
+  ]
+    .map((part) => (part ?? '').toLowerCase().replace(/\s+/g, ' ').trim())
+    .join('|');
+}
+
+/** A contact as it is matched: by email when it has one, else by name and phone. */
+export function contactKey(contact: Pick<ContactInput, 'name' | 'email' | 'phone'>): string {
+  return contact.email?.toLowerCase() ?? `${contact.name.toLowerCase()}|${contact.phone ?? ''}`;
 }
 
 export interface ImportGroup {
@@ -967,6 +1071,8 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       const first = group.counterparty;
       const firstLine = group.lines[0] ?? row.line;
       const compare: [ImportFieldId, string | null, string | null][] = [
+        // Capitals alone are not worth a note; other spelling differences are.
+        ['legalName', first.legalName.toLowerCase(), row.counterparty.legalName.toLowerCase()],
         ['tradingName', first.tradingName, row.counterparty.tradingName],
         ['types', first.types.join(', '), row.counterparty.types.join(', ')],
         ['verificationStatus', first.verificationStatus, row.counterparty.verificationStatus],
@@ -987,14 +1093,13 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       }
     }
     group.lines.push(row.line);
+    warnings.push(...row.notices);
 
     if (row.contact) {
-      const contactKey =
-        row.contact.email?.toLowerCase() ??
-        `${row.contact.name.toLowerCase()}|${row.contact.phone ?? ''}`;
+      const contactMatch = contactKey(row.contact);
       const seen = contactKeys.get(key);
-      if (seen && !seen.has(contactKey)) {
-        seen.add(contactKey);
+      if (seen && !seen.has(contactMatch)) {
+        seen.add(contactMatch);
         group.contacts.push(row.contact);
       }
     }
@@ -1005,10 +1110,10 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       if (!listed) group.commodities.push(interest);
     }
     if (row.facility) {
-      const facilityKey = JSON.stringify(row.facility).toLowerCase();
+      const facilityMatch = facilityKey(row.facility);
       const seen = facilityKeys.get(key);
-      if (seen && !seen.has(facilityKey)) {
-        seen.add(facilityKey);
+      if (seen && !seen.has(facilityMatch)) {
+        seen.add(facilityMatch);
         group.facilities.push(row.facility);
       }
     }

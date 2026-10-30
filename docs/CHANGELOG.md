@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Companies with several locations in an import
+
+- `docs/DECISIONS.md`: names matched loosely; a later file's new locations, contacts and grains added to companies already listed; Canada and the US left as they are; City or Town and two-phone cells.
+- `docs/DATA_MODEL.md`: migration `20261030070000_facility_import_batch.sql`.
+- `docs/API.md`, `docs/PRODUCT.md`, `README.md`: the import's matching and additions.
+
 ## 2026-10-30 — Handoff record of #87
 
 - `docs/HANDOFF.md`: Codex's findings on #85 fixed (ivanmueller/gss#87) with their CI and Deploy staging runs.
