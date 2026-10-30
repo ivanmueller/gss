@@ -320,6 +320,56 @@ describe('the counterparty directory as app_api', () => {
     expect(looked.map((facility) => facility.facilityName)).toEqual(['Synthetic Spur']);
   });
 
+  // Codex's review of ivanmueller/gss#88: additions are worked out before the import locks
+  // the company, so two imports of the same file both found the location missing.
+  it('adds a location or contact once when two imports race to add it', async () => {
+    const ctx = as(users.olivia);
+    const [mills] = (await db.existingCounterparties(ctx, orgs.a)).filter(
+      (company) => company.legalName === 'Synthetic Prairie Mills',
+    );
+    if (!mills) throw new Error('fixture missing');
+    const siding = {
+      name: 'Synthetic Siding',
+      facilityType: null,
+      addressLine: null,
+      city: 'Synthetic Siding',
+      region: 'AB',
+      postalCode: null,
+      country: 'CA',
+      latitude: null,
+      longitude: null,
+      locationPrecision: null,
+    } as const;
+    const field = {
+      ...siding,
+      name: null,
+      city: null,
+      region: null,
+      latitude: '51.000000',
+      longitude: '-105.000000',
+      locationPrecision: 'approximate',
+    } as const;
+    const addition = {
+      counterpartyId: mills.id,
+      facilities: [siding, field],
+      contacts: [{ name: 'Synthetic Third Buyer', role: null, email: null, phone: null }],
+      commodities: [],
+    };
+    await Promise.all(
+      ['e', 'f'].map((letter) =>
+        db.importCounterparties(
+          ctx,
+          batch({ contentSha256: letter.repeat(64), counterparties: [], additions: [addition] }),
+        ),
+      ),
+    );
+
+    const after = await db.getCounterparty(ctx, mills.id);
+    expect(after?.facilities.filter((f) => f.name === 'Synthetic Siding')).toHaveLength(1);
+    expect(after?.facilities.filter((f) => f.latitude === '51.000000')).toHaveLength(1);
+    expect(after?.contacts.filter((k) => k.name === 'Synthetic Third Buyer')).toHaveLength(1);
+  });
+
   it('refuses the same content twice', async () => {
     await expect(
       db.importCounterparties(as(users.olivia), batch({ counterparties: [] })),

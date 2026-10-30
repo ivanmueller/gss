@@ -16,6 +16,7 @@ import type {
   LocationPrecision,
   TransportAccess,
 } from '@grain/domain';
+import { contactKey, facilityKey } from '@grain/domain';
 import postgres from 'postgres';
 
 import { crmQueries, type CrmDatabase } from './crm-db';
@@ -167,13 +168,16 @@ export interface ExistingCounterparty {
   primaryCountry: string;
   legalName: string;
   archived: boolean;
-  facilities: Pick<
-    FacilityInput,
-    'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country'
-  >[];
+  facilities: ExistingFacility[];
   contacts: Pick<ContactInput, 'name' | 'email' | 'phone'>[];
   commodities: CommodityInterest[];
 }
+
+/** A location as an import matches it (facilityKey). */
+type ExistingFacility = Pick<
+  FacilityInput,
+  'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country' | 'latitude' | 'longitude'
+>;
 
 /** A located facility for a map pin, with the counterparty it belongs to. */
 export interface MapFacility {
@@ -835,7 +839,8 @@ export function createDatabase(sql: postgres.Sql): Database {
           (ExistingCounterparty['facilities'][number] & { counterparty_id: string })[]
         >`
           select counterparty_id, name, address_line as "addressLine", city, region,
-                 postal_code as "postalCode", country
+                 postal_code as "postalCode", country, latitude::text as latitude,
+                 longitude::text as longitude
           from app.facilities where organization_id = ${organizationId}`;
         const contacts = await tx<
           (ExistingCounterparty['contacts'][number] & { counterparty_id: string })[]
@@ -931,11 +936,44 @@ export function createDatabase(sql: postgres.Sql): Database {
                     for no key update`
                 ).map((row) => row.id),
               );
+        // What they had was read before the lock: another import may have added the same
+        // locations and contacts since, so they are matched again now (Codex's review of
+        // ivanmueller/gss#88). Commodities are unique in the table.
+        const lockedIds = [...open];
+        const hasFacility = new Set<string>();
+        const hasContact = new Set<string>();
+        if (lockedIds.length > 0) {
+          const facilities = await tx<(ExistingFacility & { counterparty_id: string })[]>`
+            select counterparty_id, name, address_line as "addressLine", city, region,
+                   postal_code as "postalCode", country, latitude::text as latitude,
+                   longitude::text as longitude
+            from app.facilities
+            where organization_id = ${org} and counterparty_id in ${tx(lockedIds)}`;
+          for (const { counterparty_id, ...facility } of facilities) {
+            hasFacility.add(`${counterparty_id}\n${facilityKey(facility)}`);
+          }
+          const contacts = await tx<
+            (Pick<ContactInput, 'name' | 'email' | 'phone'> & { counterparty_id: string })[]
+          >`
+            select counterparty_id, name, email, phone
+            from app.counterparty_contacts
+            where organization_id = ${org} and counterparty_id in ${tx(lockedIds)}`;
+          for (const { counterparty_id, ...contact } of contacts) {
+            hasContact.add(`${counterparty_id}\n${contactKey(contact)}`);
+          }
+        }
         const targets = [
           ...withIds,
           ...batch.additions
             .filter((item) => open.has(item.counterpartyId))
-            .map(({ counterpartyId, ...item }) => ({ id: counterpartyId, ...item })),
+            .map(({ counterpartyId: id, ...item }) => ({
+              id,
+              ...item,
+              facilities: item.facilities.filter(
+                (f) => !hasFacility.has(`${id}\n${facilityKey(f)}`),
+              ),
+              contacts: item.contacts.filter((k) => !hasContact.has(`${id}\n${contactKey(k)}`)),
+            })),
         ];
 
         const contacts = targets.flatMap(({ id, contacts: list }) =>
