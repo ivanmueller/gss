@@ -154,7 +154,10 @@ describe('ImportSpreadsheet', () => {
     expect(screen.getByLabelText('Legal name (required)')).toHaveTextContent('Company Name');
     expect(screen.getByLabelText('Province or state')).toHaveTextContent('Prov');
     expect(screen.getByLabelText('Contact email')).toHaveTextContent('E-mail');
-    expect(screen.getByLabelText('Trading name')).toHaveTextContent('— not in my file —');
+    // The trading name is no longer collected; Market and Tier are (2026-10-30).
+    expect(screen.queryByLabelText('Trading name')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Market')).toHaveTextContent('— not in my file —');
+    expect(screen.getByLabelText('Tier')).toHaveTextContent('— not in my file —');
     expect(screen.getByRole('status')).toHaveTextContent('3 rows ready.');
 
     await userEvent.click(screen.getByRole('button', { name: 'Review import' }));

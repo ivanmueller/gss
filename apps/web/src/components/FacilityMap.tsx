@@ -46,6 +46,11 @@ export interface FacilityMapProps {
   cooperative?: boolean;
   /** Without road names, highway numbers and points of interest (isClutterLayer). */
   simple?: boolean;
+  /**
+   * Moves to hold these bounds whenever they change (the pins a filter leaves), without
+   * reloading the map; null leaves the view as it is.
+   */
+  fitTo?: MapBounds | null;
   /** The visible box after every move; null when none of it is on the map. */
   onViewChange?: (bbox: Bbox | null) => void;
   onSelect: (pinId: string) => void;
@@ -222,6 +227,14 @@ export default function FacilityMap(props: FacilityMapProps) {
   useEffect(() => {
     map.current?.getSource<GeoJSONSource>(SOURCE)?.setData(pinFeatures(pins));
   }, [pins]);
+
+  // Compared as text, so a new array with the same bounds does not move the map.
+  const fitKey = props.fitTo ? props.fitTo.join(',') : null;
+  useEffect(() => {
+    const bounds = latest.current.fitTo;
+    if (!map.current || !bounds) return;
+    map.current.fitBounds(bounds, { padding: 40, maxZoom: 12, duration: 600 });
+  }, [fitKey]);
 
   useEffect(() => {
     if (map.current?.getLayer(SELECTED)) {

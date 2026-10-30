@@ -65,6 +65,16 @@ type Step =
     } & Plan)
   | { kind: 'done'; result: ImportResult };
 
+/** The fields a column can fill; the trading name is no longer collected (2026-10-30). */
+const SHOWN_FIELDS = IMPORT_FIELDS.filter((field) => field.id !== 'tradingName');
+
+/** Columns matched by their names, without the trading name. */
+function suggested(headers: string[]): Mapping {
+  const mapping = suggestMapping(headers);
+  delete mapping.tradingName;
+  return mapping;
+}
+
 const STEP_INDEX: Record<Step['kind'], number> = { choose: 0, map: 1, review: 2, done: 3 };
 
 const FIELD_LABELS = Object.fromEntries(
@@ -194,7 +204,7 @@ function ColumnMapping({
       <fieldset>
         <legend className="sr-only">Match your columns to fields</legend>
         <div className="grid grid-cols-1 divide-y text-sm">
-          {IMPORT_FIELDS.map((field) => {
+          {SHOWN_FIELDS.map((field) => {
             const id = `${baseId}-${field.id}`;
             const header = mapping[field.id];
             return (
@@ -283,7 +293,7 @@ export function ImportSpreadsheet({
       setStep({
         kind: 'map',
         sheet,
-        mapping: suggestMapping(sheet.headers),
+        mapping: suggested(sheet.headers),
         side: 'buyer',
         error: null,
         busy: false,

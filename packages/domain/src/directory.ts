@@ -23,6 +23,34 @@ export const FACILITY_TYPES = [
 export type FacilityType = (typeof FACILITY_TYPES)[number];
 export const LOCATION_PRECISIONS = ['exact', 'approximate'] as const;
 export type LocationPrecision = (typeof LOCATION_PRECISIONS)[number];
+/** The markets a counterparty serves (owner's request, 2026-10-30); several allowed. */
+export const MARKETS = [
+  'pet',
+  'bird',
+  'equine',
+  'specialty',
+  'small_animal',
+  'exotic',
+  'wildlife',
+  'aqua',
+] as const;
+export type Market = (typeof MARKETS)[number];
+
+export const MARKET_LABELS: Record<Market, string> = {
+  pet: 'Pet',
+  bird: 'Bird',
+  equine: 'Equine',
+  specialty: 'Specialty',
+  small_animal: 'Small Animal',
+  exotic: 'Exotic',
+  wildlife: 'Wildlife',
+  aqua: 'Aqua',
+};
+
+/** A counterparty's tier (owner's request, 2026-10-30); one, or none. */
+export const TIERS = ['A', 'B', 'C'] as const;
+export type Tier = (typeof TIERS)[number];
+
 /** How a location is served (owner's request, 2026-10-30); never read from a spreadsheet. */
 export const TRANSPORT_ACCESS = ['rail', 'truck', 'rail_and_truck'] as const;
 export type TransportAccess = (typeof TRANSPORT_ACCESS)[number];
@@ -128,10 +156,23 @@ export const IMPORT_FIELDS = [
       'crops',
       'crop',
       'grains',
+      'grain',
       'products',
       'commodities bought',
       'commodities sold',
     ],
+  },
+  {
+    id: 'markets',
+    label: 'Market',
+    required: false,
+    headers: ['market', 'markets', 'market type', 'markets served', 'segment'],
+  },
+  {
+    id: 'tier',
+    label: 'Tier',
+    required: false,
+    headers: ['tier', 'customer tier', 'account tier'],
   },
   {
     id: 'notes',
@@ -234,6 +275,8 @@ export const COUNTERPARTY_FIELD_IDS = [
   'verificationStatus',
   'website',
   'companyPhone',
+  'markets',
+  'tier',
   'notes',
 ] as const satisfies readonly ImportFieldId[];
 export const CONTACT_FIELD_IDS = [
@@ -340,6 +383,9 @@ export interface CounterpartyInput {
   website: string | null;
   /** The company's main phone number, apart from its contacts' own. */
   phone: string | null;
+  /** The markets it serves, each once, in MARKETS order. */
+  markets: Market[];
+  tier: Tier | null;
   notes: string | null;
 }
 
@@ -514,6 +560,43 @@ function readPhone(r: FieldReader, field: 'contactPhone' | 'companyPhone'): stri
   return phone;
 }
 
+/** Words of a market name, without case, spaces, hyphens or a plural s ("Small animals"). */
+function marketKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z]+/g, '')
+    .replace(/s$/, '');
+}
+
+const MARKET_NAMES = new Map<string, Market>([
+  ...MARKETS.map((market) => [marketKey(MARKET_LABELS[market]), market] as const),
+  ['aquatic', 'aqua'],
+  ['aquaculture', 'aqua'],
+  ['horse', 'equine'],
+]);
+
+/** A Market column's names ("Pet; Bird"), each once, in MARKETS order. Others are refused. */
+function readMarkets(r: FieldReader): Market[] {
+  const text = r.value('markets');
+  if (text === null) return [];
+  const found = new Set<Market>();
+  const unknown: string[] = [];
+  for (const part of text.split(/[;,/|\n]+| and /i)) {
+    const name = part.trim();
+    if (name === '') continue;
+    const market = MARKET_NAMES.get(marketKey(name));
+    if (market) found.add(market);
+    else unknown.push(name);
+  }
+  if (unknown.length > 0) {
+    r.issue(
+      'markets',
+      `${unknown.map((name) => `"${name}"`).join(', ')} must be ${Object.values(MARKET_LABELS).join(', ')}`,
+    );
+  }
+  return MARKETS.filter((market) => found.has(market));
+}
+
 function readCounterparty(
   r: FieldReader,
   defaultTypes: readonly CounterpartyType[] | undefined,
@@ -564,6 +647,13 @@ function readCounterparty(
   }
 
   const phone = readPhone(r, 'companyPhone');
+  const markets = readMarkets(r);
+  const tierText = r.value('tier');
+  const tier =
+    tierText === null
+      ? null
+      : (TIERS.find((item) => item === tierText.replace(/^tier\s*/i, '').toUpperCase()) ?? null);
+  if (tierText !== null && tier === null) r.issue('tier', `"${tierText}" must be A, B or C`);
   const notes = cleanLines(r.raw('notes'));
 
   if (legalName === null || country === null || types.length === 0) return null;
@@ -575,6 +665,8 @@ function readCounterparty(
     verificationStatus,
     website,
     phone,
+    markets,
+    tier,
     notes,
   };
 }
@@ -876,6 +968,8 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         ['verificationStatus', first.verificationStatus, row.counterparty.verificationStatus],
         ['website', first.website, row.counterparty.website],
         ['companyPhone', first.phone, row.counterparty.phone],
+        ['markets', first.markets.join(', '), row.counterparty.markets.join(', ') || null],
+        ['tier', first.tier, row.counterparty.tier],
         ['notes', first.notes, row.counterparty.notes],
       ];
       for (const [field, kept, ignored] of compare) {

@@ -5,6 +5,7 @@ import { AuthCard } from './AuthCard';
 import { MfaChallenge } from './MfaChallenge';
 import { MfaEnroll } from './MfaEnroll';
 import { SignInForm } from './SignInForm';
+import { clearApiCache } from '../lib/useApiResource';
 
 export interface Account {
   email: string | null;
@@ -86,6 +87,8 @@ export function AuthGate({
   );
 
   const signOut = useCallback(() => {
+    // The answers kept for quick page switches belong to this person only.
+    clearApiCache();
     void auth.signOut();
   }, [auth]);
 

@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Counterparties: pickers, markets and tiers, the map, the + window, kept answers
+
+- `docs/DECISIONS.md`: the owner's eight changes and answers (markets and tiers; several commodities; the map without a list; the + window in two steps; no trading name; kept answers; grains from a spreadsheet).
+- `docs/DATA_MODEL.md`: migration `20261030060000_counterparty_market_tier.sql`; `counterparties.markets`, `tier`.
+- `docs/API.md`: `markets` and `tier`; the logo kept by checksum.
+- `docs/PRODUCT.md`, `docs/DESIGN_SYSTEM.md`, `README.md`: the pickers, the map view, the + window, `MultiPicker` and `animate-dialog-in`.
+
 ## 2026-10-30 — Handoff record of #84
 
 - `docs/HANDOFF.md`: Codex's P3 on #83 fixed (ivanmueller/gss#84); CI run #184 on `main` red in the freight browser test, not this change, to be re-run.
