@@ -79,6 +79,7 @@ export function fakeDatabase(): Mocked<Database> {
     addContact: vi.fn<Database['addContact']>(() => saved()),
     updateContact: vi.fn<Database['updateContact']>(() => saved()),
     removeContact: vi.fn<Database['removeContact']>(() => saved()),
+    setMainContact: vi.fn<Database['setMainContact']>(() => saved()),
     addFacility: vi.fn<Database['addFacility']>(() => saved()),
     updateFacility: vi.fn<Database['updateFacility']>(() => saved()),
     removeFacility: vi.fn<Database['removeFacility']>(() => saved()),

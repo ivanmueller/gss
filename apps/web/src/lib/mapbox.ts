@@ -188,3 +188,28 @@ export function facilityPin(facility: MapFacility): MapPin {
     hollow: facility.locationPrecision === 'approximate',
   };
 }
+
+/** A map area as [west, south, east, north] in degrees. */
+export type MapBounds = [number, number, number, number];
+
+/**
+ * The smallest area holding every pin, for a map that starts on them; null when there are
+ * none. One pin (or several at the same spot) gives a point, which the map shows at its
+ * closest starting zoom.
+ */
+export function pinBounds(
+  pins: readonly Pick<MapPin, 'latitude' | 'longitude'>[],
+): MapBounds | null {
+  if (pins.length === 0) return null;
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const { latitude, longitude } of pins) {
+    west = Math.min(west, longitude);
+    east = Math.max(east, longitude);
+    south = Math.min(south, latitude);
+    north = Math.max(north, latitude);
+  }
+  return [west, south, east, north];
+}

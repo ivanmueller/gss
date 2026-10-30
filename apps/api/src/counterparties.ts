@@ -5,6 +5,7 @@ import {
   groupImportRows,
   importRequestSchema,
   inspectPng,
+  mainContactSchema,
   MAX_LOGO_BYTES,
   normalizeCountry,
   parseContactFields,
@@ -419,6 +420,20 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     if (!isUuid(id) || !isUuid(contactId)) return apiError(c, 404, 'NOT_FOUND', 'No such contact.');
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const result = await db.removeContact(ctx, id, contactId);
+      return savedDetail(c, db, ctx, id, result, 'contact');
+    });
+  });
+
+  routes.put('/:id/main-contact', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = mainContactSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.setMainContact(ctx, id, request.data.contactId);
       return savedDetail(c, db, ctx, id, result, 'contact');
     });
   });

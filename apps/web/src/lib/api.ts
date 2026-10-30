@@ -26,6 +26,8 @@ export interface Contact {
   role: string | null;
   email: string | null;
   phone: string | null;
+  /** The counterparty's main contact, shown at the top of its page; at most one. */
+  isMain: boolean;
   /** Sent back with an edit; the API refuses an edit of a version that has changed. */
   version: string;
 }
@@ -171,7 +173,7 @@ export async function apiJson<T>(path: string, token: string, init: RequestInit 
 export function sendJson<T>(
   path: string,
   token: string,
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: unknown,
 ): Promise<T> {
   return apiJson<T>(path, token, {

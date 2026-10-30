@@ -308,6 +308,64 @@ describe('contacts and locations as app_api', () => {
     expect((await detail(other)).contacts).toHaveLength(1);
   });
 
+  it('keeps at most one main contact, chosen only by editors of its own organization', async () => {
+    const counterpartyId = await create('Synthetic Main Contact', { contacts: [] });
+    const other = await create('Synthetic Other Main Contact');
+    const otherContact = (await detail(other)).contacts[0];
+    if (!otherContact) throw new Error('fixture has no contact');
+    for (const name of ['Synthetic Ana', 'Synthetic Ben']) {
+      await db.addContact(as(users.olivia), counterpartyId, contact(name));
+    }
+    const added = (await detail(counterpartyId)).contacts;
+    const [ana, ben] = added;
+    if (!ana || !ben) throw new Error('contacts not added');
+    expect(added.map((k) => k.isMain)).toEqual([false, false]);
+    const main = async () =>
+      (await detail(counterpartyId)).contacts.filter((k) => k.isMain).map((k) => k.name);
+
+    expect(await db.setMainContact(as(users.olivia), counterpartyId, ana.id)).toEqual({
+      status: 'saved',
+    });
+    expect(await main()).toEqual(['Synthetic Ana']);
+    // The main contact is listed first.
+    expect((await detail(counterpartyId)).contacts[0]?.name).toBe('Synthetic Ana');
+    // Another choice replaces it.
+    expect(await db.setMainContact(as(users.olivia), counterpartyId, ben.id)).toEqual({
+      status: 'saved',
+    });
+    expect(await main()).toEqual(['Synthetic Ben']);
+
+    // Readers, other organizations and other counterparties' contacts are refused.
+    expect(await db.setMainContact(as(users.victor), counterpartyId, ana.id)).toEqual({
+      status: 'forbidden',
+    });
+    expect(await db.setMainContact(as(users.bob), counterpartyId, ana.id)).toEqual({
+      status: 'not_found',
+    });
+    expect(await db.setMainContact(as(users.olivia), counterpartyId, otherContact.id)).toEqual({
+      status: 'not_found',
+    });
+    expect(await main()).toEqual(['Synthetic Ben']);
+    expect((await detail(other)).contacts[0]?.isMain).toBe(false);
+
+    // Removing the main contact leaves none; null clears it too.
+    expect(await db.removeContact(as(users.olivia), counterpartyId, ben.id)).toEqual({
+      status: 'saved',
+    });
+    expect(await main()).toEqual([]);
+    await db.setMainContact(as(users.olivia), counterpartyId, ana.id);
+    expect(await db.setMainContact(as(users.olivia), counterpartyId, null)).toEqual({
+      status: 'saved',
+    });
+    expect(await main()).toEqual([]);
+
+    // Each change is audited by column.
+    const [audit] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.audit_events
+      where entity_id = ${ana.id} and changed_fields = array['is_main']`;
+    expect(audit?.count).toBe(4);
+  });
+
   it('keeps the geocoder as the source until the coordinates themselves change', async () => {
     const counterpartyId = await create('Synthetic Locations', { facilities: [facility()] });
     const [unlocated] = (await detail(counterpartyId)).facilities;

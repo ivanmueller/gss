@@ -1,19 +1,49 @@
 import {
+  CONTACT_CHANNEL_LABELS,
   formatAlberta,
+  isLive,
   normalizeCountry,
   parseContactFields,
   parseCounterpartyFields,
   parseFacilityFields,
   type FieldIssue,
 } from '@grain/domain';
-import { Archive, ArchiveRestore, ImageUp, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState, type ChangeEvent, type SyntheticEvent, type ReactNode } from 'react';
+import {
+  Archive,
+  ArchiveRestore,
+  CalendarPlus,
+  Ellipsis,
+  ImageUp,
+  Mail,
+  MessageSquarePlus,
+  Pencil,
+  Phone,
+  Plus,
+  Star,
+  StarOff,
+  Trash2,
+} from 'lucide-react';
+import { useMemo, useState, type ChangeEvent, type ReactNode, type SyntheticEvent } from 'react';
 
 import { BackLink } from '../components/BackLink';
-import { CounterpartyLogo } from '../components/CounterpartyLogo';
-import { CounterpartyCrm } from '../components/CounterpartyCrm';
+import {
+  ContactHistoryCard,
+  CrmMessage,
+  FollowUpsCard,
+  lastContact,
+  nextFollowUp,
+  useCounterpartyCrm,
+  type CounterpartyCrmState,
+} from '../components/CounterpartyCrm';
 import { CounterpartyFreight } from '../components/CounterpartyFreight';
-import { CounterpartyQuotes } from '../components/CounterpartyQuotes';
+import { CounterpartyLocationsMap } from '../components/CounterpartyLocationsMap';
+import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import {
+  CounterpartyQuotesCard,
+  quoteSides,
+  useCounterpartyQuotes,
+  type CounterpartyQuotesState,
+} from '../components/CounterpartyQuotes';
 import { CounterpartyWebsite } from '../components/CounterpartyWebsite';
 import {
   CompanyFields,
@@ -23,10 +53,16 @@ import {
   type FieldsProps,
   type FormValues,
 } from '../components/DirectoryFields';
-import { Badge } from '../components/ui/badge';
+import { Badge, type BadgeVariant } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Callout } from '../components/ui/callout';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
 import { FileButton } from '../components/ui/file-button';
 import { VerificationBadge } from '../components/VerificationBadge';
 import {
@@ -38,6 +74,7 @@ import {
   type CounterpartyDetail,
   type Facility,
 } from '../lib/api';
+import { dueState } from '../lib/crm';
 import {
   canEditDirectory,
   coordinatesSourceLabel,
@@ -47,7 +84,11 @@ import {
   typeLabel,
 } from '../lib/directory';
 import { logoAsPng } from '../lib/logoImage';
+import { canEnterQuotes } from '../lib/quotes';
+import { Link } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
+import { useMediaQuery } from '../lib/useMediaQuery';
+import { cn } from '../lib/utils';
 import type { DirectorySession } from './CounterpartiesPage';
 
 /** Uploads a PNG, JPG or WebP logo (JPG and WebP are saved as PNG). */
@@ -334,52 +375,19 @@ function locationName(facility: Facility): string {
   );
 }
 
+/** Counterparties that trade grain get the trading layout; a carrier only keeps the plain one. */
+export function tradingLayout(types: readonly string[]): boolean {
+  return types.some((type) => type !== 'carrier');
+}
+
+const TYPE_BADGES: Record<string, BadgeVariant> = { buyer: 'bid', seller: 'offer', broker: 'info' };
+
 /** /counterparties/:id: one counterparty with its contacts and locations; editors change them here. */
 export function CounterpartyPage({ session, id }: { session: DirectorySession; id: string }) {
-  const { token, organization } = session;
-  const [resource, reload] = useApiResource<CounterpartyDetail>(`/counterparties/${id}`, token);
-  const [editing, setEditing] = useState<Editing>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  // The first logo's upload button goes away once the logo is saved, so the page keeps its
-  // "Logo saved." in that spot.
-  const [firstLogoSaved, setFirstLogoSaved] = useState(false);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [archiving, setArchiving] = useState(false);
-  const editor = canEditDirectory(organization.role);
-  const path = `/counterparties/${id}`;
-
-  function done(message: string) {
-    setEditing(null);
-    setNotice(message);
-    reload();
-  }
-
-  function start(next: Editing) {
-    setNotice(null);
-    setFirstLogoSaved(false);
-    setEditing(next);
-  }
-
-  function reloadAndClose() {
-    setEditing(null);
-    setNotice(null);
-    reload();
-  }
-
-  async function setArchived(archived: boolean) {
-    setArchiving(true);
-    setArchiveError(null);
-    try {
-      await sendJson(`${path}/${archived ? 'archive' : 'restore'}`, token, 'POST');
-      done(archived ? 'Archived.' : 'Restored.');
-    } catch (failure) {
-      setArchiveError(
-        failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
-      );
-    } finally {
-      setArchiving(false);
-    }
-  }
+  const [resource, reload] = useApiResource<CounterpartyDetail>(
+    `/counterparties/${id}`,
+    session.token,
+  );
 
   return (
     <section aria-labelledby="counterparty-heading" className="flex flex-col gap-4">
@@ -393,471 +401,879 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
             : `Could not load the counterparty: ${resource.error.message}`}
         </p>
       )}
-      {resource.status === 'ok' &&
-        (() => {
-          const detail = resource.data;
-          const archived = detail.archivedAt !== null;
-          const canChange = editor && !archived;
-          const country = normalizeCountry(detail.primaryCountry) ?? 'CA';
-          return (
-            <>
-              <p role="status" className="sr-only">
-                {notice}
-              </p>
-              {archived && (
-                <Callout variant="warning" icon={Archive}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p>
-                      <strong>Archived</strong> on {formatAlberta(detail.archivedAt ?? '')}. It is
-                      left off the list and the map, and cannot be changed until it is restored.
-                    </p>
-                    {editor && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={archiving}
-                        onClick={() => void setArchived(false)}
-                      >
-                        <ArchiveRestore aria-hidden="true" />
-                        Restore
-                      </Button>
-                    )}
-                  </div>
-                </Callout>
-              )}
-              {archiveError && (
-                <p role="alert" className="text-sm text-danger">
-                  {archiveError}
-                </p>
-              )}
+      {resource.status === 'ok' && (
+        <CounterpartyView session={session} detail={resource.data} reload={reload} />
+      )}
+    </section>
+  );
+}
 
-              <Card className="flex flex-wrap items-start gap-4 p-4">
-                <CounterpartyLogo
-                  counterpartyId={detail.id}
-                  name={detail.legalName}
-                  sha256={detail.logoSha256}
-                  token={token}
-                  size="lg"
-                />
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                  <h1 id="counterparty-heading" className="text-2xl font-semibold tracking-tight">
-                    {detail.legalName}
-                  </h1>
-                  {detail.tradingName && (
-                    <p className="text-sm text-muted-foreground">Trading as {detail.tradingName}</p>
-                  )}
-                  {detail.website && <CounterpartyWebsite website={detail.website} />}
-                  <div className="flex flex-wrap gap-1.5">
-                    <VerificationBadge status={detail.verificationStatus} />
-                    {archived && <Badge>Archived</Badge>}
-                  </div>
-                  {/* With a logo already, it is changed under Edit details. */}
-                  {canChange && detail.logoSha256 === null && (
-                    <LogoUpload
-                      counterpartyId={detail.id}
-                      token={token}
-                      label="Upload logo"
-                      onUploaded={() => {
-                        setFirstLogoSaved(true);
-                        reload();
-                      }}
-                    />
-                  )}
-                  {canChange && detail.logoSha256 !== null && firstLogoSaved && (
-                    <p role="status" className="text-xs text-success">
-                      Logo saved.
-                    </p>
-                  )}
-                </div>
-                {canChange && editing?.kind !== 'archive' && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        start({ kind: 'details' });
-                      }}
-                    >
-                      <Pencil aria-hidden="true" />
-                      Edit details
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        start({ kind: 'archive' });
-                      }}
-                    >
-                      <Archive aria-hidden="true" />
-                      Archive
-                    </Button>
-                  </div>
-                )}
-                {canChange && editing?.kind === 'archive' && (
-                  <div
-                    role="group"
-                    aria-label="Archive this counterparty"
-                    className="flex w-full flex-col gap-2 rounded-control border bg-muted/40 p-3 text-sm"
-                  >
-                    <p>
-                      Archive <strong>{detail.legalName}</strong>? It leaves the list and the map,
-                      and nothing about it is deleted. You can restore it at any time.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" disabled={archiving} onClick={() => void setArchived(true)}>
-                        {archiving ? 'Archiving…' : 'Archive'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setEditing(null);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </Card>
+function CounterpartyView({
+  session,
+  detail,
+  reload,
+}: {
+  session: DirectorySession;
+  detail: CounterpartyDetail;
+  reload: () => void;
+}) {
+  const { token, organization } = session;
+  const [editing, setEditing] = useState<Editing>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // The first logo's upload button goes away once the logo is saved, so the page keeps its
+  // "Logo saved." in that spot.
+  const [firstLogoSaved, setFirstLogoSaved] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [mainError, setMainError] = useState<string | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
+  const editor = canEditDirectory(organization.role);
+  const path = `/counterparties/${detail.id}`;
+  const archived = detail.archivedAt !== null;
+  const canChange = editor && !archived;
+  const country = normalizeCountry(detail.primaryCountry) ?? 'CA';
+  const trading = tradingLayout(detail.types);
+  const contactNames = useMemo(() => detail.contacts.map((contact) => contact.name), [detail]);
+  const crm = useCounterpartyCrm(session, { id: detail.id, archived, contactNames });
+  const quotes = useCounterpartyQuotes(session, detail.id);
+  // Two columns on a computer screen (Tailwind's `xl`); one, in order of use, below it.
+  const wide = useMediaQuery('(min-width: 1280px)', true);
 
-              {editing?.kind === 'details' ? (
-                <Card className="overflow-hidden">
-                  {detail.logoSha256 !== null && (
-                    <div className="border-b bg-muted/40 px-4 pt-4 pb-3">
-                      <LogoUpload
-                        counterpartyId={detail.id}
-                        token={token}
-                        label="Change logo"
-                        onUploaded={reload}
-                      />
-                    </div>
-                  )}
+  function done(message: string) {
+    setEditing(null);
+    setNotice(message);
+    reload();
+  }
+
+  function start(next: Editing) {
+    setNotice(null);
+    setFirstLogoSaved(false);
+    setMainError(null);
+    setEditing(next);
+  }
+
+  function reloadAndClose() {
+    setEditing(null);
+    setNotice(null);
+    reload();
+  }
+
+  async function setArchived(archive: boolean) {
+    setArchiving(true);
+    setArchiveError(null);
+    try {
+      await sendJson(`${path}/${archive ? 'archive' : 'restore'}`, token, 'POST');
+      done(archive ? 'Archived.' : 'Restored.');
+    } catch (failure) {
+      setArchiveError(
+        failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
+      );
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  async function setMainContact(contactId: string | null) {
+    setMainError(null);
+    try {
+      await sendJson(`${path}/main-contact`, token, 'PUT', { contactId });
+      done(contactId === null ? 'No main contact now.' : 'Main contact saved.');
+    } catch (failure) {
+      setMainError(
+        failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
+      );
+    }
+  }
+
+  const logo = (
+    <>
+      {/* With a logo already, it is changed under Edit details. */}
+      {canChange && detail.logoSha256 === null && (
+        <LogoUpload
+          counterpartyId={detail.id}
+          token={token}
+          label="Upload logo"
+          onUploaded={() => {
+            setFirstLogoSaved(true);
+            reload();
+          }}
+        />
+      )}
+      {canChange && detail.logoSha256 !== null && firstLogoSaved && (
+        <p role="status" className="text-xs text-success">
+          Logo saved.
+        </p>
+      )}
+    </>
+  );
+
+  const archiveConfirm = canChange && editing?.kind === 'archive' && (
+    <div
+      role="group"
+      aria-label="Archive this counterparty"
+      className="flex w-full flex-col gap-2 rounded-control border bg-muted/40 p-3 text-sm"
+    >
+      <p>
+        Archive <strong>{detail.legalName}</strong>? It leaves the list and the map, and nothing
+        about it is deleted. You can restore it at any time.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={archiving} onClick={() => void setArchived(true)}>
+          {archiving ? 'Archiving…' : 'Archive'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setEditing(null);
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+
+  const name = (
+    <>
+      <h1 id="counterparty-heading" className="text-2xl font-semibold tracking-tight">
+        {detail.legalName}
+      </h1>
+      {detail.tradingName && (
+        <p className="text-sm text-muted-foreground">Trading as {detail.tradingName}</p>
+      )}
+    </>
+  );
+
+  // A carrier's header: its name, website and the changes it allows, as before.
+  const plainHeader = (
+    <Card className="flex flex-wrap items-start gap-4 p-4">
+      <CounterpartyLogo
+        counterpartyId={detail.id}
+        name={detail.legalName}
+        sha256={detail.logoSha256}
+        token={token}
+        size="lg"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        {name}
+        {detail.website && <CounterpartyWebsite website={detail.website} />}
+        <div className="flex flex-wrap gap-1.5">
+          <VerificationBadge status={detail.verificationStatus} />
+          {archived && <Badge>Archived</Badge>}
+        </div>
+        {logo}
+      </div>
+      {canChange && editing?.kind !== 'archive' && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              start({ kind: 'details' });
+            }}
+          >
+            <Pencil aria-hidden="true" />
+            Edit details
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              start({ kind: 'archive' });
+            }}
+          >
+            <Archive aria-hidden="true" />
+            Archive
+          </Button>
+        </div>
+      )}
+      {archiveConfirm}
+    </Card>
+  );
+
+  const main = detail.contacts.find((contact) => contact.isMain) ?? null;
+  const sides = quoteSides(detail.types);
+  const canQuote = canEnterQuotes(organization.role) && !archived;
+  const places = [detail.regions.join(', '), countryName(detail.primaryCountry)].filter(Boolean);
+
+  // A buyer's or seller's header: who they are, whom to call, and the day's actions.
+  const tradingHeader = (
+    <Card className="flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap items-start gap-4">
+        <CounterpartyLogo
+          counterpartyId={detail.id}
+          name={detail.legalName}
+          sha256={detail.logoSha256}
+          token={token}
+          size="lg"
+        />
+        <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1.5">
+          {name}
+          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+            {detail.types.map((type) => (
+              <Badge key={type} variant={TYPE_BADGES[type] ?? 'neutral'}>
+                {typeLabel(type)}
+              </Badge>
+            ))}
+            <VerificationBadge status={detail.verificationStatus} />
+            {archived && <Badge>Archived</Badge>}
+            <span className="text-muted-foreground">{places.join(' · ')}</span>
+          </div>
+          {detail.website && <CounterpartyWebsite website={detail.website} />}
+          {logo}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {crm.writer && crm.adding !== 'contact' && (
+            <Button
+              size="sm"
+              onClick={() => {
+                crm.startAdding('contact');
+              }}
+            >
+              <MessageSquarePlus aria-hidden="true" />
+              Log contact
+            </Button>
+          )}
+          {canQuote &&
+            sides.map((side) => (
+              <Button key={side} asChild size="sm" variant="outline">
+                <Link href={`/quotes/new?counterparty=${detail.id}&side=${side}`}>
+                  <Plus aria-hidden="true" />
+                  {side === 'bid' ? 'New bid' : 'New offer'}
+                </Link>
+              </Button>
+            ))}
+          {crm.canPlan && crm.adding !== 'follow-up' && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                crm.startAdding('follow-up');
+              }}
+            >
+              <CalendarPlus aria-hidden="true" />
+              Plan follow-up
+            </Button>
+          )}
+          {canChange && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon-sm" variant="outline" aria-label="More actions">
+                  <Ellipsis aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    start({ kind: 'details' });
+                  }}
+                >
+                  <Pencil aria-hidden="true" />
+                  Edit details
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    start({ kind: 'archive' });
+                  }}
+                >
+                  <Archive aria-hidden="true" />
+                  Archive
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </div>
+      <MainContact contact={main} hint={canChange && detail.contacts.length > 0} />
+      {archiveConfirm}
+    </Card>
+  );
+
+  const editDetails = editing?.kind === 'details' && (
+    <Card className="overflow-hidden">
+      {detail.logoSha256 !== null && (
+        <div className="border-b bg-muted/40 px-4 pt-4 pb-3">
+          <LogoUpload
+            counterpartyId={detail.id}
+            token={token}
+            label="Change logo"
+            onUploaded={reload}
+          />
+        </div>
+      )}
+      <EditForm
+        label="Edit details"
+        initial={companyValues(detail)}
+        check={(values) => issuesOf(parseCounterpartyFields(values))}
+        save={(values) => sendJson(path, token, 'PATCH', { version: detail.version, values })}
+        submitLabel="Save details"
+        onSaved={() => {
+          done('Details saved.');
+        }}
+        onCancel={() => {
+          setEditing(null);
+        }}
+        onReload={reloadAndClose}
+      >
+        {(fields) => <CompanyFields {...fields} />}
+      </EditForm>
+    </Card>
+  );
+
+  const detailsCard = (
+    <Card asChild>
+      <section aria-label="Details">
+        <dl className="grid grid-cols-1 gap-4 p-4 text-sm sm:grid-cols-2">
+          <Field label="Type">{detail.types.map(typeLabel).join(', ')}</Field>
+          <Field label="Country">{countryName(detail.primaryCountry)}</Field>
+          <Field label="Source">{sourceLabel(detail.source)}</Field>
+          <Field label="Added">{formatAlberta(detail.createdAt)}</Field>
+          {detail.notes && (
+            <div className="sm:col-span-2">
+              <Field label="Notes">
+                <span className="whitespace-pre-line">{detail.notes}</span>
+              </Field>
+            </div>
+          )}
+        </dl>
+      </section>
+    </Card>
+  );
+
+  const contactsCard = (
+    <Card asChild>
+      <section aria-labelledby="contacts-heading">
+        <CardHeader>
+          <CardTitle id="contacts-heading">Contacts ({detail.contacts.length})</CardTitle>
+          {canChange && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                start({ kind: 'contact', id: null });
+              }}
+            >
+              <Plus aria-hidden="true" />
+              Add contact
+            </Button>
+          )}
+        </CardHeader>
+        {mainError && (
+          <p role="alert" className="border-b px-4 py-3 text-sm text-danger">
+            {mainError}
+          </p>
+        )}
+        {editing?.kind === 'contact' && editing.id === null && (
+          <EditForm
+            label="New contact"
+            initial={contactValues(null)}
+            check={(values) => issuesOf(parseContactFields(values))}
+            save={(values) => sendJson(`${path}/contacts`, token, 'POST', { values })}
+            submitLabel="Add contact"
+            onSaved={() => {
+              done('Contact added.');
+            }}
+            onCancel={() => {
+              setEditing(null);
+            }}
+            onReload={reloadAndClose}
+          >
+            {(fields) => <ContactFields {...fields} required />}
+          </EditForm>
+        )}
+        {detail.contacts.length === 0 ? (
+          <p className="px-4 py-4 text-sm text-muted-foreground">No contacts recorded.</p>
+        ) : (
+          <ul className="divide-y text-sm">
+            {detail.contacts.map((contact) =>
+              editing?.kind === 'contact' && editing.id === contact.id ? (
+                <li key={contact.id}>
                   <EditForm
-                    label="Edit details"
-                    initial={companyValues(detail)}
-                    check={(values) => issuesOf(parseCounterpartyFields(values))}
+                    label={`Edit ${contact.name}`}
+                    initial={contactValues(contact)}
+                    check={(values) => issuesOf(parseContactFields(values))}
                     save={(values) =>
-                      sendJson(path, token, 'PATCH', { version: detail.version, values })
+                      sendJson(`${path}/contacts/${contact.id}`, token, 'PATCH', {
+                        version: contact.version,
+                        values,
+                      })
                     }
-                    submitLabel="Save details"
+                    submitLabel="Save contact"
                     onSaved={() => {
-                      done('Details saved.');
+                      done('Contact saved.');
                     }}
                     onCancel={() => {
                       setEditing(null);
                     }}
                     onReload={reloadAndClose}
                   >
-                    {(fields) => <CompanyFields {...fields} />}
+                    {(fields) => <ContactFields {...fields} required />}
                   </EditForm>
-                </Card>
+                </li>
               ) : (
-                <Card asChild>
-                  <dl className="grid grid-cols-1 gap-4 p-4 text-sm sm:grid-cols-2">
-                    <Field label="Type">{detail.types.map(typeLabel).join(', ')}</Field>
-                    <Field label="Country">{countryName(detail.primaryCountry)}</Field>
-                    <Field label="Source">{sourceLabel(detail.source)}</Field>
-                    <Field label="Added">{formatAlberta(detail.createdAt)}</Field>
-                    {detail.notes && (
-                      <div className="sm:col-span-2">
-                        <Field label="Notes">
-                          <span className="whitespace-pre-line">{detail.notes}</span>
-                        </Field>
+                <li
+                  key={contact.id}
+                  className="flex flex-wrap items-start justify-between gap-3 px-4 py-3"
+                >
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                      {contact.name}
+                      {contact.isMain && (
+                        <Badge variant="info">
+                          <Star aria-hidden="true" />
+                          Main contact
+                        </Badge>
+                      )}
+                    </span>
+                    {contact.role && <span className="text-muted-foreground">{contact.role}</span>}
+                    <ContactLinks contact={contact} />
+                  </div>
+                  {canChange &&
+                    (editing?.kind === 'remove-contact' && editing.id === contact.id ? (
+                      <ConfirmRemove
+                        what={contact.name}
+                        onConfirm={async () => {
+                          await sendJson(`${path}/contacts/${contact.id}`, token, 'DELETE');
+                          done('Contact removed.');
+                        }}
+                        onCancel={() => {
+                          setEditing(null);
+                        }}
+                      />
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {contact.isMain ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`${contact.name} is no longer the main contact`}
+                            onClick={() => void setMainContact(null)}
+                          >
+                            <StarOff aria-hidden="true" />
+                            Not main
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Make ${contact.name} the main contact`}
+                            onClick={() => void setMainContact(contact.id)}
+                          >
+                            <Star aria-hidden="true" />
+                            Make main
+                          </Button>
+                        )}
+                        <ItemActions
+                          name={contact.name}
+                          onEdit={() => {
+                            start({ kind: 'contact', id: contact.id });
+                          }}
+                          onRemove={() => {
+                            start({ kind: 'remove-contact', id: contact.id });
+                          }}
+                        />
                       </div>
-                    )}
-                  </dl>
-                </Card>
-              )}
+                    ))}
+                </li>
+              ),
+            )}
+          </ul>
+        )}
+      </section>
+    </Card>
+  );
 
-              <Card asChild>
-                <section aria-labelledby="contacts-heading">
-                  <CardHeader>
-                    <CardTitle id="contacts-heading">Contacts ({detail.contacts.length})</CardTitle>
-                    {canChange && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          start({ kind: 'contact', id: null });
-                        }}
-                      >
-                        <Plus aria-hidden="true" />
-                        Add contact
-                      </Button>
-                    )}
-                  </CardHeader>
-                  {editing?.kind === 'contact' && editing.id === null && (
-                    <EditForm
-                      label="New contact"
-                      initial={contactValues(null)}
-                      check={(values) => issuesOf(parseContactFields(values))}
-                      save={(values) => sendJson(`${path}/contacts`, token, 'POST', { values })}
-                      submitLabel="Add contact"
-                      onSaved={() => {
-                        done('Contact added.');
-                      }}
-                      onCancel={() => {
-                        setEditing(null);
-                      }}
-                      onReload={reloadAndClose}
-                    >
-                      {(fields) => <ContactFields {...fields} required />}
-                    </EditForm>
+  const locationsCard = (
+    <Card asChild className="overflow-hidden">
+      <section aria-labelledby="locations-heading">
+        <CardHeader>
+          <CardTitle id="locations-heading">Locations ({detail.facilities.length})</CardTitle>
+          {canChange && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                start({ kind: 'location', id: null });
+              }}
+            >
+              <Plus aria-hidden="true" />
+              Add location
+            </Button>
+          )}
+        </CardHeader>
+        {trading && (
+          <CounterpartyLocationsMap
+            facilities={detail.facilities}
+            types={detail.types}
+            selectedId={selectedLocation}
+            onSelect={setSelectedLocation}
+          />
+        )}
+        {editing?.kind === 'location' && editing.id === null && (
+          <EditForm
+            label="New location"
+            initial={locationValues(null, country)}
+            check={(values) => issuesOf(parseFacilityFields(values, country))}
+            save={(values) => sendJson(`${path}/facilities`, token, 'POST', { values })}
+            submitLabel="Add location"
+            onSaved={() => {
+              done('Location added.');
+            }}
+            onCancel={() => {
+              setEditing(null);
+            }}
+            onReload={reloadAndClose}
+          >
+            {(fields) => <LocationFields {...fields} />}
+          </EditForm>
+        )}
+        {detail.facilities.length === 0 ? (
+          <p className="px-4 py-4 text-sm text-muted-foreground">No locations recorded.</p>
+        ) : (
+          <ul className="divide-y text-sm">
+            {detail.facilities.map((facility) =>
+              editing?.kind === 'location' && editing.id === facility.id ? (
+                <li key={facility.id}>
+                  <EditForm
+                    label={`Edit ${locationName(facility)}`}
+                    initial={locationValues(facility, country)}
+                    check={(values) => issuesOf(parseFacilityFields(values, country))}
+                    save={(values) =>
+                      sendJson(`${path}/facilities/${facility.id}`, token, 'PATCH', {
+                        version: facility.version,
+                        values,
+                      })
+                    }
+                    submitLabel="Save location"
+                    onSaved={() => {
+                      done('Location saved.');
+                    }}
+                    onCancel={() => {
+                      setEditing(null);
+                    }}
+                    onReload={reloadAndClose}
+                  >
+                    {(fields) => <LocationFields {...fields} />}
+                  </EditForm>
+                </li>
+              ) : (
+                <li
+                  key={facility.id}
+                  className={cn(
+                    'flex flex-wrap items-start justify-between gap-3 px-4 py-3',
+                    facility.id === selectedLocation && 'bg-accent',
                   )}
-                  {detail.contacts.length === 0 ? (
-                    <p className="px-4 py-4 text-sm text-muted-foreground">No contacts recorded.</p>
-                  ) : (
-                    <ul className="divide-y text-sm">
-                      {detail.contacts.map((contact) =>
-                        editing?.kind === 'contact' && editing.id === contact.id ? (
-                          <li key={contact.id}>
-                            <EditForm
-                              label={`Edit ${contact.name}`}
-                              initial={contactValues(contact)}
-                              check={(values) => issuesOf(parseContactFields(values))}
-                              save={(values) =>
-                                sendJson(`${path}/contacts/${contact.id}`, token, 'PATCH', {
-                                  version: contact.version,
-                                  values,
-                                })
-                              }
-                              submitLabel="Save contact"
-                              onSaved={() => {
-                                done('Contact saved.');
-                              }}
-                              onCancel={() => {
-                                setEditing(null);
-                              }}
-                              onReload={reloadAndClose}
-                            >
-                              {(fields) => <ContactFields {...fields} required />}
-                            </EditForm>
-                          </li>
-                        ) : (
-                          <li
-                            key={contact.id}
-                            className="flex flex-wrap items-start justify-between gap-3 px-4 py-3"
-                          >
-                            <div className="flex min-w-0 flex-col gap-0.5">
-                              <span className="font-medium">{contact.name}</span>
-                              {contact.role && (
-                                <span className="text-muted-foreground">{contact.role}</span>
-                              )}
-                              {contact.email && (
-                                <a
-                                  href={`mailto:${contact.email}`}
-                                  className="w-fit underline underline-offset-4"
-                                >
-                                  {contact.email}
-                                </a>
-                              )}
-                              {contact.phone && (
-                                <a
-                                  href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
-                                  className="w-fit underline underline-offset-4"
-                                >
-                                  {contact.phone}
-                                </a>
-                              )}
-                            </div>
-                            {canChange &&
-                              (editing?.kind === 'remove-contact' && editing.id === contact.id ? (
-                                <ConfirmRemove
-                                  what={contact.name}
-                                  onConfirm={async () => {
-                                    await sendJson(
-                                      `${path}/contacts/${contact.id}`,
-                                      token,
-                                      'DELETE',
-                                    );
-                                    done('Contact removed.');
-                                  }}
-                                  onCancel={() => {
-                                    setEditing(null);
-                                  }}
-                                />
-                              ) : (
-                                <ItemActions
-                                  name={contact.name}
-                                  onEdit={() => {
-                                    start({ kind: 'contact', id: contact.id });
-                                  }}
-                                  onRemove={() => {
-                                    start({ kind: 'remove-contact', id: contact.id });
-                                  }}
-                                />
-                              ))}
-                          </li>
-                        ),
+                >
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="font-medium">
+                      {facility.name ?? facilityTypeLabel(facility.facilityType) ?? 'Location'}
+                      {facility.name && facility.facilityType && (
+                        <span className="font-normal text-muted-foreground">
+                          {' '}
+                          · {facilityTypeLabel(facility.facilityType)}
+                        </span>
                       )}
-                    </ul>
-                  )}
-                </section>
-              </Card>
-
-              <CounterpartyCrm
-                session={session}
-                counterparty={{
-                  id: detail.id,
-                  archived,
-                  contactNames: detail.contacts.map((contact) => contact.name),
-                }}
-              />
-
-              <Card asChild>
-                <section aria-labelledby="locations-heading">
-                  <CardHeader>
-                    <CardTitle id="locations-heading">
-                      Locations ({detail.facilities.length})
-                    </CardTitle>
-                    {canChange && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          start({ kind: 'location', id: null });
-                        }}
-                      >
-                        <Plus aria-hidden="true" />
-                        Add location
-                      </Button>
+                    </span>
+                    <span>{address(facility)}</span>
+                    {facility.latitude && facility.longitude ? (
+                      <span className="text-xs text-muted-foreground">
+                        {facility.latitude}, {facility.longitude} ·{' '}
+                        {facility.locationPrecision === 'exact'
+                          ? 'exact location'
+                          : 'approximate location'}
+                        {coordinatesSourceLabel(facility.geocodingSource) &&
+                          ` · ${coordinatesSourceLabel(facility.geocodingSource) ?? ''}`}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">No coordinates yet</span>
                     )}
-                  </CardHeader>
-                  {editing?.kind === 'location' && editing.id === null && (
-                    <EditForm
-                      label="New location"
-                      initial={locationValues(null, country)}
-                      check={(values) => issuesOf(parseFacilityFields(values, country))}
-                      save={(values) => sendJson(`${path}/facilities`, token, 'POST', { values })}
-                      submitLabel="Add location"
-                      onSaved={() => {
-                        done('Location added.');
-                      }}
-                      onCancel={() => {
-                        setEditing(null);
-                      }}
-                      onReload={reloadAndClose}
-                    >
-                      {(fields) => <LocationFields {...fields} />}
-                    </EditForm>
-                  )}
-                  {detail.facilities.length === 0 ? (
-                    <p className="px-4 py-4 text-sm text-muted-foreground">
-                      No locations recorded.
-                    </p>
-                  ) : (
-                    <ul className="divide-y text-sm">
-                      {detail.facilities.map((facility) =>
-                        editing?.kind === 'location' && editing.id === facility.id ? (
-                          <li key={facility.id}>
-                            <EditForm
-                              label={`Edit ${locationName(facility)}`}
-                              initial={locationValues(facility, country)}
-                              check={(values) => issuesOf(parseFacilityFields(values, country))}
-                              save={(values) =>
-                                sendJson(`${path}/facilities/${facility.id}`, token, 'PATCH', {
-                                  version: facility.version,
-                                  values,
-                                })
-                              }
-                              submitLabel="Save location"
-                              onSaved={() => {
-                                done('Location saved.');
-                              }}
-                              onCancel={() => {
-                                setEditing(null);
-                              }}
-                              onReload={reloadAndClose}
-                            >
-                              {(fields) => <LocationFields {...fields} />}
-                            </EditForm>
-                          </li>
-                        ) : (
-                          <li
-                            key={facility.id}
-                            className="flex flex-wrap items-start justify-between gap-3 px-4 py-3"
-                          >
-                            <div className="flex min-w-0 flex-col gap-0.5">
-                              <span className="font-medium">
-                                {facility.name ??
-                                  facilityTypeLabel(facility.facilityType) ??
-                                  'Location'}
-                                {facility.name && facility.facilityType && (
-                                  <span className="font-normal text-muted-foreground">
-                                    {' '}
-                                    · {facilityTypeLabel(facility.facilityType)}
-                                  </span>
-                                )}
-                              </span>
-                              <span>{address(facility)}</span>
-                              {facility.latitude && facility.longitude ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {facility.latitude}, {facility.longitude} ·{' '}
-                                  {facility.locationPrecision === 'exact'
-                                    ? 'exact location'
-                                    : 'approximate location'}
-                                  {coordinatesSourceLabel(facility.geocodingSource) &&
-                                    ` · ${coordinatesSourceLabel(facility.geocodingSource) ?? ''}`}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  No coordinates yet
-                                </span>
-                              )}
-                            </div>
-                            {canChange &&
-                              (editing?.kind === 'remove-location' && editing.id === facility.id ? (
-                                <ConfirmRemove
-                                  what={locationName(facility)}
-                                  onConfirm={async () => {
-                                    await sendJson(
-                                      `${path}/facilities/${facility.id}`,
-                                      token,
-                                      'DELETE',
-                                    );
-                                    done('Location removed.');
-                                  }}
-                                  onCancel={() => {
-                                    setEditing(null);
-                                  }}
-                                />
-                              ) : (
-                                <ItemActions
-                                  name={locationName(facility)}
-                                  onEdit={() => {
-                                    start({ kind: 'location', id: facility.id });
-                                  }}
-                                  onRemove={() => {
-                                    start({ kind: 'remove-location', id: facility.id });
-                                  }}
-                                />
-                              ))}
-                          </li>
-                        ),
-                      )}
-                    </ul>
-                  )}
-                </section>
-              </Card>
+                  </div>
+                  {canChange &&
+                    (editing?.kind === 'remove-location' && editing.id === facility.id ? (
+                      <ConfirmRemove
+                        what={locationName(facility)}
+                        onConfirm={async () => {
+                          await sendJson(`${path}/facilities/${facility.id}`, token, 'DELETE');
+                          done('Location removed.');
+                        }}
+                        onCancel={() => {
+                          setEditing(null);
+                        }}
+                      />
+                    ) : (
+                      <ItemActions
+                        name={locationName(facility)}
+                        onEdit={() => {
+                          start({ kind: 'location', id: facility.id });
+                        }}
+                        onRemove={() => {
+                          start({ kind: 'remove-location', id: facility.id });
+                        }}
+                      />
+                    ))}
+                </li>
+              ),
+            )}
+          </ul>
+        )}
+      </section>
+    </Card>
+  );
 
-              <CounterpartyQuotes
-                session={session}
-                counterparty={{ id: detail.id, types: detail.types, archived }}
-              />
+  const counterparty = { id: detail.id, types: detail.types, archived };
+  const quotesCard = (
+    <CounterpartyQuotesCard
+      session={session}
+      counterparty={counterparty}
+      state={quotes}
+      // In a column the table's later columns (valid until, status) would be cut off.
+      stacked={trading}
+    />
+  );
+  const freightCard = (
+    <CounterpartyFreight
+      session={session}
+      counterparty={{ ...counterparty, facilityCount: detail.facilities.length }}
+      folded={trading}
+    />
+  );
 
-              <CounterpartyFreight
-                session={session}
-                counterparty={{
-                  id: detail.id,
-                  types: detail.types,
-                  archived,
-                  facilityCount: detail.facilities.length,
-                }}
-              />
+  return (
+    <>
+      <p role="status" className="sr-only">
+        {notice}
+      </p>
+      {archived && (
+        <Callout variant="warning" icon={Archive}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p>
+              <strong>Archived</strong> on {formatAlberta(detail.archivedAt ?? '')}. It is left off
+              the list and the map, and cannot be changed until it is restored.
+            </p>
+            {editor && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={archiving}
+                onClick={() => void setArchived(false)}
+              >
+                <ArchiveRestore aria-hidden="true" />
+                Restore
+              </Button>
+            )}
+          </div>
+        </Callout>
+      )}
+      {archiveError && (
+        <p role="alert" className="text-sm text-danger">
+          {archiveError}
+        </p>
+      )}
+
+      {!trading && (
+        <>
+          {plainHeader}
+          {editDetails || detailsCard}
+          {contactsCard}
+          <CrmMessage crm={crm} />
+          <FollowUpsCard crm={crm} />
+          <ContactHistoryCard crm={crm} />
+          {locationsCard}
+          {quotesCard}
+          {freightCard}
+        </>
+      )}
+
+      {trading && (
+        <>
+          {tradingHeader}
+          <TradingFacts quotes={quotes} crm={crm} facilities={detail.facilities} />
+          {editDetails}
+          <CrmMessage crm={crm} />
+          {wide ? (
+            <div className="grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-4">
+              <div className="flex min-w-0 flex-col gap-4">
+                {quotesCard}
+                <FollowUpsCard crm={crm} />
+                <ContactHistoryCard crm={crm} />
+              </div>
+              <div className="flex min-w-0 flex-col gap-4">
+                {contactsCard}
+                {locationsCard}
+                {detailsCard}
+                {freightCard}
+              </div>
+            </div>
+          ) : (
+            <>
+              <FollowUpsCard crm={crm} />
+              {quotesCard}
+              {contactsCard}
+              <ContactHistoryCard crm={crm} />
+              {locationsCard}
+              {detailsCard}
+              {freightCard}
             </>
-          );
-        })()}
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+/** Phone and email as links, so a tap on a phone calls or writes. */
+function ContactLinks({ contact }: { contact: Contact }) {
+  return (
+    <>
+      {contact.phone && (
+        <a
+          href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
+          className="flex w-fit items-center gap-1.5 underline underline-offset-4"
+        >
+          <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
+          {contact.phone}
+        </a>
+      )}
+      {contact.email && (
+        <a
+          href={`mailto:${contact.email}`}
+          className="flex w-fit items-center gap-1.5 break-all underline underline-offset-4"
+        >
+          <Mail aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+          {contact.email}
+        </a>
+      )}
+    </>
+  );
+}
+
+/** The main contact at the top of a buyer's or seller's page; a hint to editors when none. */
+function MainContact({ contact, hint }: { contact: Contact | null; hint: boolean }) {
+  if (!contact) {
+    return hint ? (
+      <p className="border-t pt-3 text-sm text-muted-foreground">
+        No main contact yet: choose one under Contacts with <strong>Make main</strong>.
+      </p>
+    ) : null;
+  }
+  return (
+    <div
+      role="group"
+      aria-label="Main contact"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-3 text-sm"
+    >
+      <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Main contact
+      </span>
+      <span>
+        <span className="font-medium">{contact.name}</span>
+        {contact.role && <span className="text-muted-foreground"> · {contact.role}</span>}
+      </span>
+      <ContactLinks contact={contact} />
+    </div>
+  );
+}
+
+function count(n: number, one: string, many: string): string {
+  return `${String(n)} ${n === 1 ? one : many}`;
+}
+
+function Fact({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) {
+  return (
+    <Card className="flex min-w-0 flex-col gap-0.5 px-4 py-3">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-sm font-semibold break-words">{children}</dd>
+      {note && <dd className="text-xs break-words text-muted-foreground">{note}</dd>}
+    </Card>
+  );
+}
+
+/** Four facts from the records: live bids and offers, the next follow-up, the last contact, locations. */
+function TradingFacts({
+  quotes,
+  crm,
+  facilities,
+}: {
+  quotes: CounterpartyQuotesState;
+  crm: CounterpartyCrmState;
+  facilities: readonly Facility[];
+}) {
+  const loading = '…';
+  const live =
+    quotes.list.status === 'ok'
+      ? quotes.list.data.quotes.filter((quote) => isLive(quote.status))
+      : null;
+  const bids = live?.filter((quote) => quote.side === 'bid').length ?? 0;
+  const next = crm.followUps.status === 'ok' ? nextFollowUp(crm.followUps.data.followUps) : null;
+  const last = crm.log.status === 'ok' ? lastContact(crm.log.data.entries) : null;
+  const located = facilities.filter((f) => f.latitude !== null && f.longitude !== null).length;
+  const due = next ? dueState(next) : null;
+
+  return (
+    <section aria-label="At a glance">
+      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Fact
+          label="Live bids and offers"
+          note={
+            live &&
+            live.length > 0 &&
+            [
+              bids > 0 && count(bids, 'bid', 'bids'),
+              live.length > bids && count(live.length - bids, 'offer', 'offers'),
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          }
+        >
+          {live ? live.length : quotes.list.status === 'error' ? 'Not loaded' : loading}
+        </Fact>
+        <Fact
+          label="Next follow-up"
+          note={
+            next &&
+            (due === 'overdue'
+              ? `Overdue · ${next.task}`
+              : due === 'today'
+                ? `Due today · ${next.task}`
+                : next.task)
+          }
+        >
+          {crm.followUps.status === 'ok'
+            ? next
+              ? formatAlberta(next.dueAt)
+              : 'None planned'
+            : crm.followUps.status === 'error'
+              ? 'Not loaded'
+              : loading}
+        </Fact>
+        <Fact
+          label="Last contact"
+          note={
+            last &&
+            `${CONTACT_CHANNEL_LABELS[last.current.channel]} with ${last.current.contactName}`
+          }
+        >
+          {crm.log.status === 'ok'
+            ? last
+              ? formatAlberta(last.current.occurredAt)
+              : 'None logged'
+            : crm.log.status === 'error'
+              ? 'Not loaded'
+              : loading}
+        </Fact>
+        <Fact
+          label="Locations"
+          note={
+            facilities.length > 0 &&
+            (located === facilities.length
+              ? 'All with coordinates'
+              : `${String(located)} with coordinates`)
+          }
+        >
+          {facilities.length}
+        </Fact>
+      </dl>
     </section>
   );
 }

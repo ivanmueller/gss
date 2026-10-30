@@ -120,8 +120,9 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
     'Synthetic Farmer',
   );
 
-  // Correct the details and the location.
-  await page.getByRole('button', { name: 'Edit details' }).click();
+  // A seller's page: Edit details and Archive are under More actions.
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit details' }).click();
   const details = page.getByRole('form', { name: 'Edit details' });
   await details.getByLabel('Trading name').fill('Hand Grower');
   await details.getByLabel('Website').fill('Example.com/');
@@ -144,13 +145,18 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
     '52.133214, -106.670046 · exact location · entered by hand',
   );
 
-  // Remove the contact, after a confirmation.
+  // The main contact, shown at the top with a link to call.
+  await page.getByRole('button', { name: 'Make Synthetic Farmer the main contact' }).click();
+  await expect(page.getByRole('group', { name: 'Main contact' })).toContainText('Synthetic Farmer');
+
+  // Remove the contact, after a confirmation; no main contact is left.
   await page.getByRole('button', { name: 'Remove Synthetic Farmer' }).click();
   await page
     .getByRole('group', { name: 'Remove Synthetic Farmer' })
     .getByRole('button', { name: 'Remove' })
     .click();
   await expect(page.getByRole('region', { name: 'Contacts (0)' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Main contact' })).toHaveCount(0);
 
   // Sellers only.
   await page.getByRole('link', { name: 'All counterparties' }).click();
@@ -162,7 +168,8 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
 
   // Archive: off the list until shown, then restored.
   await table.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
-  await page.getByRole('button', { name: 'Archive' }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
   await page
     .getByRole('group', { name: 'Archive this counterparty' })
     .getByRole('button', { name: 'Archive' })
@@ -173,7 +180,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await page.getByRole('checkbox', { name: 'Show archived (1)' }).check();
   await page.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
   await page.getByRole('button', { name: 'Restore' }).click();
-  await expect(page.getByRole('button', { name: 'Edit details' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'More actions' })).toBeVisible();
 
   // The old map address opens the map view.
   await page.goto('/map');
@@ -279,6 +286,7 @@ test("another organization's counterparties stay hidden, even by id", async ({ p
     request.post(`${one}/contacts`, { headers, data: { values: { contactName: 'Intruder' } } }),
     request.post(`${one}/facilities`, { headers, data: { values: { city: 'Elsewhere' } } }),
     request.delete(`${one}/facilities/${OTHER_ORG.counterpartyId}`, { headers }),
+    request.put(`${one}/main-contact`, { headers, data: { contactId: null } }),
   ];
   for (const write of await Promise.all(writes)) expect(write.status()).toBe(404);
 

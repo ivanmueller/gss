@@ -269,6 +269,8 @@ export const updateCounterpartySchema = z.object({
 export const createContactSchema = z.object({ values: fieldValues(CONTACT_FIELD_IDS) });
 /** PATCH /api/v1/counterparties/{id}/contacts/{contactId}. */
 export const updateContactSchema = z.object({ version, values: fieldValues(CONTACT_FIELD_IDS) });
+/** PUT /api/v1/counterparties/{id}/main-contact: one of its contacts, or null for none. */
+export const mainContactSchema = z.object({ contactId: z.uuid().nullable() });
 /** POST /api/v1/counterparties/{id}/facilities. */
 export const createFacilitySchema = z.object({ values: fieldValues(FACILITY_FIELD_IDS) });
 /** PATCH /api/v1/counterparties/{id}/facilities/{facilityId}. */

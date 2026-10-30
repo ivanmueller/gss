@@ -56,14 +56,17 @@ export function QuoteList({
   quotes,
   caption,
   showCounterparty = true,
+  stacked = false,
 }: {
   quotes: QuoteSummary[];
   caption: string;
   showCounterparty?: boolean;
+  /** Always the stacked list, for a narrow column (a buyer's or seller's page on a computer). */
+  stacked?: boolean;
 }) {
   // Tailwind's `md` breakpoint: below it the table becomes a stacked list.
   const wide = useMediaQuery('(min-width: 768px)', true);
-  if (!wide) {
+  if (stacked || !wide) {
     return (
       <ul className="divide-y" aria-label={caption}>
         {quotes.map((quote) => (

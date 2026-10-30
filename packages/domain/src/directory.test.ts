@@ -4,6 +4,7 @@ import {
   createCounterpartySchema,
   groupImportRows,
   importRequestSchema,
+  mainContactSchema,
   parseContactFields,
   parseCounterpartyFields,
   parseDirectoryRecord,
@@ -372,6 +373,21 @@ describe('importRequestSchema', () => {
       values: { legalName: 'A', country: 'CA' },
     }));
     expect(importRequestSchema.safeParse({ ...valid, rows }).success).toBe(false);
+  });
+});
+
+describe('mainContactSchema', () => {
+  it('takes one contact id, or null for none', () => {
+    expect(
+      mainContactSchema.safeParse({ contactId: '00000000-0000-4000-8000-0000000000aa' }).success,
+    ).toBe(true);
+    expect(mainContactSchema.safeParse({ contactId: null }).success).toBe(true);
+  });
+
+  it('refuses anything else', () => {
+    expect(mainContactSchema.safeParse({}).success).toBe(false);
+    expect(mainContactSchema.safeParse({ contactId: 'k1' }).success).toBe(false);
+    expect(mainContactSchema.safeParse({ contactId: 42 }).success).toBe(false);
   });
 });
 

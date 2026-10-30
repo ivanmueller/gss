@@ -52,6 +52,8 @@ export interface CounterpartySummary {
 
 export interface Contact extends ContactInput {
   id: string;
+  /** The counterparty's main contact, shown at the top of its page; at most one. */
+  isMain: boolean;
   /** Its last change time, sent back with an edit so a stale edit is refused (VERSION in @grain/domain). */
   version: string;
 }
@@ -268,6 +270,12 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     ctx: RequestContext,
     counterpartyId: string,
     contactId: string,
+  ) => Promise<WriteResult>;
+  /** Makes one of its contacts the main contact (any other stops being it), or none (null). */
+  setMainContact: (
+    ctx: RequestContext,
+    counterpartyId: string,
+    contactId: string | null,
   ) => Promise<WriteResult>;
   addFacility: (
     ctx: RequestContext,
@@ -554,10 +562,10 @@ export function createDatabase(sql: postgres.Sql): Database {
         `;
         if (!row) return null;
         const contacts = await tx<Contact[]>`
-          select id, name, role, email, phone,
+          select id, name, role, email, phone, is_main as "isMain",
                  to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
           from app.counterparty_contacts where counterparty_id = ${id}
-          order by lower(name), id
+          order by is_main desc, lower(name), id
         `;
         const facilities = await tx<Facility[]>`
           select id, name, facility_type::text as "facilityType", address_line as "addressLine",
@@ -969,6 +977,34 @@ export function createDatabase(sql: postgres.Sql): Database {
           returning id
         `;
         return rows.length === 1 ? SAVED : NOT_FOUND;
+      });
+    },
+
+    setMainContact(ctx, counterpartyId, contactId) {
+      return asUser(ctx, async (tx) => {
+        // The counterparty is locked, so two choices of main contact happen one after the other.
+        const target = await editable(tx, counterpartyId);
+        if (target.status !== 'ok') return target;
+        if (
+          contactId !== null &&
+          !(await exists(tx, 'counterparty_contacts', counterpartyId, contactId))
+        ) {
+          return NOT_FOUND;
+        }
+        // The old main contact first: at most one is main at any moment (a unique index).
+        // Only real changes are written (and audited).
+        await tx`
+          update app.counterparty_contacts set is_main = false
+          where counterparty_id = ${counterpartyId} and is_main
+            and id is distinct from ${contactId}::uuid
+        `;
+        if (contactId !== null) {
+          await tx`
+            update app.counterparty_contacts set is_main = true
+            where id = ${contactId} and counterparty_id = ${counterpartyId} and not is_main
+          `;
+        }
+        return SAVED;
       });
     },
 
