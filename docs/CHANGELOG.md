@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #81
+
+- `docs/HANDOFF.md`: the handoff record of #80 (ivanmueller/gss#81) with its CI and Deploy staging runs; the owner's next request (company phone, coordinates at add and import, rail and truck access, adding in the + window, verified commodities) in the next task.
+
 ## 2026-10-30 — Handoff record of #80
 
 - `docs/HANDOFF.md`: the Counterparties toolbar (ivanmueller/gss#80) with its CI and Deploy staging runs; the owner's check on staging extended to #79 and #80.
