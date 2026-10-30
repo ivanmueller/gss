@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-30 — Handoff record of #84
+
+- `docs/HANDOFF.md`: Codex's P3 on #83 fixed (ivanmueller/gss#84); CI run #184 on `main` red in the freight browser test, not this change, to be re-run.
+
 ## 2026-10-30 — Handoff record of #83
 
 - `docs/HANDOFF.md`: removing follow-ups, the simpler locations map, shorter coordinates and Added (ivanmueller/gss#83) with their CI and Deploy staging runs and Codex's review; the owner's check on staging extended to #83.
