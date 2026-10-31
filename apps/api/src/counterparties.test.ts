@@ -676,6 +676,50 @@ describe('POST /api/v1/counterparties/import', () => {
     expect(answer.fingerprint).not.toBe(fingerprint);
   });
 
+  // Codex's second review of ivanmueller/gss#95: the fingerprint holds the values replaced,
+  // and is checked when nothing is left to write.
+  describe('a company changed by someone else between Check and import', () => {
+    const file = {
+      ...body,
+      rows: [{ line: 2, values: { legalName: 'Synthetic Mills', country: 'CA', tier: 'A' } }],
+    };
+    async function checkThenCommitAfter(tierMeanwhile: 'A' | 'C') {
+      db.existingCounterparties.mockResolvedValueOnce([
+        existing('Synthetic Mills', 'CA', { tier: 'B' }),
+      ]);
+      const checked = await sendImport(file);
+      const review = await checked.json<{
+        fingerprint: string;
+        counterparties: { changes: string[] }[];
+      }>();
+      expect(review.counterparties[0]?.changes).toEqual(['Tier: B → A']);
+      db.existingCounterparties.mockResolvedValueOnce([
+        existing('Synthetic Mills', 'CA', { tier: tierMeanwhile }),
+      ]);
+      return sendImport({ ...file, commit: true, reviewed: review.fingerprint });
+    }
+
+    it('writes nothing when a value it would replace changed', async () => {
+      const res = await checkThenCommitAfter('C');
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: 'PLAN_CHANGED' },
+        counterparties: [{ changes: ['Tier: C → A'] }],
+      });
+    });
+
+    it('shows that nothing is left to write when it was changed to the same value', async () => {
+      const res = await checkThenCommitAfter('A');
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: { code: 'PLAN_CHANGED' },
+        fingerprint: null,
+        summary: { existingWithAdditions: 0, existingUpdated: 0 },
+        counterparties: [{ changes: [] }],
+      });
+    });
+  });
+
   it('refuses an import that was not checked first', async () => {
     const res = await sendImport({ ...body, commit: true });
     expect(res.status).toBe(422);

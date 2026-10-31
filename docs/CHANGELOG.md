@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Codex's second review of #95
+
+- `docs/DECISIONS.md`, `docs/API.md`: the fingerprint holds the values replaced and is checked when nothing is left to write.
+
 ## 2026-10-31 — Handoff record of #95
 
 - `docs/HANDOFF.md`: imports updating listed companies, pasted logos and the phone format (ivanmueller/gss#95) with their CI and Deploy staging runs, and Codex's review.

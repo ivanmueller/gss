@@ -523,16 +523,23 @@ function listed(items: readonly string[]): string {
 }
 
 /**
- * What an import would write, as a SHA-256 of it (null when nothing): the Check step's answer
- * carries it, and the import writes only when its own plan has the same.
+ * What an import would write and what it would replace, as a SHA-256 (null when nothing): the
+ * Check step's answer carries it, and the import writes only when its own plan has the same.
+ * The review's changes hold the values replaced ("Tier: B → A"), so a company changed since
+ * the check changes it even when the file's values stay the same (Codex's reviews of
+ * ivanmueller/gss#95).
  */
-function fingerprintOf(batch: ImportBatchInput | null): Promise<string | null> {
+function fingerprintOf(
+  batch: ImportBatchInput | null,
+  review: ImportMatch['result'],
+): Promise<string | null> {
   if (batch === null) return Promise.resolve(null);
   return sha256Hex(
     JSON.stringify({
       skipped: batch.skippedCount,
       counterparties: batch.counterparties,
       additions: batch.additions,
+      review: review.counterparties.map(({ status, changes }) => ({ status, changes })),
     }),
   );
 }
@@ -605,6 +612,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         );
         const fingerprint = await fingerprintOf(
           importBatchFor(plan, match, { organizationId, fileName, contentSha256: '', rowCount: 0 }),
+          match.result,
         );
         const result = { ...match.result, fingerprint };
         if (!commit) return c.json(result);
@@ -659,8 +667,10 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           },
           // Only what the Check step showed is written: the list may have changed since
           // (Codex's review of ivanmueller/gss#95).
+          // Also when nothing is left to write, so a stale Check step is replaced.
           async (batch) => {
-            const fingerprint = await fingerprintOf(batch);
+            if (result === undefined) throw new Error('the import was not planned');
+            const fingerprint = await fingerprintOf(batch, result);
             if (fingerprint !== reviewed) throw new PlanChanged(fingerprint);
           },
         );

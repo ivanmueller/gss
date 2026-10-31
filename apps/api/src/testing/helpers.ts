@@ -65,8 +65,8 @@ export function fakeDatabase(): Mocked<Database> {
     importCounterparties: vi.fn<Database['importCounterparties']>(
       async (ctx, organizationId, plan, check) => {
         const batch = plan(await db.existingCounterparties(ctx, organizationId));
-        if (batch === null) return null;
         await check?.(batch);
+        if (batch === null) return null;
         return '00000000-0000-4000-8000-0000000ba7c4';
       },
     ),

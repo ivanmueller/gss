@@ -344,7 +344,7 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     organizationId: string,
     plan: (existing: ExistingCounterparty[]) => ImportBatchInput | null,
     /** Runs on the plan kept, before anything is written; throwing writes nothing. */
-    check?: (batch: ImportBatchInput) => Promise<void>,
+    check?: (batch: ImportBatchInput | null) => Promise<void>,
   ) => Promise<string | null>;
   isOrgAdmin: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   /** Sets a member's names (null removes one); false when not allowed or not a member. */
@@ -1002,7 +1002,10 @@ export function createDatabase(sql: postgres.Sql): Database {
         let batch: ImportBatchInput | null;
         for (let attempt = 1; ; attempt += 1) {
           batch = plan(await readExisting(tx, org));
-          if (batch === null) return null;
+          if (batch === null) {
+            await check?.(null);
+            return null;
+          }
           if (batch.organizationId !== org) throw new Error('import for another organization');
           const unlocked = batch.additions
             .map((item) => item.counterpartyId)

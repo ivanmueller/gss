@@ -406,6 +406,43 @@ describe('ImportSpreadsheet', () => {
     ]);
   });
 
+  // Codex's second review of ivanmueller/gss#95.
+  it('stops offering the import when the list changed and nothing is left to write', async () => {
+    const empty = result({
+      fingerprint: null,
+      summary: {
+        ...result().summary,
+        newCounterparties: 0,
+        existingCounterparties: 2,
+        contacts: 0,
+        facilities: 0,
+      },
+      counterparties: [],
+    });
+    mockApi({
+      'POST /counterparties/import': (call) =>
+        (call.body as { commit: boolean }).commit
+          ? Response.json(
+              {
+                error: {
+                  code: 'PLAN_CHANGED',
+                  message:
+                    'The list changed since this file was checked. Look over the changes again, then import.',
+                },
+                ...empty,
+              },
+              { status: 409 },
+            )
+          : Response.json(result()),
+    });
+    importer();
+    await chooseFile(CSV);
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Import 2 new counterparties' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The list changed');
+    expect(screen.getByRole('button', { name: /^Import 0/ })).toBeDisabled();
+  });
+
   it('adds new locations to companies already in the list when nothing else is new', async () => {
     const adding = result({
       summary: {

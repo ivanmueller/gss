@@ -385,3 +385,5 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Phones too long once formatted:** a valid number that formatting would make longer than 40 characters (a very long extension) is kept as written, in the app and in the database (migration `20261031040000_phone_format_length.sql`; staging's phones were tidied without such a number).
 - **An importer demoted mid-import:** the import now holds the importer's membership until it is done (migration `20261031030000_import_holds_membership.sql`), and an update that changes nothing undoes the whole import, which is then refused.
 
+**2026-10-31 — Codex's second review of ivanmueller/gss#95 (one P2, one P3).** Both fixed, each with a test that fails without the fix: the fingerprint now also holds the values a file would replace (the Check step's "Tier: B → A"), so a company changed by someone else since the check stops the import even when the file's values stay the same; and it is checked when nothing is left to write too, so a stale Check step is replaced by the new one (nothing to import) instead of answering "nothing new to import".
+
