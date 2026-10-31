@@ -469,3 +469,16 @@ describe('a removal committed while another change waits', () => {
     ).toEqual({ status: 'not_found' });
   });
 });
+
+// The owner's request of 2026-10-31: admins delete archived counterparties, never one with
+// history. Last, as it archives the counterparty the tests above use.
+describe('deleting a counterparty with a contact history, as app_api', () => {
+  it('keeps it, archived, and says why', async () => {
+    expect((await db.setArchived(as(users.ada), counterparties.buyer, true)).status).toBe('saved');
+    expect(await db.deleteCounterparty(as(users.ada), counterparties.buyer)).toEqual({
+      status: 'has_history',
+      history: ['contact_log', 'follow_ups'],
+    });
+    expect(await db.getCounterparty(as(users.ada), counterparties.buyer)).not.toBeNull();
+  });
+});

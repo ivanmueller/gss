@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mockApi } from '../test/api';
-import { clearApiCache, signedInAs, useApiResource } from './useApiResource';
+import { clearApiCache, forgetApiAnswers, signedInAs, useApiResource } from './useApiResource';
 
 function Show({
   path,
@@ -48,6 +48,26 @@ describe('useApiResource', () => {
     });
     render(<Show path="/thing" />);
     expect(screen.getByText('loading')).toBeInTheDocument();
+  });
+
+  it('forgets the answers under a path, and only those, after a delete', async () => {
+    mockApi({
+      'GET /counterparties?organization_id=a': () => Response.json({ name: 'Synthetic List' }),
+      'GET /quotes': () => Response.json({ name: 'Synthetic Quotes' }),
+    });
+    const list = render(<Show path="/counterparties?organization_id=a" />);
+    await screen.findByText('Synthetic List');
+    list.unmount();
+    const quotes = render(<Show path="/quotes" />);
+    await screen.findByText('Synthetic Quotes');
+    quotes.unmount();
+
+    forgetApiAnswers('/counterparties');
+    const again = render(<Show path="/counterparties?organization_id=a" />);
+    expect(screen.getByText('loading')).toBeInTheDocument();
+    again.unmount();
+    render(<Show path="/quotes" />);
+    expect(screen.getByText('Synthetic Quotes')).toBeInTheDocument();
   });
 
   // Codex's review of ivanmueller/gss#85.

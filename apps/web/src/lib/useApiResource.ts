@@ -42,6 +42,16 @@ function cacheKey(path: string, token: string): string {
   return `${signedInAs(token)}\n${path}`;
 }
 
+/**
+ * Forgets the kept answers to paths starting with `prefix`, for everyone: after a record is
+ * deleted, so its list does not show it again while it reloads.
+ */
+export function forgetApiAnswers(prefix: string): void {
+  for (const key of answers.keys()) {
+    if (key.slice(key.indexOf('\n') + 1).startsWith(prefix)) answers.delete(key);
+  }
+}
+
 /** Forgets every kept answer: on sign-out, so the next person never sees them. */
 export function clearApiCache(): void {
   answers.clear();

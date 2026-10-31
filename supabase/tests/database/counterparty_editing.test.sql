@@ -120,8 +120,8 @@ select ok(
   'app_api cannot change a counterparty''s organization, source or creation record'
 );
 select ok(
-  not has_table_privilege('app_api', 'app.counterparties', 'delete, truncate'),
-  'app_api cannot delete counterparties, only archive them'
+  not has_table_privilege('app_api', 'app.counterparties', 'truncate'),
+  'app_api cannot empty counterparties; it deletes only archived ones, as an admin (counterparty_deletion.test.sql)'
 );
 select ok(
   has_column_privilege('app_api', 'app.counterparty_contacts', 'name', 'update')

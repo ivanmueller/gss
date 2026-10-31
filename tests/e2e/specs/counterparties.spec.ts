@@ -311,6 +311,48 @@ async function accessToken(page: Page): Promise<string> {
   });
 }
 
+// The owner's request of 2026-10-31: an admin (the test user is one) deletes an archived
+// counterparty that has no history.
+test('deletes an archived counterparty, with a confirmation', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  await page.goto('/counterparties');
+  await page.getByRole('button', { name: 'Add counterparties' }).click();
+  await page
+    .getByRole('dialog', { name: 'Add counterparties' })
+    .getByRole('button', { name: /^Add by hand/ })
+    .click();
+  const dialog = page.getByRole('dialog', { name: 'Add a counterparty' });
+  const company = dialog.getByRole('region', { name: 'Company' });
+  await company.getByRole('checkbox', { name: 'Buyer' }).check();
+  await company.getByLabel('Legal name (required)').fill('Synthetic Short-Lived Co');
+  await choose(company.getByLabel('Country (required)'), 'Canada');
+  await dialog.getByRole('button', { name: 'Add counterparty' }).click();
+  await expect(page.getByRole('heading', { name: 'Synthetic Short-Lived Co' })).toBeVisible();
+  const address = page.url();
+
+  // Not before it is archived.
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+  await page
+    .getByRole('group', { name: 'Archive this counterparty' })
+    .getByRole('button', { name: 'Archive' })
+    .click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  const confirm = page.getByRole('group', { name: 'Delete this counterparty' });
+  await expect(confirm).toContainText('cannot be undone');
+  await confirm.getByRole('button', { name: 'Delete permanently' }).click();
+
+  await expect(page).toHaveURL(/\/counterparties$/);
+  await expect(page.getByRole('link', { name: 'Synthetic Short-Lived Co' })).toHaveCount(0);
+  await page.goto(address);
+  await expect(page.getByText('This counterparty does not exist.')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+
 test("another organization's counterparties stay hidden, even by id", async ({ page, request }) => {
   const headers = { Authorization: `Bearer ${await accessToken(page)}` };
 
@@ -528,6 +570,34 @@ test('enters an offer, records new terms, and withdraws it, keeping the history'
     headers,
   });
   expect(await other.json()).toEqual({ quotes: [], truncated: false });
+
+  expect(errors).toEqual([]);
+});
+
+// The owner's request of 2026-10-31: a counterparty with history is kept. Runs after the offer
+// test above, which leaves an offer from "Synthetic Hand Grower"; restored for the tests below.
+test('keeps an archived counterparty with bids or offers, and says why', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  await page.goto('/counterparties');
+  await page.getByRole('link', { name: 'Synthetic Hand Grower' }).click();
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+  await page
+    .getByRole('group', { name: 'Archive this counterparty' })
+    .getByRole('button', { name: 'Archive' })
+    .click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  const confirm = page.getByRole('group', { name: 'Delete this counterparty' });
+  await confirm.getByRole('button', { name: 'Delete permanently' }).click();
+  await expect(confirm.getByRole('alert')).toContainText(
+    'It has bids or offers, which are kept for the record, so it cannot be deleted. It stays archived.',
+  );
+  await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(page.getByRole('button', { name: 'More actions' })).toBeVisible();
 
   expect(errors).toEqual([]);
 });

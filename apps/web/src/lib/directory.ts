@@ -30,6 +30,11 @@ export function canEditDirectory(role: string): boolean {
   return role === 'operations' || role === 'org_admin';
 }
 
+/** Admins delete archived counterparties that have no history (owner's request, 2026-10-31). */
+export function canDeleteCounterparties(role: string): boolean {
+  return role === 'org_admin';
+}
+
 /**
  * Counterparties as choices of a searchable dropdown: the legal name, with the trading name
  * and the provinces or states and country beneath it, all searched.

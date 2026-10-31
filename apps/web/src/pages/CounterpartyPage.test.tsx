@@ -553,6 +553,68 @@ describe('CounterpartyPage editing', () => {
     ]);
   });
 
+  // The owner's request of 2026-10-31.
+  it('lets an admin delete an archived counterparty after a confirmation, then shows the list', async () => {
+    const calls = mockApi({
+      [`GET ${PATH}`]: () => Response.json({ ...DETAIL, archivedAt: '2026-10-28T10:00:00.000Z' }),
+      [`DELETE ${PATH}`]: () => new Response(null, { status: 204 }),
+    });
+    window.history.pushState(null, '', `/counterparties/${ID}`);
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    const confirm = screen.getByRole('group', { name: 'Delete this counterparty' });
+    expect(confirm).toHaveTextContent('cannot be undone');
+    // Keep it closes the question without deleting.
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Keep it' }));
+    expect(calls.some((call) => call.method === 'DELETE')).toBe(false);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/counterparties');
+    });
+    expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.path)).toEqual([
+      PATH,
+    ]);
+  });
+
+  it('says why a counterparty with history cannot be deleted, and stays on its page', async () => {
+    const message =
+      'It has bids or offers, which are kept for the record, so it cannot be deleted. It stays archived.';
+    mockApi({
+      [`GET ${PATH}`]: () => Response.json({ ...DETAIL, archivedAt: '2026-10-28T10:00:00.000Z' }),
+      [`DELETE ${PATH}`]: () =>
+        Response.json({ error: { code: 'HAS_HISTORY', message } }, { status: 409 }),
+    });
+    window.history.pushState(null, '', `/counterparties/${ID}`);
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(window.location.pathname).toBe(`/counterparties/${ID}`);
+    expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeEnabled();
+  });
+
+  it('offers Delete only to admins, and only once archived', async () => {
+    mockApi({
+      [`GET ${PATH}`]: () => Response.json({ ...DETAIL, archivedAt: '2026-10-28T10:00:00.000Z' }),
+    });
+    const { unmount } = render(
+      <CounterpartyPage
+        session={{ ...SESSION, organization: { ...ORG, role: 'operations' } }}
+        id={ID}
+      />,
+    );
+    expect(await screen.findByRole('button', { name: 'Restore' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    unmount();
+
+    mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    expect(await screen.findByRole('button', { name: 'More actions' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
   it('offers no changes to a viewer', async () => {
     mockApi({ [`GET ${PATH}`]: () => Response.json(DETAIL) });
     render(

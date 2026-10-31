@@ -192,8 +192,10 @@ select throws_ok(
     pg_temp.add('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
                 'oats', 'buys', '00000000-0000-4000-8000-0000000022aa')),
   'GS005', null, 'nothing is added to an archived counterparty');
+-- By anyone but an admin, who removes them when deleting the counterparty
+-- (counterparty_deletion.test.sql).
 select throws_ok(
-  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000022aa',
+  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000011aa',
     $$delete from app.counterparty_commodities where commodity_code = 'canola'$$),
   'GS005', null, 'nor removed');
 -- Another organization learns nothing about the archiving either: it is refused as always.

@@ -30,6 +30,7 @@ import { Hono } from 'hono';
 
 import {
   LIST_LIMIT,
+  type CounterpartyHistory,
   type Database,
   type ExistingCounterparty,
   type ImportAddition,
@@ -242,6 +243,21 @@ export function importBatchFor(
     })),
     additions: match.adding.map(({ addition }) => addition),
   };
+}
+
+/** What keeps a counterparty from being deleted, as the answer names it. */
+const HISTORY_NAMES: Record<CounterpartyHistory, string> = {
+  quotes: 'bids or offers',
+  freight: 'freight rates',
+  contact_log: 'a contact history',
+  follow_ups: 'follow-ups',
+};
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: readonly string[]): string {
+  return items.length <= 1
+    ? (items[0] ?? '')
+    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1] ?? ''}`;
 }
 
 /** /api/v1/counterparties. Mounted after requireUser, so every route needs a signed-in user. */
@@ -485,7 +501,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
-  // Archiving hides a counterparty from the list and the map; it is never deleted.
+  // Archiving hides a counterparty from the list and the map; an admin may then delete it.
   for (const [action, archived] of [
     ['archive', true],
     ['restore', false],
@@ -500,6 +516,34 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       });
     });
   }
+
+  // Admins delete an archived counterparty with no history (owner's request, 2026-10-31).
+  routes.delete('/:id', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.deleteCounterparty(ctx, id);
+      switch (result.status) {
+        case 'deleted':
+          return c.body(null, 204);
+        case 'not_found':
+          return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+        case 'forbidden':
+          return apiError(c, 403, 'FORBIDDEN', 'Only admins can delete counterparties.');
+        case 'not_archived':
+          return apiError(c, 409, 'NOT_ARCHIVED', 'Archive this counterparty before deleting it.');
+        case 'has_history':
+          return apiError(
+            c,
+            409,
+            'HAS_HISTORY',
+            `It has ${listed(result.history.map((what) => HISTORY_NAMES[what]))}, which are kept for the record, so it cannot be deleted. It stays archived.`,
+            { history: result.history },
+          );
+      }
+    });
+  });
 
   routes.post('/:id/contacts', async (c) => {
     c.header('Cache-Control', 'no-store');
