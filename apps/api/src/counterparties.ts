@@ -1,8 +1,10 @@
 import {
   commodityChangeSchema,
-  contactKey,
+  COUNTERPARTY_TYPES,
   counterpartyKey,
   facilityKey,
+  FACILITY_TYPE_LABELS,
+  MARKET_LABELS,
   createContactSchema,
   createCounterpartySchema,
   createFacilitySchema,
@@ -20,9 +22,12 @@ import {
   updateContactSchema,
   updateCounterpartySchema,
   updateFacilitySchema,
+  type ContactInput,
   type CounterpartyType,
+  type FacilityInput,
   type FieldIssue,
   type ImportGroup,
+  type Market,
   type ImportIssue,
   type ParsedImportRow,
 } from '@grain/domain';
@@ -30,9 +35,12 @@ import { Hono } from 'hono';
 
 import {
   LIST_LIMIT,
+  type CounterpartyChanges,
   type CounterpartyHistory,
   type Database,
   type ExistingCounterparty,
+  type ExistingFacility,
+  type FacilityChanges,
   type ImportAddition,
   type ImportBatchInput,
   type RequestContext,
@@ -123,24 +131,229 @@ function declaredLength(header: string | undefined): number | null {
   return Number(header);
 }
 
+/** A name or place compared without case or extra spaces. */
+function norm(value: string | null): string {
+  return (value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 /**
- * What a file adds to a company already in the list: the locations, contacts and
- * commodities it does not have yet. Its own details are never changed.
+ * Whether a file's contact is one the company has: the same email when both have one, else
+ * the same name. Its phone, email and role can then be updated.
  */
-function newFor(company: ExistingCounterparty, group: ImportGroup): ImportAddition {
-  const facilities = new Set(company.facilities.map(facilityKey));
-  const contacts = new Set(company.contacts.map(contactKey));
+function sameContact(listed: ContactInput, contact: ContactInput): boolean {
+  if (listed.email !== null && contact.email !== null) {
+    return listed.email.toLowerCase() === contact.email.toLowerCase();
+  }
+  return norm(listed.name) === norm(contact.name);
+}
+
+/**
+ * Whether a file's location is one the company has: the same name, city, province or state
+ * and country, with an address and postal code that agree or are missing on one side (so a
+ * file can fill them in). One given only by its coordinates matches by them (facilityKey).
+ */
+function sameLocation(listed: ExistingFacility, facility: FacilityInput): boolean {
+  const words = (
+    f: Pick<FacilityInput, 'name' | 'addressLine' | 'city' | 'region' | 'postalCode'>,
+  ) => [f.name, f.addressLine, f.city, f.region, f.postalCode].map(norm);
+  if (words(listed).every((word) => word === '') || words(facility).every((word) => word === '')) {
+    return facilityKey(listed) === facilityKey(facility);
+  }
+  const fits = (a: string | null, b: string | null) =>
+    norm(a) === '' || norm(b) === '' || norm(a) === norm(b);
+  return (
+    listed.country === facility.country &&
+    norm(listed.name) === norm(facility.name) &&
+    norm(listed.city) === norm(facility.city) &&
+    norm(listed.region) === norm(facility.region) &&
+    fits(listed.addressLine, facility.addressLine) &&
+    fits(listed.postalCode, facility.postalCode)
+  );
+}
+
+const NOTES_MAX = 2000;
+
+/** "Company phone: (403) 555-0100 → (403) 555-0199", or "… none → …". */
+function changed(label: string, before: string | null, after: string): string {
+  return `${label}: ${before ?? 'none'} → ${after}`;
+}
+
+/**
+ * What a file changes on a company already in the list (owner's answers, 2026-10-30 and
+ * 2026-10-31): new locations, contacts and commodities are added (unverified); a filled cell
+ * replaces its detail and an empty one keeps it; types are only added; a verified company
+ * stays verified; the file's notes go below the company's own. Commodities already listed,
+ * verified or not, are left as they are. `changes` says it all in words for the Check step.
+ */
+function changesFor(
+  company: ExistingCounterparty,
+  group: ImportGroup,
+): { addition: ImportAddition; changes: string[]; warnings: ImportIssue[] } {
+  const changes: string[] = [];
+  const warnings: ImportIssue[] = [];
+  const file = group.counterparty;
+  const details: CounterpartyChanges = {};
+
+  const types = COUNTERPARTY_TYPES.filter(
+    (type) => company.types.includes(type) || file.types.includes(type),
+  );
+  if (types.length > company.types.length) {
+    details.types = types;
+    changes.push(changed('Type', company.types.join(', '), types.join(', ')));
+  }
+  if (
+    group.givenVerification &&
+    company.verificationStatus !== 'verified' &&
+    file.verificationStatus !== company.verificationStatus
+  ) {
+    details.verificationStatus = file.verificationStatus;
+    changes.push(changed('Verification', company.verificationStatus, file.verificationStatus));
+  }
+  if (file.website !== null && file.website !== company.website) {
+    details.website = file.website;
+    changes.push(changed('Website', company.website, file.website));
+  }
+  if (file.phone !== null && file.phone !== company.phone) {
+    details.phone = file.phone;
+    changes.push(changed('Company phone', company.phone, file.phone));
+  }
+  if (file.markets.length > 0 && file.markets.join(',') !== company.markets.join(',')) {
+    details.markets = file.markets;
+    const names = (markets: readonly Market[]) =>
+      markets.map((market) => MARKET_LABELS[market]).join(', ') || null;
+    changes.push(changed('Markets', names(company.markets), names(file.markets) ?? ''));
+  }
+  if (file.tier !== null && file.tier !== company.tier) {
+    details.tier = file.tier;
+    changes.push(changed('Tier', company.tier, file.tier));
+  }
+  if (file.notes !== null && !(company.notes ?? '').includes(file.notes)) {
+    const notes = company.notes === null ? file.notes : `${company.notes}\n\n${file.notes}`;
+    if (notes.length > NOTES_MAX) {
+      warnings.push({
+        line: group.lines[0] ?? 0,
+        field: 'notes',
+        message: `not added to ${company.legalName}'s notes: together they would be longer than ${String(NOTES_MAX)} characters`,
+      });
+    } else {
+      details.notes = notes;
+      changes.push("Notes: the file's notes added below");
+    }
+  }
+
+  const contacts: ContactInput[] = [];
+  const contactUpdates: ImportAddition['contactUpdates'] = [];
+  for (const contact of group.contacts) {
+    const listed = company.contacts.find((item) => sameContact(item, contact));
+    if (!listed) {
+      contacts.push(contact);
+      continue;
+    }
+    const update: ImportAddition['contactUpdates'][number]['changes'] = {};
+    const said: string[] = [];
+    for (const [field, label] of [
+      ['phone', 'phone'],
+      ['email', 'email'],
+      ['role', 'role'],
+    ] as const) {
+      const value = contact[field];
+      if (value !== null && value !== listed[field]) {
+        update[field] = value;
+        said.push(changed(label, listed[field], value));
+      }
+    }
+    if (said.length > 0) {
+      contactUpdates.push({ id: listed.id, changes: update });
+      changes.push(`Contact ${listed.name}: ${said.join('; ')}`);
+    }
+  }
+
+  const facilities: FacilityInput[] = [];
+  const facilityUpdates: ImportAddition['facilityUpdates'] = [];
+  for (const facility of group.facilities) {
+    const listed = company.facilities.find((item) => sameLocation(item, facility));
+    if (!listed) {
+      facilities.push(facility);
+      continue;
+    }
+    const update: FacilityChanges = {};
+    const said: string[] = [];
+    if (facility.facilityType !== null && facility.facilityType !== listed.facilityType) {
+      update.facilityType = facility.facilityType;
+      said.push(
+        changed(
+          'type',
+          listed.facilityType && FACILITY_TYPE_LABELS[listed.facilityType],
+          FACILITY_TYPE_LABELS[facility.facilityType],
+        ),
+      );
+    }
+    if (listed.addressLine === null && facility.addressLine !== null) {
+      update.addressLine = facility.addressLine;
+      said.push(changed('address', null, facility.addressLine));
+    }
+    if (listed.postalCode === null && facility.postalCode !== null) {
+      update.postalCode = facility.postalCode;
+      said.push(changed('postal code', null, facility.postalCode));
+    }
+    const at = (value: string | null) => (value === null ? null : Number(value).toFixed(6));
+    if (
+      facility.latitude !== null &&
+      facility.longitude !== null &&
+      (at(facility.latitude) !== at(listed.latitude) ||
+        at(facility.longitude) !== at(listed.longitude))
+    ) {
+      update.coordinates = {
+        latitude: facility.latitude,
+        longitude: facility.longitude,
+        locationPrecision: facility.locationPrecision ?? 'approximate',
+      };
+      said.push(
+        changed(
+          'coordinates',
+          listed.latitude === null
+            ? null
+            : `${String(at(listed.latitude))}, ${String(at(listed.longitude))}`,
+          `${String(at(facility.latitude))}, ${String(at(facility.longitude))}`,
+        ),
+      );
+    }
+    if (said.length > 0) {
+      facilityUpdates.push({ id: listed.id, changes: update });
+      const where = [listed.name, listed.city, listed.region].filter(Boolean).join(', ');
+      changes.push(`Location ${where || 'without a name'}: ${said.join('; ')}`);
+    }
+  }
+
   const commodities = new Set(company.commodities.map((k) => `${k.direction}:${k.commodity}`));
   return {
-    counterpartyId: company.id,
-    facilities: group.facilities.filter((facility) => !facilities.has(facilityKey(facility))),
-    contacts: group.contacts.filter((contact) => !contacts.has(contactKey(contact))),
-    commodities: group.commodities.filter((k) => !commodities.has(`${k.direction}:${k.commodity}`)),
+    addition: {
+      counterpartyId: company.id,
+      details: Object.keys(details).length > 0 ? details : null,
+      contacts,
+      facilities,
+      commodities: group.commodities.filter(
+        (k) => !commodities.has(`${k.direction}:${k.commodity}`),
+      ),
+      contactUpdates,
+      facilityUpdates,
+    },
+    changes,
+    warnings,
   };
 }
 
+/** Whether a file adds anything to a listed company or changes anything on it. */
 function hasAny(addition: ImportAddition): boolean {
-  return addition.facilities.length + addition.contacts.length + addition.commodities.length > 0;
+  return (
+    addition.details !== null ||
+    addition.facilities.length +
+      addition.contacts.length +
+      addition.commodities.length +
+      addition.contactUpdates.length +
+      addition.facilityUpdates.length >
+      0
+  );
 }
 
 export interface ImportPlan {
@@ -184,9 +397,14 @@ export function matchImport(
   const fresh = plan.groups.filter((group) => !existing.has(group.key));
   const additions = plan.groups.flatMap((group) => {
     const company = existing.get(group.key);
-    return company && !company.archived ? [{ group, addition: newFor(company, group) }] : [];
+    return company && !company.archived ? [{ group, ...changesFor(company, group) }] : [];
   });
   const adding = additions.filter(({ addition }) => hasAny(addition));
+  const updating = additions.filter(
+    ({ addition }) =>
+      addition.details !== null ||
+      addition.contactUpdates.length + addition.facilityUpdates.length > 0,
+  );
   const result = {
     committed: false,
     importBatchId: null as string | null,
@@ -204,10 +422,14 @@ export function matchImport(
       addedContacts: adding.reduce((sum, { addition }) => sum + addition.contacts.length, 0),
       addedFacilities: adding.reduce((sum, { addition }) => sum + addition.facilities.length, 0),
       addedCommodities: adding.reduce((sum, { addition }) => sum + addition.commodities.length, 0),
+      // Listed companies whose own details, contacts or locations the file changes (owner's
+      // answer, 2026-10-31).
+      existingUpdated: updating.length,
     },
     counterparties: plan.groups.map((group) => {
       const company = existing.get(group.key);
-      const addition = additions.find((item) => item.group === group)?.addition;
+      const match = additions.find((item) => item.group === group);
+      const addition = match?.addition;
       return {
         legalName: group.counterparty.legalName,
         country: group.counterparty.primaryCountry,
@@ -215,10 +437,11 @@ export function matchImport(
         contacts: addition ? addition.contacts.length : group.contacts.length,
         facilities: addition ? addition.facilities.length : group.facilities.length,
         status: !company ? 'new' : company.archived ? 'archived' : 'existing',
+        changes: match?.changes ?? [],
       };
     }),
     issues: plan.issues,
-    warnings: plan.warnings,
+    warnings: [...plan.warnings, ...additions.flatMap((item) => item.warnings)],
   };
   return { result, fresh, adding };
 }

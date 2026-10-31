@@ -71,6 +71,9 @@ describe('AddCounterpartyForm', () => {
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Seller' }));
     await choose(within(company).getByLabelText('Country (required)'), 'Canada');
     await userEvent.type(within(company).getByLabelText('Company phone'), '306 555 0100');
+    // Formatted once the box is left (owner's choice, 2026-10-31).
+    await userEvent.tab();
+    expect(within(company).getByLabelText('Company phone')).toHaveValue('(306) 555-0100');
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Small Animal' }));
     await choose(within(company).getByLabelText('Tier'), 'Tier A');
     await userEvent.type(within(section('Contact')).getByLabelText('Name'), 'Synthetic Grower');
@@ -94,7 +97,7 @@ describe('AddCounterpartyForm', () => {
           types: 'seller',
           country: 'CA',
           verificationStatus: 'unverified',
-          companyPhone: '306 555 0100',
+          companyPhone: '(306) 555-0100',
           markets: 'small_animal',
           tier: 'A',
           contactName: 'Synthetic Grower',

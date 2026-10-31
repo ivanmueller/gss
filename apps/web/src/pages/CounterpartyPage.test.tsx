@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -275,6 +275,69 @@ describe('CounterpartyPage', () => {
       expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
     });
     expect(screen.getByText('Logo saved.')).toBeInTheDocument();
+  });
+
+  // The owner's choice of 2026-10-31: Copy image on a website, then Paste logo.
+  describe('pasting a logo', () => {
+    function withLogoPut() {
+      return mockApi({
+        [`GET /counterparties/${ID}`]: () => Response.json(DETAIL),
+        [`PUT /counterparties/${ID}/logo`]: () =>
+          Response.json({ sha256: 'b'.repeat(64), width: 1, height: 1, bytes: 70 }),
+      });
+    }
+    function clipboardHolding(items: { type: string; data: Uint8Array }[]) {
+      vi.stubGlobal(
+        'navigator',
+        withClipboard({
+          read: () =>
+            Promise.resolve(
+              items.map(({ type, data }) => ({
+                types: [type],
+                getType: () => Promise.resolve(new Blob([new Uint8Array(data)], { type })),
+              })),
+            ),
+        }),
+      );
+    }
+    /** The browser's navigator with this clipboard, or none. */
+    function withClipboard(clipboard: unknown): Navigator {
+      return Object.assign(Object.create(navigator) as Navigator, { clipboard });
+    }
+
+    it('uploads the copied image when Paste logo is clicked', async () => {
+      const calls = withLogoPut();
+      clipboardHolding([{ type: 'image/png', data: PNG }]);
+      render(<CounterpartyPage session={SESSION} id={ID} />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Paste logo' }));
+      await waitFor(() => {
+        expect(calls.find((call) => call.method === 'PUT')?.body).toEqual(PNG);
+      });
+    });
+
+    it('says so when nothing copied is an image', async () => {
+      const calls = withLogoPut();
+      clipboardHolding([{ type: 'text/plain', data: new TextEncoder().encode('Synthetic') }]);
+      render(<CounterpartyPage session={SESSION} id={ID} />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Paste logo' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('No copied image found');
+      expect(calls.some((call) => call.method === 'PUT')).toBe(false);
+    });
+
+    it('takes Ctrl+V on the button where the browser keeps the clipboard to itself', async () => {
+      const calls = withLogoPut();
+      vi.stubGlobal('navigator', withClipboard(undefined));
+      render(<CounterpartyPage session={SESSION} id={ID} />);
+      const paste = await screen.findByRole('button', { name: 'Paste logo' });
+      await userEvent.click(paste);
+      expect(await screen.findByRole('alert')).toHaveTextContent('press Ctrl+V');
+      fireEvent.paste(paste, {
+        clipboardData: { files: [new File([PNG], 'image.png', { type: 'image/png' })] },
+      });
+      await waitFor(() => {
+        expect(calls.find((call) => call.method === 'PUT')?.body).toEqual(PNG);
+      });
+    });
   });
 
   it('refuses a file that is not a PNG before uploading it', async () => {

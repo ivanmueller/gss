@@ -438,6 +438,11 @@ export interface DirectoryRecord {
 
 export interface ParsedImportRow extends DirectoryRecord {
   line: number;
+  /**
+   * Whether the row gave a verification status; an empty cell reads as unverified, which
+   * must not replace a listed company's (owner's answer, 2026-10-31).
+   */
+  givenVerification: boolean;
   /** What was read differently from how the row put it, e.g. a second phone number moved to the notes. */
   notices: ImportIssue[];
 }
@@ -570,9 +575,31 @@ class FieldReader {
   }
 }
 
-/** A phone number field, with "ext." or "extension" written as x; null when empty. */
+/**
+ * A phone number as it is saved (owner's choice, 2026-10-31): a North American number as
+ * (403) 555-0100, an extension as " x7" ("ext. 7" and "extension 7" too). A number with
+ * another country code (+44 …), or anything else that is not 10 digits (11 with a leading 1),
+ * is kept as written. `app.format_phone` in the database does the same
+ * (20261031020000_phone_format.sql).
+ */
+export function formatPhone(text: string): string {
+  const phone = text.trim().replace(/\s*(extension|ext\.?)\s*/i, ' x');
+  const parts = /^(.*?)\s*x\s*(\d+)$/i.exec(phone);
+  const main = parts?.[1] ?? phone;
+  const extension = parts?.[2];
+  if (/[^0-9+(). /-]/.test(main)) return phone;
+  let digits = main.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+  else if (main.startsWith('+')) return phone;
+  if (digits.length !== 10) return phone;
+  const ext = extension === undefined ? '' : ` x${extension}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}${ext}`;
+}
+
+/** A phone number field, formatted (formatPhone); null when empty. */
 function readPhone(r: FieldReader, field: 'contactPhone' | 'companyPhone'): string | null {
-  const phone = r.value(field)?.replace(/\s*(extension|ext\.?)\s*/i, ' x') ?? null;
+  const text = r.value(field);
+  const phone = text === null ? null : formatPhone(text);
   if (phone !== null && !PHONE.test(phone)) r.issue(field, `"${phone}" is not a phone number`);
   return phone;
 }
@@ -604,9 +631,9 @@ function readCompanyPhone(r: FieldReader): { phone: string | null; more: string 
   if (!PHONE.test(first) || rest === '') return { phone: readPhone(r, 'companyPhone'), more: null };
   r.notice(
     'companyPhone',
-    `holds more than one number or a note: "${first}" is the company phone, and "${rest}" is added to the notes`,
+    `holds more than one number or a note: "${formatPhone(first)}" is the company phone, and "${rest}" is added to the notes`,
   );
-  return { phone: first, more: rest };
+  return { phone: formatPhone(first), more: rest };
 }
 
 /**
@@ -910,7 +937,12 @@ export function parseImportRow(
   }
   return {
     status: 'ok',
-    row: { line, ...result.record, notices: result.notices.map((notice) => ({ line, ...notice })) },
+    row: {
+      line,
+      ...result.record,
+      givenVerification: (values.verificationStatus ?? '').trim() !== '',
+      notices: result.notices.map((notice) => ({ line, ...notice })),
+    },
   };
 }
 
@@ -1061,6 +1093,8 @@ export function contactKey(contact: Pick<ContactInput, 'name' | 'email' | 'phone
 export interface ImportGroup {
   key: string;
   counterparty: CounterpartyInput;
+  /** Whether its first row gave a verification status (ParsedImportRow). */
+  givenVerification: boolean;
   contacts: ContactInput[];
   facilities: FacilityInput[];
   /** Every row's commodities, each once. */
@@ -1090,6 +1124,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       group = {
         key,
         counterparty: row.counterparty,
+        givenVerification: row.givenVerification,
         contacts: [],
         facilities: [],
         commodities: [],

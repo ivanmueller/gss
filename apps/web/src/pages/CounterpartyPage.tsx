@@ -15,6 +15,7 @@ import {
   Archive,
   ArchiveRestore,
   CalendarPlus,
+  ClipboardPaste,
   Ellipsis,
   ImageUp,
   Layers,
@@ -31,7 +32,14 @@ import {
   Trash2,
   Truck,
 } from 'lucide-react';
-import { useMemo, useState, type ChangeEvent, type ReactNode, type SyntheticEvent } from 'react';
+import {
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type ReactNode,
+  type SyntheticEvent,
+} from 'react';
 
 import { BackLink } from '../components/BackLink';
 import {
@@ -102,7 +110,11 @@ import { useMediaQuery } from '../lib/useMediaQuery';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from './CounterpartiesPage';
 
-/** Uploads a PNG, JPG or WebP logo (JPG and WebP are saved as PNG). */
+/**
+ * Uploads a PNG, JPG or WebP logo (JPG and WebP are saved as PNG), chosen from a file or
+ * pasted: on a website, right-click the logo → Copy image, then Paste logo here, or Ctrl+V
+ * (Cmd+V) on that button (owner's choice, 2026-10-31). The app never fetches the website.
+ */
 function LogoUpload({
   counterpartyId,
   token,
@@ -120,10 +132,7 @@ function LogoUpload({
     kind: 'idle',
   });
 
-  async function upload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  async function upload(file: File) {
     setState({ kind: 'saving' });
     const logo = await logoAsPng(file);
     if (!logo.ok) {
@@ -147,17 +156,69 @@ function LogoUpload({
     }
   }
 
+  function chosen(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) void upload(file);
+  }
+
+  /** The copied image, read when the button is clicked (the browser may ask first). */
+  async function pasteFromClipboard() {
+    // Missing in older browsers and on pages not served over https.
+    const clipboard = navigator.clipboard as Clipboard | undefined;
+    if (typeof clipboard?.read !== 'function') {
+      setState({ kind: 'error', message: PASTE_WITH_KEYS });
+      return;
+    }
+    try {
+      for (const item of await clipboard.read()) {
+        const type = item.types.find((kind) => kind.startsWith('image/'));
+        if (type) {
+          const blob = await item.getType(type);
+          await upload(new File([blob], 'pasted logo', { type }));
+          return;
+        }
+      }
+      setState({ kind: 'error', message: NOTHING_COPIED });
+    } catch {
+      setState({ kind: 'error', message: PASTE_WITH_KEYS });
+    }
+  }
+
+  /** Ctrl+V or Cmd+V while the button is selected. */
+  function pasted(event: ClipboardEvent<HTMLButtonElement>) {
+    const file = [...event.clipboardData.files].find((item) => item.type.startsWith('image/'));
+    event.preventDefault();
+    if (file) void upload(file);
+    else setState({ kind: 'error', message: NOTHING_COPIED });
+  }
+
+  const saving = state.kind === 'saving';
   return (
     <div className="flex flex-col gap-1 text-sm">
-      <FileButton
-        accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
-        size="sm"
-        disabled={state.kind === 'saving'}
-        onChange={(event) => void upload(event)}
-      >
-        <ImageUp aria-hidden="true" />
-        {state.kind === 'saving' ? 'Uploading…' : label}
-      </FileButton>
+      <div className="flex flex-wrap gap-2">
+        <FileButton
+          accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+          size="sm"
+          disabled={saving}
+          onChange={chosen}
+        >
+          <ImageUp aria-hidden="true" />
+          {saving ? 'Uploading…' : label}
+        </FileButton>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={saving}
+          title="On the website, right-click the logo, choose Copy image, then click here."
+          onClick={() => void pasteFromClipboard()}
+          onPaste={pasted}
+        >
+          <ClipboardPaste aria-hidden="true" />
+          Paste logo
+        </Button>
+      </div>
       {state.kind === 'saved' && (
         <p role="status" className="text-xs text-success">
           Logo saved.
@@ -171,6 +232,11 @@ function LogoUpload({
     </div>
   );
 }
+
+const NOTHING_COPIED =
+  'No copied image found. On the website, right-click the logo, choose Copy image, then paste again.';
+const PASTE_WITH_KEYS =
+  'This browser did not let the app read the copied image. Click Paste logo, then press Ctrl+V (Cmd+V on a Mac).';
 
 function address(facility: Facility): string {
   const parts = [

@@ -320,6 +320,13 @@ function existing(
     primaryCountry,
     legalName,
     archived: false,
+    types: ['buyer'],
+    verificationStatus: 'unverified',
+    website: null,
+    phone: null,
+    markets: [],
+    tier: null,
+    notes: null,
     facilities: [],
     contacts: [],
     commodities: [],
@@ -367,6 +374,7 @@ describe('POST /api/v1/counterparties/import', () => {
         addedContacts: 0,
         addedFacilities: 0,
         addedCommodities: 0,
+        existingUpdated: 0,
       },
       counterparties: [
         {
@@ -376,6 +384,7 @@ describe('POST /api/v1/counterparties/import', () => {
           contacts: 1,
           facilities: 1,
           status: 'new',
+          changes: [],
         },
         {
           legalName: 'Synthetic Existing Co',
@@ -384,6 +393,7 @@ describe('POST /api/v1/counterparties/import', () => {
           contacts: 0,
           facilities: 0,
           status: 'existing',
+          changes: [],
         },
       ],
       issues: [],
@@ -515,6 +525,9 @@ describe('POST /api/v1/counterparties/import', () => {
       existing('Synthetic Mills Limited', 'CA', {
         facilities: [
           {
+            id: '00000000-0000-4000-8000-000000000f01',
+            facilityType: null,
+            locationPrecision: null,
             name: null,
             addressLine: null,
             city: 'Alpha',
@@ -526,7 +539,15 @@ describe('POST /api/v1/counterparties/import', () => {
             longitude: '-104.600000',
           },
         ],
-        contacts: [{ name: 'Ana', email: null, phone: null }],
+        contacts: [
+          {
+            id: '00000000-0000-4000-8000-0000000c0001',
+            name: 'Ana',
+            role: null,
+            email: null,
+            phone: null,
+          },
+        ],
         commodities: [{ commodity: 'canola', direction: 'buys' }],
       }),
       existing('Synthetic Closed Co', 'US', { archived: true }),
@@ -596,6 +617,9 @@ describe('POST /api/v1/counterparties/import', () => {
             facilities: [expect.objectContaining({ city: 'Beta', region: 'MB' }) as unknown],
             contacts: [expect.objectContaining({ name: 'Ben' }) as unknown],
             commodities: [{ commodity: 'oats', direction: 'buys' }],
+            details: null,
+            contactUpdates: [],
+            facilityUpdates: [],
           },
         ],
       }),
@@ -621,11 +645,200 @@ describe('POST /api/v1/counterparties/import', () => {
     });
   });
 
+  // The owner's answer of 2026-10-31: filled cells win, empty ones keep, verified stays.
+  it('updates a listed company from a file, and says what changes', async () => {
+    const listed = [
+      existing('Synthetic Mills', 'CA', {
+        types: ['seller'],
+        verificationStatus: 'verified',
+        phone: '(306) 555-0100',
+        markets: ['pet'],
+        tier: 'B',
+        notes: 'Synthetic own note.',
+        contacts: [
+          {
+            id: '00000000-0000-4000-8000-0000000c0001',
+            name: 'Ana',
+            role: null,
+            email: 'ana@example.test',
+            phone: null,
+          },
+        ],
+        facilities: [
+          {
+            id: '00000000-0000-4000-8000-000000000f01',
+            name: null,
+            facilityType: null,
+            addressLine: null,
+            city: 'Alpha',
+            region: 'SK',
+            postalCode: null,
+            country: 'CA',
+            latitude: null,
+            longitude: null,
+            locationPrecision: null,
+          },
+        ],
+        commodities: [{ commodity: 'oats', direction: 'buys' }],
+      }),
+    ];
+    db.existingCounterparties.mockResolvedValueOnce(listed);
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'buyers.csv',
+      commit: true,
+      defaultTypes: ['buyer'],
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Mills',
+            country: 'CA',
+            verificationStatus: 'unverified',
+            website: 'example.com',
+            companyPhone: '306 555 0199',
+            tier: 'A',
+            notes: 'Synthetic file note.',
+            commodities: 'Canola',
+            contactName: 'ANA',
+            contactRole: 'Buyer',
+            contactPhone: '306-555-0111',
+            facilityType: 'Elevator',
+            addressLine: '1 Synthetic Road',
+            city: 'Alpha',
+            region: 'SK',
+            postalCode: 'S4P 3Y2',
+          },
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const answer = await res.json<{
+      summary: Record<string, number>;
+      counterparties: { status: string; contacts: number; facilities: number; changes: string[] }[];
+    }>();
+    expect(answer.summary).toMatchObject({
+      newCounterparties: 0,
+      existingWithAdditions: 1,
+      existingUpdated: 1,
+      addedContacts: 0,
+      addedFacilities: 0,
+      addedCommodities: 1,
+    });
+    expect(answer.counterparties).toEqual([
+      expect.objectContaining({
+        status: 'existing',
+        contacts: 0,
+        facilities: 0,
+        changes: [
+          'Type: seller → buyer, seller',
+          'Website: none → https://example.com',
+          'Company phone: (306) 555-0100 → (306) 555-0199',
+          'Tier: B → A',
+          "Notes: the file's notes added below",
+          'Contact Ana: phone: none → (306) 555-0111; role: none → Buyer',
+          'Location Alpha, SK: type: none → Elevator; address: none → 1 Synthetic Road; postal code: none → S4P 3Y2',
+        ],
+      }),
+    ]);
+    // A verified company stays verified; empty Market cells keep its markets.
+    expect(planned(listed)?.additions).toEqual([
+      {
+        counterpartyId: listed[0]?.id,
+        details: {
+          types: ['buyer', 'seller'],
+          website: 'https://example.com',
+          phone: '(306) 555-0199',
+          tier: 'A',
+          notes: 'Synthetic own note.\n\nSynthetic file note.',
+        },
+        contacts: [],
+        facilities: [],
+        commodities: [{ commodity: 'canola', direction: 'buys' }],
+        contactUpdates: [
+          {
+            id: '00000000-0000-4000-8000-0000000c0001',
+            changes: { phone: '(306) 555-0111', role: 'Buyer' },
+          },
+        ],
+        facilityUpdates: [
+          {
+            id: '00000000-0000-4000-8000-000000000f01',
+            changes: {
+              facilityType: 'elevator',
+              addressLine: '1 Synthetic Road',
+              postalCode: 'S4P 3Y2',
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('changes nothing when the file says what the company already has', async () => {
+    const listed = [
+      existing('Synthetic Mills', 'CA', {
+        phone: '(306) 555-0100',
+        tier: 'A',
+        notes: 'Synthetic own note.\n\nSynthetic file note.',
+      }),
+    ];
+    db.existingCounterparties.mockResolvedValueOnce(listed);
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'buyers.csv',
+      commit: true,
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Mills',
+            country: 'CA',
+            companyPhone: '306.555.0100',
+            tier: 'a',
+            notes: 'Synthetic file note.',
+          },
+        },
+      ],
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'NOTHING_TO_IMPORT' } });
+  });
+
+  it('keeps notes that would grow too long, and says so', async () => {
+    db.existingCounterparties.mockResolvedValueOnce([
+      existing('Synthetic Mills', 'CA', { notes: 'x'.repeat(1990) }),
+    ]);
+    const res = await postImport({
+      ...body,
+      rows: [
+        {
+          line: 7,
+          values: { legalName: 'Synthetic Mills', country: 'CA', notes: 'Synthetic file note.' },
+        },
+      ],
+    });
+    expect(await res.json()).toMatchObject({
+      summary: { existingUpdated: 0 },
+      warnings: [
+        {
+          line: 7,
+          field: 'notes',
+          message:
+            "not added to Synthetic Mills's notes: together they would be longer than 2000 characters",
+        },
+      ],
+    });
+  });
+
   it('says when there is nothing new to import', async () => {
     const listed = [
       existing('Synthetic Mills', 'CA', {
         facilities: [
           {
+            id: '00000000-0000-4000-8000-000000000f01',
+            facilityType: null,
+            locationPrecision: null,
             name: null,
             addressLine: null,
             city: 'Alpha',
@@ -636,7 +849,15 @@ describe('POST /api/v1/counterparties/import', () => {
             longitude: null,
           },
         ],
-        contacts: [{ name: 'Ana', email: null, phone: null }],
+        contacts: [
+          {
+            id: '00000000-0000-4000-8000-0000000c0001',
+            name: 'Ana',
+            role: null,
+            email: null,
+            phone: null,
+          },
+        ],
       }),
       existing('Synthetic Existing Co', 'US'),
     ];
@@ -785,7 +1006,7 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
       expect.anything(),
       ORG,
       expect.objectContaining({
-        counterparty: expect.objectContaining({ phone: '306 555 0100 x4' }) as unknown,
+        counterparty: expect.objectContaining({ phone: '(306) 555-0100 x4' }) as unknown,
         facilities: [expect.objectContaining({ transportAccess: 'rail_and_truck' }) as unknown],
       }),
     );

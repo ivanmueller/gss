@@ -5,6 +5,7 @@ import {
   counterpartyKey,
   createCounterpartySchema,
   facilityKey,
+  formatPhone,
   groupImportRows,
   importRequestSchema,
   mainContactSchema,
@@ -82,6 +83,7 @@ describe('parseImportRow', () => {
       }),
     ).toEqual({
       line: 2,
+      givenVerification: true,
       counterparty: {
         legalName: 'Synthetic Prairie Mills Inc.',
         tradingName: 'Prairie Mills',
@@ -98,7 +100,7 @@ describe('parseImportRow', () => {
         name: 'Synthetic Merchandiser',
         role: 'Grain buyer',
         email: 'merch@example.test',
-        phone: '+1 (306) 555-0100 x12',
+        phone: '(306) 555-0100 x12',
       },
       facility: {
         name: 'Synthetic Elevator',
@@ -126,6 +128,8 @@ describe('parseImportRow', () => {
   it('defaults to an unverified buyer with no contact or location', () => {
     expect(ok({ legalName: 'Synthetic Buyer LLC', country: 'US' })).toEqual({
       line: 2,
+      // No verification cell: a listed company's status is not replaced by "unverified".
+      givenVerification: false,
       counterparty: {
         legalName: 'Synthetic Buyer LLC',
         tradingName: null,
@@ -574,8 +578,8 @@ describe('company phones', () => {
         contactPhone: '306 555 0199 extension 3',
       }),
     ).toMatchObject({
-      counterparty: { phone: '306-555-0100 x2' },
-      contact: { phone: '306 555 0199 x3' },
+      counterparty: { phone: '(306) 555-0100 x2' },
+      contact: { phone: '(306) 555-0199 x3' },
     });
     expect(
       parseCounterpartyFields({
@@ -669,7 +673,7 @@ describe('companies with several locations', () => {
       notes: 'Synthetic record.',
     });
     expect(row.counterparty).toMatchObject({
-      phone: '555-010-0100',
+      phone: '(555) 010-0100',
       notes: 'Synthetic record.\nCompany phone also: 555-010-0101',
     });
     expect(row.notices).toEqual([
@@ -677,13 +681,13 @@ describe('companies with several locations', () => {
         line: 2,
         field: 'companyPhone',
         message:
-          'holds more than one number or a note: "555-010-0100" is the company phone, and "555-010-0101" is added to the notes',
+          'holds more than one number or a note: "(555) 010-0100" is the company phone, and "555-010-0101" is added to the notes',
       },
     ]);
     expect(
       ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555-010-0100 (front desk)' })
         .counterparty,
-    ).toMatchObject({ phone: '555-010-0100', notes: 'Company phone also: (front desk)' });
+    ).toMatchObject({ phone: '(555) 010-0100', notes: 'Company phone also: (front desk)' });
     // The notice reaches the check step as a warning.
     expect(groupImportRows([row]).warnings).toEqual(row.notices);
     // A form someone is filling in still refuses two numbers.
@@ -756,26 +760,26 @@ describe('companies with several locations', () => {
       companyPhone: '555-010-0100 / 555-010-0101',
     });
     expect(row.counterparty).toMatchObject({
-      phone: '555-010-0100',
+      phone: '(555) 010-0100',
       notes: 'Company phone also: 555-010-0101',
     });
     expect(row.notices).toHaveLength(1);
     expect(
       ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555/010-0100' })
         .counterparty,
-    ).toMatchObject({ phone: '555/010-0100', notes: null });
+    ).toMatchObject({ phone: '(555) 010-0100', notes: null });
     // Nor with a note or a second number after it (Codex's second review of ivanmueller/gss#88).
     expect(
       ok({ legalName: 'Synthetic Feeds', country: 'US', companyPhone: '555/010-0100 (front desk)' })
         .counterparty,
-    ).toMatchObject({ phone: '555/010-0100', notes: 'Company phone also: (front desk)' });
+    ).toMatchObject({ phone: '(555) 010-0100', notes: 'Company phone also: (front desk)' });
     expect(
       ok({
         legalName: 'Synthetic Feeds',
         country: 'US',
         companyPhone: '555/010-0100; 555-010-0101',
       }).counterparty,
-    ).toMatchObject({ phone: '555/010-0100', notes: 'Company phone also: 555-010-0101' });
+    ).toMatchObject({ phone: '(555) 010-0100', notes: 'Company phone also: 555-010-0101' });
   });
 });
 
@@ -1034,6 +1038,50 @@ describe('the add form (parseNewCounterparty)', () => {
     ).toMatchObject({
       status: 'ok',
       record: { facility: { country: 'US', city: 'Synthetic Falls' } },
+    });
+  });
+});
+
+// The owner's choice of 2026-10-31.
+describe('formatPhone', () => {
+  it.each([
+    ['4035550100', '(403) 555-0100'],
+    ['403-555-0100', '(403) 555-0100'],
+    ['403.555.0100', '(403) 555-0100'],
+    [' (403)555 0100 ', '(403) 555-0100'],
+    ['1 403 555 0100', '(403) 555-0100'],
+    ['+1 403 555 0100', '(403) 555-0100'],
+    ['+14035550100', '(403) 555-0100'],
+    ['403-555-0100 ext. 7', '(403) 555-0100 x7'],
+    ['403 555 0100 extension 12', '(403) 555-0100 x12'],
+    ['403-555-0100x7', '(403) 555-0100 x7'],
+    ['(403) 555-0100 x7', '(403) 555-0100 x7'],
+  ])('writes %j as %j', (typed, saved) => {
+    expect(formatPhone(typed)).toBe(saved);
+  });
+
+  it.each([
+    ['+44 20 7946 0958'],
+    ['+33 1 23 45 67 89'],
+    ['555-0100'],
+    ['403 555 01000'],
+    ['call 403 555 0100'],
+  ])('keeps %j as written', (typed) => {
+    expect(formatPhone(typed)).toBe(typed);
+  });
+
+  it('formats phones typed in a form and read from a spreadsheet', () => {
+    expect(
+      ok({
+        legalName: 'Synthetic Feeds',
+        country: 'CA',
+        companyPhone: '306.555.0100',
+        contactName: 'Ana',
+        contactPhone: '1-306-555-0199',
+      }),
+    ).toMatchObject({
+      counterparty: { phone: '(306) 555-0100' },
+      contact: { phone: '(306) 555-0199' },
     });
   });
 });

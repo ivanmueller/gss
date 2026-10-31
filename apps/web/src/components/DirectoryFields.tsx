@@ -3,6 +3,7 @@ import {
   COUNTRY_NAMES,
   FACILITY_TYPE_LABELS,
   normalizeCountry,
+  formatPhone,
   MARKET_LABELS,
   MARKETS,
   REGIONS,
@@ -168,6 +169,16 @@ function TextField({
         autoComplete={autoComplete}
         value={f.value(field)}
         onChange={f.set(field)}
+        // A phone takes its saved form, (403) 555-0100, once the person leaves the box (owner's
+        // choice, 2026-10-31); the server formats it the same way.
+        onBlur={
+          type === 'tel'
+            ? (event) => {
+                const formatted = formatPhone(event.target.value);
+                if (formatted !== event.target.value) props.onChange({ [field]: formatted });
+              }
+            : undefined
+        }
         disabled={props.disabled}
         required={required}
       />

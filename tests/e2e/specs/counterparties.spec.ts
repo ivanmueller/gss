@@ -124,15 +124,24 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
     name: 'more.csv',
     mimeType: 'text/csv',
     buffer: Buffer.from(
-      ['Legal Name,Country,City or Town,State', 'SYNTHETIC MILLS.,Canada,Delta,SK', ''].join('\n'),
+      [
+        'Legal Name,Country,City or Town,State,Company Phone',
+        'SYNTHETIC MILLS.,Canada,Delta,SK,306.555.0142',
+        '',
+      ].join('\n'),
     ),
   });
   await dialog.getByRole('button', { name: 'Review import' }).click();
   await expect(dialog.getByText('Already in the list; adds 1 location')).toBeVisible();
+  // A filled cell updates the listed company (owner's answer, 2026-10-31).
+  await expect(dialog.getByRole('list', { name: 'Changes to SYNTHETIC MILLS.' })).toHaveText(
+    'Company phone: none → (306) 555-0142',
+  );
   await dialog.getByRole('button', { name: 'Add to the companies already in the list' }).click();
   await expect(
     dialog.getByText('Added 1 new location for 1 company already in the list.'),
   ).toBeVisible();
+  await expect(dialog.getByText('Updated 1 company from the file.')).toBeVisible();
   // Its coordinates are looked up too; not set up in CI.
   await expect(dialog.getByRole('alert')).toContainText('Finding coordinates is not set up');
   await dialog.getByRole('button', { name: 'Done' }).click();
@@ -184,7 +193,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await dialog.getByRole('button', { name: 'Open Synthetic Hand Grower' }).click();
 
   await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Company phone 306 555 0100 x7' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Company phone (306) 555-0100 x7' })).toHaveAttribute(
     'href',
     'tel:3065550100;ext=7',
   );
