@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Handoff record of #93
+
+- `docs/HANDOFF.md`: admins delete archived counterparties (ivanmueller/gss#93) with its CI and Deploy staging runs, and Codex's review of it.
+
 ## 2026-10-31 — Admins delete archived counterparties
 
 - `docs/DECISIONS.md`: who may delete, what goes with a counterparty, and why one with history stays archived.
