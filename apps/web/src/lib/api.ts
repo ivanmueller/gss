@@ -124,6 +124,8 @@ export interface ImportResult {
     addedContacts: number;
     addedFacilities: number;
     addedCommodities: number;
+    /** Listed companies whose own details, contacts or locations the file changes. */
+    existingUpdated: number;
   };
   counterparties: {
     legalName: string;
@@ -133,6 +135,8 @@ export interface ImportResult {
     contacts: number;
     facilities: number;
     status: 'new' | 'existing' | 'archived';
+    /** For a listed company, each change the file makes to it, in words. */
+    changes: string[];
   }[];
   issues: ImportIssue[];
   warnings: ImportIssue[];

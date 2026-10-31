@@ -83,6 +83,7 @@ describe('parseImportRow', () => {
       }),
     ).toEqual({
       line: 2,
+      givenVerification: true,
       counterparty: {
         legalName: 'Synthetic Prairie Mills Inc.',
         tradingName: 'Prairie Mills',
@@ -127,6 +128,8 @@ describe('parseImportRow', () => {
   it('defaults to an unverified buyer with no contact or location', () => {
     expect(ok({ legalName: 'Synthetic Buyer LLC', country: 'US' })).toEqual({
       line: 2,
+      // No verification cell: a listed company's status is not replaced by "unverified".
+      givenVerification: false,
       counterparty: {
         legalName: 'Synthetic Buyer LLC',
         tradingName: null,

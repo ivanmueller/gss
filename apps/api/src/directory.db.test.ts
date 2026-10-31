@@ -375,6 +375,9 @@ describe('the counterparty directory as app_api', () => {
         additions: (
           [
             {
+              details: null,
+              contactUpdates: [],
+              facilityUpdates: [],
               counterpartyId: mills.id,
               facilities: [spur],
               contacts: [{ name: 'Synthetic Second Buyer', role: null, email: null, phone: null }],
@@ -384,7 +387,15 @@ describe('the counterparty directory as app_api', () => {
                 { commodity: 'oats', direction: 'buys' },
               ],
             },
-            { counterpartyId: closed.id, facilities: [spur], contacts: [], commodities: [] },
+            {
+              details: null,
+              contactUpdates: [],
+              facilityUpdates: [],
+              counterpartyId: closed.id,
+              facilities: [spur],
+              contacts: [],
+              commodities: [],
+            },
           ] satisfies ImportBatchInput['additions']
         ).filter((item) => existing.some((c) => c.id === item.counterpartyId && !c.archived)),
       }),
@@ -456,6 +467,9 @@ describe('the counterparty directory as app_api', () => {
             : [{ ...template, counterparty: { ...template.counterparty, legalName } }],
           additions: [
             {
+              details: null,
+              contactUpdates: [],
+              facilityUpdates: [],
               counterpartyId: mills.id,
               facilities: [siding, field].filter((f) => !has.has(facilityKey(f))),
               contacts: [contact].filter((k) => !known.has(contactKey(k))),
@@ -548,7 +562,17 @@ describe('the counterparty directory as app_api', () => {
         const company = existing.find((c) => c.id === target);
         const additions =
           company && !company.archived && !company.facilities.some((f) => f.name === depot.name)
-            ? [{ counterpartyId: target, facilities: [depot], contacts: [], commodities: [] }]
+            ? [
+                {
+                  details: null,
+                  contactUpdates: [],
+                  facilityUpdates: [],
+                  counterpartyId: target,
+                  facilities: [depot],
+                  contacts: [],
+                  commodities: [],
+                },
+              ]
             : [];
         const counterparties =
           newName === null || existing.some((c) => c.legalName === newName)
@@ -646,6 +670,119 @@ describe('the counterparty directory as app_api', () => {
       select count(*)::int as count from app.import_batches
       where organization_id = ${orgs.a} and content_sha256 = ${file}`;
     expect(recorded?.count).toBe(2);
+  });
+
+  // The owner's answer of 2026-10-31: a later file updates a listed company, filled cells
+  // winning, while a verified commodity stays as it is.
+  it('updates a listed company, its contact and its location from a file', async () => {
+    const ctx = as(users.olivia);
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      counterparty: {
+        legalName: 'Synthetic Updated Co',
+        tradingName: null,
+        types: ['seller'],
+        primaryCountry: 'CA',
+        verificationStatus: 'verified',
+        website: null,
+        phone: '(306) 555-0100',
+        markets: ['pet'],
+        tier: 'B',
+        notes: 'Synthetic own note.',
+      },
+      contacts: [{ name: 'Synthetic Ana', role: null, email: 'ana@example.test', phone: null }],
+      facilities: [
+        {
+          name: null,
+          facilityType: null,
+          addressLine: null,
+          city: 'Synthetic Halt',
+          region: 'SK',
+          postalCode: null,
+          country: 'CA',
+          latitude: '52.000000',
+          longitude: '-106.000000',
+          locationPrecision: 'approximate',
+        },
+      ],
+      commodities: [{ commodity: 'canola', direction: 'buys' }],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const target = created.id;
+    await db.changeCommodities(ctx, target, {
+      add: [],
+      remove: [],
+      verify: [{ commodity: 'canola', direction: 'buys' }],
+    });
+
+    const batchId = await importRows(
+      ctx,
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'SYNTHETIC UPDATED CO',
+            country: 'CA',
+            verificationStatus: 'pending',
+            companyPhone: '306 555 0199',
+            tier: 'A',
+            notes: 'Synthetic file note.',
+            commodities: 'Canola; Oats',
+            contactName: 'synthetic ana',
+            contactPhone: '306-555-0111',
+            contactRole: 'Buyer',
+            facilityType: 'Elevator',
+            addressLine: '1 Synthetic Road',
+            city: 'Synthetic Halt',
+            region: 'SK',
+            latitude: '52.5',
+            longitude: '-106.5',
+            locationPrecision: 'exact',
+          },
+        },
+      ],
+      '7'.repeat(64),
+    );
+    expect(batchId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const after = await db.getCounterparty(ctx, target);
+    expect(after).toMatchObject({
+      legalName: 'Synthetic Updated Co',
+      types: ['buyer', 'seller'],
+      verificationStatus: 'verified',
+      phone: '(306) 555-0199',
+      markets: ['pet'],
+      tier: 'A',
+      notes: 'Synthetic own note.\n\nSynthetic file note.',
+    });
+    expect(after?.contacts).toEqual([
+      expect.objectContaining({
+        name: 'Synthetic Ana',
+        email: 'ana@example.test',
+        phone: '(306) 555-0111',
+        role: 'Buyer',
+      }),
+    ]);
+    expect(after?.facilities).toEqual([
+      expect.objectContaining({
+        facilityType: 'elevator',
+        addressLine: '1 Synthetic Road',
+        latitude: '52.500000',
+        longitude: '-106.500000',
+        locationPrecision: 'exact',
+        geocodingSource: 'file_import',
+      }),
+    ]);
+    // The verified commodity stays verified; the new one is unverified.
+    expect(after?.commodities.map((k) => [k.code, k.verifiedAt === null])).toEqual([
+      ['canola', false],
+      ['oats', true],
+    ]);
+    // The update is audited.
+    const [audit] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.audit_events
+      where entity = 'counterparties' and entity_id = ${target} and action = 'update'
+        and actor_id = ${users.olivia} and 'phone' = any (changed_fields)`;
+    expect(audit?.count).toBe(1);
   });
 
   it('plans again when a commodity is added by hand while the import waits for the company', async () => {

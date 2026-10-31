@@ -438,6 +438,11 @@ export interface DirectoryRecord {
 
 export interface ParsedImportRow extends DirectoryRecord {
   line: number;
+  /**
+   * Whether the row gave a verification status; an empty cell reads as unverified, which
+   * must not replace a listed company's (owner's answer, 2026-10-31).
+   */
+  givenVerification: boolean;
   /** What was read differently from how the row put it, e.g. a second phone number moved to the notes. */
   notices: ImportIssue[];
 }
@@ -932,7 +937,12 @@ export function parseImportRow(
   }
   return {
     status: 'ok',
-    row: { line, ...result.record, notices: result.notices.map((notice) => ({ line, ...notice })) },
+    row: {
+      line,
+      ...result.record,
+      givenVerification: (values.verificationStatus ?? '').trim() !== '',
+      notices: result.notices.map((notice) => ({ line, ...notice })),
+    },
   };
 }
 
@@ -1083,6 +1093,8 @@ export function contactKey(contact: Pick<ContactInput, 'name' | 'email' | 'phone
 export interface ImportGroup {
   key: string;
   counterparty: CounterpartyInput;
+  /** Whether its first row gave a verification status (ParsedImportRow). */
+  givenVerification: boolean;
   contacts: ContactInput[];
   facilities: FacilityInput[];
   /** Every row's commodities, each once. */
@@ -1112,6 +1124,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       group = {
         key,
         counterparty: row.counterparty,
+        givenVerification: row.givenVerification,
         contacts: [],
         facilities: [],
         commodities: [],

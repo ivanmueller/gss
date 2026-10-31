@@ -519,10 +519,17 @@ export function ImportSpreadsheet({
             {step.result.summary.existingWithAdditions > 0 && (
               <p className="font-medium">Added {added(step.result)}.</p>
             )}
+            {step.result.summary.existingUpdated > 0 && (
+              <p className="font-medium">
+                Updated {plural(step.result.summary.existingUpdated, 'company', 'companies')} from
+                the file.
+              </p>
+            )}
             {step.result.summary.existingCounterparties > 0 && (
               <p>
-                {step.result.summary.existingCounterparties} were already in the list; their own
-                details were left unchanged.
+                {step.result.summary.existingCounterparties} were already in the list: filled cells
+                replaced their details, empty ones kept them, and verified grains were left as they
+                were.
               </p>
             )}
           </Card>
@@ -568,6 +575,9 @@ function added({ summary }: ImportResult): string {
     parts.length > 1
       ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`
       : (parts[0] ?? '');
+  if (list === '') {
+    return `updates to ${plural(summary.existingUpdated, 'company', 'companies')} already in the list`;
+  }
   return `${list} for ${plural(summary.existingWithAdditions, 'company', 'companies')} already in the list`;
 }
 
@@ -587,8 +597,9 @@ function resultText(item: ImportResult['counterparties'][number]): string {
     item.facilities > 0 && plural(item.facilities, 'location', 'locations'),
     item.contacts > 0 && plural(item.contacts, 'contact', 'contacts'),
   ].filter((part): part is string => part !== false);
-  return parts.length > 0
-    ? `Already in the list; adds ${parts.join(' and ')}`
+  if (parts.length > 0) return `Already in the list; adds ${parts.join(' and ')}`;
+  return item.changes.length > 0
+    ? 'Already in the list; updated'
     : 'Already in the list; nothing new';
 }
 
@@ -628,7 +639,19 @@ function ReviewSummary({ result }: { result: ImportResult }) {
                 <TableCell className="py-1.5">{item.lines.join(', ')}</TableCell>
                 <TableCell className="py-1.5">{item.contacts}</TableCell>
                 <TableCell className="py-1.5">{item.facilities}</TableCell>
-                <TableCell className="py-1.5">{resultText(item)}</TableCell>
+                <TableCell className="py-1.5">
+                  {resultText(item)}
+                  {item.changes.length > 0 && (
+                    <ul
+                      aria-label={`Changes to ${item.legalName}`}
+                      className="mt-1 list-disc pl-4 text-xs text-muted-foreground"
+                    >
+                      {item.changes.map((change) => (
+                        <li key={change}>{change}</li>
+                      ))}
+                    </ul>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

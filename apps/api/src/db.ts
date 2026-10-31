@@ -14,7 +14,10 @@ import type {
   FacilityType,
   GeocodeScope,
   LocationPrecision,
+  Market,
+  Tier,
   TransportAccess,
+  VerificationStatus,
 } from '@grain/domain';
 import postgres from 'postgres';
 
@@ -167,10 +170,36 @@ export interface ImportBatchInput {
 
 export interface ImportAddition {
   counterpartyId: string;
+  /**
+   * Its own details the file changes, filled cells winning (owner's answer, 2026-10-31); only
+   * the fields given are written, none is ever cleared. Null when none changes.
+   */
+  details: CounterpartyChanges | null;
   contacts: ContactInput[];
   facilities: FacilityInput[];
   commodities: CommodityInterest[];
+  /** Its contacts the file changes: only the fields given. */
+  contactUpdates: {
+    id: string;
+    changes: Partial<Pick<ContactInput, 'role' | 'email' | 'phone'>>;
+  }[];
+  /** Its locations the file changes: only the fields given. */
+  facilityUpdates: { id: string; changes: FacilityChanges }[];
 }
+
+export type CounterpartyChanges = Partial<
+  Pick<
+    CounterpartyInput,
+    'types' | 'verificationStatus' | 'website' | 'phone' | 'markets' | 'tier' | 'notes'
+  >
+>;
+
+/** A location's type, missing address parts, or coordinates (given together). */
+export type FacilityChanges = Partial<
+  Pick<FacilityInput, 'facilityType' | 'addressLine' | 'postalCode'>
+> & {
+  coordinates?: Pick<FacilityInput, 'latitude' | 'longitude' | 'locationPrecision'>;
+};
 
 /** A company already in the list, with what it has, to match an import against. */
 export interface ExistingCounterparty {
@@ -178,16 +207,32 @@ export interface ExistingCounterparty {
   primaryCountry: string;
   legalName: string;
   archived: boolean;
+  types: CounterpartyType[];
+  verificationStatus: VerificationStatus;
+  website: string | null;
+  phone: string | null;
+  markets: Market[];
+  tier: Tier | null;
+  notes: string | null;
   facilities: ExistingFacility[];
-  contacts: Pick<ContactInput, 'name' | 'email' | 'phone'>[];
+  contacts: (ContactInput & { id: string })[];
   commodities: CommodityInterest[];
 }
 
-/** A location as an import matches it (facilityKey). */
-type ExistingFacility = Pick<
+/** A location as an import matches and updates it. */
+export type ExistingFacility = Pick<
   FacilityInput,
-  'name' | 'addressLine' | 'city' | 'region' | 'postalCode' | 'country' | 'latitude' | 'longitude'
->;
+  | 'name'
+  | 'facilityType'
+  | 'addressLine'
+  | 'city'
+  | 'region'
+  | 'postalCode'
+  | 'country'
+  | 'latitude'
+  | 'longitude'
+  | 'locationPrecision'
+> & { id: string };
 
 /** A located facility for a map pin, with the counterparty it belongs to. */
 export interface MapFacility {
@@ -612,21 +657,28 @@ export function createDatabase(sql: postgres.Sql): Database {
     organizationId: string,
   ): Promise<ExistingCounterparty[]> {
     const companies = await tx<
-      { id: string; primary_country: string; legal_name: string; archived: boolean }[]
+      (Omit<
+        ExistingCounterparty,
+        'primaryCountry' | 'legalName' | 'facilities' | 'contacts' | 'commodities'
+      > & { primary_country: string; legal_name: string })[]
     >`
-      select id, primary_country, legal_name, archived_at is not null as archived
+      select id, primary_country, legal_name, archived_at is not null as archived,
+             to_jsonb(types::text[]) as types,
+             verification_status::text as "verificationStatus", website, phone,
+             to_jsonb(markets) as markets, tier, notes
       from app.counterparties where organization_id = ${organizationId}`;
     const facilities = await tx<
       (ExistingCounterparty['facilities'][number] & { counterparty_id: string })[]
     >`
-      select counterparty_id, name, address_line as "addressLine", city, region,
-             postal_code as "postalCode", country, latitude::text as latitude,
-             longitude::text as longitude
+      select counterparty_id, id, name, facility_type::text as "facilityType",
+             address_line as "addressLine", city, region, postal_code as "postalCode", country,
+             latitude::text as latitude, longitude::text as longitude,
+             location_precision::text as "locationPrecision"
       from app.facilities where organization_id = ${organizationId}`;
     const contacts = await tx<
       (ExistingCounterparty['contacts'][number] & { counterparty_id: string })[]
     >`
-      select counterparty_id, name, email, phone
+      select counterparty_id, id, name, role, email, phone
       from app.counterparty_contacts where organization_id = ${organizationId}`;
     const commodities = await tx<
       {
@@ -638,13 +690,12 @@ export function createDatabase(sql: postgres.Sql): Database {
       select counterparty_id, commodity_code as commodity, direction
       from app.counterparty_commodities where organization_id = ${organizationId}`;
     const byId = new Map<string, ExistingCounterparty>(
-      companies.map((row) => [
+      companies.map(({ primary_country, legal_name, ...row }) => [
         row.id,
         {
-          id: row.id,
-          primaryCountry: row.primary_country,
-          legalName: row.legal_name,
-          archived: row.archived,
+          ...row,
+          primaryCountry: primary_country,
+          legalName: legal_name,
           facilities: [],
           contacts: [],
           commodities: [],
@@ -1046,6 +1097,59 @@ export function createDatabase(sql: postgres.Sql): Database {
         for (const part of chunks(commodities)) {
           // Unverified; one a company already lists stays as it is.
           await tx`insert into app.counterparty_commodities ${tx(part)} on conflict do nothing`;
+        }
+
+        // What the file changes on companies already listed, filled cells winning (owner's
+        // answer, 2026-10-31): only the fields given, never cleared. The plan was made under
+        // their locks, so it is what they have now.
+        for (const {
+          counterpartyId: id,
+          details,
+          contactUpdates,
+          facilityUpdates,
+        } of batch.additions) {
+          if (details !== null) {
+            await tx`
+              update app.counterparties
+              set types = coalesce(
+                    ${details.types ? enumArray(details.types) : null}::app.counterparty_type[], types),
+                  verification_status = coalesce(
+                    ${details.verificationStatus ?? null}::app.verification_status,
+                    verification_status),
+                  website = coalesce(${details.website ?? null}, website),
+                  phone = coalesce(${details.phone ?? null}, phone),
+                  markets = coalesce(
+                    ${details.markets ? `{${details.markets.join(',')}}` : null}::text[], markets),
+                  tier = coalesce(${details.tier ?? null}, tier),
+                  notes = coalesce(${details.notes ?? null}, notes)
+              where id = ${id} and organization_id = ${org}`;
+          }
+          for (const { id: contactId, changes } of contactUpdates) {
+            await tx`
+              update app.counterparty_contacts
+              set role = coalesce(${changes.role ?? null}, role),
+                  email = coalesce(${changes.email ?? null}, email),
+                  phone = coalesce(${changes.phone ?? null}, phone)
+              where id = ${contactId} and counterparty_id = ${id} and organization_id = ${org}`;
+          }
+          for (const { id: facilityId, changes } of facilityUpdates) {
+            const at = changes.coordinates;
+            await tx`
+              update app.facilities
+              set facility_type = coalesce(
+                    ${changes.facilityType ?? null}::app.facility_type, facility_type),
+                  address_line = coalesce(${changes.addressLine ?? null}, address_line),
+                  postal_code = coalesce(${changes.postalCode ?? null}, postal_code)
+                  ${
+                    at
+                      ? tx`, latitude = ${at.latitude}::numeric, longitude = ${at.longitude}::numeric,
+                          location_precision = ${at.locationPrecision}::app.location_precision,
+                          geocoding_source = 'file_import', geocoding_accuracy = null,
+                          geocoding_confidence = null`
+                      : tx``
+                  }
+              where id = ${facilityId} and counterparty_id = ${id} and organization_id = ${org}`;
+          }
         }
         return batchId;
       });

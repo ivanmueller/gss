@@ -33,6 +33,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
       addedContacts: 0,
       addedFacilities: 0,
       addedCommodities: 0,
+      existingUpdated: 0,
     },
     counterparties: [
       {
@@ -42,6 +43,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
         contacts: 1,
         facilities: 2,
         status: 'new',
+        changes: [],
       },
       {
         legalName: 'Synthetic Buyer LLC',
@@ -50,6 +52,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
         contacts: 0,
         facilities: 1,
         status: 'new',
+        changes: [],
       },
     ],
     issues: [],
@@ -306,6 +309,53 @@ describe('ImportSpreadsheet', () => {
     );
   });
 
+  // The owner's answer of 2026-10-31.
+  it('lists what a file changes on a company already in the list', async () => {
+    const updating = result({
+      summary: {
+        ...result().summary,
+        newCounterparties: 0,
+        existingCounterparties: 1,
+        contacts: 0,
+        facilities: 0,
+        existingWithAdditions: 1,
+        existingUpdated: 1,
+      },
+      counterparties: [
+        {
+          legalName: 'Synthetic Mills',
+          country: 'CA',
+          lines: [2],
+          contacts: 0,
+          facilities: 0,
+          status: 'existing',
+          changes: ['Company phone: (306) 555-0100 → (306) 555-0199', 'Tier: B → A'],
+        },
+      ],
+    });
+    mockApi({
+      'POST /counterparties/import': (call) =>
+        (call.body as { commit: boolean }).commit
+          ? Response.json({ ...updating, committed: true, importBatchId: BATCH }, { status: 201 })
+          : Response.json(updating),
+    });
+    importer();
+    await chooseFile(CSV);
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    const table = await screen.findByRole('table', { name: 'Counterparties in this import' });
+    expect(within(table).getByText('Already in the list; updated')).toBeInTheDocument();
+    expect(
+      within(within(table).getByRole('list', { name: 'Changes to Synthetic Mills' }))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Company phone: (306) 555-0100 → (306) 555-0199', 'Tier: B → A']);
+    expect(screen.getByText(/updates to 1 company already in the list/)).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Add to the companies already in the list' }),
+    );
+    expect(await screen.findByText('Updated 1 company from the file.')).toBeInTheDocument();
+  });
+
   it('adds new locations to companies already in the list when nothing else is new', async () => {
     const adding = result({
       summary: {
@@ -327,6 +377,7 @@ describe('ImportSpreadsheet', () => {
           contacts: 1,
           facilities: 2,
           status: 'existing',
+          changes: [],
         },
         {
           legalName: 'Synthetic Buyer LLC',
@@ -335,6 +386,7 @@ describe('ImportSpreadsheet', () => {
           contacts: 0,
           facilities: 0,
           status: 'archived',
+          changes: [],
         },
       ],
     });
