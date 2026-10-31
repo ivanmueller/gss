@@ -26,7 +26,18 @@ const NUMBERS = [
   '20 7946 0958',
   '0100',
 ];
-const EXTENSIONS = ['', ' x7', 'x12', ' x 345', ' x', 'x0', '  '];
+const EXTENSIONS = [
+  '',
+  ' x7',
+  'x12',
+  ' x 345',
+  ' x',
+  'x0',
+  '  ',
+  // Long enough that formatting would pass 40 characters (Codex's review of #95).
+  `x${'1'.repeat(25)}`,
+  `x${'1'.repeat(29)}`,
+];
 
 afterAll(async () => {
   await admin.end();

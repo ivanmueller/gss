@@ -1,5 +1,6 @@
 import {
   commodityChangeSchema,
+  contactKey,
   COUNTERPARTY_TYPES,
   counterpartyKey,
   facilityKey,
@@ -171,6 +172,32 @@ function sameLocation(listed: ExistingFacility, facility: FacilityInput): boolea
   );
 }
 
+/**
+ * Which listed record each of a file's records is, each listed one taken at most once
+ * (Codex's review of ivanmueller/gss#95): exact matches first, then loose ones among those
+ * left, in file order. A file record whose only match is taken is new.
+ */
+function assign<L, F>(
+  listed: readonly L[],
+  file: readonly F[],
+  exact: (listed: L, item: F) => boolean,
+  loose: (listed: L, item: F) => boolean,
+): (L | undefined)[] {
+  const taken = new Set<L>();
+  const matched: (L | undefined)[] = file.map(() => undefined);
+  for (const same of [exact, loose]) {
+    file.forEach((item, index) => {
+      if (matched[index] !== undefined) return;
+      const found = listed.find((record) => !taken.has(record) && same(record, item));
+      if (found !== undefined) {
+        taken.add(found);
+        matched[index] = found;
+      }
+    });
+  }
+  return matched;
+}
+
 const NOTES_MAX = 2000;
 
 /** "Company phone: (403) 555-0100 → (403) 555-0199", or "… none → …". */
@@ -243,8 +270,14 @@ function changesFor(
 
   const contacts: ContactInput[] = [];
   const contactUpdates: ImportAddition['contactUpdates'] = [];
-  for (const contact of group.contacts) {
-    const listed = company.contacts.find((item) => sameContact(item, contact));
+  const contactMatches = assign(
+    company.contacts,
+    group.contacts,
+    (listed, contact) => contactKey(listed) === contactKey(contact),
+    sameContact,
+  );
+  for (const [index, contact] of group.contacts.entries()) {
+    const listed = contactMatches[index];
     if (!listed) {
       contacts.push(contact);
       continue;
@@ -270,8 +303,14 @@ function changesFor(
 
   const facilities: FacilityInput[] = [];
   const facilityUpdates: ImportAddition['facilityUpdates'] = [];
-  for (const facility of group.facilities) {
-    const listed = company.facilities.find((item) => sameLocation(item, facility));
+  const facilityMatches = assign(
+    company.facilities,
+    group.facilities,
+    (listed, facility) => facilityKey(listed) === facilityKey(facility),
+    sameLocation,
+  );
+  for (const [index, facility] of group.facilities.entries()) {
+    const listed = facilityMatches[index];
     if (!listed) {
       facilities.push(facility);
       continue;
@@ -483,6 +522,35 @@ function listed(items: readonly string[]): string {
     : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1] ?? ''}`;
 }
 
+/**
+ * What an import would write and what it would replace, as a SHA-256 (null when nothing): the
+ * Check step's answer carries it, and the import writes only when its own plan has the same.
+ * The review's changes hold the values replaced ("Tier: B → A"), so a company changed since
+ * the check changes it even when the file's values stay the same (Codex's reviews of
+ * ivanmueller/gss#95).
+ */
+function fingerprintOf(
+  batch: ImportBatchInput | null,
+  review: ImportMatch['result'],
+): Promise<string | null> {
+  if (batch === null) return Promise.resolve(null);
+  return sha256Hex(
+    JSON.stringify({
+      skipped: batch.skippedCount,
+      counterparties: batch.counterparties,
+      additions: batch.additions,
+      review: review.counterparties.map(({ status, changes }) => ({ status, changes })),
+    }),
+  );
+}
+
+/** Thrown when an import's plan is no longer what its Check step showed. */
+class PlanChanged extends Error {
+  constructor(readonly fingerprint: string | null) {
+    super('the plan changed since it was checked');
+  }
+}
+
 /** /api/v1/counterparties. Mounted after requireUser, so every route needs a signed-in user. */
 export function counterpartyRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
@@ -524,7 +592,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         fields: request.error.issues.slice(0, 20).map((issue) => issue.path.join('.')),
       });
     }
-    const { organizationId, fileName, commit, rows, defaultTypes } = request.data;
+    const { organizationId, fileName, commit, rows, defaultTypes, reviewed } = request.data;
     const plan = planImport(rows, defaultTypes);
 
     return withDatabase(c, openDatabase, async (db, ctx) => {
@@ -537,13 +605,21 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         );
       }
       if (!commit || plan.issues.length > 0) {
-        const { result } = matchImport(
+        const match = matchImport(
           plan,
           rows.length,
           await db.existingCounterparties(ctx, organizationId),
         );
+        const fingerprint = await fingerprintOf(
+          importBatchFor(plan, match, { organizationId, fileName, contentSha256: '', rowCount: 0 }),
+          match.result,
+        );
+        const result = { ...match.result, fingerprint };
         if (!commit) return c.json(result);
         return apiError(c, 422, 'VALIDATION_FAILED', 'Fix the rows with problems first.', result);
+      }
+      if (reviewed === undefined) {
+        return apiError(c, 422, 'NOT_CHECKED', 'Check the file before importing it.');
       }
 
       const contentSha256 = await sha256Hex(
@@ -574,16 +650,40 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
       // so two files imported at once never create the same company twice and the answer says
       // what was written (Codex's review of ivanmueller/gss#88).
       let result: ImportMatch['result'] | undefined;
-      const importBatchId = await db.importCounterparties(ctx, organizationId, (companies) => {
-        const match = matchImport(plan, rows.length, companies);
-        result = match.result;
-        return importBatchFor(plan, match, {
+      let importBatchId: string | null;
+      try {
+        importBatchId = await db.importCounterparties(
+          ctx,
           organizationId,
-          fileName,
-          contentSha256,
-          rowCount: rows.length,
-        });
-      });
+          (companies) => {
+            const match = matchImport(plan, rows.length, companies);
+            result = match.result;
+            return importBatchFor(plan, match, {
+              organizationId,
+              fileName,
+              contentSha256,
+              rowCount: rows.length,
+            });
+          },
+          // Only what the Check step showed is written: the list may have changed since
+          // (Codex's review of ivanmueller/gss#95).
+          // Also when nothing is left to write, so a stale Check step is replaced.
+          async (batch) => {
+            if (result === undefined) throw new Error('the import was not planned');
+            const fingerprint = await fingerprintOf(batch, result);
+            if (fingerprint !== reviewed) throw new PlanChanged(fingerprint);
+          },
+        );
+      } catch (error) {
+        if (!(error instanceof PlanChanged) || result === undefined) throw error;
+        return apiError(
+          c,
+          409,
+          'PLAN_CHANGED',
+          'The list changed since this file was checked. Look over the changes again, then import.',
+          { ...result, fingerprint: error.fingerprint },
+        );
+      }
       if (result === undefined) throw new Error('the import was not planned');
       if (importBatchId === null) {
         return apiError(
@@ -594,7 +694,7 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           result,
         );
       }
-      return c.json({ ...result, committed: true, importBatchId }, 201);
+      return c.json({ ...result, fingerprint: reviewed, committed: true, importBatchId }, 201);
     });
   });
 

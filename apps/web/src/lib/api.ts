@@ -110,6 +110,8 @@ export interface MapFacilities {
 export interface ImportResult {
   committed: boolean;
   importBatchId: string | null;
+  /** What importing would write, as checked; sent back to import it. */
+  fingerprint: string | null;
   summary: {
     rows: number;
     emptyRows: number;

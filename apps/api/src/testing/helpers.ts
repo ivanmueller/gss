@@ -63,10 +63,12 @@ export function fakeDatabase(): Mocked<Database> {
     existingCounterparties: vi.fn<Database['existingCounterparties']>(() => Promise.resolve([])),
     // Plans against existingCounterparties, as the real one does under its lock.
     importCounterparties: vi.fn<Database['importCounterparties']>(
-      async (ctx, organizationId, plan) =>
-        plan(await db.existingCounterparties(ctx, organizationId)) === null
-          ? null
-          : '00000000-0000-4000-8000-0000000ba7c4',
+      async (ctx, organizationId, plan, check) => {
+        const batch = plan(await db.existingCounterparties(ctx, organizationId));
+        await check?.(batch);
+        if (batch === null) return null;
+        return '00000000-0000-4000-8000-0000000ba7c4';
+      },
     ),
     isOrgAdmin: vi.fn<Database['isOrgAdmin']>(() => Promise.resolve(true)),
     setMemberNames: vi.fn<Database['setMemberNames']>(() => Promise.resolve(true)),

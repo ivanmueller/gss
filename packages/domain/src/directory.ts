@@ -322,6 +322,16 @@ export const importRequestSchema = z.object({
   commit: z.boolean(),
   /** Types for rows whose type is empty or not in the file; buyer when left out. */
   defaultTypes: z.array(z.enum(COUNTERPARTY_TYPES)).min(1).max(4).optional(),
+  /**
+   * With commit: the fingerprint of what the Check step showed (its answer's `fingerprint`),
+   * so nothing is written unless it is still what was checked (Codex's review of
+   * ivanmueller/gss#95). Null when the Check step had nothing to write.
+   */
+  reviewed: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable()
+    .optional(),
   rows: z
     .array(
       z.object({
@@ -475,6 +485,7 @@ function cleanLines(value: string | undefined): string | null {
 const LABEL_MAX = 200;
 // Mirrors the database checks so a row that passes here is not refused there.
 const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+\.[^@\s\p{Cc}]+$/u;
+const PHONE_MAX = 40;
 const PHONE = /^[0-9+(). /x-]{3,40}$/;
 const CA_POSTAL = /^([A-Z]\d[A-Z]) ?(\d[A-Z]\d)$/;
 const US_ZIP = /^\d{5}(-\d{4})?$/;
@@ -580,7 +591,7 @@ class FieldReader {
  * (403) 555-0100, an extension as " x7" ("ext. 7" and "extension 7" too). A number with
  * another country code (+44 …), or anything else that is not 10 digits (11 with a leading 1),
  * is kept as written. `app.format_phone` in the database does the same
- * (20261031020000_phone_format.sql).
+ * (20261031020000_phone_format.sql, 20261031040000_phone_format_length.sql).
  */
 export function formatPhone(text: string): string {
   const phone = text.trim().replace(/\s*(extension|ext\.?)\s*/i, ' x');
@@ -593,7 +604,10 @@ export function formatPhone(text: string): string {
   else if (main.startsWith('+')) return phone;
   if (digits.length !== 10) return phone;
   const ext = extension === undefined ? '' : ` x${extension}`;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}${ext}`;
+  const formatted = `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}${ext}`;
+  // Never longer than a phone may be: a long extension keeps the number as written (Codex's
+  // review of ivanmueller/gss#95).
+  return formatted.length > PHONE_MAX ? phone : formatted;
 }
 
 /** A phone number field, formatted (formatPhone); null when empty. */

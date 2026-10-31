@@ -20,6 +20,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
   return {
     committed: false,
     importBatchId: null,
+    fingerprint: 'f'.repeat(64),
     summary: {
       rows: 3,
       emptyRows: 0,
@@ -354,6 +355,92 @@ describe('ImportSpreadsheet', () => {
       screen.getByRole('button', { name: 'Add to the companies already in the list' }),
     );
     expect(await screen.findByText('Updated 1 company from the file.')).toBeInTheDocument();
+  });
+
+  // Codex's review of ivanmueller/gss#95.
+  it('imports what was checked, and shows the new plan when the list changed meanwhile', async () => {
+    const changed = result({
+      fingerprint: 'e'.repeat(64),
+      counterparties: [
+        {
+          legalName: 'Synthetic Mills',
+          country: 'CA',
+          lines: [2, 3],
+          contacts: 0,
+          facilities: 0,
+          status: 'existing',
+          changes: ['Tier: B → A'],
+        },
+      ],
+    });
+    const calls = mockApi({
+      'POST /counterparties/import': (call) =>
+        (call.body as { commit: boolean }).commit
+          ? Response.json(
+              {
+                error: {
+                  code: 'PLAN_CHANGED',
+                  message:
+                    'The list changed since this file was checked. Look over the changes again, then import.',
+                },
+                ...changed,
+              },
+              { status: 409 },
+            )
+          : Response.json(result()),
+    });
+    importer();
+    await chooseFile(CSV);
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Import 2 new counterparties' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The list changed since this file was checked',
+    );
+    expect(screen.getByRole('list', { name: 'Changes to Synthetic Mills' })).toHaveTextContent(
+      'Tier: B → A',
+    );
+    const commits = calls.filter((call) => (call.body as { commit: boolean }).commit);
+    expect(commits.map((call) => (call.body as { reviewed: string }).reviewed)).toEqual([
+      'f'.repeat(64),
+    ]);
+  });
+
+  // Codex's second review of ivanmueller/gss#95.
+  it('stops offering the import when the list changed and nothing is left to write', async () => {
+    const empty = result({
+      fingerprint: null,
+      summary: {
+        ...result().summary,
+        newCounterparties: 0,
+        existingCounterparties: 2,
+        contacts: 0,
+        facilities: 0,
+      },
+      counterparties: [],
+    });
+    mockApi({
+      'POST /counterparties/import': (call) =>
+        (call.body as { commit: boolean }).commit
+          ? Response.json(
+              {
+                error: {
+                  code: 'PLAN_CHANGED',
+                  message:
+                    'The list changed since this file was checked. Look over the changes again, then import.',
+                },
+                ...empty,
+              },
+              { status: 409 },
+            )
+          : Response.json(result()),
+    });
+    importer();
+    await chooseFile(CSV);
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Import 2 new counterparties' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The list changed');
+    expect(screen.getByRole('button', { name: /^Import 0/ })).toBeDisabled();
   });
 
   it('adds new locations to companies already in the list when nothing else is new', async () => {

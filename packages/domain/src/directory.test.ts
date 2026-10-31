@@ -1070,6 +1070,20 @@ describe('formatPhone', () => {
     expect(formatPhone(typed)).toBe(typed);
   });
 
+  // Codex's review of ivanmueller/gss#95: formatting must not make a valid number too long.
+  it('keeps a number as written when formatting would make it longer than 40 characters', () => {
+    const long = `4035550100x${'1'.repeat(29)}`;
+    expect(long).toHaveLength(40);
+    expect(formatPhone(long)).toBe(long);
+    expect(
+      ok({ legalName: 'Synthetic Feeds', country: 'CA', companyPhone: long }).counterparty.phone,
+    ).toBe(long);
+    expect(
+      ok({ legalName: 'Synthetic Feeds', country: 'CA', companyPhone: `${long}; 403-555-0101` })
+        .counterparty.phone,
+    ).toBe(long);
+  });
+
   it('formats phones typed in a form and read from a spreadsheet', () => {
     expect(
       ok({

@@ -785,6 +785,71 @@ describe('the counterparty directory as app_api', () => {
     expect(audit?.count).toBe(1);
   });
 
+  // Codex's review of ivanmueller/gss#95: an importer demoted while the import ran had its
+  // updates skipped by row level security, yet the import was recorded.
+  it('keeps the importer able to import until the import is done', async () => {
+    const ctx = as(users.olivia);
+    const template = batch().counterparties[1];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      ...template,
+      counterparty: {
+        ...template.counterparty,
+        legalName: 'Synthetic Held Co',
+        primaryCountry: 'CA',
+        phone: '(306) 555-0100',
+      },
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const other = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+    let demoted: Promise<void> = Promise.resolve();
+    try {
+      const imported = await whileItWaits(
+        async (tx) => {
+          await tx`select pg_advisory_xact_lock(
+            hashtextextended(${`app.counterparty_import:${orgs.a}`}, 0))`;
+        },
+        () =>
+          importRows(
+            ctx,
+            [
+              {
+                line: 2,
+                values: {
+                  legalName: 'Synthetic Held Co',
+                  country: 'CA',
+                  companyPhone: '306 555 0199',
+                },
+              },
+            ],
+            '6'.repeat(64),
+          ),
+        {
+          waitingOn: '%lock_counterparty_import%',
+          meanwhile: async (tx) => {
+            demoted = other`
+              update app.organization_members set role = 'viewer'
+              where organization_id = ${orgs.a} and user_id = ${users.olivia}`.then(
+              () => undefined,
+            );
+            // The demotion waits for the import, which holds the importer's membership.
+            expect(
+              await waitUntilWaiting(tx, 'postgres', '%update app.organization_members%', false),
+            ).toBe(true);
+          },
+        },
+      );
+      expect(imported).toMatch(/^[0-9a-f-]{36}$/);
+      await demoted;
+    } finally {
+      await demoted.catch(() => undefined);
+      await admin`update app.organization_members set role = 'operations'
+                  where organization_id = ${orgs.a} and user_id = ${users.olivia}`;
+      await other.end();
+    }
+    expect((await db.getCounterparty(as(users.adam), created.id))?.phone).toBe('(306) 555-0199');
+  });
+
   it('plans again when a commodity is added by hand while the import waits for the company', async () => {
     const ctx = as(users.olivia);
     const template = batch().counterparties[1];

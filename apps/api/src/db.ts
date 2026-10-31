@@ -343,6 +343,8 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     ctx: RequestContext,
     organizationId: string,
     plan: (existing: ExistingCounterparty[]) => ImportBatchInput | null,
+    /** Runs on the plan kept, before anything is written; throwing writes nothing. */
+    check?: (batch: ImportBatchInput | null) => Promise<void>,
   ) => Promise<string | null>;
   isOrgAdmin: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   /** Sets a member's names (null removes one); false when not allowed or not a member. */
@@ -523,6 +525,17 @@ function enteredSource(facility: FacilityInput, source: 'manual' | 'file_import'
 class RolledBack<T> extends Error {
   constructor(readonly result: T) {
     super('rolled back');
+  }
+}
+
+/**
+ * Every update an import plans changes its row (Codex's review of ivanmueller/gss#95): if row
+ * level security skips one, the whole import is rolled back and refused, as a refused insert
+ * already is, rather than recorded without it.
+ */
+function updated(rows: readonly unknown[]): void {
+  if (rows.length !== 1) {
+    throw Object.assign(new Error('an update in the import was refused'), { code: '42501' });
   }
 }
 
@@ -972,7 +985,7 @@ export function createDatabase(sql: postgres.Sql): Database {
       return asUser(ctx, (tx) => readExisting(tx, organizationId));
     },
 
-    importCounterparties(ctx, organizationId, plan) {
+    importCounterparties(ctx, organizationId, plan, check) {
       return asUser(ctx, async (tx) => {
         // Matching and writing happen under the lock, so an import running at the same time
         // waits and then sees this one's companies (Codex's review of ivanmueller/gss#88).
@@ -989,7 +1002,10 @@ export function createDatabase(sql: postgres.Sql): Database {
         let batch: ImportBatchInput | null;
         for (let attempt = 1; ; attempt += 1) {
           batch = plan(await readExisting(tx, org));
-          if (batch === null) return null;
+          if (batch === null) {
+            await check?.(null);
+            return null;
+          }
           if (batch.organizationId !== org) throw new Error('import for another organization');
           const unlocked = batch.additions
             .map((item) => item.counterpartyId)
@@ -1004,6 +1020,7 @@ export function createDatabase(sql: postgres.Sql): Database {
           for (const row of open) locked.add(row.id);
         }
 
+        await check?.(batch);
         const [created] = await tx<{ id: string }[]>`
           insert into app.import_batches
             (organization_id, kind, file_name, content_sha256, row_count, created_count,
@@ -1109,7 +1126,8 @@ export function createDatabase(sql: postgres.Sql): Database {
           facilityUpdates,
         } of batch.additions) {
           if (details !== null) {
-            await tx`
+            updated(
+              await tx`
               update app.counterparties
               set types = coalesce(
                     ${details.types ? enumArray(details.types) : null}::app.counterparty_type[], types),
@@ -1122,19 +1140,25 @@ export function createDatabase(sql: postgres.Sql): Database {
                     ${details.markets ? `{${details.markets.join(',')}}` : null}::text[], markets),
                   tier = coalesce(${details.tier ?? null}, tier),
                   notes = coalesce(${details.notes ?? null}, notes)
-              where id = ${id} and organization_id = ${org}`;
+              where id = ${id} and organization_id = ${org}
+              returning id`,
+            );
           }
           for (const { id: contactId, changes } of contactUpdates) {
-            await tx`
+            updated(
+              await tx`
               update app.counterparty_contacts
               set role = coalesce(${changes.role ?? null}, role),
                   email = coalesce(${changes.email ?? null}, email),
                   phone = coalesce(${changes.phone ?? null}, phone)
-              where id = ${contactId} and counterparty_id = ${id} and organization_id = ${org}`;
+              where id = ${contactId} and counterparty_id = ${id} and organization_id = ${org}
+              returning id`,
+            );
           }
           for (const { id: facilityId, changes } of facilityUpdates) {
             const at = changes.coordinates;
-            await tx`
+            updated(
+              await tx`
               update app.facilities
               set facility_type = coalesce(
                     ${changes.facilityType ?? null}::app.facility_type, facility_type),
@@ -1148,7 +1172,9 @@ export function createDatabase(sql: postgres.Sql): Database {
                           geocoding_confidence = null`
                       : tx``
                   }
-              where id = ${facilityId} and counterparty_id = ${id} and organization_id = ${org}`;
+              where id = ${facilityId} and counterparty_id = ${id} and organization_id = ${org}
+              returning id`,
+            );
           }
         }
         return batchId;
