@@ -124,6 +124,38 @@ describe('useApiResource', () => {
     expect(screen.getByText('loading')).toBeInTheDocument();
   });
 
+  // Codex's review of ivanmueller/gss#93: a page loaded before a delete put the deleted record
+  // back in the kept answers, so Back showed it again.
+  it('does not keep an answer asked for before its path was forgotten', async () => {
+    let release: () => void = () => undefined;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockApi({
+      'GET /counterparties/c1': async () => {
+        await waiting;
+        return Response.json({ name: 'Synthetic Deleted' });
+      },
+      'GET /quotes': () => Response.json({ name: 'Synthetic Quotes' }),
+    });
+    const first = render(<Show path="/counterparties/c1" />);
+    act(() => {
+      forgetApiAnswers('/counterparties');
+    });
+    release();
+    expect(await screen.findByText('Synthetic Deleted')).toBeInTheDocument();
+    first.unmount();
+    render(<Show path="/counterparties/c1" />);
+    expect(screen.getByText('loading')).toBeInTheDocument();
+
+    // Answers asked for afterwards, and to other paths, are kept as before.
+    const later = render(<Show path="/quotes" />);
+    await screen.findByText('Synthetic Quotes');
+    later.unmount();
+    render(<Show path="/quotes" />);
+    expect(screen.getAllByText('Synthetic Quotes').length).toBeGreaterThan(0);
+  });
+
   it('tells people apart by the id in their token, so a renewed token is the same person', () => {
     const jwt = (sub: string, iat: number) =>
       `header.${btoa(JSON.stringify({ sub, iat })).replace(/=+$/, '')}.signature`;

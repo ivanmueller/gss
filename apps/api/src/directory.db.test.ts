@@ -26,7 +26,7 @@ if (!ADMIN_URL || !API_URL) {
 
 const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
 const id = () => crypto.randomUUID();
-const users = { olivia: id(), victor: id(), bob: id(), adam: id() };
+const users = { olivia: id(), victor: id(), bob: id(), adam: id(), ana: id() };
 const orgs = { a: id(), b: id() };
 const as = (userId: string): RequestContext => ({ userId, requestId: id() });
 
@@ -124,35 +124,59 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
 let db: Database;
 
 /**
- * Runs `change` in an admin transaction as olivia, starts the import, and commits the change
- * only once the import waits for a company's row lock: a change made after the import read
- * the list but before it locked the company.
+ * Runs `change` in an admin transaction as olivia, starts `run`, and commits the change only
+ * once `run` waits for a row lock (by default an import waiting for a company): a change made
+ * after it read but before it locked.
  */
-function whileImportWaits(
+function whileItWaits<T>(
   change: (tx: postgres.TransactionSql) => Promise<void>,
-  run: () => Promise<string | null>,
-): Promise<string | null> {
+  run: () => Promise<T>,
+  { waitingOn = '%for no key update%', meanwhile }: WhileWaiting = {},
+): Promise<T> {
   return admin
     .begin(async (tx) => {
       await tx`select set_config('app.user_id', ${users.olivia}, true)`;
       await change(tx);
       const running = run();
       void running.catch(() => undefined);
-      for (let waited = 0; ; waited += 1) {
-        // pg_stat_activity is read once per transaction unless its snapshot is cleared.
-        await tx`select pg_stat_clear_snapshot()`;
-        const [row] = await tx<{ count: number }[]>`
-          select count(*)::int as count from pg_stat_activity
-          where usename = 'app_api' and wait_event_type = 'Lock'
-            and query like '%for no key update%'`;
-        if (row?.count === 1) break;
-        if (waited > 40) throw new Error('the import did not wait for the company');
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+      await waitUntilWaiting(tx, 'app_api', waitingOn, true);
+      await meanwhile?.(tx);
       // In an object: postgres.js would wait for a returned promise inside the transaction.
       return { running };
     })
     .then(({ running }) => running);
+}
+
+interface WhileWaiting {
+  /** The waiting statement, as a LIKE pattern. */
+  waitingOn?: string;
+  /** Runs once the statement waits, before the change is committed. */
+  meanwhile?: (tx: postgres.TransactionSql) => Promise<void>;
+}
+
+/**
+ * Waits until one of `user`'s statements matching `pattern` waits for a lock: about two
+ * seconds, then throws when `required`, else returns false.
+ */
+async function waitUntilWaiting(
+  tx: postgres.TransactionSql,
+  user: string,
+  pattern: string,
+  required: boolean,
+): Promise<boolean> {
+  for (let waited = 0; ; waited += 1) {
+    // pg_stat_activity is read once per transaction unless its snapshot is cleared.
+    await tx`select pg_stat_clear_snapshot()`;
+    const [row] = await tx<{ count: number }[]>`
+      select count(*)::int as count from pg_stat_activity
+      where usename = ${user} and wait_event_type = 'Lock' and query like ${pattern}`;
+    if (row?.count === 1) return true;
+    if (waited > 40) {
+      if (required) throw new Error(`no statement like ${pattern} waited`);
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /**
@@ -184,6 +208,7 @@ beforeAll(async () => {
   await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at) values
     (${orgs.a}, ${users.olivia}, 'operations', 'active', now()),
     (${orgs.a}, ${users.adam}, 'org_admin', 'active', now()),
+    (${orgs.a}, ${users.ana}, 'org_admin', 'active', now()),
     (${orgs.a}, ${users.victor}, 'viewer', 'active', now()),
     (${orgs.b}, ${users.bob}, 'org_admin', 'active', now())`;
   db = postgresDatabase(API_URL);
@@ -533,7 +558,7 @@ describe('the counterparty directory as app_api', () => {
         return batch({ contentSha256: letter.repeat(64), counterparties, additions });
       };
     const archivedWhileWaiting = (run: () => Promise<string | null>) =>
-      whileImportWaits(async (tx) => {
+      whileItWaits(async (tx) => {
         await tx`update app.counterparties set archived_at = now() where id = ${target}`;
       }, run);
     const batchesOf = async (letter: string) =>
@@ -641,7 +666,7 @@ describe('the counterparty directory as app_api', () => {
     const file = '8'.repeat(64);
 
     // As changeCommodities does: the company locked, then Canola added.
-    const imported = await whileImportWaits(
+    const imported = await whileItWaits(
       async (tx) => {
         await tx`select id from app.counterparties where id = ${created.id} for no key update`;
         await tx`insert into app.counterparty_commodities
@@ -707,6 +732,81 @@ describe('the counterparty directory as app_api', () => {
       where entity = 'counterparties' and entity_id = ${target} and action = 'delete'
         and actor_id = ${users.adam} and request_id = ${ctx.requestId}`;
     expect(audit?.count).toBe(1);
+  });
+
+  // Codex's review of ivanmueller/gss#93: an admin demoted while the delete waited for the
+  // company had its contacts and locations deleted, then was refused the company itself.
+  it('keeps the deleting admin an admin until the delete is done', async () => {
+    const template = batch().counterparties[0];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(as(users.olivia), orgs.a, {
+      ...template,
+      counterparty: { ...template.counterparty, legalName: 'Synthetic Contested Co' },
+      commodities: [],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const target = created.id;
+    await db.setArchived(as(users.olivia), target, true);
+    const other = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+    let demoted: Promise<void> = Promise.resolve();
+    try {
+      const result = await whileItWaits(
+        async (tx) => {
+          await tx`select id from app.counterparties where id = ${target} for update`;
+        },
+        () => db.deleteCounterparty(as(users.adam), target),
+        {
+          waitingOn: '%for update%',
+          meanwhile: async (tx) => {
+            demoted = other`
+              update app.organization_members set role = 'operations'
+              where organization_id = ${orgs.a} and user_id = ${users.adam}`.then(() => undefined);
+            // The demotion waits for the delete, which holds the admin's membership.
+            expect(
+              await waitUntilWaiting(tx, 'postgres', '%update app.organization_members%', false),
+            ).toBe(true);
+          },
+        },
+      );
+      expect(result).toEqual({ status: 'deleted' });
+      await demoted;
+    } finally {
+      await demoted.catch(() => undefined);
+      await admin`update app.organization_members set role = 'org_admin'
+                  where organization_id = ${orgs.a} and user_id = ${users.adam}`;
+      await other.end();
+    }
+    const [left] = await admin<{ count: number }[]>`
+      select (select count(*) from app.counterparties where id = ${target})
+           + (select count(*) from app.counterparty_contacts where counterparty_id = ${target})
+           + (select count(*) from app.facilities where counterparty_id = ${target})
+           as count`;
+    expect(Number(left?.count)).toBe(0);
+  });
+
+  it('refuses a delete by someone demoted just before it', async () => {
+    const template = batch().counterparties[0];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(as(users.olivia), orgs.a, {
+      ...template,
+      counterparty: { ...template.counterparty, legalName: 'Synthetic Kept Co' },
+      commodities: [],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    await db.setArchived(as(users.olivia), created.id, true);
+    await admin`update app.organization_members set role = 'operations'
+                where organization_id = ${orgs.a} and user_id = ${users.adam}`;
+    try {
+      expect(await db.deleteCounterparty(as(users.adam), created.id)).toEqual({
+        status: 'forbidden',
+      });
+    } finally {
+      await admin`update app.organization_members set role = 'org_admin'
+                  where organization_id = ${orgs.a} and user_id = ${users.adam}`;
+    }
+    const after = await db.getCounterparty(as(users.olivia), created.id);
+    expect(after?.contacts).toHaveLength(1);
+    expect(after?.facilities).toHaveLength(2);
   });
 
   it('leaves no user or request id on the connection after writes and refused writes', async () => {

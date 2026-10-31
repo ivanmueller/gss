@@ -364,3 +364,7 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **What stays:** a counterparty that bids or offers, freight rates (as carrier, or from or to one of its locations), a contact history or follow-ups (removed ones too) refer to cannot be deleted: those are kept for the record and never edited (AGENTS.md rule 5), so it stays archived and the page says why. The database's foreign keys refuse it too. Deleting those as well was not chosen; it can be revisited if the owner wants it.
 - **Imports:** a later spreadsheet with a deleted company's name adds it again as a new company, as for any company not in the list.
 
+**2026-10-31 — Codex's review of ivanmueller/gss#93 (one P2, one P3).** Both fixed, each with a test that fails without the fix:
+- **An admin demoted while a delete waits:** the delete now locks the person's own admin membership first (checking its role and status again on its latest version), so a change to their role or status waits until the delete is done, and one made just before is seen and refused. If the last step still deletes nothing, everything the delete did is rolled back, so a company is never left without its contacts and locations.
+- **A page loaded before a delete:** an answer asked for before its path was forgotten is no longer kept, so Back shows "This counterparty does not exist." rather than the deleted company.
+

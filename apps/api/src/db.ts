@@ -474,6 +474,13 @@ function enteredSource(facility: FacilityInput, source: 'manual' | 'file_import'
   return facility.latitude === null ? null : source;
 }
 
+/** Thrown to end a transaction without its writes, answering with `result`. */
+class RolledBack<T> extends Error {
+  constructor(readonly result: T) {
+    super('rolled back');
+  }
+}
+
 const SAVED = { status: 'saved' } as const;
 const NOT_FOUND = { status: 'not_found' } as const;
 const CHANGED = { status: 'changed' } as const;
@@ -1206,11 +1213,22 @@ export function createDatabase(sql: postgres.Sql): Database {
 
     deleteCounterparty(ctx, id) {
       return asUser(ctx, async (tx): Promise<DeleteResult> => {
-        const [row] = await tx<{ allowed: boolean }[]>`
-          select app.is_org_admin(organization_id) as allowed
-          from app.counterparties where id = ${id}`;
+        const [row] = await tx<{ organization_id: string }[]>`
+          select organization_id from app.counterparties where id = ${id}`;
         if (!row) return NOT_FOUND;
-        if (!row.allowed) return { status: 'forbidden' };
+        // The person's own admin membership, locked for the rest of the transaction: their
+        // role or status cannot change while the delete waits or runs, and a change made just
+        // before is seen here (the conditions are checked again on the row's latest version).
+        // Otherwise RLS could refuse the last delete after the first ones (Codex's review of
+        // ivanmueller/gss#93). Locking needs the members update policy, which only admins pass.
+        const [admin] = await tx`
+          select m.id from app.organization_members m
+          where m.organization_id = ${row.organization_id}
+            and m.user_id = app.current_user_id()
+            and m.role = 'org_admin' and m.status = 'active'
+            and app.is_org_admin(m.organization_id)
+          for share of m`;
+        if (!admin) return { status: 'forbidden' };
         // It and its locations are locked for the rest of the transaction: restoring it, a
         // change under it, and a bid, offer or freight rate naming it or one of its locations
         // wait for this delete and then find it gone, or happened first and are seen below.
@@ -1242,7 +1260,12 @@ export function createDatabase(sql: postgres.Sql): Database {
         await tx`delete from app.facilities where counterparty_id = ${id}`;
         await tx`delete from app.counterparty_logos where counterparty_id = ${id}`;
         const deleted = await tx`delete from app.counterparties where id = ${id} returning id`;
-        return deleted.length === 1 ? { status: 'deleted' } : NOT_FOUND;
+        // What went before is kept only with the counterparty itself.
+        if (deleted.length !== 1) throw new RolledBack<DeleteResult>({ status: 'forbidden' });
+        return { status: 'deleted' };
+      }).catch((error: unknown) => {
+        if (error instanceof RolledBack) return error.result as DeleteResult;
+        throw error;
       });
     },
 

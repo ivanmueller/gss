@@ -13,10 +13,21 @@ export type Resource<T> =
  */
 const answers = new Map<string, unknown>();
 /**
- * Moves on at each clearing, so an answer still on its way when the cache is emptied is not
- * kept afterwards (Codex's review of ivanmueller/gss#85).
+ * Moves on at each clearing or forgetting, so an answer still on its way when the cache is
+ * emptied (Codex's review of ivanmueller/gss#85), or its path forgotten after a delete (Codex's
+ * review of ivanmueller/gss#93), is not kept afterwards.
  */
 let generation = 0;
+/** When answers to paths starting with each prefix were last forgotten ('' for all). */
+const forgotten = new Map<string, number>();
+
+/** Whether an answer to `path`, asked for at `asked`, may still be kept. */
+function keepable(path: string, asked: number): boolean {
+  for (const [prefix, at] of forgotten) {
+    if (at > asked && path.startsWith(prefix)) return false;
+  }
+  return true;
+}
 
 /**
  * Whose sign-in a token is: the person's id from the token (its `sub`), so an hourly token
@@ -47,6 +58,8 @@ function cacheKey(path: string, token: string): string {
  * deleted, so its list does not show it again while it reloads.
  */
 export function forgetApiAnswers(prefix: string): void {
+  generation += 1;
+  forgotten.set(prefix, generation);
   for (const key of answers.keys()) {
     if (key.slice(key.indexOf('\n') + 1).startsWith(prefix)) answers.delete(key);
   }
@@ -56,6 +69,7 @@ export function forgetApiAnswers(prefix: string): void {
 export function clearApiCache(): void {
   answers.clear();
   generation += 1;
+  forgotten.set('', generation);
 }
 
 /**
@@ -85,7 +99,7 @@ export function useApiResource<T>(
     apiJson<T>(path, token, { signal: controller.signal })
       .then((data) => {
         if (controller.signal.aborted) return;
-        if (started === generation) answers.set(cacheKey(path, token), data);
+        if (keepable(path, started)) answers.set(cacheKey(path, token), data);
         setState({ path, who: signedInAs(token), version, resource: { status: 'ok', data } });
       })
       .catch((error: unknown) => {
