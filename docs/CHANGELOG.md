@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Handoff record of #95
+
+- `docs/HANDOFF.md`: imports updating listed companies, pasted logos and the phone format (ivanmueller/gss#95) with their CI and Deploy staging runs, and Codex's review.
+
 ## 2026-10-31 — Codex's review of #95
 
 - `docs/DECISIONS.md`: one listed record per row, the reviewed plan's fingerprint, long phones kept, the importer's membership held.
