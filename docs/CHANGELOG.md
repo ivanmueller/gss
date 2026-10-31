@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Imports update listed companies; pasted logos; phone format
+
+- `docs/DECISIONS.md`: filled cells win on a later import (verified grains and a verified company's status kept); logos pasted, not fetched by link; phones as (403) 555-0100.
+- `docs/DATA_MODEL.md`: migration `20261031020000_phone_format.sql`.
+- `docs/API.md`: the import's `changes` and `existingUpdated`.
+- `README.md`: the import's updates, Paste logo, the phone format.
+
 ## 2026-10-31 — Handoff record of #94
 
 - `docs/HANDOFF.md`: Codex's findings on #93 fixed (ivanmueller/gss#94) with its CI and Deploy staging runs.
