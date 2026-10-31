@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(9);
+select plan(10);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader).
@@ -72,6 +72,12 @@ select throws_ok(pg_temp.lock_as('00000000-0000-4000-8000-0000000044aa', '000000
   '42501', null, 'nor a trader');
 select throws_ok(pg_temp.lock_as('00000000-0000-4000-8000-0000000011bb', '00000000-0000-4000-8000-0000000000aa'),
   '42501', null, 'nor another organization''s admin');
+update app.organization_members set status = 'suspended'
+ where user_id = '00000000-0000-4000-8000-0000000011aa';
+select throws_ok(pg_temp.lock_as('00000000-0000-4000-8000-0000000011aa', '00000000-0000-4000-8000-0000000000aa'),
+  '42501', null, 'nor a suspended operations member');
+update app.organization_members set status = 'active'
+ where user_id = '00000000-0000-4000-8000-0000000011aa';
 
 -- The same file may be imported again: the import's matching, not its checksum, keeps a
 -- repeat from adding anything twice.

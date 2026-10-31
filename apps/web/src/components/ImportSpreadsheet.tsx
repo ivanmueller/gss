@@ -306,12 +306,17 @@ export function ImportSpreadsheet({
     }
   }
 
-  async function send({ sheet, mapping, side }: Plan, commit: boolean): Promise<ImportResult> {
+  async function send(
+    { sheet, mapping, side }: Plan,
+    commit: boolean,
+    reviewed?: string | null,
+  ): Promise<ImportResult> {
     const path = '/counterparties/import';
     const body = JSON.stringify({
       organizationId: organization.id,
       fileName: sheet.fileName.slice(0, 200),
       commit,
+      ...(commit && { reviewed }),
       defaultTypes: [side],
       rows: mappedRows(sheet, mapping),
     });
@@ -335,10 +340,16 @@ export function ImportSpreadsheet({
   async function commit(plan: Plan, result: ImportResult) {
     setStep({ kind: 'review', ...plan, result, error: null, busy: true });
     try {
-      setStep({ kind: 'done', result: await send(plan, true) });
+      setStep({ kind: 'done', result: await send(plan, true, result.fingerprint) });
       onImported();
     } catch (error) {
-      setStep({ kind: 'review', ...plan, result, error: messageOf(error), busy: false });
+      // The list changed since the check: nothing was written, and its answer is the new plan
+      // to look over (Codex's review of ivanmueller/gss#95).
+      const fresh =
+        error instanceof ApiError && error.code === 'PLAN_CHANGED'
+          ? (error.body as ImportResult)
+          : result;
+      setStep({ kind: 'review', ...plan, result: fresh, error: messageOf(error), busy: false });
     }
   }
 

@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Codex's review of #95
+
+- `docs/DECISIONS.md`: one listed record per row, the reviewed plan's fingerprint, long phones kept, the importer's membership held.
+- `docs/DATA_MODEL.md`: migrations `20261031030000_import_holds_membership.sql` and `20261031040000_phone_format_length.sql`.
+- `docs/API.md`: `fingerprint`, `reviewed`, `NOT_CHECKED` and `PLAN_CHANGED`.
+
 ## 2026-10-31 — Imports update listed companies; pasted logos; phone format
 
 - `docs/DECISIONS.md`: filled cells win on a later import (verified grains and a verified company's status kept); logos pasted, not fetched by link; phones as (403) 555-0100.

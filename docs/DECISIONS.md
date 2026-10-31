@@ -379,3 +379,9 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 
 **2026-10-31 — Phone numbers in one format (owner's choice).** A North American number is saved as (403) 555-0100, an extension as x7 ("ext. 7" and "extension 7" read the same); a leading 1 or +1 is dropped; a number with another country code, or anything else, is kept as written. Forms format a number when its box is left; spreadsheets are formatted on import; the numbers already saved were tidied once by migration `20261031020000_phone_format.sql`.
 
+**2026-10-31 — Codex's review of ivanmueller/gss#95 (four P2).** All fixed, each with a test that fails without the fix:
+- **One listed record, two rows:** a listed contact or location is now matched by at most one of the file's rows, exact matches first; another row that would match it is added as new, so a second email or address never overwrites the first.
+- **What is imported is what was checked:** the Check step's answer carries a fingerprint of what importing would write; the import sends it back and writes only if the plan made under the locks is the same. If someone changed a company in between, nothing is written and the Check step shows the new changes to look over.
+- **Phones too long once formatted:** a valid number that formatting would make longer than 40 characters (a very long extension) is kept as written, in the app and in the database (migration `20261031040000_phone_format_length.sql`; staging's phones were tidied without such a number).
+- **An importer demoted mid-import:** the import now holds the importer's membership until it is done (migration `20261031030000_import_holds_membership.sql`), and an update that changes nothing undoes the whole import, which is then refused.
+
