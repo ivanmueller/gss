@@ -785,7 +785,7 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
       expect.anything(),
       ORG,
       expect.objectContaining({
-        counterparty: expect.objectContaining({ phone: '306 555 0100 x4' }) as unknown,
+        counterparty: expect.objectContaining({ phone: '(306) 555-0100 x4' }) as unknown,
         facilities: [expect.objectContaining({ transportAccess: 'rail_and_truck' }) as unknown],
       }),
     );

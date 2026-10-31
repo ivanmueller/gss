@@ -184,7 +184,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await dialog.getByRole('button', { name: 'Open Synthetic Hand Grower' }).click();
 
   await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Company phone 306 555 0100 x7' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Company phone (306) 555-0100 x7' })).toHaveAttribute(
     'href',
     'tel:3065550100;ext=7',
   );
