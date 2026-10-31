@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Handoff record of #89 to #92
+
+- `docs/HANDOFF.md`: Codex's reviews of #88 fixed (ivanmueller/gss#89 to #92) with their CI and Deploy staging runs.
+
 ## 2026-10-30 — Codex's fourth review of #88
 
 - `docs/DECISIONS.md`: the plan kept only once made with its companies locked; the same file may be imported again.
