@@ -80,6 +80,9 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     updateCounterparty: vi.fn<Database['updateCounterparty']>(() => saved()),
     setArchived: vi.fn<Database['setArchived']>(() => saved()),
+    deleteCounterparty: vi.fn<Database['deleteCounterparty']>(() =>
+      Promise.resolve({ status: 'deleted' as const }),
+    ),
     addContact: vi.fn<Database['addContact']>(() => saved()),
     updateContact: vi.fn<Database['updateContact']>(() => saved()),
     removeContact: vi.fn<Database['removeContact']>(() => saved()),

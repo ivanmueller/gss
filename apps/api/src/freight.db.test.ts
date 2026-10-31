@@ -20,7 +20,7 @@ if (!ADMIN_URL || !API_URL) {
 
 const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
 const id = () => crypto.randomUUID();
-const users = { tess: id(), victor: id(), olivia: id(), bob: id() };
+const users = { tess: id(), victor: id(), olivia: id(), bob: id(), ada: id() };
 const orgs = { a: id(), b: id() };
 const counterparties = {
   carrier: id(),
@@ -64,6 +64,7 @@ beforeAll(async () => {
     (${orgs.a}, ${users.tess}, 'trader', 'active', now()),
     (${orgs.a}, ${users.victor}, 'viewer', 'active', now()),
     (${orgs.a}, ${users.olivia}, 'operations', 'active', now()),
+    (${orgs.a}, ${users.ada}, 'org_admin', 'active', now()),
     (${orgs.b}, ${users.bob}, 'org_admin', 'active', now())`;
   await admin`insert into app.counterparties
       (id, organization_id, legal_name, types, primary_country, source, created_by, archived_at) values
@@ -308,5 +309,20 @@ describe('carrier freight rates as app_api', () => {
     await expect(
       db.removeFacility(as(users.olivia), counterparties.seller, facilities.seller),
     ).rejects.toMatchObject({ code: '23503', constraint_name: 'freight_quotes_origin_fkey' });
+  });
+});
+
+// The owner's request of 2026-10-31: admins delete archived counterparties, never one with
+// history. Last, as it archives counterparties the tests above use.
+describe('deleting a counterparty with freight rates, as app_api', () => {
+  it('keeps a carrier with rates, and a company with rates at its locations', async () => {
+    for (const counterparty of [counterparties.carrier, counterparties.buyer]) {
+      expect((await db.setArchived(as(users.olivia), counterparty, true)).status).toBe('saved');
+      expect(await db.deleteCounterparty(as(users.ada), counterparty)).toEqual({
+        status: 'has_history',
+        history: ['freight'],
+      });
+      expect(await db.getCounterparty(as(users.ada), counterparty)).not.toBeNull();
+    }
   });
 });

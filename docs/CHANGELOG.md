@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Admins delete archived counterparties
+
+- `docs/DECISIONS.md`: who may delete, what goes with a counterparty, and why one with history stays archived.
+- `docs/DATA_MODEL.md`: migration `20261031010000_counterparty_deletion.sql`.
+- `docs/API.md`: `DELETE /api/v1/counterparties/{id}`.
+- `docs/PRODUCT.md`, `README.md`, `AGENTS.md`: Delete beside Restore for admins.
+
 ## 2026-10-31 — Handoff record of #89 to #92
 
 - `docs/HANDOFF.md`: Codex's reviews of #88 fixed (ivanmueller/gss#89 to #92) with their CI and Deploy staging runs.

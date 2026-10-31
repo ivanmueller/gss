@@ -110,6 +110,17 @@ export interface CounterpartyCommodity {
 }
 
 /** The outcome of a change to a counterparty, its contacts or its locations. */
+/** What a counterparty has that keeps it from being deleted: records that keep their history. */
+export type CounterpartyHistory = 'quotes' | 'freight' | 'contact_log' | 'follow_ups';
+
+export type DeleteResult =
+  | { status: 'deleted' }
+  | { status: 'not_found' }
+  /** The user is not an admin of its organization. */
+  | { status: 'forbidden' }
+  | { status: 'not_archived' }
+  | { status: 'has_history'; history: CounterpartyHistory[] };
+
 export type WriteResult =
   | { status: 'saved' }
   /** The counterparty (or its contact or location) does not exist or is not visible. */
@@ -326,6 +337,12 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
   ) => Promise<WriteResult>;
   /** Archives or restores a counterparty; doing what is already done changes nothing. */
   setArchived: (ctx: RequestContext, id: string, archived: boolean) => Promise<WriteResult>;
+  /**
+   * Deletes an archived counterparty with its contacts, locations, commodities and logo; only
+   * an admin of its organization may (owner's request, 2026-10-31). One with bids or offers,
+   * freight rates, a contact history or follow-ups is kept.
+   */
+  deleteCounterparty: (ctx: RequestContext, id: string) => Promise<DeleteResult>;
   addContact: (
     ctx: RequestContext,
     counterpartyId: string,
@@ -1184,6 +1201,48 @@ export function createDatabase(sql: postgres.Sql): Database {
           where id = ${id} and (archived_at is null) = ${archived}
         `;
         return SAVED;
+      });
+    },
+
+    deleteCounterparty(ctx, id) {
+      return asUser(ctx, async (tx): Promise<DeleteResult> => {
+        const [row] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(organization_id) as allowed
+          from app.counterparties where id = ${id}`;
+        if (!row) return NOT_FOUND;
+        if (!row.allowed) return { status: 'forbidden' };
+        // It and its locations are locked for the rest of the transaction: restoring it, a
+        // change under it, and a bid, offer or freight rate naming it or one of its locations
+        // wait for this delete and then find it gone, or happened first and are seen below.
+        const [locked] = await tx<{ archived: boolean }[]>`
+          select archived_at is not null as archived
+          from app.counterparties where id = ${id}
+          for update`;
+        if (!locked) return NOT_FOUND;
+        if (!locked.archived) return { status: 'not_archived' };
+        await tx`select id from app.facilities where counterparty_id = ${id} order by id for update`;
+        const [kept] = await tx<Record<CounterpartyHistory, boolean>[]>`
+          select
+            exists (select from app.quotes where counterparty_id = ${id}) as quotes,
+            exists (
+              select from app.freight_quotes q
+              where q.carrier_id = ${id}
+                 or exists (select from app.facilities f
+                            where f.counterparty_id = ${id}
+                              and f.id in (q.origin_facility_id, q.destination_facility_id))
+            ) as freight,
+            exists (select from app.contact_log_entries where counterparty_id = ${id}) as contact_log,
+            exists (select from app.follow_ups where counterparty_id = ${id}) as follow_ups`;
+        const history = (['quotes', 'freight', 'contact_log', 'follow_ups'] as const).filter(
+          (what) => kept?.[what] === true,
+        );
+        if (history.length > 0) return { status: 'has_history', history };
+        await tx`delete from app.counterparty_commodities where counterparty_id = ${id}`;
+        await tx`delete from app.counterparty_contacts where counterparty_id = ${id}`;
+        await tx`delete from app.facilities where counterparty_id = ${id}`;
+        await tx`delete from app.counterparty_logos where counterparty_id = ${id}`;
+        const deleted = await tx`delete from app.counterparties where id = ${id} returning id`;
+        return deleted.length === 1 ? { status: 'deleted' } : NOT_FOUND;
       });
     },
 

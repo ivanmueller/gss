@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(63);
+select plan(64);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader),
@@ -98,15 +98,17 @@ select ok(
   'app_api cannot call the audit trigger function directly'
 );
 select ok(
-  not has_table_privilege('app_api', 'app.counterparties', 'delete, truncate')
+  -- Deletes are limited by policy to archived counterparties, by admins
+  -- (counterparty_deletion.test.sql).
+  not has_table_privilege('app_api', 'app.counterparties', 'truncate')
     and not has_table_privilege('app_api', 'app.counterparty_contacts', 'truncate')
     and not has_table_privilege('app_api', 'app.facilities', 'truncate')
     and not has_table_privilege('app_api', 'app.import_batches', 'update, delete, truncate'),
-  'app_api cannot delete counterparties, empty directory tables or change import records'
+  'app_api cannot empty directory tables or change import records'
 );
 select ok(
-  not has_table_privilege('app_api', 'app.counterparty_logos', 'delete, truncate'),
-  'app_api cannot delete logos'
+  not has_table_privilege('app_api', 'app.counterparty_logos', 'truncate'),
+  'app_api cannot empty the logos (it deletes only an archived counterparty''s, as an admin)'
 );
 select ok(
   has_column_privilege('app_api', 'app.counterparty_logos', 'data', 'update')
@@ -302,10 +304,14 @@ select throws_ok(
      where legal_name = 'Synthetic Prairie Mills'$$)$q$,
   '42501', null, 'a counterparty cannot be moved to another organization through the API role'
 );
-select throws_ok(
+-- Only archived ones can be deleted, by an admin (counterparty_deletion.test.sql); none is.
+create temp table counterparties_before as select count(*)::int as n from app.counterparties;
+select lives_ok(
   $q$select pg_temp.api_exec('00000000-0000-4000-8000-0000000022aa', 'delete from app.counterparties')$q$,
-  '42501', null, 'counterparties cannot be deleted through the API role'
+  'an admin may ask to delete counterparties'
 );
+select is((select count(*)::int from app.counterparties), (select n from counterparties_before),
+  'but none that is not archived is deleted');
 
 -- Logos.
 select lives_ok(

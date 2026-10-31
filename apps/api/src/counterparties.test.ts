@@ -84,6 +84,7 @@ describe('authentication', () => {
     ['PATCH', `/${COUNTERPARTY}`],
     ['POST', `/${COUNTERPARTY}/archive`],
     ['POST', `/${COUNTERPARTY}/restore`],
+    ['DELETE', `/${COUNTERPARTY}`],
     ['POST', `/${COUNTERPARTY}/contacts`],
     ['PATCH', `/${COUNTERPARTY}/contacts/${CONTACT}`],
     ['DELETE', `/${COUNTERPARTY}/contacts/${CONTACT}`],
@@ -966,6 +967,54 @@ describe('archiving', () => {
   it('refuses a reader who cannot edit', async () => {
     db.setArchived.mockResolvedValueOnce({ status: 'forbidden' });
     expect((await send('POST', `/${COUNTERPARTY}/archive`)).status).toBe(403);
+  });
+});
+
+describe("DELETE /api/v1/counterparties/:id (owner's request, 2026-10-31)", () => {
+  it('deletes an archived counterparty as the signed-in admin', async () => {
+    const res = await send('DELETE', `/${COUNTERPARTY}`);
+    expect(res.status).toBe(204);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(db.deleteCounterparty).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      COUNTERPARTY,
+    );
+  });
+
+  it.each([
+    [{ status: 'not_found' as const }, 404, 'NOT_FOUND', 'No such counterparty.'],
+    [{ status: 'forbidden' as const }, 403, 'FORBIDDEN', 'Only admins can delete counterparties.'],
+    [
+      { status: 'not_archived' as const },
+      409,
+      'NOT_ARCHIVED',
+      'Archive this counterparty before deleting it.',
+    ],
+    [
+      { status: 'has_history' as const, history: ['quotes' as const] },
+      409,
+      'HAS_HISTORY',
+      'It has bids or offers, which are kept for the record, so it cannot be deleted. It stays archived.',
+    ],
+    [
+      {
+        status: 'has_history' as const,
+        history: ['freight' as const, 'contact_log' as const, 'follow_ups' as const],
+      },
+      409,
+      'HAS_HISTORY',
+      'It has freight rates, a contact history and follow-ups, which are kept for the record, so it cannot be deleted. It stays archived.',
+    ],
+  ])('answers %j with %i %s', async (result, status, code, message) => {
+    db.deleteCounterparty.mockResolvedValueOnce(result);
+    const res = await send('DELETE', `/${COUNTERPARTY}`);
+    expect(res.status).toBe(status);
+    expect(await res.json()).toMatchObject({ error: { code, message } });
+  });
+
+  it('refuses an id that is not one without opening the database', async () => {
+    expect((await send('DELETE', '/not-an-id')).status).toBe(404);
+    expect(db.deleteCounterparty).not.toHaveBeenCalled();
   });
 });
 

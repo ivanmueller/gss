@@ -20,7 +20,7 @@ if (!ADMIN_URL || !API_URL) {
 
 const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
 const id = () => crypto.randomUUID();
-const users = { tess: id(), victor: id(), olivia: id(), bob: id() };
+const users = { tess: id(), victor: id(), olivia: id(), bob: id(), ada: id() };
 const orgs = { a: id(), b: id() };
 const counterparties = { buyer: id(), seller: id(), archived: id(), other: id() };
 const facilities = { buyer: id(), seller: id() };
@@ -62,6 +62,7 @@ beforeAll(async () => {
     (${orgs.a}, ${users.tess}, 'trader', 'active', now()),
     (${orgs.a}, ${users.victor}, 'viewer', 'active', now()),
     (${orgs.a}, ${users.olivia}, 'operations', 'active', now()),
+    (${orgs.a}, ${users.ada}, 'org_admin', 'active', now()),
     (${orgs.b}, ${users.bob}, 'org_admin', 'active', now())`;
   await admin`insert into app.counterparties
       (id, organization_id, legal_name, types, primary_country, source, created_by, archived_at) values
@@ -372,5 +373,22 @@ describe('bids and offers as app_api', () => {
     expect(commodities).toHaveLength(20);
     // The shared code's copy, which reads spreadsheet names, is the database's list.
     expect(commodities).toEqual(COMMODITIES.map(({ code, name }) => ({ code, name })));
+  });
+});
+
+// The owner's request of 2026-10-31: admins delete archived counterparties, never one with
+// history. Last, as it archives counterparties the tests above use.
+describe('deleting a counterparty with bids or offers, as app_api', () => {
+  it('keeps it, archived, and says why', async () => {
+    expect((await db.setArchived(as(users.olivia), counterparties.buyer, true)).status).toBe(
+      'saved',
+    );
+    expect(await db.deleteCounterparty(as(users.ada), counterparties.buyer)).toEqual({
+      status: 'has_history',
+      history: ['quotes'],
+    });
+    expect(
+      (await db.getCounterparty(as(users.ada), counterparties.buyer))?.archivedAt,
+    ).not.toBeNull();
   });
 });

@@ -3,7 +3,7 @@
 Canadian–U.S. physical grain trading operations platform. The repository has the Phase 0 tooling, CI and a staging deploy. On staging, one Cloudflare Worker serves the web app and the API:
 
 - sign-in with an authenticator code, and a **Team** page where admins add people (the app makes their login), set names and roles, and suspend or reactivate them;
-- the counterparty directory of buyers and sellers: added by hand or from a spreadsheet, edited, archived, with logos;
+- the counterparty directory of buyers and sellers: added by hand or from a spreadsheet, edited, archived (and deleted by admins once archived, unless they have history), with logos;
 - its Mapbox map view, with coordinates looked up through Geocodio;
 - **Bids & offers**: real bids and offers linked to counterparties, with a revision history that is never edited;
 - a trading workspace (map and order book in CAD) showing those live bids and offers, or made-up demo data while the Demo data switch is on;
@@ -97,7 +97,7 @@ Either way, each new location without coordinates gets them from its address at 
 Operations and admin members can also:
 
 - **Website:** entered under **Edit details** (or when adding a counterparty, or from a "Website" column in a spreadsheet); `example.com` is saved as `https://example.com`. The site name must be in plain letters (no accents). On the counterparty's page it is a link that opens in a new tab.
-- On a counterparty's page: **Edit details**, **Archive** (and **Restore**; on a buyer's or seller's page the first two are under **⋯**), add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
+- On a counterparty's page: **Edit details**, **Archive** (and **Restore**; on a buyer's or seller's page the first two are under **⋯**); an admin can **Delete** an archived one, after a confirmation, unless it has bids or offers, freight rates, a contact history or follow-ups (it then stays archived); add, edit and remove contacts and locations, and upload a PNG, JPG or WebP logo (a JPG or WebP is saved as a PNG; a logo already there is changed under **Edit details**). Every change is recorded in the audit trail. If someone else changed the record after you opened it, your save is refused and you can load the latest version.
 - On a buyer's or seller's page: **Make main** on a contact, shown at the top with the next follow-up and the last contact.
 - **Verified commodities:** a commodity from a spreadsheet shows grey and dashed (unverified); anyone on the team clicks it and chooses **Verify** to make it verified, shown in the buy or sell colour. Ticked by hand under **Edit**, a commodity is verified at once.
 

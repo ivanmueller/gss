@@ -87,6 +87,7 @@ import {
 } from '../lib/api';
 import { dueState } from '../lib/crm';
 import {
+  canDeleteCounterparties,
   canEditDirectory,
   countryName,
   facilityTypeLabel,
@@ -95,8 +96,8 @@ import {
 } from '../lib/directory';
 import { logoAsPng } from '../lib/logoImage';
 import { canEnterQuotes } from '../lib/quotes';
-import { Link } from '../lib/router';
-import { useApiResource } from '../lib/useApiResource';
+import { Link, navigate } from '../lib/router';
+import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from './CounterpartiesPage';
@@ -378,6 +379,7 @@ type Editing =
   | { kind: 'remove-contact'; id: string }
   | { kind: 'remove-location'; id: string }
   | { kind: 'archive' }
+  | { kind: 'delete' }
   | { kind: 'coordinates' }
   | null;
 
@@ -441,6 +443,8 @@ function CounterpartyView({
   const [firstLogoSaved, setFirstLogoSaved] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [mainError, setMainError] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
   const editor = canEditDirectory(organization.role);
@@ -486,6 +490,22 @@ function CounterpartyView({
       );
     } finally {
       setArchiving(false);
+    }
+  }
+
+  async function deleteCounterparty() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      // 204, with no body to read.
+      await apiFetch(path, token, { method: 'DELETE' });
+      forgetApiAnswers('/counterparties');
+      navigate('/counterparties');
+    } catch (failure) {
+      setDeleteError(
+        failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.',
+      );
+      setDeleting(false);
     }
   }
 
@@ -1114,18 +1134,74 @@ function CounterpartyView({
               <strong>Archived</strong> on {formatAlberta(detail.archivedAt ?? '')}. It is left off
               the list and the map, and cannot be changed until it is restored.
             </p>
-            {editor && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={archiving}
-                onClick={() => void setArchived(false)}
-              >
-                <ArchiveRestore aria-hidden="true" />
-                Restore
-              </Button>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {editor && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={archiving || deleting}
+                  onClick={() => void setArchived(false)}
+                >
+                  <ArchiveRestore aria-hidden="true" />
+                  Restore
+                </Button>
+              )}
+              {canDeleteCounterparties(organization.role) && editing?.kind !== 'delete' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={archiving}
+                  onClick={() => {
+                    setDeleteError(null);
+                    start({ kind: 'delete' });
+                  }}
+                >
+                  <Trash2 aria-hidden="true" />
+                  Delete
+                </Button>
+              )}
+            </div>
           </div>
+          {editing?.kind === 'delete' && (
+            <div
+              role="group"
+              aria-label="Delete this counterparty"
+              className="mt-3 flex flex-col gap-2 border-t border-warning-border pt-3"
+            >
+              <p>
+                Delete <strong>{detail.legalName}</strong> permanently? Its contacts, locations,
+                commodities and logo are deleted with it, and this cannot be undone. The audit trail
+                keeps who deleted it and when. A counterparty with bids or offers, freight rates, a
+                contact history or follow-ups cannot be deleted; it stays archived.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={deleting}
+                  onClick={() => void deleteCounterparty()}
+                >
+                  {deleting ? 'Deleting…' : 'Delete permanently'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={deleting}
+                  onClick={() => {
+                    setEditing(null);
+                    setDeleteError(null);
+                  }}
+                >
+                  Keep it
+                </Button>
+              </div>
+              {deleteError && (
+                <p role="alert" className="text-danger">
+                  {deleteError}
+                </p>
+              )}
+            </div>
+          )}
         </Callout>
       )}
       {archiveError && (

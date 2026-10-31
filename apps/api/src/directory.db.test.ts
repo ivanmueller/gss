@@ -26,7 +26,7 @@ if (!ADMIN_URL || !API_URL) {
 
 const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
 const id = () => crypto.randomUUID();
-const users = { olivia: id(), victor: id(), bob: id() };
+const users = { olivia: id(), victor: id(), bob: id(), adam: id() };
 const orgs = { a: id(), b: id() };
 const as = (userId: string): RequestContext => ({ userId, requestId: id() });
 
@@ -183,6 +183,7 @@ beforeAll(async () => {
     (${orgs.a}, 'Synthetic Org A'), (${orgs.b}, 'Synthetic Org B')`;
   await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at) values
     (${orgs.a}, ${users.olivia}, 'operations', 'active', now()),
+    (${orgs.a}, ${users.adam}, 'org_admin', 'active', now()),
     (${orgs.a}, ${users.victor}, 'viewer', 'active', now()),
     (${orgs.b}, ${users.bob}, 'org_admin', 'active', now())`;
   db = postgresDatabase(API_URL);
@@ -669,6 +670,43 @@ describe('the counterparty directory as app_api', () => {
     expect((await db.getCounterparty(ctx, created.id))?.commodities.map((k) => k.code)).toEqual([
       'canola',
     ]);
+  });
+
+  // The owner's request of 2026-10-31.
+  it('lets an admin delete an archived counterparty with what it has, and nobody else', async () => {
+    const template = batch().counterparties[0];
+    if (!template) throw new Error('fixture missing');
+    const created = await db.createCounterparty(as(users.olivia), orgs.a, {
+      ...template,
+      counterparty: { ...template.counterparty, legalName: 'Synthetic Short-Lived Co' },
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const target = created.id;
+    expect((await db.putLogo(as(users.olivia), target, PNG)).status).toBe('saved');
+
+    expect(await db.deleteCounterparty(as(users.adam), target)).toEqual({ status: 'not_archived' });
+    expect((await db.setArchived(as(users.olivia), target, true)).status).toBe('saved');
+    expect(await db.deleteCounterparty(as(users.olivia), target)).toEqual({ status: 'forbidden' });
+    expect(await db.deleteCounterparty(as(users.victor), target)).toEqual({ status: 'forbidden' });
+    expect(await db.deleteCounterparty(as(users.bob), target)).toEqual({ status: 'not_found' });
+
+    const ctx = as(users.adam);
+    expect(await db.deleteCounterparty(ctx, target)).toEqual({ status: 'deleted' });
+    expect(await db.getCounterparty(ctx, target)).toBeNull();
+    expect(await db.deleteCounterparty(ctx, target)).toEqual({ status: 'not_found' });
+    const [left] = await admin<{ count: number }[]>`
+      select (select count(*) from app.counterparty_contacts where counterparty_id = ${target})
+           + (select count(*) from app.facilities where counterparty_id = ${target})
+           + (select count(*) from app.counterparty_commodities where counterparty_id = ${target})
+           + (select count(*) from app.counterparty_logos where counterparty_id = ${target})
+           as count`;
+    expect(Number(left?.count)).toBe(0);
+    // The audit trail keeps who deleted it, when, and in which request.
+    const [audit] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.audit_events
+      where entity = 'counterparties' and entity_id = ${target} and action = 'delete'
+        and actor_id = ${users.adam} and request_id = ${ctx.requestId}`;
+    expect(audit?.count).toBe(1);
   });
 
   it('leaves no user or request id on the connection after writes and refused writes', async () => {
