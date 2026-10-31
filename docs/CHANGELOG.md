@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Handoff record of #94
+
+- `docs/HANDOFF.md`: Codex's findings on #93 fixed (ivanmueller/gss#94) with its CI and Deploy staging runs.
+
 ## 2026-10-31 — Codex's review of #93
 
 - `docs/DECISIONS.md`: the deleting admin's membership held until the delete is done; nothing kept unless the company itself is deleted; late answers not kept after a delete.
