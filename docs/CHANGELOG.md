@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Handoff record of #98
+
+- `docs/HANDOFF.md`: the carrier page, lanes and equipment (ivanmueller/gss#98) with its CI and Deploy staging runs and Codex's review; GT-050; the staging checklist.
+- `AGENTS.md`: the status line with carrier lanes.
+
 ## 2026-11-01 — Codex's review of the carrier lanes
 
 - `docs/DECISIONS.md`, `docs/DATA_MODEL.md`: `app.begin_lane_change` locks the person's membership and the carrier for each change of lanes.
