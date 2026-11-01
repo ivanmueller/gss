@@ -664,6 +664,12 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await page.getByRole('menuitemcheckbox', { name: 'Montana' }).click();
   await page.getByRole('menuitemcheckbox', { name: 'North Dakota' }).click();
   await page.keyboard.press('Escape');
+  // Truck or rail only when chosen: lanes start as not stated (owner's answer, 2026-11-01).
+  await expect(laneForm.getByRole('button', { name: 'Not stated' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await laneForm.getByRole('button', { name: 'Truck', exact: true }).click();
   await laneForm.getByRole('button', { name: 'Save lanes' }).click();
   const laneList = page.getByRole('region', { name: 'Lanes (2)' }).getByRole('list', {
     name: 'Lanes',
