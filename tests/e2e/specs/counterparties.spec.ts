@@ -634,8 +634,14 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
   await company.getByRole('checkbox', { name: 'Carrier' }).check();
   await choose(company.getByLabel('Country (required)'), 'Canada');
+  // Its equipment when it is added (owner's request, 2026-11-01); lanes follow on its page.
+  await page
+    .getByRole('region', { name: 'Equipment and lanes' })
+    .getByRole('checkbox', { name: 'Dry van' })
+    .check();
   await page.getByRole('button', { name: 'Add counterparty' }).click();
   await expect(page.getByRole('heading', { name: 'Synthetic Hauling' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Equipment' })).toContainText('Dry van');
 
   // The Carriers filter shows it alone.
   await page.getByRole('link', { name: 'All counterparties' }).click();

@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Adding a carrier by hand; truck or rail only when stated
+
+- `docs/DECISIONS.md`: the add form for carriers (equipment, lanes, home yard, no market or tier); lanes not stated as truck or rail.
+- `docs/DATA_MODEL.md`: migration `20261101020000_lane_transport_optional.sql`.
+- `docs/API.md`: `equipment` and `lanes` on `POST /api/v1/counterparties`; a lane's transport may be null.
+- `docs/PRODUCT.md`: the add form for carriers.
+
 ## 2026-11-01 — Handoff record of #98
 
 - `docs/HANDOFF.md`: the carrier page, lanes and equipment (ivanmueller/gss#98) with its CI and Deploy staging runs and Codex's review; GT-050; the staging checklist.

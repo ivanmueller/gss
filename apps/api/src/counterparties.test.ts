@@ -1152,8 +1152,49 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
           }) as unknown,
         ],
         commodities: [],
+        equipment: [],
+        lanes: [],
       },
     );
+  });
+
+  it('saves a carrier’s equipment and first lanes, each pair of places once', async () => {
+    const res = await send('POST', '', {
+      organizationId: ORG,
+      values: { legalName: 'Synthetic Hauling', country: 'CA', types: 'carrier' },
+      equipment: ['van', 'super_b'],
+      lanes: [
+        { origin: 'CA-AB', destination: 'US-MT', transport: null },
+        { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+        { origin: 'CA-AB', destination: 'US-MT', transport: 'rail' },
+      ],
+    });
+    expect(res.status).toBe(201);
+    expect(db.createCounterparty).toHaveBeenCalledWith(
+      expect.anything(),
+      ORG,
+      expect.objectContaining({
+        equipment: ['super_b', 'van'],
+        lanes: [
+          { origin: 'CA-AB', destination: 'US-MT', transport: 'rail' },
+          { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+        ],
+      }),
+    );
+  });
+
+  it('refuses equipment or lanes for a counterparty that is not a carrier', async () => {
+    for (const extra of [
+      { equipment: ['van'] },
+      { lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: null }] },
+    ]) {
+      const res = await send('POST', '', { organizationId: ORG, values, ...extra });
+      expect(res.status).toBe(422);
+      expect(await res.json()).toMatchObject({
+        issues: [{ field: 'types', message: 'must include Carrier to have equipment or lanes' }],
+      });
+    }
+    expect(openDatabase).not.toHaveBeenCalled();
   });
 
   it('saves the company phone, and the location’s rail or truck access given beside it', async () => {

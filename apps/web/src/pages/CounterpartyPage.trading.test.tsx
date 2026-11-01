@@ -529,6 +529,8 @@ describe('a carrier’s page', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit details' }));
     const form = screen.getByRole('form', { name: 'Edit details' });
+    // A carrier is not asked for a market or tier.
+    expect(within(form).queryByText('Tier')).toBeNull();
     const equipment = within(form).getByRole('group', { name: /Equipment/ });
     expect(within(equipment).getByRole('checkbox', { name: 'Super B hopper' })).toBeChecked();
     await userEvent.click(within(equipment).getByRole('checkbox', { name: 'Super B hopper' }));

@@ -182,11 +182,46 @@ describe('CarrierLanes', () => {
     expect(onSaved).toHaveBeenCalledWith('Lanes saved.');
   });
 
+  it('leaves truck or rail out unless chosen, and shows no badge for it', async () => {
+    const calls = mockApi({ [`PATCH /counterparties/${ID}/lanes`]: () => Response.json(DETAIL) });
+    show('trader', {
+      ...DETAIL,
+      lanes: [{ origin: 'CA-SK', destination: 'US-ND', transport: null }],
+      quotedLanes: [],
+    });
+    const list = screen.getByRole('list', { name: 'Lanes' });
+    expect(list.textContent.replace(/\s+/g, ' ')).toBe(
+      'From Saskatchewan to North DakotaCross-borderEditRemove',
+    );
+    expect(
+      screen.getByRole('button', {
+        name: 'Edit lanes from Saskatchewan, truck or rail not stated',
+      }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add lanes' }));
+    const form = screen.getByRole('form', { name: 'New lanes' });
+    expect(within(form).getByRole('button', { name: 'Not stated' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await userEvent.click(within(form).getByRole('button', { name: 'From' }));
+    await userEvent.type(screen.getByRole('combobox', { name: 'Search the list' }), 'manitoba');
+    await userEvent.click(screen.getByRole('option', { name: 'Manitoba' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'To: None' }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Minnesota' }));
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(within(form).getByRole('button', { name: 'Save lanes' }));
+    expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
+      add: [{ origin: 'CA-MB', destination: 'US-MN', transport: null }],
+      remove: [],
+    });
+  });
+
   it('removes one starting place’s lanes after asking', async () => {
     const calls = mockApi({ [`PATCH /counterparties/${ID}/lanes`]: () => Response.json(DETAIL) });
     const onSaved = show('operations');
     await userEvent.click(
-      screen.getByRole('button', { name: 'Remove lanes from Alberta by truck' }),
+      screen.getByRole('button', { name: 'Remove lanes from Alberta, by truck' }),
     );
     const confirm = screen.getByRole('group', { name: 'Remove lanes from Alberta' });
     expect(confirm).toHaveTextContent('Remove the lanes from Alberta to Montana, North Dakota?');

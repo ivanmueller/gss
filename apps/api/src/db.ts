@@ -163,6 +163,9 @@ export interface NewCounterparty {
   contacts: ContactInput[];
   facilities: FacilityInput[];
   commodities: CommodityInterest[];
+  /** A carrier's equipment and first lanes (each pair of places once). */
+  equipment?: Equipment[];
+  lanes?: CarrierLane[];
 }
 
 export interface ImportBatchInput {
@@ -1332,11 +1335,13 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.counterparties
             (organization_id, legal_name, trading_name, types, primary_country,
-             verification_status, website, phone, markets, tier, notes, source, created_by)
+             verification_status, website, phone, markets, tier, equipment, notes, source,
+             created_by)
           values (${organizationId}, ${c.legalName}, ${c.tradingName},
                   ${enumArray(c.types)}::app.counterparty_type[], ${c.primaryCountry},
                   ${c.verificationStatus}::app.verification_status, ${c.website}, ${c.phone},
                   ${`{${c.markets.join(',')}}`}::text[], ${c.tier},
+                  ${`{${(record.equipment ?? []).join(',')}}`}::text[],
                   ${c.notes}, 'manual', app.current_user_id())
           returning id
         `;
@@ -1346,6 +1351,15 @@ export function createDatabase(sql: postgres.Sql): Database {
         }
         for (const facility of record.facilities) {
           await insertFacility(tx, organizationId, created.id, facility);
+        }
+        // A carrier's first lanes: operations and admins add counterparties, and may add
+        // lanes too; nobody else sees the new carrier until this commits.
+        for (const lane of record.lanes ?? []) {
+          await tx`
+            insert into app.carrier_lanes
+              (organization_id, carrier_id, origin, destination, transport, created_by)
+            values (${organizationId}, ${created.id}, ${lane.origin}, ${lane.destination},
+                    ${lane.transport}, app.current_user_id())`;
         }
         // Chosen by the person adding it, so verified by them.
         for (const interest of record.commodities) {

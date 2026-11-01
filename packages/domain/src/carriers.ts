@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { TRANSPORT_ACCESS, updateCounterpartySchema, type TransportAccess } from './directory';
+import {
+  createCounterpartySchema,
+  TRANSPORT_ACCESS,
+  updateCounterpartySchema,
+  type TransportAccess,
+} from './directory';
 import { CA_REGIONS, US_REGIONS, type CountryCode } from './regions';
 
 // A carrier's lanes and equipment (owner's request and answers, 2026-11-01; docs/DECISIONS.md).
@@ -55,11 +60,17 @@ export function laneRegionsOf(country: CountryCode): { code: string; name: strin
 export interface CarrierLane {
   origin: string;
   destination: string;
-  transport: TransportAccess;
+  /** Truck, rail or both only when stated; null when not (owner's answer, 2026-11-01). */
+  transport: TransportAccess | null;
 }
 
 const laneRegion = z.string().refine(isLaneRegion, { message: 'not a province or state' });
 const lanePlaces = z.object({ origin: laneRegion, destination: laneRegion });
+
+/** One lane as sent: its places, and truck, rail or both, or null when not stated. */
+export const laneSchema = lanePlaces.extend({
+  transport: z.enum(TRANSPORT_ACCESS).nullable(),
+});
 
 /** Most lanes one change may add or remove (every pair of places is far more than needed). */
 export const MAX_LANE_CHANGE = 500;
@@ -70,7 +81,7 @@ export const MAX_LANE_CHANGE = 500;
  */
 export const laneChangeSchema = z
   .object({
-    add: z.array(lanePlaces.extend({ transport: z.enum(TRANSPORT_ACCESS) })).max(MAX_LANE_CHANGE),
+    add: z.array(laneSchema).max(MAX_LANE_CHANGE),
     remove: z.array(lanePlaces).max(MAX_LANE_CHANGE),
   })
   .refine((change) => change.add.length + change.remove.length > 0, {
@@ -103,15 +114,20 @@ export function runsLane(
 /** One origin's lanes with the same transport, to show as "From Alberta → Montana, North Dakota". */
 export interface LaneGroup {
   origin: string;
-  transport: TransportAccess;
+  transport: TransportAccess | null;
   destinations: string[];
+}
+
+/** Truck, rail and both in that order, then not stated. */
+function transportOrder(transport: TransportAccess | null): number {
+  return transport === null ? TRANSPORT_ACCESS.length : TRANSPORT_ACCESS.indexOf(transport);
 }
 
 /** Lanes grouped by origin and transport, origins and destinations by name. */
 export function groupLanes(lanes: readonly CarrierLane[]): LaneGroup[] {
   const groups = new Map<string, LaneGroup>();
   for (const lane of lanes) {
-    const key = `${lane.origin} ${lane.transport}`;
+    const key = `${lane.origin} ${lane.transport ?? 'not_stated'}`;
     const group = groups.get(key) ?? {
       origin: lane.origin,
       transport: lane.transport,
@@ -125,8 +141,7 @@ export function groupLanes(lanes: readonly CarrierLane[]): LaneGroup[] {
     .map((group) => ({ ...group, destinations: [...group.destinations].sort(byName) }))
     .sort(
       (a, b) =>
-        byName(a.origin, b.origin) ||
-        TRANSPORT_ACCESS.indexOf(a.transport) - TRANSPORT_ACCESS.indexOf(b.transport),
+        byName(a.origin, b.origin) || transportOrder(a.transport) - transportOrder(b.transport),
     );
 }
 
@@ -167,4 +182,13 @@ export const equipmentSchema = z
  */
 export const updateCounterpartyDetailsSchema = updateCounterpartySchema.extend({
   equipment: equipmentSchema.optional(),
+});
+
+/**
+ * POST /api/v1/counterparties: one counterparty entered by hand and, for a carrier, its
+ * equipment and first lanes (owner's request, 2026-11-01).
+ */
+export const createCounterpartyDetailsSchema = createCounterpartySchema.extend({
+  equipment: equipmentSchema.optional(),
+  lanes: z.array(laneSchema).max(MAX_LANE_CHANGE).optional(),
 });

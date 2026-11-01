@@ -5,7 +5,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(58);
+select plan(61);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader), sam (suspended
@@ -238,6 +238,21 @@ select throws_ok(
                 'CA-SK', 'US-MT', 'barge', '00000000-0000-4000-8000-0000000044aa')),
   '23514', null, 'only truck, rail or both');
 
+-- Not stated (20261101020000_lane_transport_optional.sql) ---------------------------
+select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+  format($$insert into app.carrier_lanes
+             (organization_id, carrier_id, origin, destination, transport, created_by)
+           values (%L, %L, 'CA-MB', 'US-ND', null, %L)$$,
+         '00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
+         '00000000-0000-4000-8000-0000000044aa')), 1,
+  'a lane may be saved without truck or rail, when nobody said which');
+select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+  $$update app.carrier_lanes set transport = 'rail' where origin = 'CA-MB' and destination = 'US-ND'$$), 1,
+  'and given one later');
+select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+  $$delete from app.carrier_lanes where origin = 'CA-MB' and destination = 'US-ND'$$), 1,
+  'and removed like any other');
+
 -- Starting a change (Codex's review of ba68201) ------------------------------------
 -- Runs app.begin_lane_change as app_api for the given user, in a subtransaction.
 create function pg_temp.begin_as(uid text, carrier text) returns text
@@ -330,13 +345,14 @@ select is(
   (select count(*)::int from app.audit_events
     where entity = 'carrier_lanes' and action = 'insert'
       and organization_id = '00000000-0000-4000-8000-0000000000aa'),
-  3, 'every lane added is audited');
+  4, 'every lane added is audited');
 select is(
   (select array_agg(actor_id::text order by actor_id) from app.audit_events
     where entity = 'carrier_lanes' and action in ('update', 'delete')
       and organization_id = '00000000-0000-4000-8000-0000000000aa'),
   array['00000000-0000-4000-8000-0000000011aa', '00000000-0000-4000-8000-0000000022aa',
-        '00000000-0000-4000-8000-0000000022aa', '00000000-0000-4000-8000-0000000044aa'],
+        '00000000-0000-4000-8000-0000000022aa', '00000000-0000-4000-8000-0000000044aa',
+        '00000000-0000-4000-8000-0000000044aa', '00000000-0000-4000-8000-0000000044aa'],
   'and every change and removal, with who made it');
 
 select * from finish();

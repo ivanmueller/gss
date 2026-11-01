@@ -140,14 +140,94 @@ describe('AddCounterpartyForm', () => {
     await userEvent.type(within(company).getByLabelText('Legal name (required)'), 'Synthetic Co');
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Carrier' }));
     await choose(within(company).getByLabelText('Country (required)'), 'Canada');
-    // A carrier's location is not asked whether rail or trucks serve it.
-    expect(within(section('Location')).queryByLabelText('Served by')).toBeNull();
+    // A carrier's location is its home yard, not asked whether rail or trucks serve it.
+    expect(within(section('Home yard')).queryByLabelText('Served by')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
     await waitFor(() => {
       expect(window.location.pathname).toBe(`/counterparties/${CREATED}`);
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.body).toMatchObject({ transportAccess: null });
+  });
+
+  it('adds a carrier with its equipment and lanes, without market or tier', async () => {
+    const calls = mockApi({
+      'POST /counterparties': () => Response.json({ id: CREATED }, { status: 201 }),
+    });
+    form();
+    const company = section('Company');
+    expect(within(company).getByText('Tier')).toBeInTheDocument();
+    await userEvent.type(
+      within(company).getByLabelText('Legal name (required)'),
+      'Synthetic Hauling',
+    );
+    await userEvent.click(within(company).getByRole('checkbox', { name: 'Carrier' }));
+    await choose(within(company).getByLabelText('Country (required)'), 'Canada');
+    // Market and tier are a buyer's or seller's.
+    expect(within(company).queryByText('Tier')).toBeNull();
+    expect(within(company).queryByRole('group', { name: /Market/ })).toBeNull();
+
+    const carrier = section('Equipment and lanes');
+    await userEvent.click(within(carrier).getByRole('checkbox', { name: 'Super B hopper' }));
+    await userEvent.click(within(carrier).getByRole('checkbox', { name: 'Dry van' }));
+    const first = within(carrier).getByRole('group', { name: 'Lanes 1' });
+    await userEvent.click(within(first).getByRole('button', { name: 'From' }));
+    await userEvent.type(screen.getByRole('combobox', { name: 'Search the list' }), 'alberta');
+    await userEvent.click(screen.getByRole('option', { name: 'Alberta' }));
+    await userEvent.click(within(first).getByRole('button', { name: 'To: None' }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Montana' }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'North Dakota' }));
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(within(first).getByRole('button', { name: 'Truck' }));
+
+    // A second place, started but not finished, is pointed out before anything is sent.
+    await userEvent.click(
+      within(carrier).getByRole('button', { name: 'Lanes from another place' }),
+    );
+    const second = within(carrier).getByRole('group', { name: 'Lanes 2' });
+    await userEvent.click(within(second).getByRole('button', { name: 'From' }));
+    await userEvent.type(screen.getByRole('combobox', { name: 'Search the list' }), 'sask');
+    await userEvent.click(screen.getByRole('option', { name: 'Saskatchewan' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
+    expect(screen.getByText('Lanes 2: Choose at least one place they go to.')).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+
+    // Truck or rail left not stated.
+    await userEvent.click(within(second).getByRole('button', { name: 'To: None' }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'North Dakota' }));
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    const body = calls[0]?.body as { values: Record<string, string> };
+    expect(body).toMatchObject({
+      equipment: ['super_b', 'van'],
+      lanes: [
+        { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
+        { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+        { origin: 'CA-SK', destination: 'US-ND', transport: null },
+      ],
+    });
+    expect(body.values).not.toHaveProperty('equipment');
+  }, 15_000);
+
+  it('sends no equipment or lanes for a buyer', async () => {
+    const calls = mockApi({
+      'POST /counterparties': () => Response.json({ id: CREATED }, { status: 201 }),
+    });
+    form();
+    const company = section('Company');
+    await userEvent.type(within(company).getByLabelText('Legal name (required)'), 'Synthetic Mill');
+    await userEvent.click(within(company).getByRole('checkbox', { name: 'Buyer' }));
+    await choose(within(company).getByLabelText('Country (required)'), 'Canada');
+    expect(screen.queryByRole('region', { name: 'Equipment and lanes' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]?.body).not.toHaveProperty('equipment');
+    expect(calls[0]?.body).not.toHaveProperty('lanes');
   });
 
   it('shows each problem by its field before sending anything', async () => {

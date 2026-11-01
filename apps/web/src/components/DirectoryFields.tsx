@@ -1,6 +1,8 @@
 import {
   COUNTERPARTY_TYPES,
   COUNTRY_NAMES,
+  EQUIPMENT,
+  EQUIPMENT_LABELS,
   FACILITY_TYPE_LABELS,
   normalizeCountry,
   formatPhone,
@@ -10,6 +12,7 @@ import {
   SUPPORTED_COUNTRIES,
   TIERS,
   TRANSPORT_ACCESS_LABELS,
+  type Equipment,
   type FieldIssue,
   type ImportFieldId,
 } from '@grain/domain';
@@ -231,6 +234,9 @@ export function CompanyFields(props: FieldsProps) {
   const notesError = f.error('notes', 'Notes');
   const statusError = f.error('verificationStatus', 'Verification');
 
+  // Market and tier describe a buyer's or seller's business, not a carrier's (owner's answer,
+  // 2026-11-01): not asked for a counterparty that is only a carrier; saved values are kept.
+  const carrierOnly = chosen.size > 0 && [...chosen].every((type) => type === 'carrier');
   const markets = new Set(f.value('markets').split(',').filter(Boolean));
   const marketsError = f.error('markets', 'Market');
   const tierError = f.error('tier', 'Tier');
@@ -281,52 +287,56 @@ export function CompanyFields(props: FieldsProps) {
         required
         className="sm:col-span-2"
       />
-      <fieldset
-        className="flex flex-col gap-1.5 sm:col-span-2"
-        aria-describedby={marketsError ? `${f.id('markets')}-error` : undefined}
-      >
-        <legend className="text-sm font-medium">
-          Market <span className="font-normal text-muted-foreground">(any that apply)</span>
-        </legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
-          {MARKETS.map((market) => (
-            <label key={market} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="size-4 accent-primary"
-                checked={markets.has(market)}
-                disabled={props.disabled}
-                onChange={(event) => {
-                  const next = new Set(markets);
-                  if (event.target.checked) next.add(market);
-                  else next.delete(market);
-                  props.onChange({
-                    markets: MARKETS.filter((item) => next.has(item)).join(','),
-                  });
-                }}
-              />
-              {MARKET_LABELS[market]}
-            </label>
-          ))}
-        </div>
-        {marketsError && (
-          <p id={`${f.id('markets')}-error`} className="text-xs text-danger">
-            {marketsError}
-          </p>
-        )}
-      </fieldset>
-      <Field id={f.id('tier')} label="Tier" error={tierError}>
-        <Select
-          {...controlProps(f.id('tier'), tierError)}
-          value={f.value('tier')}
-          onValueChange={f.choose('tier')}
-          disabled={props.disabled}
-          options={[
-            { value: '', label: 'No tier' },
-            ...TIERS.map((tier) => ({ value: tier, label: `Tier ${tier}` })),
-          ]}
-        />
-      </Field>
+      {!carrierOnly && (
+        <>
+          <fieldset
+            className="flex flex-col gap-1.5 sm:col-span-2"
+            aria-describedby={marketsError ? `${f.id('markets')}-error` : undefined}
+          >
+            <legend className="text-sm font-medium">
+              Market <span className="font-normal text-muted-foreground">(any that apply)</span>
+            </legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+              {MARKETS.map((market) => (
+                <label key={market} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={markets.has(market)}
+                    disabled={props.disabled}
+                    onChange={(event) => {
+                      const next = new Set(markets);
+                      if (event.target.checked) next.add(market);
+                      else next.delete(market);
+                      props.onChange({
+                        markets: MARKETS.filter((item) => next.has(item)).join(','),
+                      });
+                    }}
+                  />
+                  {MARKET_LABELS[market]}
+                </label>
+              ))}
+            </div>
+            {marketsError && (
+              <p id={`${f.id('markets')}-error`} className="text-xs text-danger">
+                {marketsError}
+              </p>
+            )}
+          </fieldset>
+          <Field id={f.id('tier')} label="Tier" error={tierError}>
+            <Select
+              {...controlProps(f.id('tier'), tierError)}
+              value={f.value('tier')}
+              onValueChange={f.choose('tier')}
+              disabled={props.disabled}
+              options={[
+                { value: '', label: 'No tier' },
+                ...TIERS.map((tier) => ({ value: tier, label: `Tier ${tier}` })),
+              ]}
+            />
+          </Field>
+        </>
+      )}
       <CountrySelect field="country" label="Country" props={props} required />
       <Field id={f.id('verificationStatus')} label="Verification" error={statusError}>
         <Select
@@ -510,5 +520,44 @@ export function LocationFields({ access = false, ...props }: FieldsProps & { acc
         />
       </Field>
     </div>
+  );
+}
+
+/** "super_b,van" from the form → ['super_b', 'van'], in EQUIPMENT order. */
+export function equipmentOf(value: string | undefined): Equipment[] {
+  const chosen = new Set((value ?? '').split(','));
+  return EQUIPMENT.filter((item) => chosen.has(item));
+}
+
+/** What a carrier hauls with, as checkboxes under Edit details. */
+export function EquipmentFields({ props }: { props: FieldsProps }) {
+  const chosen = new Set(equipmentOf(props.values.equipment));
+  return (
+    <fieldset className="flex flex-col gap-1.5">
+      <legend className="text-sm font-medium">
+        Equipment <span className="font-normal text-muted-foreground">(any that apply)</span>
+      </legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+        {EQUIPMENT.map((item) => (
+          <label key={item} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={chosen.has(item)}
+              disabled={props.disabled}
+              onChange={(event) => {
+                const next = new Set(chosen);
+                if (event.target.checked) next.add(item);
+                else next.delete(item);
+                props.onChange({
+                  equipment: EQUIPMENT.filter((other) => next.has(other)).join(','),
+                });
+              }}
+            />
+            {EQUIPMENT_LABELS[item]}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
