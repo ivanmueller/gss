@@ -403,3 +403,5 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Truck or rail only when stated:** a lane's transport may be empty (migration `20261101020000_lane_transport_optional.sql`), shown without a badge; **Not stated** is the form's starting choice, on the carrier's page too. A lane started but not finished in the add form is pointed out before anything is sent.
 - **Spreadsheet columns come next, in their own pull request:** Equipment, Loads in, Delivers to and Mode, with the headers given to the owner to build a sheet.
 
+**2026-11-01 — Columns found in a spreadsheet shown in green (owner's request).** On the import's Match the columns step, each field filled from the file is shaded green with a check mark and a green edge, and a "columns found in your file" list shows the file's columns that are imported, in green, above those not used (grey). The owner also noted that carrier sheets will mostly carry the company phone, not contacts: every column is optional, so the carrier header list given to the owner leaves the contact columns out; buyer sheets with contacts import as before.
+

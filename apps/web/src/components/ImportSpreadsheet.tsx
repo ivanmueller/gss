@@ -8,12 +8,13 @@ import {
   type ImportFieldId,
   type ImportIssue,
 } from '@grain/domain';
-import { FileSpreadsheet } from 'lucide-react';
+import { CircleCheck, FileSpreadsheet } from 'lucide-react';
 import Papa from 'papaparse';
 import { useId, useMemo, useState, type ChangeEvent } from 'react';
 
 import { apiJson, ApiError, type ImportResult } from '../lib/api';
 import { countryName } from '../lib/directory';
+import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { FindCoordinates } from './FindCoordinates';
 import { Button } from './ui/button';
@@ -152,32 +153,67 @@ function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) 
   );
 }
 
-/** The file's columns that fill no field, so the user can see what is left out. */
+/**
+ * The file's columns: those found (green) and those that fill no field, so the user can see
+ * at a glance what is imported and what is left out (owner's request, 2026-11-01).
+ */
 function UnusedColumns({ sheet, mapping }: { sheet: Sheet; mapping: Mapping }) {
   const used = new Set(Object.values(mapping));
+  const found = sheet.headers.filter((header) => used.has(header));
   const unused = sheet.headers.filter((header) => !used.has(header));
-  if (unused.length === 0) {
-    return <p className="text-sm text-muted-foreground">Every column in your file is used.</p>;
-  }
-  return (
+  const foundList = found.length > 0 && (
     <div className="flex flex-col gap-1.5 text-sm">
       <p>
         <strong>
-          {unused.length === 1
-            ? '1 column in your file is not used:'
-            : `${String(unused.length)} columns in your file are not used:`}
+          {found.length === 1
+            ? '1 column found in your file:'
+            : `${String(found.length)} columns found in your file:`}
         </strong>{' '}
-        if one of them holds a field above under another name, choose it for that field. Columns
-        left unused are not imported.
+        these are imported.
       </p>
-      <ul aria-label="Columns not used" className="flex flex-wrap gap-1.5">
-        {unused.map((header) => (
-          <li key={header} className="rounded-badge border bg-muted px-2 py-0.5 text-xs">
+      <ul aria-label="Columns found" className="flex flex-wrap gap-1.5">
+        {found.map((header) => (
+          <li
+            key={header}
+            className="flex items-center gap-1 rounded-badge border border-success-border bg-success-subtle px-2 py-0.5 text-xs text-success"
+          >
+            <CircleCheck aria-hidden="true" className="size-3" />
             {header}
           </li>
         ))}
       </ul>
     </div>
+  );
+  if (unused.length === 0) {
+    return (
+      <>
+        {foundList}
+        <p className="text-sm text-muted-foreground">Every column in your file is used.</p>
+      </>
+    );
+  }
+  return (
+    <>
+      {foundList}
+      <div className="flex flex-col gap-1.5 text-sm">
+        <p>
+          <strong>
+            {unused.length === 1
+              ? '1 column in your file is not used:'
+              : `${String(unused.length)} columns in your file are not used:`}
+          </strong>{' '}
+          if one of them holds a field above under another name, choose it for that field. Columns
+          left unused are not imported.
+        </p>
+        <ul aria-label="Columns not used" className="flex flex-wrap gap-1.5">
+          {unused.map((header) => (
+            <li key={header} className="rounded-badge border bg-muted px-2 py-0.5 text-xs">
+              {header}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </>
   );
 }
 
@@ -207,14 +243,27 @@ function ColumnMapping({
           {SHOWN_FIELDS.map((field) => {
             const id = `${baseId}-${field.id}`;
             const header = mapping[field.id];
+            // A field filled from the file is green, so what was found shows at a glance
+            // (owner's request, 2026-11-01).
+            const found = header !== undefined;
             return (
               <div
                 key={field.id}
-                className="grid grid-cols-1 gap-1.5 px-4 py-2.5 sm:grid-cols-[12rem_1fr_1fr] sm:items-center sm:gap-3"
+                data-found={found ? '' : undefined}
+                className={cn(
+                  // Every row keeps the edge, so found and other rows line up.
+                  'grid grid-cols-1 gap-1.5 border-l-4 border-l-transparent px-4 py-2.5 sm:grid-cols-[12rem_1fr_1fr] sm:items-center sm:gap-3',
+                  found && 'border-l-success bg-success-subtle',
+                )}
               >
-                <label htmlFor={id} className="font-medium">
-                  {field.label}
-                  {field.required && <span className="text-danger"> (required)</span>}
+                <label htmlFor={id} className="flex items-center gap-1.5 font-medium">
+                  {found && (
+                    <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-success" />
+                  )}
+                  <span>
+                    {field.label}
+                    {field.required && <span className="text-danger"> (required)</span>}
+                  </span>
                 </label>
                 <Select
                   id={id}
@@ -238,6 +287,7 @@ function ColumnMapping({
                   ]}
                 />
                 <span className="truncate text-xs text-muted-foreground">
+                  {found && <span className="sr-only">Found in your file. </span>}
                   {header === undefined
                     ? field.required
                       ? 'Choose the column that holds this.'
