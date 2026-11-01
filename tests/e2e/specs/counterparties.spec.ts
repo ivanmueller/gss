@@ -667,8 +667,8 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await expect(laneList).toContainText('Truck');
   await expect(page.getByText('Cross-border').first()).toBeVisible();
 
-  // Found by where it delivers, among carriers.
-  await page.getByRole('link', { name: 'All counterparties' }).click();
+  // Found by where it delivers, among carriers (the pickers show with Carriers chosen).
+  await page.goto('/counterparties?type=carrier&view=table');
   await page.getByRole('button', { name: 'Delivers to: All' }).click();
   await page.getByRole('menuitemcheckbox', { name: 'Anywhere' }).click();
   await page.getByRole('menuitemcheckbox', { name: 'Montana' }).click();
