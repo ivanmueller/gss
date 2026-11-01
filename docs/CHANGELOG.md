@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Handoff record of #99
+
+- `docs/HANDOFF.md`: carriers added by hand and lanes not stated as truck or rail (ivanmueller/gss#99) with their CI and Deploy staging runs and Codex's review; the staging checklist and the carrier import next.
+
 ## 2026-11-01 — Adding a carrier by hand; truck or rail only when stated
 
 - `docs/DECISIONS.md`: the add form for carriers (equipment, lanes, home yard, no market or tier); lanes not stated as truck or rail.
