@@ -130,7 +130,7 @@ A quote past its valid-until time shows as expired. A location with quotes canno
 
 ## Freight
 
-**Freight** lists carriers' live freight rates by route (tick **Include withdrawn and expired** for the rest), filtered by truck or rail and by carrier. A carrier is a counterparty marked as a carrier (add one under **Counterparties**); its page lists its rates with **New freight rate**, and any other counterparty's page lists the rates to and from its locations.
+**Freight** lists carriers' live freight rates by route (tick **Include withdrawn and expired** for the rest), filtered by truck or rail and by carrier. A carrier is a counterparty marked as a carrier (add one under **Counterparties**); its page has **New freight rate** at the top and lists its rates, its **Lanes** (from a province or state to others, by truck, rail or both, on a map; the places its freight rates run between added, dashed) and its equipment (under **Edit details**); any other counterparty's page lists the rates to and from its locations. With **Carriers** chosen on Counterparties, **Loads in** and **Delivers to** find carriers by their lanes. The province and state outlines come from Natural Earth (public domain), rebuilt with `node scripts/build-lane-regions.js <file>`.
 
 Traders, operations and admin members can:
 

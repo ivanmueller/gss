@@ -33,6 +33,9 @@ const DETAIL: CounterpartyDetail = {
   sells: [],
   markets: [],
   tier: null,
+  equipment: [],
+  lanes: [],
+  quotedLanes: [],
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [
     {
@@ -170,10 +173,12 @@ describe('CounterpartyPage', () => {
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('CAD 105.00/MT');
     // The carrier is the page itself, so the table leaves it out.
     expect(within(table).queryByRole('columnheader', { name: 'Carrier' })).toBeNull();
-    expect(within(freight).getByRole('link', { name: 'New freight rate' })).toHaveAttribute(
+    // New freight rate is at the top of a carrier's page, not again in its rates.
+    expect(screen.getByRole('link', { name: 'New freight rate' })).toHaveAttribute(
       'href',
       `/freight/new?carrier=${ID}`,
     );
+    expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
   });
 
   it('lists freight to and from the locations of a counterparty that is not a carrier', async () => {

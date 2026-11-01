@@ -29,7 +29,8 @@ import { Select } from './ui/select';
  * spreadsheet column fills it (owner's answer, 2026-10-30), so it is sent beside the values
  * (splitAccess) rather than among them.
  */
-export type FormValues = Partial<Record<ImportFieldId | 'transportAccess', string>>;
+/** Form values; a location's access and a carrier's equipment are sent beside the fields. */
+export type FormValues = Partial<Record<ImportFieldId | 'transportAccess' | 'equipment', string>>;
 
 /** The values to send, and the location's access beside them ('' is not known: null). */
 export function splitAccess({ transportAccess, ...values }: FormValues): {

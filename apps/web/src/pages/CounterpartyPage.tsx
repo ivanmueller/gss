@@ -1,5 +1,7 @@
 import {
   CONTACT_CHANNEL_LABELS,
+  EQUIPMENT,
+  EQUIPMENT_LABELS,
   formatAlberta,
   normalizeCountry,
   parseContactFields,
@@ -7,6 +9,7 @@ import {
   parseFacilityFields,
   MARKET_LABELS,
   TRANSPORT_ACCESS_LABELS,
+  type Equipment,
   type FieldIssue,
   type Market,
   type TransportAccess,
@@ -16,6 +19,7 @@ import {
   ArchiveRestore,
   CalendarPlus,
   ClipboardPaste,
+  Container,
   Ellipsis,
   ImageUp,
   Layers,
@@ -31,6 +35,7 @@ import {
   TrainFront,
   Trash2,
   Truck,
+  Waypoints,
 } from 'lucide-react';
 import {
   useMemo,
@@ -42,6 +47,7 @@ import {
 } from 'react';
 
 import { BackLink } from '../components/BackLink';
+import { CarrierLanes, isCrossBorder } from '../components/CarrierLanes';
 import {
   ContactHistoryCard,
   CrmMessage,
@@ -94,6 +100,7 @@ import {
   type Facility,
 } from '../lib/api';
 import { dueState } from '../lib/crm';
+import { canEnterFreight } from '../lib/freight';
 import {
   canDeleteCounterparties,
   canEditDirectory,
@@ -270,6 +277,7 @@ function companyValues(detail: CounterpartyDetail): FormValues {
     markets: detail.markets.join(','),
     tier: detail.tier ?? '',
     notes: detail.notes ?? '',
+    equipment: detail.equipment.join(','),
   };
 }
 
@@ -459,9 +467,52 @@ function locationName(facility: Facility): string {
   );
 }
 
-/** Counterparties that trade grain get the trading layout; a carrier only keeps the plain one. */
+/**
+ * Counterparties that trade grain get the trading layout: bids and offers first, what they
+ * buy and sell. A counterparty that is only a carrier gets the same page built around its
+ * freight: rates first, its lanes and equipment (owner's request, 2026-11-01).
+ */
 export function tradingLayout(types: readonly string[]): boolean {
   return types.some((type) => type !== 'carrier');
+}
+
+/** "super_b,van" from the form → ['super_b', 'van'], in EQUIPMENT order. */
+function equipmentOf(value: string | undefined): Equipment[] {
+  const chosen = new Set((value ?? '').split(','));
+  return EQUIPMENT.filter((item) => chosen.has(item));
+}
+
+/** What a carrier hauls with, as checkboxes under Edit details. */
+function EquipmentFields({ props }: { props: FieldsProps }) {
+  const chosen = new Set(equipmentOf(props.values.equipment));
+  return (
+    <fieldset className="flex flex-col gap-1.5">
+      <legend className="text-sm font-medium">
+        Equipment <span className="font-normal text-muted-foreground">(any that apply)</span>
+      </legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+        {EQUIPMENT.map((item) => (
+          <label key={item} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={chosen.has(item)}
+              disabled={props.disabled}
+              onChange={(event) => {
+                const next = new Set(chosen);
+                if (event.target.checked) next.add(item);
+                else next.delete(item);
+                props.onChange({
+                  equipment: EQUIPMENT.filter((other) => next.has(other)).join(','),
+                });
+              }}
+            />
+            {EQUIPMENT_LABELS[item]}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
 }
 
 const TYPE_BADGES: Record<string, BadgeVariant> = { buyer: 'bid', seller: 'offer', broker: 'info' };
@@ -519,6 +570,7 @@ function CounterpartyView({
   const canChange = editor && !archived;
   const country = normalizeCountry(detail.primaryCountry) ?? 'CA';
   const trading = tradingLayout(detail.types);
+  const carrier = detail.types.includes('carrier');
   const contactNames = useMemo(() => detail.contacts.map((contact) => contact.name), [detail]);
   const crm = useCounterpartyCrm(session, { id: detail.id, archived, contactNames });
   const quotes = useCounterpartyQuotes(session, detail.id);
@@ -644,60 +696,14 @@ function CounterpartyView({
     </>
   );
 
-  // A carrier's header: its name, website and the changes it allows, as before.
-  const plainHeader = (
-    <Card className="flex flex-wrap items-start gap-4 p-4">
-      <CounterpartyLogo
-        counterpartyId={detail.id}
-        name={detail.legalName}
-        sha256={detail.logoSha256}
-        token={token}
-        size="lg"
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {name}
-        <MarketsAndTier detail={detail} />
-        <WebsiteAndPhone detail={detail} />
-        <div className="flex flex-wrap gap-1.5">
-          <VerificationBadge status={detail.verificationStatus} />
-          {archived && <Badge>Archived</Badge>}
-        </div>
-        {logo}
-      </div>
-      {canChange && editing?.kind !== 'archive' && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              start({ kind: 'details' });
-            }}
-          >
-            <Pencil aria-hidden="true" />
-            Edit details
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              start({ kind: 'archive' });
-            }}
-          >
-            <Archive aria-hidden="true" />
-            Archive
-          </Button>
-        </div>
-      )}
-      {archiveConfirm}
-    </Card>
-  );
-
   const main = detail.contacts.find((contact) => contact.isMain) ?? null;
   const sides = quoteSides(detail.types);
   const canQuote = canEnterQuotes(organization.role) && !archived;
+  const canFreight = carrier && canEnterFreight(organization.role) && !archived;
   const places = [detail.regions.join(', '), countryName(detail.primaryCountry)].filter(Boolean);
 
-  // A buyer's or seller's header: who they are, whom to call, and the day's actions.
+  // Who they are, whom to call, and the day's actions; a carrier's with its equipment and
+  // whether it crosses the border.
   const tradingHeader = (
     <Card className="flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-start gap-4">
@@ -721,6 +727,7 @@ function CounterpartyView({
             <span className="text-muted-foreground">{places.join(' · ')}</span>
           </div>
           <MarketsAndTier detail={detail} />
+          {carrier && <EquipmentAndBorder detail={detail} />}
           <WebsiteAndPhone detail={detail} />
           {logo}
         </div>
@@ -745,6 +752,14 @@ function CounterpartyView({
                 </Link>
               </Button>
             ))}
+          {canFreight && (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/freight/new?carrier=${detail.id}`}>
+                <Plus aria-hidden="true" />
+                New freight rate
+              </Link>
+            </Button>
+          )}
           {crm.canPlan && crm.adding !== 'follow-up' && (
             <Button
               size="sm"
@@ -811,7 +826,16 @@ function CounterpartyView({
         label="Edit details"
         initial={companyValues(detail)}
         check={(values) => issuesOf(parseCounterpartyFields(values))}
-        save={(values) => sendJson(path, token, 'PATCH', { version: detail.version, values })}
+        save={({ equipment, ...values }) =>
+          sendJson(path, token, 'PATCH', {
+            version: detail.version,
+            values,
+            // Only a carrier's; left out, the equipment saved is kept.
+            ...(values.types?.split(',').includes('carrier') && {
+              equipment: equipmentOf(equipment),
+            }),
+          })
+        }
         submitLabel="Save details"
         onSaved={() => {
           done('Details saved.');
@@ -821,7 +845,14 @@ function CounterpartyView({
         }}
         onReload={reloadAndClose}
       >
-        {(fields) => <CompanyFields {...fields} />}
+        {(fields) => (
+          <>
+            <CompanyFields {...fields} />
+            {fields.values.types?.split(',').includes('carrier') && (
+              <EquipmentFields props={fields} />
+            )}
+          </>
+        )}
       </EditForm>
     </Card>
   );
@@ -1041,7 +1072,7 @@ function CounterpartyView({
             </DialogContent>
           )}
         </Dialog>
-        {trading && (
+        {detail.facilities.length > 0 && (
           <CounterpartyLocationsMap
             facilities={detail.facilities}
             types={detail.types}
@@ -1184,8 +1215,14 @@ function CounterpartyView({
     <CounterpartyFreight
       session={session}
       counterparty={{ ...counterparty, facilityCount: detail.facilities.length }}
-      folded={trading}
+      // A carrier's own rates are what its page is for; a buyer's or seller's start folded.
+      folded={!carrier}
+      // Its header already has New freight rate.
+      hideNew={canFreight}
     />
+  );
+  const lanesCard = carrier && (
+    <CarrierLanes token={token} role={organization.role} detail={detail} onSaved={done} />
   );
 
   return (
@@ -1236,9 +1273,9 @@ function CounterpartyView({
             >
               <p>
                 Delete <strong>{detail.legalName}</strong> permanently? Its contacts, locations,
-                commodities and logo are deleted with it, and this cannot be undone. The audit trail
-                keeps who deleted it and when. A counterparty with bids or offers, freight rates, a
-                contact history or follow-ups cannot be deleted; it stays archived.
+                lanes, commodities and logo are deleted with it, and this cannot be undone. The
+                audit trail keeps who deleted it and when. A counterparty with bids or offers,
+                freight rates, a contact history or follow-ups cannot be deleted; it stays archived.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -1276,54 +1313,66 @@ function CounterpartyView({
         </p>
       )}
 
-      {!trading && (
-        <>
-          {plainHeader}
-          {editDetails || detailsCard}
-          {contactsCard}
-          <CrmMessage crm={crm} />
-          <FollowUpsCard crm={crm} />
-          <ContactHistoryCard crm={crm} />
-          {locationsCard}
-          {quotesCard}
-          {freightCard}
-        </>
-      )}
-
-      {trading && (
-        <>
-          {tradingHeader}
-          {editDetails}
-          <CrmMessage crm={crm} />
-          {wide ? (
-            <div className="grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-4">
-              <div className="flex min-w-0 flex-col gap-4">
-                {quotesCard}
-                <FollowUpsCard crm={crm} />
-                <ContactHistoryCard crm={crm} />
-              </div>
-              <div className="flex min-w-0 flex-col gap-4">
-                {contactsCard}
-                {commoditiesCard}
-                {locationsCard}
-                {detailsCard}
-                {freightCard}
-              </div>
-            </div>
-          ) : (
-            <>
-              <FollowUpsCard crm={crm} />
+      {tradingHeader}
+      {editDetails}
+      <CrmMessage crm={crm} />
+      {trading &&
+        (wide ? (
+          <div className="grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-4">
+            <div className="flex min-w-0 flex-col gap-4">
               {quotesCard}
-              {contactsCard}
+              <FollowUpsCard crm={crm} />
               <ContactHistoryCard crm={crm} />
+            </div>
+            <div className="flex min-w-0 flex-col gap-4">
+              {contactsCard}
               {commoditiesCard}
+              {lanesCard}
               {locationsCard}
               {detailsCard}
               {freightCard}
-            </>
-          )}
-        </>
-      )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <FollowUpsCard crm={crm} />
+            {quotesCard}
+            {contactsCard}
+            <ContactHistoryCard crm={crm} />
+            {commoditiesCard}
+            {lanesCard}
+            {locationsCard}
+            {detailsCard}
+            {freightCard}
+          </>
+        ))}
+      {/* A carrier's page: its freight rates first, then its lanes (owner's request, 2026-11-01). */}
+      {!trading &&
+        (wide ? (
+          <div className="grid grid-cols-[minmax(0,1fr)_26rem] items-start gap-4">
+            <div className="flex min-w-0 flex-col gap-4">
+              {freightCard}
+              <FollowUpsCard crm={crm} />
+              <ContactHistoryCard crm={crm} />
+            </div>
+            <div className="flex min-w-0 flex-col gap-4">
+              {lanesCard}
+              {contactsCard}
+              {locationsCard}
+              {detailsCard}
+            </div>
+          </div>
+        ) : (
+          <>
+            <FollowUpsCard crm={crm} />
+            {lanesCard}
+            {freightCard}
+            {contactsCard}
+            <ContactHistoryCard crm={crm} />
+            {locationsCard}
+            {detailsCard}
+          </>
+        ))}
     </>
   );
 }
@@ -1539,6 +1588,34 @@ function MarketsAndTier({ detail }: { detail: CounterpartyDetail }) {
               <Badge variant="neutral">
                 <PawPrint aria-hidden="true" />
                 {MARKET_LABELS[market as Market]}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** A carrier's equipment and, when a lane or freight rate crosses the border, Cross-border. */
+function EquipmentAndBorder({ detail }: { detail: CounterpartyDetail }) {
+  const border = isCrossBorder(detail);
+  if (detail.equipment.length === 0 && !border) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
+      {border && (
+        <Badge variant="info" title="A lane or freight rate crosses the border">
+          <Waypoints aria-hidden="true" />
+          Cross-border
+        </Badge>
+      )}
+      {detail.equipment.length > 0 && (
+        <ul aria-label="Equipment" className="flex flex-wrap gap-1.5">
+          {detail.equipment.map((item) => (
+            <li key={item}>
+              <Badge variant="neutral">
+                <Container aria-hidden="true" />
+                {EQUIPMENT_LABELS[item as Equipment]}
               </Badge>
             </li>
           ))}

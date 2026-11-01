@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-01 — A carrier's page, lanes and equipment
+
+- `docs/DECISIONS.md`: the carrier page like a buyer's; lanes from a province or state to others by truck, rail or both, on a map from Natural Earth's public-domain outlines; lanes from freight rates; equipment; Cross-border from lanes; the Loads in and Delivers to filter.
+- `docs/DATA_MODEL.md`: migration `20261101010000_carrier_lanes.sql`.
+- `docs/API.md`: `PATCH /api/v1/counterparties/{id}/lanes`; `equipment`, `lanes` and `quotedLanes` on counterparties; `equipment` on `PATCH /api/v1/counterparties/{id}`.
+- `docs/PRODUCT.md`, `docs/BUILD_PLAN.md`: the carrier page and lanes.
+
 ## 2026-11-01 — Handoff record of #97
 
 - `docs/HANDOFF.md`: the documents update (ivanmueller/gss#97) with its CI and Deploy staging runs; its pull-request run #210 failed at Start local Supabase (the runner's port 54322 in use; unit tests passed, database and browser tests did not run), run #211 on `main` green.

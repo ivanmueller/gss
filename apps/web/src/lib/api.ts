@@ -1,4 +1,10 @@
-import type { CommodityDirection, FieldIssue, ImportIssue, TransportAccess } from '@grain/domain';
+import type {
+  CarrierLane,
+  CommodityDirection,
+  FieldIssue,
+  ImportIssue,
+  TransportAccess,
+} from '@grain/domain';
 
 // Types of the API's responses (apps/api/src/db.ts and counterparties.ts).
 
@@ -24,6 +30,12 @@ export interface CounterpartySummary {
   /** The markets it serves (MARKETS in @grain/domain) and its tier (A, B, C or null). */
   markets: string[];
   tier: string | null;
+  /** A carrier's equipment (EQUIPMENT in @grain/domain). */
+  equipment: string[];
+  /** A carrier's lanes as entered (owner's request, 2026-11-01). */
+  lanes: CarrierLane[];
+  /** Where its freight rates run between, from their locations; derived, never stored. */
+  quotedLanes: CarrierLane[];
 }
 
 export interface Contact {

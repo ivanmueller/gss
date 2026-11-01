@@ -16,6 +16,7 @@ import {
   type MapPin,
   type PinFeatureCollection,
 } from '../lib/mapbox';
+import type { LaneAreas } from '../lib/lanes';
 import type { Theme } from '../lib/theme';
 
 // The only module that calls Mapbox GL JS (docs/DECISIONS.md, map decision). It is loaded
@@ -26,6 +27,18 @@ const START: [number, number, number, number] = [-120, 42, -88, 57];
 const SOURCE = 'facilities';
 const PINS = 'facilities';
 const SELECTED = 'facilities-selected';
+// A carrier's lanes (owner's request, 2026-11-01): shaded places and a line per lane.
+const AREAS = 'lane-areas';
+const LINES = 'lane-lines';
+const AREA_FILL = 'lane-areas-fill';
+const AREA_OUTLINE = 'lane-areas-outline';
+const AREA_OUTLINE_QUOTED = 'lane-areas-outline-quoted';
+const LANE_LINE = 'lane-lines-entered';
+const LANE_LINE_QUOTED = 'lane-lines-quoted';
+const EMPTY: LaneAreas = {
+  regions: { type: 'FeatureCollection', features: [] },
+  lines: { type: 'FeatureCollection', features: [] },
+};
 
 export interface FacilityMapProps {
   token: string;
@@ -51,6 +64,11 @@ export interface FacilityMapProps {
    * reloading the map; null leaves the view as it is.
    */
   fitTo?: MapBounds | null;
+  /**
+   * A carrier's lanes: places shaded darker where lanes start, lighter where they end, and
+   * outlined with dashes where only its freight rates run; a line for each lane.
+   */
+  areas?: LaneAreas | null;
   /** The visible box after every move; null when none of it is on the map. */
   onViewChange?: (bbox: Bbox | null) => void;
   onSelect: (pinId: string) => void;
@@ -89,6 +107,68 @@ function hideClutter(map: mapboxgl.Map) {
   }
 }
 
+/** Lane areas and lines take the colour of carriers' pins. */
+function paintAreas(map: mapboxgl.Map, colours: MapColours) {
+  if (!map.getLayer(AREA_FILL)) return;
+  map.setPaintProperty(AREA_FILL, 'fill-color', colours.mixed);
+  for (const layer of [AREA_OUTLINE, AREA_OUTLINE_QUOTED, LANE_LINE, LANE_LINE_QUOTED]) {
+    map.setPaintProperty(layer, 'line-color', colours.mixed);
+  }
+}
+
+function addAreaLayers(map: mapboxgl.Map, areas: LaneAreas) {
+  if (map.getSource(AREAS)) return;
+  const colours = readMapColours();
+  const quoted: mapboxgl.FilterSpecification = ['==', ['get', 'role'], 'quoted'];
+  const entered: mapboxgl.FilterSpecification = ['!=', ['get', 'role'], 'quoted'];
+  map.addSource(AREAS, { type: 'geojson', data: areas.regions });
+  map.addSource(LINES, { type: 'geojson', data: areas.lines });
+  // Under the pins, whenever they were added.
+  const below = map.getLayer(SELECTED) ? SELECTED : undefined;
+  const addLayer = (layer: mapboxgl.LayerSpecification) => {
+    map.addLayer(layer, below);
+  };
+  addLayer({
+    id: AREA_FILL,
+    type: 'fill',
+    source: AREAS,
+    filter: entered,
+    paint: {
+      'fill-color': colours.mixed,
+      'fill-opacity': ['match', ['get', 'role'], 'from', 0.5, 0.2],
+    },
+  });
+  addLayer({
+    id: AREA_OUTLINE,
+    type: 'line',
+    source: AREAS,
+    filter: entered,
+    paint: { 'line-color': colours.mixed, 'line-width': 1.5 },
+  });
+  addLayer({
+    id: AREA_OUTLINE_QUOTED,
+    type: 'line',
+    source: AREAS,
+    filter: quoted,
+    paint: { 'line-color': colours.mixed, 'line-width': 1.5, 'line-dasharray': [2, 2] },
+  });
+  addLayer({
+    id: LANE_LINE,
+    type: 'line',
+    source: LINES,
+    filter: ['!', ['get', 'quoted']],
+    layout: { 'line-cap': 'round' },
+    paint: { 'line-color': colours.mixed, 'line-width': 2.5 },
+  });
+  addLayer({
+    id: LANE_LINE_QUOTED,
+    type: 'line',
+    source: LINES,
+    filter: ['get', 'quoted'],
+    paint: { 'line-color': colours.mixed, 'line-width': 2, 'line-dasharray': [2, 2] },
+  });
+}
+
 /** Repaints the base map (for the "Map" style only) and the pins in the theme's colours. */
 function paintTheme(map: mapboxgl.Map, basemap: Basemap) {
   const colours = readMapColours();
@@ -106,6 +186,7 @@ function paintTheme(map: mapboxgl.Map, basemap: Basemap) {
     map.setPaintProperty(PINS, 'circle-stroke-color', paint['circle-stroke-color']);
     map.setPaintProperty(SELECTED, 'circle-stroke-color', colours.selected);
   }
+  paintAreas(map, colours);
 }
 
 function addPinLayers(map: mapboxgl.Map, data: PinFeatureCollection, selectedId: string | null) {
@@ -181,6 +262,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Also after a basemap or theme change, which replaces the whole style.
     instance.on('style.load', () => {
       if (latest.current.simple) hideClutter(instance);
+      if (latest.current.areas) addAreaLayers(instance, latest.current.areas);
       paintTheme(instance, latest.current.basemap);
       addPinLayers(instance, latest.current.data, latest.current.selectedId);
     });
@@ -227,6 +309,18 @@ export default function FacilityMap(props: FacilityMapProps) {
   useEffect(() => {
     map.current?.getSource<GeoJSONSource>(SOURCE)?.setData(pinFeatures(pins));
   }, [pins]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance?.isStyleLoaded()) return;
+    if (props.areas && !instance.getSource(AREAS)) {
+      addAreaLayers(instance, props.areas);
+      return;
+    }
+    const areas = props.areas ?? EMPTY;
+    instance.getSource<GeoJSONSource>(AREAS)?.setData(areas.regions);
+    instance.getSource<GeoJSONSource>(LINES)?.setData(areas.lines);
+  }, [props.areas]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

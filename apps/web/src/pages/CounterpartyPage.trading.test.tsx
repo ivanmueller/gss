@@ -38,6 +38,9 @@ const DETAIL: CounterpartyDetail = {
   sells: [],
   markets: [],
   tier: null,
+  equipment: [],
+  lanes: [],
+  quotedLanes: [],
   version: '2026-10-27T14:05:00.000000Z',
   contacts: [
     {
@@ -192,7 +195,7 @@ afterEach(() => {
 });
 
 describe('tradingLayout', () => {
-  it('is for buyers, sellers and brokers; a carrier keeps the plain page', () => {
+  it('is for buyers, sellers and brokers; a carrier gets its freight layout', () => {
     expect(tradingLayout(['buyer'])).toBe(true);
     expect(tradingLayout(['seller', 'carrier'])).toBe(true);
     expect(tradingLayout(['broker'])).toBe(true);
@@ -436,25 +439,123 @@ describe('a buyer’s or seller’s page', () => {
 });
 
 describe('a carrier’s page', () => {
-  it('keeps the plain layout, with Edit details and Archive at the top', async () => {
+  const CARRIER = {
+    ...DETAIL,
+    types: ['carrier'],
+    equipment: ['super_b', 'van'],
+    lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' }],
+  };
+  const carrierApi = (detail: object = CARRIER) =>
     mockApi({
-      [`GET ${PATH}`]: () => Response.json({ ...DETAIL, types: ['carrier'] }),
+      [`GET ${PATH}`]: () => Response.json(detail),
       [`GET /freight-quotes?carrier_id=${ID}`]: () =>
         Response.json({ freight: [], truncated: false }),
     });
+
+  it('has the buyer page’s top, with New freight rate in place of bids and offers', async () => {
+    carrierApi();
     show('operations');
-    expect(await screen.findByRole('button', { name: 'Edit details' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+    await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
+    const header = headerCard();
+    expect(within(header).getByRole('button', { name: 'Log contact' })).toBeInTheDocument();
+    expect(within(header).getByRole('link', { name: 'New freight rate' })).toHaveAttribute(
+      'href',
+      `/freight/new?carrier=${ID}`,
+    );
+    expect(within(header).queryByRole('link', { name: /New (bid|offer)/ })).toBeNull();
+    // Shown once the team (whom a follow-up can be for) has loaded.
+    expect(
+      await within(header).findByRole('button', { name: 'Plan follow-up' }),
+    ).toBeInTheDocument();
+    expect(within(header).getByRole('button', { name: 'More actions' })).toBeInTheDocument();
+    expect(within(header).getByRole('group', { name: 'Main contact' })).toBeInTheDocument();
+    expect(within(header).getByRole('group', { name: 'Next follow-up' })).toBeInTheDocument();
+    expect(within(header).getByRole('group', { name: 'Last contact' })).toBeInTheDocument();
+    // Its equipment, and Cross-border since a lane runs from Alberta to Montana.
+    expect(within(header).getByRole('list', { name: 'Equipment' })).toHaveTextContent(
+      'Super B hopperDry van',
+    );
+    expect(within(header).getByText('Cross-border')).toBeInTheDocument();
+  });
+
+  it('puts its freight rates first and its lanes at the top of the right column', async () => {
+    carrierApi();
+    show('trader');
     // Its freight rates are open, not folded.
     expect(await screen.findByRole('region', { name: 'Freight rates (0)' })).toBeInTheDocument();
     expect(headings()).toEqual([
-      'Contacts',
+      'Freight rates',
       'Follow-ups',
       'Contact history',
+      'Lanes',
+      'Contacts',
       'Locations',
-      'Bids and offers',
-      'Freight rates',
     ]);
+    expect(screen.getByRole('list', { name: 'Lanes' })).toHaveTextContent(
+      'From Alberta to Montana',
+    );
+    // A trader adds lanes, as they enter freight rates.
+    expect(screen.getByRole('button', { name: 'Add lanes' })).toBeInTheDocument();
+  });
+
+  it('puts follow-ups and lanes first on a phone', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    carrierApi();
+    show('trader');
+    await screen.findByRole('region', { name: 'Freight rates (0)' });
+    expect(headings()).toEqual([
+      'Follow-ups',
+      'Lanes',
+      'Freight rates',
+      'Contacts',
+      'Contact history',
+      'Locations',
+    ]);
+  });
+
+  it('saves its equipment under Edit details', async () => {
+    const calls = mockApi({
+      [`GET ${PATH}`]: () => Response.json(CARRIER),
+      [`GET /freight-quotes?carrier_id=${ID}`]: () =>
+        Response.json({ freight: [], truncated: false }),
+      [`PATCH ${PATH}`]: () => Response.json(CARRIER),
+    });
+    show('operations');
+    await userEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit details' }));
+    const form = screen.getByRole('form', { name: 'Edit details' });
+    const equipment = within(form).getByRole('group', { name: /Equipment/ });
+    expect(within(equipment).getByRole('checkbox', { name: 'Super B hopper' })).toBeChecked();
+    await userEvent.click(within(equipment).getByRole('checkbox', { name: 'Super B hopper' }));
+    await userEvent.click(within(equipment).getByRole('checkbox', { name: 'Flatdeck' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === 'PATCH')).toBe(true);
+    });
+    const sent = calls.find((call) => call.method === 'PATCH')?.body as {
+      equipment: string[];
+      values: Record<string, string>;
+    };
+    expect(sent.equipment).toEqual(['van', 'flatdeck']);
+    expect(sent.values).not.toHaveProperty('equipment');
+  });
+
+  it('a buyer’s Edit details does not send equipment', async () => {
+    const calls = mockApi({ [`PATCH ${PATH}`]: () => Response.json(DETAIL) });
+    show('operations');
+    await userEvent.click(await screen.findByRole('button', { name: 'More actions' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit details' }));
+    const form = screen.getByRole('form', { name: 'Edit details' });
+    expect(within(form).queryByRole('group', { name: /Equipment/ })).toBeNull();
+    await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === 'PATCH')).toBe(true);
+    });
+    expect(calls.find((call) => call.method === 'PATCH')?.body).not.toHaveProperty('equipment');
   });
 });
