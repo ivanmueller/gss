@@ -1,5 +1,6 @@
 import {
   commodityChangeSchema,
+  laneChangeSchema,
   contactKey,
   COUNTERPARTY_TYPES,
   counterpartyKey,
@@ -21,7 +22,7 @@ import {
   parseImportRow,
   parseNewCounterparty,
   updateContactSchema,
-  updateCounterpartySchema,
+  updateCounterpartyDetailsSchema,
   updateFacilitySchema,
   type ContactInput,
   type CounterpartyType,
@@ -814,12 +815,18 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
     const body = await readJson(c, MAX_FORM_BODY_BYTES);
     if (!body.ok) return body.response;
-    const request = updateCounterpartySchema.safeParse(body.value);
+    const request = updateCounterpartyDetailsSchema.safeParse(body.value);
     if (!request.success) return malformed(c, request.error);
     const parsed = parseCounterpartyFields(request.data.values);
     if (parsed.status === 'invalid') return invalid(c, parsed.issues);
     return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.updateCounterparty(ctx, id, request.data.version, parsed.value);
+      const result = await db.updateCounterparty(
+        ctx,
+        id,
+        request.data.version,
+        parsed.value,
+        request.data.equipment,
+      );
       return savedDetail(c, db, ctx, id, result, 'counterparty');
     });
   });
@@ -921,6 +928,32 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     if (!request.success) return malformed(c, request.error);
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const result = await db.changeCommodities(ctx, id, request.data);
+      return savedDetail(c, db, ctx, id, result, 'counterparty');
+    });
+  });
+
+  // A carrier's lanes: traders, operations and admins (owner's request, 2026-11-01).
+  routes.patch('/:id/lanes', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = laneChangeSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.changeLanes(ctx, id, request.data);
+      if (result.status === 'not_carrier') {
+        return apiError(c, 422, 'NOT_CARRIER', 'Only a carrier has lanes.');
+      }
+      if (result.status === 'forbidden') {
+        return apiError(
+          c,
+          403,
+          'FORBIDDEN',
+          "Only traders, operations and admins change a carrier's lanes.",
+        );
+      }
       return savedDetail(c, db, ctx, id, result, 'counterparty');
     });
   });

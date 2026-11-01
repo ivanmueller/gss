@@ -646,9 +646,50 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await expect(table.getByRole('row')).toHaveCount(2);
   await table.getByRole('link', { name: 'Synthetic Hauling' }).click();
 
+  // Its lanes (owner's request, 2026-11-01): from Alberta to Montana and North Dakota by truck.
+  const lanes = page.getByRole('region', { name: 'Lanes (0)' });
+  await expect(lanes).toContainText('No lanes yet.');
+  await lanes.getByRole('button', { name: 'Add lanes' }).click();
+  const laneForm = page.getByRole('form', { name: 'New lanes' });
+  await laneForm.getByRole('button', { name: 'From' }).click();
+  await page.getByRole('combobox', { name: 'Search the list' }).fill('alberta');
+  await page.getByRole('option', { name: 'Alberta', exact: true }).click();
+  await laneForm.getByRole('button', { name: 'To: None' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Montana' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'North Dakota' }).click();
+  await page.keyboard.press('Escape');
+  await laneForm.getByRole('button', { name: 'Save lanes' }).click();
+  const laneList = page.getByRole('region', { name: 'Lanes (2)' }).getByRole('list', {
+    name: 'Lanes',
+  });
+  await expect(laneList).toContainText('From Alberta');
+  await expect(laneList).toContainText('Montana, North Dakota');
+  await expect(laneList).toContainText('Truck');
+  await expect(page.getByText('Cross-border').first()).toBeVisible();
+
+  // Found by where it delivers, among carriers (the pickers show with Carriers chosen).
+  await page.goto('/counterparties?type=carrier&view=table');
+  await page.getByRole('button', { name: 'Delivers to: All' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Anywhere' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Montana' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/type=carrier/);
+  await expect(page).toHaveURL(/to=US-MT/);
+  await expect(table.getByRole('row')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Delivers to: Montana' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Montana' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Minnesota' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText(/^0 of \d+ shown/)).toBeVisible();
+  await page.getByRole('button', { name: 'Delivers to: Minnesota' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Anywhere' }).click();
+  await page.keyboard.press('Escape');
+  await table.getByRole('link', { name: 'Synthetic Hauling' }).click();
+
   const section = page.getByRole('region', { name: 'Freight rates (0)' });
   await expect(section).toContainText('No live freight rates.');
-  await section.getByRole('link', { name: 'New freight rate' }).click();
+  // New freight rate is at the top of a carrier's page, like New bid on a buyer's.
+  await page.getByRole('link', { name: 'New freight rate' }).click();
 
   await expect(page.getByRole('heading', { name: 'New freight rate' })).toBeVisible();
   await expect(page.getByLabel('Carrier (required)')).toContainText('Synthetic Hauling');
@@ -748,6 +789,16 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
     { headers },
   );
   expect(await other.json()).toEqual({ freight: [], truncated: false });
+
+  // Another organization's carrier has no lanes this login can change.
+  const otherLanes = await request.patch(
+    `/api/v1/counterparties/${OTHER_ORG.counterpartyId}/lanes`,
+    {
+      headers,
+      data: { add: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' }], remove: [] },
+    },
+  );
+  expect(otherLanes.status()).toBe(404);
 
   expect(errors).toEqual([]);
 });

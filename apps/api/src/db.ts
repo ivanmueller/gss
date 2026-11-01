@@ -1,4 +1,8 @@
+import { isLaneRegion } from '@grain/domain';
 import type {
+  CarrierLane,
+  Equipment,
+  LaneChange,
   Member,
   MemberRole,
   MemberStatus,
@@ -62,6 +66,15 @@ export interface CounterpartySummary {
   /** The markets it serves (pet, bird, …) and its tier (A, B, C or null). */
   markets: string[];
   tier: string | null;
+  /** A carrier's equipment, in EQUIPMENT order (@grain/domain). */
+  equipment: string[];
+  /** A carrier's lanes as entered, by origin and destination. */
+  lanes: CarrierLane[];
+  /**
+   * The places its freight rates run between (from their locations' provinces and states),
+   * withdrawn and expired ones too; derived, never stored.
+   */
+  quotedLanes: CarrierLane[];
 }
 
 export interface Contact extends ContactInput {
@@ -376,11 +389,13 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     organizationId: string,
     record: NewCounterparty,
   ) => Promise<CreateResult>;
+  /** A carrier's equipment changes too when given; left out, it is kept. */
   updateCounterparty: (
     ctx: RequestContext,
     id: string,
     version: string,
     input: CounterpartyInput,
+    equipment?: Equipment[],
   ) => Promise<WriteResult>;
   /** Archives or restores a counterparty; doing what is already done changes nothing. */
   setArchived: (ctx: RequestContext, id: string, archived: boolean) => Promise<WriteResult>;
@@ -417,6 +432,16 @@ export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, Cr
     counterpartyId: string,
     change: CommodityChange,
   ) => Promise<WriteResult>;
+  /**
+   * Adds, changes the transport of, and removes a carrier's lanes; traders, operations and
+   * admins may (owner's request, 2026-11-01). Removals first; adding a lane already listed
+   * changes its transport; removing one that is not listed changes nothing.
+   */
+  changeLanes: (
+    ctx: RequestContext,
+    carrierId: string,
+    change: LaneChange,
+  ) => Promise<WriteResult | { status: 'not_carrier' }>;
   /** Makes one of its contacts the main contact (any other stops being it), or none (null). */
   setMainContact: (
     ctx: RequestContext,
@@ -479,6 +504,14 @@ interface SummaryRow {
   sells: string[];
   markets: string[];
   tier: string | null;
+  equipment: string[];
+  lanes: CarrierLane[];
+  quoted_lanes: CarrierLane[];
+}
+
+/** Only the lanes between known places (a location's province may be any short code). */
+function knownLanes(lanes: CarrierLane[]): CarrierLane[] {
+  return lanes.filter((lane) => isLaneRegion(lane.origin) && isLaneRegion(lane.destination));
 }
 
 function summary(row: SummaryRow): CounterpartySummary {
@@ -501,6 +534,9 @@ function summary(row: SummaryRow): CounterpartySummary {
     sells: row.sells,
     markets: row.markets,
     tier: row.tier,
+    equipment: row.equipment,
+    lanes: row.lanes,
+    quotedLanes: knownLanes(row.quoted_lanes),
   };
 }
 
@@ -745,7 +781,24 @@ export function createDatabase(sql: postgres.Sql): Database {
                    join app.commodities m on m.code = k.commodity_code
                    where k.counterparty_id = c.id and k.direction = 'sells'
                    order by m.sort_order)) as sells,
-    to_jsonb(c.markets) as markets, c.tier
+    to_jsonb(c.markets) as markets, c.tier, to_jsonb(c.equipment) as equipment,
+    coalesce((select jsonb_agg(jsonb_build_object(
+                'origin', k.origin::text, 'destination', k.destination::text,
+                'transport', k.transport) order by k.origin, k.destination)
+              from app.carrier_lanes k where k.carrier_id = c.id), '[]') as lanes,
+    coalesce((select jsonb_agg(jsonb_build_object(
+                'origin', r.origin, 'destination', r.destination,
+                'transport', case when r.truck and r.rail then 'rail_and_truck'
+                                  when r.rail then 'rail' else 'truck' end)
+                order by r.origin, r.destination)
+              from (select o.country || '-' || o.region::text as origin,
+                           d.country || '-' || d.region::text as destination,
+                           bool_or(q.mode = 'truck') as truck, bool_or(q.mode = 'rail') as rail
+                    from app.freight_quotes q
+                    join app.facilities o on o.id = q.origin_facility_id
+                    join app.facilities d on d.id = q.destination_facility_id
+                    where q.carrier_id = c.id and o.region is not null and d.region is not null
+                    group by 1, 2) r), '[]') as quoted_lanes
   `;
 
   return {
@@ -1307,7 +1360,7 @@ export function createDatabase(sql: postgres.Sql): Database {
       });
     },
 
-    updateCounterparty(ctx, id, version, input) {
+    updateCounterparty(ctx, id, version, input, equipment) {
       return asUser(ctx, async (tx) => {
         const target = await editable(tx, id);
         if (target.status !== 'ok') return target;
@@ -1319,6 +1372,9 @@ export function createDatabase(sql: postgres.Sql): Database {
               verification_status = ${input.verificationStatus}::app.verification_status,
               website = ${input.website}, phone = ${input.phone},
               markets = ${`{${input.markets.join(',')}}`}::text[], tier = ${input.tier},
+              equipment = ${
+                equipment === undefined ? tx`equipment` : tx`${`{${equipment.join(',')}}`}::text[]`
+              },
               notes = ${input.notes}
           where id = ${id} and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
           returning id
@@ -1386,6 +1442,7 @@ export function createDatabase(sql: postgres.Sql): Database {
         );
         if (history.length > 0) return { status: 'has_history', history };
         await tx`delete from app.counterparty_commodities where counterparty_id = ${id}`;
+        await tx`delete from app.carrier_lanes where carrier_id = ${id}`;
         await tx`delete from app.counterparty_contacts where counterparty_id = ${id}`;
         await tx`delete from app.facilities where counterparty_id = ${id}`;
         await tx`delete from app.counterparty_logos where counterparty_id = ${id}`;
@@ -1470,6 +1527,50 @@ export function createDatabase(sql: postgres.Sql): Database {
             update app.counterparty_commodities set verified_by = app.current_user_id()
             where counterparty_id = ${counterpartyId} and commodity_code = ${commodity}
               and direction = ${direction} and verified_by is null`;
+        }
+        return SAVED;
+      });
+    },
+
+    changeLanes(ctx, carrierId, change) {
+      return asUser(ctx, async (tx) => {
+        // The person's membership and the carrier are locked for the rest of the transaction
+        // (Codex's review of ba68201): a demotion or an archiving waits for this change, or
+        // came first and is answered here, so the change is all done or not at all.
+        const [row] = await tx<{ state: string; organization_id: string | null }[]>`
+          select app.begin_lane_change(${carrierId}) as state,
+                 (select organization_id from app.counterparties where id = ${carrierId})
+                   as organization_id`;
+        switch (row?.state) {
+          case 'carrier':
+          case 'not_carrier':
+            break;
+          case 'forbidden':
+            return { status: 'forbidden' };
+          case 'archived':
+            return { status: 'archived' };
+          default:
+            return NOT_FOUND;
+        }
+        const organizationId = row.organization_id;
+        if (organizationId === null) return NOT_FOUND;
+        if (row.state === 'not_carrier' && change.add.length > 0) return { status: 'not_carrier' };
+        for (const { origin, destination } of change.remove) {
+          await tx`
+            delete from app.carrier_lanes
+            where carrier_id = ${carrierId} and origin = ${origin}
+              and destination = ${destination}`;
+        }
+        // Only a real change of transport is written (and audited).
+        for (const { origin, destination, transport } of change.add) {
+          await tx`
+            insert into app.carrier_lanes
+              (organization_id, carrier_id, origin, destination, transport, created_by)
+            values (${organizationId}, ${carrierId}, ${origin}, ${destination},
+                    ${transport}, app.current_user_id())
+            on conflict (organization_id, carrier_id, origin, destination) do update
+              set transport = excluded.transport
+              where app.carrier_lanes.transport is distinct from excluded.transport`;
         }
         return SAVED;
       });

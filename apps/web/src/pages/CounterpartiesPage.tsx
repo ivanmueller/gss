@@ -1,12 +1,24 @@
-import { COMMODITIES, MARKET_LABELS, MARKETS, TIERS } from '@grain/domain';
+import {
+  COMMODITIES,
+  COUNTRY_NAMES,
+  LANE_REGIONS,
+  laneCountry,
+  laneRegionName,
+  MARKET_LABELS,
+  MARKETS,
+  runsLane,
+  TIERS,
+} from '@grain/domain';
 import {
   Layers,
   LayoutGrid,
   List,
   Map as MapIcon,
+  MapPinned,
   PawPrint,
   Search,
   Table2,
+  Truck,
   Wheat,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -231,6 +243,27 @@ export function inTier(counterparty: Pick<CounterpartySummary, 'tier'>, tiers: r
 }
 
 /**
+ * Whether a carrier runs a lane from one of the places chosen to one of those chosen, by its
+ * lanes or its freight rates (owner's request, 2026-11-01). All chosen at both ends: every
+ * counterparty, those without lanes too; none chosen at one end: none.
+ */
+export function onLanes(
+  counterparty: Pick<CounterpartySummary, 'lanes' | 'quotedLanes'>,
+  from: readonly string[],
+  to: readonly string[],
+): boolean {
+  const anyFrom = from.length === LANE_REGIONS.length;
+  const anyTo = to.length === LANE_REGIONS.length;
+  if (anyFrom && anyTo) return true;
+  if (from.length === 0 || to.length === 0) return false;
+  return runsLane(
+    [...counterparty.lanes, ...counterparty.quotedLanes],
+    anyFrom ? [] : from,
+    anyTo ? [] : to,
+  );
+}
+
+/**
  * The values chosen in a filter kept in the address: absent means all of them;
  * "?market=pet,bird" those; "?market=" none.
  */
@@ -249,6 +282,15 @@ const COMMODITY_CODES = COMMODITIES.map((item) => item.code);
 const COMMODITY_OPTIONS = COMMODITIES.map(({ code, name }) => ({ value: code, label: name }));
 const MARKET_OPTIONS = MARKETS.map((market) => ({ value: market, label: MARKET_LABELS[market] }));
 const TIER_OPTIONS = TIERS.map((tier) => ({ value: tier, label: `Tier ${tier}` }));
+// Canada's provinces first, then the states, each by name.
+const PLACE_OPTIONS = LANE_REGIONS.map((code) => ({
+  value: code,
+  label: laneRegionName(code),
+  country: COUNTRY_NAMES[laneCountry(code)],
+}))
+  .sort((a, b) => a.country.localeCompare(b.country) || a.label.localeCompare(b.label))
+  .map(({ value, label }) => ({ value, label }));
+const PLACE_CODES = PLACE_OPTIONS.map((option) => option.value);
 
 /** /counterparties: the organization's counterparties by logo (the default), as a table or on a map. */
 export function CounterpartiesPage({ session }: { session: DirectorySession }) {
@@ -272,6 +314,9 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const commodities = chosenFrom(params.get('commodity'), COMMODITY_CODES);
   const markets = chosenFrom(params.get('market'), MARKETS);
   const tiers = chosenFrom(params.get('tier'), TIERS);
+  // Among carriers, where they load and deliver (?from=CA-AB&to=US-MT,US-ND).
+  const from = chosenFrom(params.get('from'), PLACE_CODES);
+  const to = chosenFrom(params.get('to'), PLACE_CODES);
   // ?add=one or ?add=import opens the + window on that tab (the old adding pages' addresses).
   const addTab = ADD_TABS.find((tab) => tab === params.get('add')) ?? null;
 
@@ -284,6 +329,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
       tradesCommodity(counterparty, commodities, side) &&
       servesMarket(counterparty, markets) &&
       inTier(counterparty, tiers) &&
+      (side !== 'carrier' || onLanes(counterparty, from, to)) &&
       matches(counterparty, query),
   );
   // The map shows the places of exactly the counterparties listed (2026-10-30).
@@ -363,9 +409,37 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                 ]}
                 value={side}
                 onChange={(next) => {
-                  setSearchParams({ type: next === 'all' ? null : next });
+                  // Lane places are for carriers only, so they go with any other choice.
+                  setSearchParams({
+                    type: next === 'all' ? null : next,
+                    ...(next !== 'carrier' && { from: null, to: null }),
+                  });
                 }}
               />
+              {side === 'carrier' && (
+                <>
+                  <MultiPicker
+                    label="Loads in"
+                    icon={<Truck aria-hidden="true" className="text-muted-foreground" />}
+                    options={PLACE_OPTIONS}
+                    chosen={from}
+                    allLabel="Anywhere"
+                    onChange={(next) => {
+                      setSearchParams({ from: paramFor(next, PLACE_CODES) });
+                    }}
+                  />
+                  <MultiPicker
+                    label="Delivers to"
+                    icon={<MapPinned aria-hidden="true" className="text-muted-foreground" />}
+                    options={PLACE_OPTIONS}
+                    chosen={to}
+                    allLabel="Anywhere"
+                    onChange={(next) => {
+                      setSearchParams({ to: paramFor(next, PLACE_CODES) });
+                    }}
+                  />
+                </>
+              )}
               <TabsList aria-label="Counterparty view">
                 {/* Icons only (owner's request, 2026-10-30); the name is read out and shown on hover. */}
                 <TabsTrigger value="logos" aria-label="Logos" title="Logos" className="px-2.5">

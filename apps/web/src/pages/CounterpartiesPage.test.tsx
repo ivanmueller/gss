@@ -2,10 +2,16 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { COMMODITIES, MARKETS } from '@grain/domain';
+import { COMMODITIES, LANE_REGIONS, MARKETS } from '@grain/domain';
 import type { CounterpartySummary } from '../lib/api';
 import { mockApi, ORG, SESSION } from '../test/api';
-import { CounterpartiesPage, inTier, servesMarket, tradesCommodity } from './CounterpartiesPage';
+import {
+  CounterpartiesPage,
+  inTier,
+  onLanes,
+  servesMarket,
+  tradesCommodity,
+} from './CounterpartiesPage';
 
 function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
   return {
@@ -27,6 +33,9 @@ function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
     sells: [],
     markets: [],
     tier: null,
+    equipment: [],
+    lanes: [],
+    quotedLanes: [],
     ...overrides,
   };
 }
@@ -281,6 +290,60 @@ describe('CounterpartiesPage', () => {
     expect(window.location.search).toBe('?view=table');
   });
 
+  it('finds carriers by where they load and deliver, from lanes or freight rates', async () => {
+    const albertaHauler = summary({
+      id: '00000000-0000-4000-8000-00000000ca01',
+      legalName: 'Synthetic Alberta Hauling',
+      types: ['carrier'],
+      lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' }],
+    });
+    const manitobaHauler = summary({
+      id: '00000000-0000-4000-8000-00000000ca02',
+      legalName: 'Synthetic Manitoba Hauling',
+      types: ['carrier'],
+      // Only from its freight rates.
+      quotedLanes: [{ origin: 'CA-MB', destination: 'US-MN', transport: 'rail' }],
+    });
+    const noLanes = summary({
+      id: '00000000-0000-4000-8000-00000000ca03',
+      legalName: 'Synthetic New Hauling',
+      types: ['carrier'],
+    });
+    mockApi({
+      [LIST]: () =>
+        Response.json({
+          counterparties: [summary({}), albertaHauler, manitobaHauler, noLanes],
+          truncated: false,
+        }),
+    });
+    window.history.replaceState(null, '', '/counterparties?view=table');
+    render(<CounterpartiesPage session={SESSION} />);
+    // Only among carriers.
+    await screen.findByRole('table', { name: 'Counterparties' });
+    expect(screen.queryByRole('button', { name: /^Loads in/ })).toBeNull();
+    const show = screen.getByRole('group', { name: 'Show' });
+    await userEvent.click(within(show).getByRole('button', { name: 'Carriers' }));
+    expect(screen.getByText('3 of 4 shown')).toBeInTheDocument();
+
+    await pick('Delivers to: All', 'Anywhere', 'Minnesota');
+    expect(window.location.search).toBe('?view=table&type=carrier&to=US-MN');
+    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Manitoba Hauling' })).toBeInTheDocument();
+
+    await pick('Delivers to: Minnesota', 'Montana');
+    await pick('Loads in: All', 'Anywhere', 'Alberta');
+    expect(decodeURIComponent(window.location.search)).toBe(
+      '?view=table&type=carrier&to=US-MN,US-MT&from=CA-AB',
+    );
+    expect(screen.getByText('1 of 4 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Alberta Hauling' })).toBeInTheDocument();
+
+    // Leaving Carriers lets the places go.
+    await userEvent.click(within(show).getByRole('button', { name: 'All' }));
+    expect(window.location.search).toBe('?view=table');
+    expect(screen.getByText('4 of 4 shown')).toBeInTheDocument();
+  });
+
   it('narrows by market and tier, several at once, kept in the address', async () => {
     const petA = summary({ legalName: 'Synthetic Pet Feeds', markets: ['pet', 'bird'], tier: 'A' });
     const equineB = summary({
@@ -383,3 +446,27 @@ async function pick(button: string | RegExp, ...ticked: string[]) {
   }
   await userEvent.keyboard('{Escape}');
 }
+
+describe('onLanes', () => {
+  const carrier = {
+    lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' as const }],
+    quotedLanes: [{ origin: 'CA-SK', destination: 'US-ND', transport: 'rail' as const }],
+  };
+  const all = [...LANE_REGIONS];
+
+  it('lets every counterparty through when anywhere is chosen at both ends', () => {
+    expect(onLanes({ lanes: [], quotedLanes: [] }, all, all)).toBe(true);
+  });
+
+  it('finds lanes entered or from freight rates, both ends on one lane', () => {
+    expect(onLanes(carrier, ['CA-AB'], all)).toBe(true);
+    expect(onLanes(carrier, all, ['US-ND'])).toBe(true);
+    expect(onLanes(carrier, ['CA-AB'], ['US-ND'])).toBe(false);
+    expect(onLanes(carrier, ['CA-MB'], all)).toBe(false);
+  });
+
+  it('finds none when nothing is chosen at one end', () => {
+    expect(onLanes(carrier, [], all)).toBe(false);
+    expect(onLanes(carrier, all, [])).toBe(false);
+  });
+});

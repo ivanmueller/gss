@@ -27,6 +27,9 @@ const BUYER: CounterpartySummary = {
   sells: [],
   markets: [],
   tier: null,
+  equipment: [],
+  lanes: [],
+  quotedLanes: [],
 };
 const SELLER = {
   ...BUYER,

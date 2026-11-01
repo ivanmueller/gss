@@ -19,10 +19,13 @@ export function CounterpartyFreight({
   session,
   counterparty,
   folded = false,
+  hideNew = false,
 }: {
   session: DirectorySession;
   counterparty: { id: string; types: string[]; archived: boolean; facilityCount: number };
   folded?: boolean;
+  /** Leaves out New freight rate when the page has it already (a carrier's header). */
+  hideNew?: boolean;
 }) {
   const { token, organization } = session;
   const [everything, setEverything] = useState(false);
@@ -36,7 +39,8 @@ export function CounterpartyFreight({
     token,
   );
   if (!shown) return null;
-  const canAdd = carrier && canEnterFreight(organization.role) && !counterparty.archived;
+  const canAdd =
+    !hideNew && carrier && canEnterFreight(organization.role) && !counterparty.archived;
   const count = list.status === 'ok' ? list.data.freight.length : null;
   const title = carrier ? 'Freight rates' : 'Freight to and from its locations';
 

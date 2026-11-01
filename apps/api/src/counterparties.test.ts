@@ -48,6 +48,9 @@ function summary(name: string): CounterpartySummary {
     sells: [],
     markets: [],
     tier: null,
+    equipment: [],
+    lanes: [],
+    quotedLanes: [],
   };
 }
 
@@ -1264,7 +1267,41 @@ describe('PATCH /api/v1/counterparties/:id', () => {
       COUNTERPARTY,
       VERSION,
       expect.objectContaining({ legalName: 'Synthetic Renamed', types: ['buyer', 'seller'] }),
+      undefined,
     );
+  });
+
+  it("saves a carrier's equipment, each once in the list's order, or keeps it when left out", async () => {
+    db.getCounterparty.mockResolvedValue(detail());
+    const res = await send('PATCH', `/${COUNTERPARTY}`, {
+      version: VERSION,
+      values: { ...values, types: 'carrier' },
+      equipment: ['van', 'super_b', 'van'],
+    });
+    expect(res.status).toBe(200);
+    expect(db.updateCounterparty).toHaveBeenLastCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      VERSION,
+      expect.objectContaining({ types: ['carrier'] }),
+      ['super_b', 'van'],
+    );
+    await send('PATCH', `/${COUNTERPARTY}`, { version: VERSION, values });
+    expect(db.updateCounterparty).toHaveBeenLastCalledWith(
+      expect.anything(),
+      COUNTERPARTY,
+      VERSION,
+      expect.anything(),
+      undefined,
+    );
+    openDatabase.mockClear();
+    const refused = await send('PATCH', `/${COUNTERPARTY}`, {
+      version: VERSION,
+      values,
+      equipment: ['spaceship'],
+    });
+    expect(refused.status).toBe(422);
+    expect(openDatabase).not.toHaveBeenCalled();
   });
 
   it('saves a website tidied, and refuses one that is not a web address', async () => {
@@ -1279,6 +1316,7 @@ describe('PATCH /api/v1/counterparties/:id', () => {
       COUNTERPARTY,
       VERSION,
       expect.objectContaining({ website: 'https://example.com' }),
+      undefined,
     );
 
     openDatabase.mockClear();
@@ -1528,6 +1566,60 @@ describe('commodities', () => {
       Object.assign(new Error('archived'), { code: 'GS005' }),
     );
     const late = await send('PATCH', path, body);
+    expect(late.status).toBe(409);
+    expect(await late.json()).toMatchObject({ error: { code: 'ARCHIVED' } });
+  });
+});
+
+describe('lanes', () => {
+  const path = `/${COUNTERPARTY}/lanes`;
+  const change = {
+    add: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' }],
+    remove: [{ origin: 'CA-AB', destination: 'US-ND' }],
+  };
+
+  it("adds and removes a carrier's lanes, and returns the carrier", async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail({ types: ['carrier'] }));
+    const res = await send('PATCH', path, change);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ types: ['carrier'] });
+    expect(db.changeLanes).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      COUNTERPARTY,
+      change,
+    );
+  });
+
+  it('refuses unknown places, transport and an empty change before the database', async () => {
+    for (const body of [
+      { add: [{ origin: 'AB', destination: 'US-MT', transport: 'truck' }], remove: [] },
+      { add: [{ origin: 'CA-AB', destination: 'MX-SON', transport: 'truck' }], remove: [] },
+      { add: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'barge' }], remove: [] },
+      { add: [{ origin: 'CA-AB', destination: 'US-MT' }], remove: [] },
+      { add: [], remove: [] },
+      { add: [] },
+    ]) {
+      expect((await send('PATCH', path, body)).status).toBe(422);
+    }
+    expect(db.changeLanes).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not_found', 404, 'NOT_FOUND'],
+    ['forbidden', 403, 'FORBIDDEN'],
+    ['archived', 409, 'ARCHIVED'],
+    ['not_carrier', 422, 'NOT_CARRIER'],
+  ] as const)('answers %s with %i %s', async (status, code, error) => {
+    db.changeLanes.mockResolvedValueOnce({ status });
+    const res = await send('PATCH', path, change);
+    expect(res.status).toBe(code);
+    expect(await res.json()).toMatchObject({ error: { code: error } });
+  });
+
+  it('answers 404 for an id that is not one, and 409 when archived while it waited', async () => {
+    expect((await send('PATCH', '/nope/lanes', change)).status).toBe(404);
+    db.changeLanes.mockRejectedValueOnce(Object.assign(new Error('archived'), { code: 'GS005' }));
+    const late = await send('PATCH', path, change);
     expect(late.status).toBe(409);
     expect(await late.json()).toMatchObject({ error: { code: 'ARCHIVED' } });
   });

@@ -1,3 +1,4 @@
 # The specification pack is kept as delivered; reformatting it would rewrite its tables.
 *.md
 pnpm-lock.yaml
+apps/web/src/data/lane-regions.json
