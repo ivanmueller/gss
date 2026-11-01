@@ -634,8 +634,14 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
   await company.getByRole('checkbox', { name: 'Carrier' }).check();
   await choose(company.getByLabel('Country (required)'), 'Canada');
+  // Its equipment when it is added (owner's request, 2026-11-01); lanes follow on its page.
+  await page
+    .getByRole('region', { name: 'Equipment and lanes' })
+    .getByRole('checkbox', { name: 'Dry van' })
+    .check();
   await page.getByRole('button', { name: 'Add counterparty' }).click();
   await expect(page.getByRole('heading', { name: 'Synthetic Hauling' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Equipment' })).toContainText('Dry van');
 
   // The Carriers filter shows it alone.
   await page.getByRole('link', { name: 'All counterparties' }).click();
@@ -658,6 +664,12 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await page.getByRole('menuitemcheckbox', { name: 'Montana' }).click();
   await page.getByRole('menuitemcheckbox', { name: 'North Dakota' }).click();
   await page.keyboard.press('Escape');
+  // Truck or rail only when chosen: lanes start as not stated (owner's answer, 2026-11-01).
+  await expect(laneForm.getByRole('button', { name: 'Not stated' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await laneForm.getByRole('button', { name: 'Truck', exact: true }).click();
   await laneForm.getByRole('button', { name: 'Save lanes' }).click();
   const laneList = page.getByRole('region', { name: 'Lanes (2)' }).getByRole('list', {
     name: 'Lanes',

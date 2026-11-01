@@ -12,6 +12,7 @@ import {
   laneRegionsOf,
   laneRegionShort,
   runsLane,
+  createCounterpartyDetailsSchema,
   updateCounterpartyDetailsSchema,
   type CarrierLane,
 } from './carriers';
@@ -168,5 +169,63 @@ describe('equipment', () => {
     expect(
       updateCounterpartyDetailsSchema.parse({ ...base, equipment: ['tridem'] }).equipment,
     ).toEqual(['tridem']);
+  });
+});
+
+describe('lanes not stated as truck or rail', () => {
+  it('are taken as null, and only truck, rail or both otherwise', () => {
+    const lane = { origin: 'CA-AB', destination: 'US-MT', transport: null };
+    expect(laneChangeSchema.parse({ add: [lane], remove: [] }).add).toEqual([lane]);
+    expect(
+      laneChangeSchema.safeParse({ add: [{ ...lane, transport: '' }], remove: [] }).success,
+    ).toBe(false);
+  });
+
+  it('are grouped apart, after truck, rail and both', () => {
+    expect(
+      groupLanes([
+        { origin: 'CA-AB', destination: 'US-ND', transport: null },
+        { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
+        { origin: 'CA-AB', destination: 'US-MN', transport: null },
+      ]),
+    ).toEqual([
+      { origin: 'CA-AB', transport: 'truck', destinations: ['US-MT'] },
+      { origin: 'CA-AB', transport: null, destinations: ['US-MN', 'US-ND'] },
+    ]);
+  });
+});
+
+describe('createCounterpartyDetailsSchema', () => {
+  const base = {
+    organizationId: '00000000-0000-4000-8000-0000000000aa',
+    values: { legalName: 'Synthetic Hauling', types: 'carrier', country: 'CA' },
+  };
+
+  it('takes a carrier’s equipment and first lanes, or neither', () => {
+    const plain = createCounterpartyDetailsSchema.parse(base);
+    expect(plain.equipment).toBeUndefined();
+    expect(plain.lanes).toBeUndefined();
+    expect(
+      createCounterpartyDetailsSchema.parse({
+        ...base,
+        equipment: ['van', 'super_b'],
+        lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: null }],
+      }),
+    ).toMatchObject({
+      equipment: ['super_b', 'van'],
+      lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: null }],
+    });
+  });
+
+  it('refuses unknown equipment and places', () => {
+    expect(
+      createCounterpartyDetailsSchema.safeParse({ ...base, equipment: ['ship'] }).success,
+    ).toBe(false);
+    expect(
+      createCounterpartyDetailsSchema.safeParse({
+        ...base,
+        lanes: [{ origin: 'CA-AB', destination: 'MX-SON', transport: null }],
+      }).success,
+    ).toBe(false);
   });
 });

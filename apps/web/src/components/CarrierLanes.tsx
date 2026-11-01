@@ -41,10 +41,102 @@ const PLACE_OPTIONS = LANE_REGIONS.map((code) => ({
   keywords: code,
 })).sort((a, b) => a.detail.localeCompare(b.detail) || a.label.localeCompare(b.label));
 
-const TRANSPORT_OPTIONS = TRANSPORT_ACCESS.map((value) => ({
+// Not stated first: truck or rail only when the person says so (owner's answer, 2026-11-01).
+const TRANSPORT_OPTIONS: { value: TransportAccess | ''; label: string }[] = [
+  { value: '', label: 'Not stated' },
+  ...TRANSPORT_ACCESS.map((value) => ({ value, label: TRANSPORT_ACCESS_LABELS[value] })),
+];
+
+/** One origin's lanes as chosen in a form: from one place to several, by truck, rail or both. */
+export interface LaneDraft {
+  origin: string;
+  destinations: string[];
+  transport: TransportAccess | null;
+}
+
+export const EMPTY_LANE_DRAFT: LaneDraft = { origin: '', destinations: [], transport: null };
+
+/** What is missing from a lane draft, or null when it is complete. */
+export function laneDraftProblem(draft: LaneDraft): string | null {
+  if (!draft.origin) return 'Choose where the lanes start.';
+  if (draft.destinations.length === 0) return 'Choose at least one place they go to.';
+  return null;
+}
+
+/** A complete draft's lanes, one per destination. */
+export function draftLanes(draft: LaneDraft): CarrierLane[] {
+  return draft.destinations.map((destination) => ({
+    origin: draft.origin,
+    destination,
+    transport: draft.transport,
+  }));
+}
+
+/** "by truck", or "truck or rail not stated", for buttons' names. */
+function byWords(transport: TransportAccess | null): string {
+  return transport === null
+    ? 'truck or rail not stated'
+    : `by ${TRANSPORT_ACCESS_LABELS[transport].toLowerCase()}`;
+}
+
+/** From, To and By for one origin's lanes; used on a carrier's page and in the add form. */
+export function LaneFields({
   value,
-  label: TRANSPORT_ACCESS_LABELS[value],
-}));
+  onChange,
+  disabled,
+}: {
+  value: LaneDraft;
+  onChange: (draft: LaneDraft) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">From</span>
+        <SearchSelect
+          aria-label="From"
+          value={value.origin}
+          onValueChange={(origin) => {
+            onChange({ ...value, origin });
+          }}
+          options={PLACE_OPTIONS}
+          placeholder="Province or state…"
+          disabled={disabled}
+          className="w-full"
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">To</span>
+        <MultiPicker
+          label="To"
+          icon={<MapPinned aria-hidden="true" className="size-4 text-muted-foreground" />}
+          options={PLACE_OPTIONS}
+          chosen={PLACE_OPTIONS.filter((option) => value.destinations.includes(option.value)).map(
+            (option) => option.value,
+          )}
+          allLabel="Every province and state"
+          onChange={(destinations) => {
+            onChange({ ...value, destinations });
+          }}
+        />
+        {value.destinations.length > 0 && (
+          <p className="text-xs text-muted-foreground">{places(value.destinations)}</p>
+        )}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium">By</span>
+        <SegmentedControl
+          label="By truck, rail or both"
+          options={TRANSPORT_OPTIONS}
+          value={value.transport ?? ''}
+          onChange={(transport) => {
+            onChange({ ...value, transport: transport === '' ? null : transport });
+          }}
+        />
+      </div>
+    </>
+  );
+}
 
 /** "Montana, North Dakota". */
 function places(codes: readonly string[]): string {
@@ -52,17 +144,10 @@ function places(codes: readonly string[]): string {
 }
 
 /** What to send to go from one group of lanes (or none) to the one chosen in the form. */
-export function laneChange(
-  before: LaneGroup | null,
-  after: { origin: string; destinations: readonly string[]; transport: TransportAccess },
-): LaneChange {
+export function laneChange(before: LaneGroup | null, after: LaneDraft): LaneChange {
   const kept = before?.origin === after.origin ? new Set(after.destinations) : new Set<string>();
   return {
-    add: after.destinations.map((destination) => ({
-      origin: after.origin,
-      destination,
-      transport: after.transport,
-    })),
+    add: draftLanes(after),
     remove: (before?.destinations ?? [])
       .filter((destination) => !kept.has(destination))
       .map((destination) => ({ origin: before?.origin ?? '', destination })),
@@ -83,33 +168,21 @@ function LaneForm({
 }: {
   label: string;
   initial: LaneGroup | null;
-  onSave: (lanes: {
-    origin: string;
-    destinations: string[];
-    transport: TransportAccess;
-  }) => Promise<void>;
+  onSave: (lanes: LaneDraft) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [origin, setOrigin] = useState(initial?.origin ?? '');
-  const [destinations, setDestinations] = useState<string[]>(initial?.destinations ?? []);
-  const [transport, setTransport] = useState<TransportAccess>(initial?.transport ?? 'truck');
+  const [draft, setDraft] = useState<LaneDraft>(initial ?? EMPTY_LANE_DRAFT);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: SyntheticEvent) {
     event.preventDefault();
-    if (!origin) {
-      setError('Choose where the lanes start.');
-      return;
-    }
-    if (destinations.length === 0) {
-      setError('Choose at least one place they go to.');
-      return;
-    }
-    setError(null);
+    const problem = laneDraftProblem(draft);
+    setError(problem);
+    if (problem) return;
     setBusy(true);
     try {
-      await onSave({ origin, destinations, transport });
+      await onSave(draft);
     } catch (failure) {
       setError(failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.');
       setBusy(false);
@@ -123,43 +196,7 @@ function LaneForm({
       onSubmit={(event) => void submit(event)}
       className="flex flex-col gap-3 border-b bg-muted/40 px-4 py-4"
     >
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">From</span>
-        <SearchSelect
-          aria-label="From"
-          value={origin}
-          onValueChange={setOrigin}
-          options={PLACE_OPTIONS}
-          placeholder="Province or state…"
-          disabled={busy}
-          className="w-full"
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">To</span>
-        <MultiPicker
-          label="To"
-          icon={<MapPinned aria-hidden="true" className="size-4 text-muted-foreground" />}
-          options={PLACE_OPTIONS}
-          chosen={PLACE_OPTIONS.filter((option) => destinations.includes(option.value)).map(
-            (option) => option.value,
-          )}
-          allLabel="Every province and state"
-          onChange={setDestinations}
-        />
-        {destinations.length > 0 && (
-          <p className="text-xs text-muted-foreground">{places(destinations)}</p>
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">By</span>
-        <SegmentedControl
-          label="By truck, rail or both"
-          options={TRANSPORT_OPTIONS}
-          value={transport}
-          onChange={setTransport}
-        />
-      </div>
+      <LaneFields value={draft} onChange={setDraft} disabled={busy} />
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -264,7 +301,7 @@ function LanesMap({
 
 type Editing = { kind: 'add' } | { kind: 'edit' | 'remove'; group: LaneGroup } | null;
 
-const groupKey = (group: LaneGroup) => `${group.origin} ${group.transport}`;
+const groupKey = (group: LaneGroup) => `${group.origin} ${group.transport ?? 'not_stated'}`;
 
 /** The Lanes box on a carrier's page. */
 export function CarrierLanes({
@@ -369,7 +406,9 @@ export function CarrierLanes({
                       <span>{places(group.destinations)}</span>
                     </span>
                     <span className="flex flex-wrap gap-1.5">
-                      <Badge variant="neutral">{TRANSPORT_ACCESS_LABELS[group.transport]}</Badge>
+                      {group.transport && (
+                        <Badge variant="neutral">{TRANSPORT_ACCESS_LABELS[group.transport]}</Badge>
+                      )}
                       {group.destinations.some((destination) =>
                         crossesBorder({ origin: group.origin, destination }),
                       ) && <Badge variant="info">Cross-border</Badge>}
@@ -400,7 +439,7 @@ export function CarrierLanes({
                         <Button
                           size="sm"
                           variant="ghost"
-                          aria-label={`Edit lanes from ${laneRegionName(group.origin)} by ${TRANSPORT_ACCESS_LABELS[group.transport].toLowerCase()}`}
+                          aria-label={`Edit lanes from ${laneRegionName(group.origin)}, ${byWords(group.transport)}`}
                           onClick={() => {
                             setError(null);
                             setEditing({ kind: 'edit', group });
@@ -412,7 +451,7 @@ export function CarrierLanes({
                         <Button
                           size="sm"
                           variant="ghost"
-                          aria-label={`Remove lanes from ${laneRegionName(group.origin)} by ${TRANSPORT_ACCESS_LABELS[group.transport].toLowerCase()}`}
+                          aria-label={`Remove lanes from ${laneRegionName(group.origin)}, ${byWords(group.transport)}`}
                           onClick={() => {
                             setError(null);
                             setEditing({ kind: 'remove', group });
@@ -446,7 +485,7 @@ export function CarrierLanes({
                     <span className="sr-only">{' to '}</span>
                     {laneRegionName(lane.destination)}
                     <span className="text-muted-foreground">
-                      {` · ${TRANSPORT_ACCESS_LABELS[lane.transport]}`}
+                      {lane.transport && ` · ${TRANSPORT_ACCESS_LABELS[lane.transport]}`}
                     </span>
                   </span>
                   {writer && (

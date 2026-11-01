@@ -278,6 +278,53 @@ function holdOpen(work: (tx: postgres.TransactionSql) => Promise<unknown>) {
   return { pid, release, done };
 }
 
+describe('a carrier added by hand (owner’s request, 2026-11-01)', () => {
+  it('saves its equipment and first lanes, truck or rail only when stated', async () => {
+    const created = await db.createCounterparty(as(users.olivia), orgs.a, {
+      counterparty: {
+        legalName: 'Synthetic New Hauling',
+        tradingName: null,
+        types: ['carrier'],
+        primaryCountry: 'CA',
+        verificationStatus: 'unverified',
+        website: null,
+        phone: null,
+        markets: [],
+        tier: null,
+        notes: null,
+      },
+      contacts: [],
+      facilities: [],
+      commodities: [],
+      equipment: ['super_b', 'van'],
+      lanes: [
+        { origin: 'CA-AB', destination: 'US-MT', transport: null },
+        { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+      ],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const detail = await db.getCounterparty(as(users.victor), created.id);
+    expect(detail?.equipment).toEqual(['super_b', 'van']);
+    expect(detail?.lanes).toEqual([
+      { origin: 'CA-AB', destination: 'US-MT', transport: null },
+      { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+    ]);
+    // Stated later, and back to not stated.
+    await db.changeLanes(as(users.tess), created.id, {
+      add: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'rail' }],
+      remove: [],
+    });
+    await db.changeLanes(as(users.tess), created.id, {
+      add: [{ origin: 'CA-AB', destination: 'US-ND', transport: null }],
+      remove: [],
+    });
+    expect((await db.getCounterparty(as(users.victor), created.id))?.lanes).toEqual([
+      { origin: 'CA-AB', destination: 'US-MT', transport: 'rail' },
+      { origin: 'CA-AB', destination: 'US-ND', transport: null },
+    ]);
+  });
+});
+
 // Codex's review of ba68201: two changes at the same moment.
 describe('lanes and concurrent changes', () => {
   it('a removal waiting for an archiving under way is refused once it is archived', async () => {

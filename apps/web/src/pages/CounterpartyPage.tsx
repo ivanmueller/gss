@@ -1,6 +1,5 @@
 import {
   CONTACT_CHANNEL_LABELS,
-  EQUIPMENT,
   EQUIPMENT_LABELS,
   formatAlberta,
   normalizeCountry,
@@ -70,6 +69,8 @@ import { CounterpartyWebsite } from '../components/CounterpartyWebsite';
 import {
   CompanyFields,
   ContactFields,
+  EquipmentFields,
+  equipmentOf,
   FormIssues,
   LocationFields,
   splitAccess,
@@ -474,45 +475,6 @@ function locationName(facility: Facility): string {
  */
 export function tradingLayout(types: readonly string[]): boolean {
   return types.some((type) => type !== 'carrier');
-}
-
-/** "super_b,van" from the form → ['super_b', 'van'], in EQUIPMENT order. */
-function equipmentOf(value: string | undefined): Equipment[] {
-  const chosen = new Set((value ?? '').split(','));
-  return EQUIPMENT.filter((item) => chosen.has(item));
-}
-
-/** What a carrier hauls with, as checkboxes under Edit details. */
-function EquipmentFields({ props }: { props: FieldsProps }) {
-  const chosen = new Set(equipmentOf(props.values.equipment));
-  return (
-    <fieldset className="flex flex-col gap-1.5">
-      <legend className="text-sm font-medium">
-        Equipment <span className="font-normal text-muted-foreground">(any that apply)</span>
-      </legend>
-      <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
-        {EQUIPMENT.map((item) => (
-          <label key={item} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={chosen.has(item)}
-              disabled={props.disabled}
-              onChange={(event) => {
-                const next = new Set(chosen);
-                if (event.target.checked) next.add(item);
-                else next.delete(item);
-                props.onChange({
-                  equipment: EQUIPMENT.filter((other) => next.has(other)).join(','),
-                });
-              }}
-            />
-            {EQUIPMENT_LABELS[item]}
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
 }
 
 const TYPE_BADGES: Record<string, BadgeVariant> = { buyer: 'bid', seller: 'offer', broker: 'info' };

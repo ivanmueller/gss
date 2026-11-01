@@ -1,12 +1,22 @@
-import { parseNewCounterparty, type FieldIssue } from '@grain/domain';
+import { parseNewCounterparty, type CarrierLane, type FieldIssue } from '@grain/domain';
+import { Plus, Trash2 } from 'lucide-react';
 import { useId, useState, type ReactNode, type SyntheticEvent } from 'react';
 
 import { ApiError, fieldIssues, sendJson } from '../lib/api';
 import { navigate } from '../lib/router';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import {
+  draftLanes,
+  EMPTY_LANE_DRAFT,
+  LaneFields,
+  laneDraftProblem,
+  type LaneDraft,
+} from './CarrierLanes';
+import {
   CompanyFields,
   ContactFields,
+  EquipmentFields,
+  equipmentOf,
   FormIssues,
   LocationFields,
   splitAccess,
@@ -40,6 +50,32 @@ function asksAccess(types: string | undefined): boolean {
   return chosen.length === 0 || chosen.some((type) => type !== 'carrier');
 }
 
+function isCarrier(types: string | undefined): boolean {
+  return (types ?? '').split(',').includes('carrier');
+}
+
+/** Whether a lane draft was left untouched (and is not sent). */
+function untouched(draft: LaneDraft): boolean {
+  return draft.origin === '' && draft.destinations.length === 0;
+}
+
+/**
+ * The lanes to send from the drafts, or the first problem as "Lanes 2: …"; untouched
+ * drafts are left out.
+ */
+export function lanesFromDrafts(
+  drafts: readonly LaneDraft[],
+): { lanes: CarrierLane[] } | { problem: string } {
+  const lanes: CarrierLane[] = [];
+  for (const [index, draft] of drafts.entries()) {
+    if (untouched(draft)) continue;
+    const problem = laneDraftProblem(draft);
+    if (problem) return { problem: `Lanes ${String(index + 1)}: ${problem}` };
+    lanes.push(...draftLanes(draft));
+  }
+  return { lanes };
+}
+
 /**
  * One counterparty entered by hand, with the import's fields, in the + button's window
  * (owner's request, 2026-10-30). A location given without coordinates gets them from its
@@ -58,6 +94,10 @@ export function AddCounterpartyForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<{ id: string; name: string } | null>(null);
+  // A carrier's lanes, each from one place to several (owner's request, 2026-11-01).
+  const [laneDrafts, setLaneDrafts] = useState<LaneDraft[]>([EMPTY_LANE_DRAFT]);
+  const carrier = isCarrier(values.types);
+  const carrierOnly = carrier && !asksAccess(values.types);
 
   if (added) {
     return (
@@ -105,15 +145,24 @@ export function AddCounterpartyForm({
       );
       return;
     }
+    const lanes = carrier ? lanesFromDrafts(laneDrafts) : { lanes: [] };
+    if ('problem' in lanes) {
+      setIssues([{ field: null, message: lanes.problem }]);
+      return;
+    }
     setIssues([]);
     setBusy(true);
+    // Equipment is sent beside the fields; market and tier are not a carrier's.
+    const { equipment, ...fieldValues } = values;
+    const sent = carrierOnly ? { ...fieldValues, markets: '', tier: '' } : fieldValues;
     const access = asksAccess(values.types)
-      ? splitAccess(values)
-      : splitAccess({ ...values, transportAccess: '' });
+      ? splitAccess(sent)
+      : splitAccess({ ...sent, transportAccess: '' });
     try {
       const created = await sendJson<{ id: string }>('/counterparties', token, 'POST', {
         organizationId: organization.id,
         ...access,
+        ...(carrier && { equipment: equipmentOf(equipment), lanes: lanes.lanes }),
       });
       if (checked.record.facility?.latitude === null) {
         setAdded({ id: created.id, name: checked.record.counterparty.legalName });
@@ -137,11 +186,64 @@ export function AddCounterpartyForm({
       <Section title="Company">
         <CompanyFields {...fields} />
       </Section>
+      {carrier && (
+        <Section
+          title="Equipment and lanes"
+          note="Optional. Truck or rail only when you know which; lanes can be added later on its page."
+        >
+          <EquipmentFields props={fields} />
+          {laneDrafts.map((draft, index) => (
+            <fieldset
+              // Drafts are only added at the end and removed by position.
+              key={index}
+              aria-label={`Lanes ${String(index + 1)}`}
+              className="flex flex-col gap-3 rounded-control border p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Lanes {index + 1}</span>
+                {laneDrafts.length > 1 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Remove lanes ${String(index + 1)}`}
+                    disabled={busy}
+                    onClick={() => {
+                      setLaneDrafts(laneDrafts.filter((_, other) => other !== index));
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <LaneFields
+                value={draft}
+                disabled={busy}
+                onChange={(next) => {
+                  setLaneDrafts(laneDrafts.map((other, at) => (at === index ? next : other)));
+                }}
+              />
+            </fieldset>
+          ))}
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-fit"
+            disabled={busy}
+            onClick={() => {
+              setLaneDrafts([...laneDrafts, EMPTY_LANE_DRAFT]);
+            }}
+          >
+            <Plus aria-hidden="true" />
+            Lanes from another place
+          </Button>
+        </Section>
+      )}
       <Section title="Contact" note="Optional. Leave empty to add contacts later.">
         <ContactFields {...fields} />
       </Section>
       <Section
-        title="Location"
+        title={carrierOnly ? 'Home yard' : 'Location'}
         note="Optional. Its coordinates are found from the address when you add it."
       >
         <LocationFields {...fields} access={asksAccess(values.types)} />

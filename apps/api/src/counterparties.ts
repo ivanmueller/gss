@@ -1,5 +1,6 @@
 import {
   commodityChangeSchema,
+  createCounterpartyDetailsSchema,
   laneChangeSchema,
   contactKey,
   COUNTERPARTY_TYPES,
@@ -8,7 +9,6 @@ import {
   FACILITY_TYPE_LABELS,
   MARKET_LABELS,
   createContactSchema,
-  createCounterpartySchema,
   createFacilitySchema,
   groupImportRows,
   importRequestSchema,
@@ -788,13 +788,25 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     c.header('Cache-Control', 'no-store');
     const body = await readJson(c, MAX_FORM_BODY_BYTES);
     if (!body.ok) return body.response;
-    const request = createCounterpartySchema.safeParse(body.value);
+    const request = createCounterpartyDetailsSchema.safeParse(body.value);
     if (!request.success) return malformed(c, request.error);
     const parsed = parseNewCounterparty(request.data.values);
     if (parsed.status === 'empty')
       return invalid(c, [{ field: null, message: 'The form is empty.' }]);
     if (parsed.status === 'invalid') return invalid(c, parsed.issues);
     const { counterparty, contact, facility, commodities } = parsed.record;
+    // A carrier's equipment and first lanes (owner's request, 2026-11-01).
+    const equipment = request.data.equipment ?? [];
+    const lanes = [
+      ...new Map(
+        (request.data.lanes ?? []).map((lane) => [`${lane.origin}>${lane.destination}`, lane]),
+      ).values(),
+    ];
+    if ((equipment.length > 0 || lanes.length > 0) && !counterparty.types.includes('carrier')) {
+      return invalid(c, [
+        { field: 'types', message: 'must include Carrier to have equipment or lanes' },
+      ]);
+    }
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const created = await db.createCounterparty(ctx, request.data.organizationId, {
         counterparty,
@@ -803,6 +815,8 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
           ? [{ ...facility, transportAccess: request.data.transportAccess ?? null }]
           : [],
         commodities,
+        equipment,
+        lanes,
       });
       if (created.status === 'forbidden') return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_EDIT);
       return c.json({ id: created.id }, 201);
