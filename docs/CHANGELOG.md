@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-10-31 — Handoff record of #96; documents brought up to date
+
+- `docs/HANDOFF.md`: Codex's reviews of #95 fixed (ivanmueller/gss#96) with its CI and Deploy staging runs; the status summary, GT-020 and the next steps brought up to #96.
+- `docs/API.md`, `docs/PRODUCT.md`, `docs/BUILD_PLAN.md`, `docs/DATA_MODEL.md`, `docs/DESIGN_SYSTEM.md`: listed companies updated by later files, deletion of archived counterparties, Paste logo and the phone format described as they now are.
+
 ## 2026-10-31 — Codex's second review of #95
 
 - `docs/DECISIONS.md`, `docs/API.md`: the fingerprint holds the values replaced and is checked when nothing is left to write.

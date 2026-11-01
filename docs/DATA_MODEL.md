@@ -27,7 +27,7 @@ All tenant-owned tables contain `organization_id uuid not null`, with foreign ke
 | `trades` (later) | scenario_id, contract refs, approval status, negotiated quantity, currency, counterparty commitments |
 | `trade_events` (later) | state changes, documents, delivery/shipment events, revisions |
 | `documents` | attached_entity_type/id, object_key, MIME/size, checksum, classification, uploaded_by |
-| `import_batches` | provider, imported_at, file checksum, record counts, success/reject counts |
+| `import_batches` | provider, imported_at, file checksum (a record; the same file may be imported again since `20261030090000`), record counts, success/reject counts |
 | `audit_events` | actor_id, action, entity, entity_id, org_id, before/after summary, request_id, timestamp |
 
 ### Required constraints and indexes
