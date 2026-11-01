@@ -1,6 +1,7 @@
 import type {
   CarrierLane,
   CommodityDirection,
+  ListedLane,
   FieldIssue,
   ImportIssue,
   TransportAccess,
@@ -32,8 +33,8 @@ export interface CounterpartySummary {
   tier: string | null;
   /** A carrier's equipment (EQUIPMENT in @grain/domain). */
   equipment: string[];
-  /** A carrier's lanes as entered (owner's request, 2026-11-01). */
-  lanes: CarrierLane[];
+  /** A carrier's lanes as entered, verified or not (owner's request, 2026-11-01). */
+  lanes: ListedLane[];
   /** Where its freight rates run between, from their locations; derived, never stored. */
   quotedLanes: CarrierLane[];
 }
@@ -138,6 +139,9 @@ export interface ImportResult {
     addedContacts: number;
     addedFacilities: number;
     addedCommodities: number;
+    /** A carrier's lanes: the new carriers' and those added to listed ones (unverified). */
+    lanes: number;
+    addedLanes: number;
     /** Listed companies whose own details, contacts or locations the file changes. */
     existingUpdated: number;
   };
@@ -148,6 +152,7 @@ export interface ImportResult {
     /** For a company already in the list, only the new ones. */
     contacts: number;
     facilities: number;
+    lanes: number;
     status: 'new' | 'existing' | 'archived';
     /** For a listed company, each change the file makes to it, in words. */
     changes: string[];

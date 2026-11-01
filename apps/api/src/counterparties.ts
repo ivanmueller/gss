@@ -1,6 +1,11 @@
 import {
   commodityChangeSchema,
   createCounterpartyDetailsSchema,
+  EQUIPMENT,
+  EQUIPMENT_LABELS,
+  laneRegionName,
+  type CarrierLane,
+  type Equipment,
   laneChangeSchema,
   contactKey,
   COUNTERPARTY_TYPES,
@@ -255,6 +260,16 @@ function changesFor(
     details.tier = file.tier;
     changes.push(changed('Tier', company.tier, file.tier));
   }
+  // A carrier's equipment: the file's added, none removed (owner's request, 2026-11-01).
+  const equipment = EQUIPMENT.filter(
+    (item) => company.equipment.includes(item) || group.equipment.includes(item),
+  );
+  if (equipment.length > company.equipment.length) {
+    details.equipment = equipment;
+    const names = (items: readonly Equipment[]) =>
+      items.map((item) => EQUIPMENT_LABELS[item]).join(', ') || null;
+    changes.push(changed('Equipment', names(company.equipment), names(equipment) ?? ''));
+  }
   if (file.notes !== null && !(company.notes ?? '').includes(file.notes)) {
     const notes = company.notes === null ? file.notes : `${company.notes}\n\n${file.notes}`;
     if (notes.length > NOTES_MAX) {
@@ -365,6 +380,13 @@ function changesFor(
     }
   }
 
+  // A carrier's lanes: new ones added, unverified; listed ones left as they are.
+  const listedLanes = new Set(company.lanes.map((lane) => `${lane.origin}>${lane.destination}`));
+  const lanes = group.lanes.filter(
+    (lane) => !listedLanes.has(`${lane.origin}>${lane.destination}`),
+  );
+  if (lanes.length > 0) changes.push(`Lanes added (unverified): ${laneWords(lanes)}`);
+
   const commodities = new Set(company.commodities.map((k) => `${k.direction}:${k.commodity}`));
   return {
     addition: {
@@ -372,6 +394,7 @@ function changesFor(
       details: Object.keys(details).length > 0 ? details : null,
       contacts,
       facilities,
+      lanes,
       commodities: group.commodities.filter(
         (k) => !commodities.has(`${k.direction}:${k.commodity}`),
       ),
@@ -383,6 +406,17 @@ function changesFor(
   };
 }
 
+/** "Alberta → Montana, North Dakota; Saskatchewan → North Dakota". */
+function laneWords(lanes: readonly CarrierLane[]): string {
+  const byOrigin = new Map<string, string[]>();
+  for (const lane of lanes) {
+    byOrigin.set(lane.origin, [...(byOrigin.get(lane.origin) ?? []), lane.destination]);
+  }
+  return [...byOrigin]
+    .map(([origin, to]) => `${laneRegionName(origin)} → ${to.map(laneRegionName).join(', ')}`)
+    .join('; ');
+}
+
 /** Whether a file adds anything to a listed company or changes anything on it. */
 function hasAny(addition: ImportAddition): boolean {
   return (
@@ -390,6 +424,7 @@ function hasAny(addition: ImportAddition): boolean {
     addition.facilities.length +
       addition.contacts.length +
       addition.commodities.length +
+      (addition.lanes?.length ?? 0) +
       addition.contactUpdates.length +
       addition.facilityUpdates.length >
       0
@@ -462,6 +497,9 @@ export function matchImport(
       addedContacts: adding.reduce((sum, { addition }) => sum + addition.contacts.length, 0),
       addedFacilities: adding.reduce((sum, { addition }) => sum + addition.facilities.length, 0),
       addedCommodities: adding.reduce((sum, { addition }) => sum + addition.commodities.length, 0),
+      // A carrier's lanes: the new carriers' and those added to listed ones, all unverified.
+      lanes: fresh.reduce((sum, group) => sum + group.lanes.length, 0),
+      addedLanes: adding.reduce((sum, { addition }) => sum + (addition.lanes?.length ?? 0), 0),
       // Listed companies whose own details, contacts or locations the file changes (owner's
       // answer, 2026-10-31).
       existingUpdated: updating.length,
@@ -476,6 +514,7 @@ export function matchImport(
         lines: group.lines,
         contacts: addition ? addition.contacts.length : group.contacts.length,
         facilities: addition ? addition.facilities.length : group.facilities.length,
+        lanes: addition ? (addition.lanes?.length ?? 0) : group.lanes.length,
         status: !company ? 'new' : company.archived ? 'archived' : 'existing',
         changes: match?.changes ?? [],
       };
@@ -498,12 +537,16 @@ export function importBatchFor(
   return {
     ...file,
     skippedCount: plan.groups.length - match.fresh.length,
-    counterparties: match.fresh.map(({ counterparty, contacts, facilities, commodities }) => ({
-      counterparty,
-      contacts,
-      facilities,
-      commodities,
-    })),
+    counterparties: match.fresh.map(
+      ({ counterparty, contacts, facilities, commodities, equipment, lanes }) => ({
+        counterparty,
+        contacts,
+        facilities,
+        commodities,
+        equipment,
+        lanes,
+      }),
+    ),
     additions: match.adding.map(({ addition }) => addition),
   };
 }

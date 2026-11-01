@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Carrier spreadsheets; lanes to verify
+
+- `docs/DECISIONS.md`: the Equipment, Loads in, Delivers to and Mode columns; lanes from a file unverified until verified by a rep.
+- `docs/DATA_MODEL.md`: migration `20261101030000_lane_verification.sql`.
+- `docs/API.md`: the import's carrier columns and lane counts; `verify` and `verifiedAt` on lanes.
+- `docs/PRODUCT.md`, `README.md`: carrier imports and verifying lanes.
+
 ## 2026-11-01 — Columns found shown in green
 
 - `docs/DECISIONS.md`: the import's found columns in green; carrier sheets without contact columns.

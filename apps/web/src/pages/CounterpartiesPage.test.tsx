@@ -295,7 +295,14 @@ describe('CounterpartiesPage', () => {
       id: '00000000-0000-4000-8000-00000000ca01',
       legalName: 'Synthetic Alberta Hauling',
       types: ['carrier'],
-      lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' }],
+      lanes: [
+        {
+          origin: 'CA-AB',
+          destination: 'US-MT',
+          transport: 'truck',
+          verifiedAt: '2026-10-30T12:00:00.000Z',
+        },
+      ],
     });
     const manitobaHauler = summary({
       id: '00000000-0000-4000-8000-00000000ca02',
@@ -449,7 +456,14 @@ async function pick(button: string | RegExp, ...ticked: string[]) {
 
 describe('onLanes', () => {
   const carrier = {
-    lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' as const }],
+    lanes: [
+      {
+        origin: 'CA-AB',
+        destination: 'US-MT',
+        transport: 'truck' as const,
+        verifiedAt: null,
+      },
+    ],
     quotedLanes: [{ origin: 'CA-SK', destination: 'US-ND', transport: 'rail' as const }],
   };
   const all = [...LANE_REGIONS];

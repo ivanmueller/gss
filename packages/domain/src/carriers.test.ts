@@ -11,6 +11,9 @@ import {
   laneRegionOf,
   laneRegionsOf,
   laneRegionShort,
+  parseEquipmentList,
+  parseLaneMode,
+  parsePlaceList,
   runsLane,
   createCounterpartyDetailsSchema,
   updateCounterpartyDetailsSchema,
@@ -63,7 +66,7 @@ describe('laneChangeSchema', () => {
       add: [{ origin: 'CA-AB', destination: 'US-MT', transport: 'truck' }],
       remove: [{ origin: 'CA-MB', destination: 'US-ND' }],
     };
-    expect(laneChangeSchema.parse(change)).toEqual(change);
+    expect(laneChangeSchema.parse(change)).toEqual({ ...change, verify: [] });
   });
 
   it('refuses an empty change, unknown places and transport', () => {
@@ -227,5 +230,35 @@ describe('createCounterpartyDetailsSchema', () => {
         lanes: [{ origin: 'CA-AB', destination: 'MX-SON', transport: null }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('reading spreadsheet cells', () => {
+  it('reads places by code, name or ISO code, each once, and lists the unknown', () => {
+    expect(parsePlaceList('AB, Saskatchewan; US-MT / north dakota and AB')).toEqual({
+      places: ['CA-AB', 'CA-SK', 'US-MT', 'US-ND'],
+      unknown: [],
+    });
+    expect(parsePlaceList('Albrta, Sonora, MX-SON')).toEqual({
+      places: [],
+      unknown: ['Albrta', 'Sonora', 'MX-SON'],
+    });
+  });
+
+  it('reads equipment by its name or a common one', () => {
+    expect(parseEquipmentList('Super-B, Dry van & flat deck; railcar')).toEqual({
+      equipment: ['super_b', 'van', 'flatdeck', 'hopper_car'],
+      unknown: [],
+    });
+    expect(parseEquipmentList('Reefer').unknown).toEqual(['Reefer']);
+  });
+
+  it('reads a mode as truck, rail or both; empty is not stated', () => {
+    expect(parseLaneMode('Truck')).toBe('truck');
+    expect(parseLaneMode('RAIL')).toBe('rail');
+    expect(parseLaneMode('Truck/Rail')).toBe('rail_and_truck');
+    expect(parseLaneMode('Both')).toBe('rail_and_truck');
+    expect(parseLaneMode(null)).toBeNull();
+    expect(parseLaneMode('Barge')).toBeUndefined();
   });
 });

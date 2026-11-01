@@ -6,55 +6,11 @@ import {
   updateCounterpartySchema,
   type TransportAccess,
 } from './directory';
-import { CA_REGIONS, US_REGIONS, type CountryCode } from './regions';
+import { EQUIPMENT, isLaneRegion, laneCountry, laneRegionName } from './carrier-basics';
+
+export * from './carrier-basics';
 
 // A carrier's lanes and equipment (owner's request and answers, 2026-11-01; docs/DECISIONS.md).
-
-/**
- * The places a lane runs from and to: Canada's provinces and territories and the U.S. states
- * and DC, as ISO 3166-2 codes ("CA-AB", "US-MT"). The database holds the same list
- * (app.lane_region, 20261101010000_carrier_lanes.sql).
- */
-export const LANE_REGIONS: readonly string[] = [
-  ...Object.keys(CA_REGIONS).map((code) => `CA-${code}`),
-  ...Object.keys(US_REGIONS).map((code) => `US-${code}`),
-];
-const LANE_REGION_SET = new Set(LANE_REGIONS);
-
-export function isLaneRegion(code: string): boolean {
-  return LANE_REGION_SET.has(code);
-}
-
-/** "CA-AB" → "CA". */
-export function laneCountry(code: string): CountryCode {
-  return code.startsWith('US-') ? 'US' : 'CA';
-}
-
-/** "CA-AB" → "Alberta"; an unknown code as it is. */
-export function laneRegionName(code: string): string {
-  const [country, region = ''] = code.split('-');
-  const names = country === 'US' ? US_REGIONS : country === 'CA' ? CA_REGIONS : {};
-  return names[region] ?? code;
-}
-
-/** "CA-AB" → "AB". */
-export function laneRegionShort(code: string): string {
-  return code.slice(code.indexOf('-') + 1);
-}
-
-/** A location's country and province or state as a lane's place; null when not a known one. */
-export function laneRegionOf(country: string, region: string | null): string | null {
-  if (region === null) return null;
-  const code = `${country}-${region}`;
-  return isLaneRegion(code) ? code : null;
-}
-
-/** The lane places of one country, by name, for pickers. */
-export function laneRegionsOf(country: CountryCode): { code: string; name: string }[] {
-  return LANE_REGIONS.filter((code) => laneCountry(code) === country)
-    .map((code) => ({ code, name: laneRegionName(code) }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
 
 /** Where a carrier runs: from one province or state to another, by truck, rail or both. */
 export interface CarrierLane {
@@ -62,6 +18,14 @@ export interface CarrierLane {
   destination: string;
   /** Truck, rail or both only when stated; null when not (owner's answer, 2026-11-01). */
   transport: TransportAccess | null;
+}
+
+/**
+ * A lane as listed on a carrier: verified by someone on the team (when), or not yet, as a lane
+ * from a spreadsheet is until a rep calls the carrier (owner's request, 2026-11-01).
+ */
+export interface ListedLane extends CarrierLane {
+  verifiedAt: string | null;
 }
 
 const laneRegion = z.string().refine(isLaneRegion, { message: 'not a province or state' });
@@ -83,11 +47,15 @@ export const laneChangeSchema = z
   .object({
     add: z.array(laneSchema).max(MAX_LANE_CHANGE),
     remove: z.array(lanePlaces).max(MAX_LANE_CHANGE),
+    /** Listed lanes to verify, in the person's name; one already verified stays as it is. */
+    verify: z.array(lanePlaces).max(MAX_LANE_CHANGE).default([]),
   })
-  .refine((change) => change.add.length + change.remove.length > 0, {
+  .refine((change) => change.add.length + change.remove.length + change.verify.length > 0, {
     message: 'nothing to change',
   });
 export type LaneChange = z.infer<typeof laneChangeSchema>;
+/** A change as sent; `verify` may be left out. */
+export type LaneChangeInput = z.input<typeof laneChangeSchema>;
 
 /** A lane that crosses the border between Canada and the United States. */
 export function crossesBorder(lane: Pick<CarrierLane, 'origin' | 'destination'>): boolean {
@@ -144,31 +112,6 @@ export function groupLanes(lanes: readonly CarrierLane[]): LaneGroup[] {
         byName(a.origin, b.origin) || transportOrder(a.transport) - transportOrder(b.transport),
     );
 }
-
-/**
- * What a carrier hauls with (owner's request, 2026-11-01: only what traders need). Bulk grain
- * goes in hoppers or railcars; bagged pet and bird feed in vans or on flatdecks.
- */
-export const EQUIPMENT = [
-  'super_b',
-  'tridem',
-  'walking_floor',
-  'van',
-  'flatdeck',
-  'container',
-  'hopper_car',
-] as const;
-export type Equipment = (typeof EQUIPMENT)[number];
-
-export const EQUIPMENT_LABELS: Record<Equipment, string> = {
-  super_b: 'Super B hopper',
-  tridem: 'Tridem hopper',
-  walking_floor: 'Walking floor',
-  van: 'Dry van',
-  flatdeck: 'Flatdeck',
-  container: 'Container',
-  hopper_car: 'Rail hopper car',
-};
 
 /** Equipment as sent: each once, in EQUIPMENT order. */
 export const equipmentSchema = z

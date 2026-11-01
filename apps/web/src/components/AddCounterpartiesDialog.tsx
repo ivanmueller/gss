@@ -123,7 +123,7 @@ export function AddCounterpartiesDialog({
           description={
             step === 'one'
               ? 'One company, with its first contact and location if you have them.'
-              : 'Buyers or sellers from a spreadsheet, checked before anything is saved.'
+              : 'Buyers, sellers or carriers from a spreadsheet, checked before anything is saved.'
           }
           className="max-w-3xl animate-dialog-in"
           // A half-filled form or a matched spreadsheet is not lost to a stray click outside;
