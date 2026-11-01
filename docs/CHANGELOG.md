@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Columns found shown in green
+
+- `docs/DECISIONS.md`: the import's found columns in green; carrier sheets without contact columns.
+
 ## 2026-11-01 — Handoff record of #99
 
 - `docs/HANDOFF.md`: carriers added by hand and lanes not stated as truck or rail (ivanmueller/gss#99) with their CI and Deploy staging runs and Codex's review; the staging checklist and the carrier import next.

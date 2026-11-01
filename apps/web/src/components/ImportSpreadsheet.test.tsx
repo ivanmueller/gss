@@ -118,6 +118,16 @@ describe('ImportSpreadsheet', () => {
     expect(await screen.findByLabelText('Legal name (required)')).toHaveTextContent('Grower');
     expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent('Bushels');
     expect(screen.getByText(/1 column in your file is not used/)).toBeInTheDocument();
+    // The columns found are listed in green, and their fields marked found (owner's request,
+    // 2026-11-01).
+    expect(screen.getByRole('list', { name: 'Columns found' }).textContent).toBe(
+      'GrowerCountryNotes',
+    );
+    expect(screen.getByText(/3 columns found in your file/)).toBeInTheDocument();
+    const legalName = screen.getByLabelText('Legal name (required)').closest('[data-found]');
+    expect(legalName).toHaveClass('bg-success-subtle');
+    expect(legalName).toHaveTextContent('Found in your file.');
+    expect(screen.getByLabelText('Website').closest('[data-found]')).toBeNull();
 
     const side = screen.getByRole('group', { name: 'The companies in this file are' });
     await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
