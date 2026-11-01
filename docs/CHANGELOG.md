@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Handoff record of #97
+
+- `docs/HANDOFF.md`: the documents update (ivanmueller/gss#97) with its CI and Deploy staging runs; its pull-request run #210 failed at Start local Supabase (the runner's port 54322 in use; unit tests passed, database and browser tests did not run), run #211 on `main` green.
+
 ## 2026-10-31 — Handoff record of #96; documents brought up to date
 
 - `docs/HANDOFF.md`: Codex's reviews of #95 fixed (ivanmueller/gss#96) with its CI and Deploy staging runs; the status summary, GT-020 and the next steps brought up to #96.
