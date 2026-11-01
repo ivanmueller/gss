@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
 import { normalizeCountry, normalizeRegion, type CountryCode } from './regions';
+import {
+  EQUIPMENT as EQUIPMENT_ORDER,
+  parseEquipmentList,
+  parseLaneMode,
+  parsePlaceList,
+  type Equipment,
+} from './carrier-basics';
+import type { CarrierLane } from './carriers';
 import { commodityDirections, parseCommodityList, type CommodityInterest } from './commodities';
 import { parseWebsite } from './website';
 
@@ -173,6 +181,32 @@ export const IMPORT_FIELDS = [
     label: 'Tier',
     required: false,
     headers: ['tier', 'customer tier', 'account tier'],
+  },
+  // A carrier's equipment and lanes (owner's request, 2026-11-01): every Loads in and
+  // Delivers to pair on a row is a lane, unverified until someone on the team verifies it.
+  {
+    id: 'equipment',
+    label: 'Equipment',
+    required: false,
+    headers: ['equipment', 'equipment types', 'trailers', 'trailer types', 'trucks', 'fleet'],
+  },
+  {
+    id: 'loadsIn',
+    label: 'Loads in',
+    required: false,
+    headers: ['loads in', 'load in', 'loads from', 'origin', 'origins', 'pick up', 'pickup'],
+  },
+  {
+    id: 'deliversTo',
+    label: 'Delivers to',
+    required: false,
+    headers: ['delivers to', 'deliver to', 'destination', 'destinations', 'lanes to'],
+  },
+  {
+    id: 'laneMode',
+    label: 'Mode',
+    required: false,
+    headers: ['mode', 'lane mode', 'truck or rail', 'transport', 'transport mode'],
   },
   {
     id: 'notes',
@@ -444,6 +478,9 @@ export interface DirectoryRecord {
   facility: FacilityInput | null;
   /** What it buys and sells, from a Commodities column: buyers buy them, sellers sell them. */
   commodities: CommodityInterest[];
+  /** A carrier's equipment and lanes, from the Equipment, Loads in, Delivers to and Mode columns. */
+  equipment: Equipment[];
+  lanes: CarrierLane[];
 }
 
 export interface ParsedImportRow extends DirectoryRecord {
@@ -799,6 +836,69 @@ function readCommodities(r: FieldReader, types: readonly string[]): CommodityInt
   );
 }
 
+/**
+ * A carrier's equipment and lanes: every place in Loads in to every place in Delivers to, by
+ * the Mode given or, when empty, not stated (owner's answer, 2026-11-01). Only for carriers.
+ */
+function readCarrierColumns(
+  r: FieldReader,
+  types: readonly string[],
+): { equipment: Equipment[]; lanes: CarrierLane[] } {
+  const equipmentText = r.value('equipment');
+  const fromText = r.value('loadsIn');
+  const toText = r.value('deliversTo');
+  const modeText = r.value('laneMode');
+  const none = { equipment: [], lanes: [] };
+  if (equipmentText === null && fromText === null && toText === null && modeText === null) {
+    return none;
+  }
+  const carrier = types.includes('carrier');
+  if (types.length > 0 && !carrier) {
+    const field =
+      equipmentText !== null ? 'equipment' : fromText !== null ? 'loadsIn' : 'deliversTo';
+    r.issue(field, 'is for carriers; this row is not a carrier');
+    return none;
+  }
+
+  let equipment: Equipment[] = [];
+  if (equipmentText !== null) {
+    const parsed = parseEquipmentList(equipmentText);
+    equipment = parsed.equipment;
+    if (parsed.unknown.length > 0) {
+      r.issue(
+        'equipment',
+        `${parsed.unknown.map((name) => `"${name}"`).join(', ')} must be Super B hopper, Tridem hopper, Walking floor, Dry van, Flatdeck, Container or Rail hopper car`,
+      );
+    }
+  }
+
+  const places = (field: 'loadsIn' | 'deliversTo', text: string | null): string[] => {
+    if (text === null) return [];
+    const parsed = parsePlaceList(text);
+    if (parsed.unknown.length > 0) {
+      r.issue(
+        field,
+        `${parsed.unknown.map((name) => `"${name}"`).join(', ')} ${parsed.unknown.length === 1 ? 'is not a province or state' : 'are not provinces or states'} (for example AB or Montana)`,
+      );
+    }
+    return parsed.places;
+  };
+  const origins = places('loadsIn', fromText);
+  const destinations = places('deliversTo', toText);
+  if (fromText !== null && toText === null) r.issue('deliversTo', 'is needed with Loads in');
+  if (toText !== null && fromText === null) r.issue('loadsIn', 'is needed with Delivers to');
+  const transport = parseLaneMode(modeText);
+  if (transport === undefined) {
+    r.issue('laneMode', `"${modeText ?? ''}" must be Truck, Rail or Both, or left empty`);
+  } else if (modeText !== null && fromText === null && toText === null) {
+    r.issue('laneMode', 'is for a lane; give Loads in and Delivers to');
+  }
+  const lanes = origins.flatMap((origin) =>
+    destinations.map((destination) => ({ origin, destination, transport: transport ?? null })),
+  );
+  return { equipment, lanes };
+}
+
 /** A contact, or null when no contact field has a value. */
 function readContact(r: FieldReader): ContactInput | null {
   if (!CONTACT_FIELD_IDS.some((field) => r.value(field) !== null)) return null;
@@ -927,10 +1027,11 @@ export function parseDirectoryRecord(
   const countryText = r.value('country');
   const facility = readFacility(r, countryText === null ? null : normalizeCountry(countryText));
   const commodities = readCommodities(r, counterparty?.types ?? []);
+  const { equipment, lanes } = readCarrierColumns(r, counterparty?.types ?? []);
   if (r.issues.length > 0 || counterparty === null) return { status: 'invalid', issues: r.issues };
   return {
     status: 'ok',
-    record: { counterparty, contact, facility, commodities },
+    record: { counterparty, contact, facility, commodities, equipment, lanes },
     notices: r.notices,
   };
 }
@@ -1113,6 +1214,9 @@ export interface ImportGroup {
   facilities: FacilityInput[];
   /** Every row's commodities, each once. */
   commodities: CommodityInterest[];
+  /** Every row's equipment, each once, and lanes, each pair of places once. */
+  equipment: Equipment[];
+  lanes: CarrierLane[];
   lines: number[];
 }
 
@@ -1142,6 +1246,8 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         contacts: [],
         facilities: [],
         commodities: [],
+        equipment: [],
+        lanes: [],
         lines: [],
       };
       groups.set(key, group);
@@ -1188,6 +1294,24 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         (kept) => kept.commodity === interest.commodity && kept.direction === interest.direction,
       );
       if (!listed) group.commodities.push(interest);
+    }
+    group.equipment = EQUIPMENT_ORDER.filter(
+      (item) => group.equipment.includes(item) || row.equipment.includes(item),
+    );
+    for (const lane of row.lanes) {
+      const kept = group.lanes.find(
+        (other) => other.origin === lane.origin && other.destination === lane.destination,
+      );
+      if (!kept) group.lanes.push(lane);
+      // A lane given twice: the first stated truck or rail is kept.
+      else if (kept.transport === null) kept.transport = lane.transport;
+      else if (lane.transport !== null && lane.transport !== kept.transport) {
+        warnings.push({
+          line: row.line,
+          field: 'laneMode',
+          message: `differs from an earlier line for the same lane; the earlier Mode is used`,
+        });
+      }
     }
     if (row.facility) {
       const facilityMatch = facilityKey(row.facility);

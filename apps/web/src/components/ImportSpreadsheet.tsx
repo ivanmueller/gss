@@ -46,7 +46,7 @@ interface Sheet {
 type Mapping = Partial<Record<ImportFieldId, string>>;
 
 /** Who the rows without a type are: a file of buyers or a file of sellers. */
-type FileSide = Extract<CounterpartyType, 'buyer' | 'seller'>;
+type FileSide = Extract<CounterpartyType, 'buyer' | 'seller' | 'carrier'>;
 
 /** A file, how its columns fill the fields, and who the rows without a type are. */
 interface Plan {
@@ -478,6 +478,8 @@ export function ImportSpreadsheet({
               options={[
                 { value: 'buyer', label: 'Buyers' },
                 { value: 'seller', label: 'Sellers' },
+                // A carrier sheet (owner's request, 2026-11-01).
+                { value: 'carrier', label: 'Carriers' },
               ]}
               value={step.side}
               onChange={(side) => {
@@ -574,7 +576,10 @@ export function ImportSpreadsheet({
               <p className="font-medium">
                 Imported {step.result.summary.newCounterparties} counterparties with{' '}
                 {step.result.summary.contacts} contacts and {step.result.summary.facilities}{' '}
-                locations.
+                locations
+                {step.result.summary.lanes > 0 &&
+                  `, and ${plural(step.result.summary.lanes, 'lane', 'lanes')} to verify`}
+                .
               </p>
             )}
             {step.result.summary.existingWithAdditions > 0 && (
@@ -631,6 +636,7 @@ function added({ summary }: ImportResult): string {
     summary.addedFacilities > 0 && plural(summary.addedFacilities, 'new location', 'new locations'),
     summary.addedContacts > 0 && plural(summary.addedContacts, 'new contact', 'new contacts'),
     summary.addedCommodities > 0 && plural(summary.addedCommodities, 'new grain', 'new grains'),
+    summary.addedLanes > 0 && plural(summary.addedLanes, 'new lane', 'new lanes'),
   ].filter((part): part is string => part !== false);
   const list =
     parts.length > 1
@@ -657,6 +663,7 @@ function resultText(item: ImportResult['counterparties'][number]): string {
   const parts = [
     item.facilities > 0 && plural(item.facilities, 'location', 'locations'),
     item.contacts > 0 && plural(item.contacts, 'contact', 'contacts'),
+    item.lanes > 0 && plural(item.lanes, 'lane', 'lanes'),
   ].filter((part): part is string => part !== false);
   if (parts.length > 0) return `Already in the list; adds ${parts.join(' and ')}`;
   return item.changes.length > 0
@@ -670,7 +677,8 @@ function ReviewSummary({ result }: { result: ImportResult }) {
     <div className="flex flex-col gap-3">
       <p role="status" className="text-sm">
         {summary.newCounterparties} new counterparties ({summary.contacts} contacts,{' '}
-        {summary.facilities} locations)
+        {summary.facilities} locations
+        {summary.lanes > 0 && `, ${plural(summary.lanes, 'lane', 'lanes')} (unverified)`})
         {summary.existingCounterparties > 0 &&
           ` · ${String(summary.existingCounterparties)} already in the list`}
         {summary.existingWithAdditions > 0 && `; ${added(result)}`}
@@ -685,6 +693,7 @@ function ReviewSummary({ result }: { result: ImportResult }) {
               <TableHead>Rows</TableHead>
               <TableHead>Contacts</TableHead>
               <TableHead>Locations</TableHead>
+              <TableHead>Lanes</TableHead>
               <TableHead>Result</TableHead>
             </tr>
           </TableHeader>
@@ -700,6 +709,7 @@ function ReviewSummary({ result }: { result: ImportResult }) {
                 <TableCell className="py-1.5">{item.lines.join(', ')}</TableCell>
                 <TableCell className="py-1.5">{item.contacts}</TableCell>
                 <TableCell className="py-1.5">{item.facilities}</TableCell>
+                <TableCell className="py-1.5">{item.lanes}</TableCell>
                 <TableCell className="py-1.5">
                   {resultText(item)}
                   {item.changes.length > 0 && (

@@ -34,6 +34,8 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
       addedContacts: 0,
       addedFacilities: 0,
       addedCommodities: 0,
+      lanes: 0,
+      addedLanes: 0,
       existingUpdated: 0,
     },
     counterparties: [
@@ -43,6 +45,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
         lines: [2, 3],
         contacts: 1,
         facilities: 2,
+        lanes: 0,
         status: 'new',
         changes: [],
       },
@@ -52,6 +55,7 @@ function result(overrides: Partial<ImportResult> = {}): ImportResult {
         lines: [4],
         contacts: 0,
         facilities: 1,
+        lanes: 0,
         status: 'new',
         changes: [],
       },
@@ -130,6 +134,8 @@ describe('ImportSpreadsheet', () => {
     expect(screen.getByLabelText('Website').closest('[data-found]')).toBeNull();
 
     const side = screen.getByRole('group', { name: 'The companies in this file are' });
+    // A carrier sheet too (owner's request, 2026-11-01).
+    expect(within(side).getByRole('button', { name: 'Carriers' })).toBeInTheDocument();
     await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
     // Choosing the column for a field takes it off the unused list.
     await choose(screen.getByLabelText('Counterparty type'), 'Bushels');
@@ -339,6 +345,7 @@ describe('ImportSpreadsheet', () => {
           lines: [2],
           contacts: 0,
           facilities: 0,
+          lanes: 0,
           status: 'existing',
           changes: ['Company phone: (306) 555-0100 → (306) 555-0199', 'Tier: B → A'],
         },
@@ -378,6 +385,7 @@ describe('ImportSpreadsheet', () => {
           lines: [2, 3],
           contacts: 0,
           facilities: 0,
+          lanes: 0,
           status: 'existing',
           changes: ['Tier: B → A'],
         },
@@ -473,6 +481,7 @@ describe('ImportSpreadsheet', () => {
           lines: [2, 3],
           contacts: 1,
           facilities: 2,
+          lanes: 0,
           status: 'existing',
           changes: [],
         },
@@ -482,6 +491,7 @@ describe('ImportSpreadsheet', () => {
           lines: [4],
           contacts: 0,
           facilities: 0,
+          lanes: 0,
           status: 'archived',
           changes: [],
         },

@@ -8,11 +8,11 @@ import {
   TRANSPORT_ACCESS,
   TRANSPORT_ACCESS_LABELS,
   type CarrierLane,
-  type LaneChange,
+  type LaneChangeInput,
   type LaneGroup,
   type TransportAccess,
 } from '@grain/domain';
-import { ArrowRight, MapPinned, Pencil, Plus, Route, Trash2 } from 'lucide-react';
+import { ArrowRight, CircleDashed, MapPinned, Pencil, Plus, Route, Trash2 } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 
 import { ApiError, sendJson, type CounterpartyDetail } from '../lib/api';
@@ -24,6 +24,7 @@ import { MultiPicker } from './MultiPicker';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
+import { Dialog, DialogClose, DialogContent } from './ui/dialog';
 import { SearchSelect } from './ui/search-select';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -144,7 +145,7 @@ function places(codes: readonly string[]): string {
 }
 
 /** What to send to go from one group of lanes (or none) to the one chosen in the form. */
-export function laneChange(before: LaneGroup | null, after: LaneDraft): LaneChange {
+export function laneChange(before: LaneGroup | null, after: LaneDraft): LaneChangeInput {
   const kept = before?.origin === after.origin ? new Set(after.destinations) : new Set<string>();
   return {
     add: draftLanes(after),
@@ -324,7 +325,15 @@ export function CarrierLanes({
   const quoted = quotedOnly(detail.lanes, detail.quotedLanes);
   const path = `/counterparties/${detail.id}/lanes`;
 
-  async function send(change: LaneChange, message: string) {
+  // Lanes from a spreadsheet not yet verified, by their places (owner's request, 2026-11-01).
+  const unverified = new Set(
+    detail.lanes
+      .filter((lane) => lane.verifiedAt === null)
+      .map((lane) => `${lane.origin}>${lane.destination}`),
+  );
+  const [verifying, setVerifying] = useState<{ origin: string; destination: string } | null>(null);
+
+  async function send(change: LaneChangeInput, message: string) {
     await sendJson(path, token, 'PATCH', change);
     setEditing(null);
     onSaved(message);
@@ -359,6 +368,18 @@ export function CarrierLanes({
           )}
         </CardHeader>
         <LanesMap lanes={detail.lanes} quotedLanes={detail.quotedLanes} mapbox={mapbox} />
+        <VerifyLane
+          lane={verifying}
+          onClose={() => {
+            setVerifying(null);
+          }}
+          onVerify={(lane) =>
+            send(
+              { add: [], remove: [], verify: [lane] },
+              `${laneRegionName(lane.origin)} to ${laneRegionName(lane.destination)} verified.`,
+            )
+          }
+        />
         {editing?.kind === 'add' && (
           <LaneForm
             label="New lanes"
@@ -403,7 +424,25 @@ export function CarrierLanes({
                       <span className="font-medium">From {laneRegionName(group.origin)}</span>
                       <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
                       <span className="sr-only">{' to '}</span>
-                      <span>{places(group.destinations)}</span>
+                      {group.destinations.some((destination) =>
+                        unverified.has(`${group.origin}>${destination}`),
+                      ) ? (
+                        <Destinations
+                          origin={group.origin}
+                          destinations={group.destinations}
+                          unverified={unverified}
+                          onVerify={
+                            writer
+                              ? (destination) => {
+                                  setError(null);
+                                  setVerifying({ origin: group.origin, destination });
+                                }
+                              : null
+                          }
+                        />
+                      ) : (
+                        <span>{places(group.destinations)}</span>
+                      )}
                     </span>
                     <span className="flex flex-wrap gap-1.5">
                       {group.transport && (
@@ -557,5 +596,125 @@ function RemoveLanes({
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * A group's destinations when some are not yet verified: verified ones as text, unverified ones
+ * grey and dashed, like commodities from a spreadsheet; a click asks to verify one.
+ */
+function Destinations({
+  origin,
+  destinations,
+  unverified,
+  onVerify,
+}: {
+  origin: string;
+  destinations: readonly string[];
+  unverified: ReadonlySet<string>;
+  onVerify: ((destination: string) => void) | null;
+}) {
+  return (
+    <ul aria-label={`Places from ${laneRegionName(origin)}`} className="flex flex-wrap gap-1.5">
+      {destinations.map((destination) => {
+        const name = laneRegionName(destination);
+        if (!unverified.has(`${origin}>${destination}`)) {
+          return (
+            <li key={destination} className="px-1">
+              {name}
+            </li>
+          );
+        }
+        const chip =
+          'inline-flex items-center gap-1 rounded-badge border border-dashed px-2 py-0.5 text-xs text-muted-foreground';
+        return (
+          <li key={destination}>
+            {onVerify ? (
+              <button
+                type="button"
+                className={`${chip} hover:bg-accent`}
+                aria-label={`${name}, not verified: verify ${laneRegionName(origin)} to ${name}`}
+                onClick={() => {
+                  onVerify(destination);
+                }}
+              >
+                <CircleDashed aria-hidden="true" className="size-3" />
+                {name}
+              </button>
+            ) : (
+              <span className={chip}>
+                <CircleDashed aria-hidden="true" className="size-3" />
+                {name}
+                <span className="sr-only"> (not verified)</span>
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** "Verify Alberta to Montana?", from an unverified lane: one from a spreadsheet. */
+function VerifyLane({
+  lane,
+  onClose,
+  onVerify,
+}: {
+  lane: { origin: string; destination: string } | null;
+  onClose: () => void;
+  onVerify: (lane: { origin: string; destination: string }) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function verify(chosen: { origin: string; destination: string }) {
+    setBusy(true);
+    setError(null);
+    try {
+      await onVerify(chosen);
+      onClose();
+    } catch (failure) {
+      setError(failure instanceof ApiError ? failure.message : 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const route = lane && `${laneRegionName(lane.origin)} to ${laneRegionName(lane.destination)}`;
+  return (
+    <Dialog
+      open={lane !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          setError(null);
+          onClose();
+        }
+      }}
+    >
+      {lane && route && (
+        <DialogContent
+          title={`Verify ${route}?`}
+          description={`This lane came from a spreadsheet and has not been checked yet. Verify it once the carrier has confirmed it runs from ${route}.`}
+          className="max-w-sm"
+        >
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={busy} onClick={() => void verify(lane)}>
+              {busy ? 'Verifying…' : 'Verify'}
+            </Button>
+            <DialogClose asChild>
+              <Button variant="outline" disabled={busy}>
+                Not now
+              </Button>
+            </DialogClose>
+          </div>
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }

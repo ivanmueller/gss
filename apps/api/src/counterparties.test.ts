@@ -348,9 +348,11 @@ function existing(
     markets: [],
     tier: null,
     notes: null,
+    equipment: [],
     facilities: [],
     contacts: [],
     commodities: [],
+    lanes: [],
     ...overrides,
   };
 }
@@ -397,6 +399,8 @@ describe('POST /api/v1/counterparties/import', () => {
         addedContacts: 0,
         addedFacilities: 0,
         addedCommodities: 0,
+        lanes: 0,
+        addedLanes: 0,
         existingUpdated: 0,
       },
       counterparties: [
@@ -406,6 +410,7 @@ describe('POST /api/v1/counterparties/import', () => {
           lines: [2, 3],
           contacts: 1,
           facilities: 1,
+          lanes: 0,
           status: 'new',
           changes: [],
         },
@@ -415,6 +420,7 @@ describe('POST /api/v1/counterparties/import', () => {
           lines: [4],
           contacts: 0,
           facilities: 0,
+          lanes: 0,
           status: 'existing',
           changes: [],
         },
@@ -640,6 +646,7 @@ describe('POST /api/v1/counterparties/import', () => {
             facilities: [expect.objectContaining({ city: 'Beta', region: 'MB' }) as unknown],
             contacts: [expect.objectContaining({ name: 'Ben' }) as unknown],
             commodities: [{ commodity: 'oats', direction: 'buys' }],
+            lanes: [],
             details: null,
             contactUpdates: [],
             facilityUpdates: [],
@@ -840,6 +847,7 @@ describe('POST /api/v1/counterparties/import', () => {
         contacts: [],
         facilities: [],
         commodities: [{ commodity: 'canola', direction: 'buys' }],
+        lanes: [],
         contactUpdates: [
           {
             id: '00000000-0000-4000-8000-0000000c0001',
@@ -1074,6 +1082,131 @@ describe('POST /api/v1/counterparties/import', () => {
     const res = await postImport(body, { 'Content-Length': String(10 * 1024 * 1024 + 1) });
     expect(res.status).toBe(413);
     expect(openDatabase).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/v1/counterparties/import with carriers (owner’s request, 2026-11-01)', () => {
+  const rows = [
+    {
+      line: 2,
+      values: {
+        legalName: 'Synthetic Hauling',
+        country: 'CA',
+        equipment: 'Super B',
+        loadsIn: 'AB',
+        deliversTo: 'MT, ND',
+        laneMode: 'Truck',
+      },
+    },
+    {
+      line: 3,
+      values: { legalName: 'Synthetic Hauling', country: 'CA', loadsIn: 'MB', deliversTo: 'MN' },
+    },
+  ];
+  const body = {
+    organizationId: ORG,
+    fileName: 'carriers.csv',
+    commit: true,
+    defaultTypes: ['carrier'],
+    rows,
+  };
+
+  it('imports a new carrier with its equipment and lanes, rows of an empty type as carriers', async () => {
+    const res = await postImport(body);
+    expect(res.status).toBe(201);
+    const answer = await res.json<{ summary: Record<string, number> }>();
+    expect(answer.summary).toMatchObject({ newCounterparties: 1, lanes: 3, addedLanes: 0 });
+    expect(planned()?.counterparties).toEqual([
+      expect.objectContaining({
+        counterparty: expect.objectContaining({ types: ['carrier'] }) as unknown,
+        equipment: ['super_b'],
+        lanes: [
+          { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
+          { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+          { origin: 'CA-MB', destination: 'US-MN', transport: null },
+        ],
+      }),
+    ]);
+  });
+
+  it('adds only the new lanes and equipment to a carrier already listed, and says so', async () => {
+    const listed = [
+      existing('Synthetic Hauling', 'CA', {
+        types: ['carrier'],
+        equipment: ['van'],
+        lanes: [{ origin: 'CA-AB', destination: 'US-MT' }],
+      }),
+    ];
+    db.existingCounterparties.mockResolvedValue(listed);
+    const res = await postImport(body);
+    expect(res.status).toBe(201);
+    const answer = await res.json<{
+      summary: Record<string, number>;
+      counterparties: { lanes: number; changes: string[] }[];
+    }>();
+    expect(answer.summary).toMatchObject({
+      newCounterparties: 0,
+      addedLanes: 2,
+      existingUpdated: 1,
+    });
+    expect(answer.counterparties[0]).toMatchObject({
+      lanes: 2,
+      changes: [
+        'Equipment: Dry van → Super B hopper, Dry van',
+        'Lanes added (unverified): Alberta → North Dakota; Manitoba → Minnesota',
+      ],
+    });
+    expect(planned(listed)?.additions).toEqual([
+      expect.objectContaining({
+        details: { equipment: ['super_b', 'van'] },
+        lanes: [
+          { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+          { origin: 'CA-MB', destination: 'US-MN', transport: null },
+        ],
+      }),
+    ]);
+  });
+
+  it('says nothing is new when every lane and piece of equipment is listed', async () => {
+    db.existingCounterparties.mockResolvedValue([
+      existing('Synthetic Hauling', 'CA', {
+        types: ['carrier'],
+        equipment: ['super_b'],
+        lanes: [
+          { origin: 'CA-AB', destination: 'US-MT' },
+          { origin: 'CA-AB', destination: 'US-ND' },
+          { origin: 'CA-MB', destination: 'US-MN' },
+        ],
+      }),
+    ]);
+    const res = await postImport(body);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: { code: 'NOTHING_TO_IMPORT' } });
+  });
+
+  it('refuses lanes on a row that is not a carrier', async () => {
+    const res = await sendImport({
+      ...body,
+      commit: false,
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Mill',
+            country: 'US',
+            types: 'Buyer',
+            loadsIn: 'AB',
+            deliversTo: 'MT',
+          },
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      issues: [
+        { line: 2, field: 'loadsIn', message: 'is for carriers; this row is not a carrier' },
+      ],
+    });
   });
 });
 
@@ -1627,8 +1760,20 @@ describe('lanes', () => {
     expect(db.changeLanes).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID }),
       COUNTERPARTY,
-      change,
+      { ...change, verify: [] },
     );
+  });
+
+  it('verifies listed lanes', async () => {
+    db.getCounterparty.mockResolvedValueOnce(detail({ types: ['carrier'] }));
+    const verify = [{ origin: 'CA-AB', destination: 'US-MT' }];
+    expect((await send('PATCH', path, { add: [], remove: [], verify })).status).toBe(200);
+    expect(db.changeLanes).toHaveBeenCalledWith(expect.anything(), COUNTERPARTY, {
+      add: [],
+      remove: [],
+      verify,
+    });
+    expect((await send('PATCH', path, { add: [], remove: [], verify: [] })).status).toBe(422);
   });
 
   it('refuses unknown places, transport and an empty change before the database', async () => {

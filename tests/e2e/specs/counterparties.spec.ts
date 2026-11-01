@@ -955,3 +955,60 @@ test("another organization's contact log and follow-ups stay out of reach", asyn
   });
   expect(plan.status()).toBe(404);
 });
+
+// A carrier sheet (owner's request, 2026-11-01): Equipment, Loads In, Delivers To and Mode
+// read, the found columns in green, the lanes unverified until a rep verifies one. Last in
+// this file, so the carrier it adds is not in the lists the tests above count.
+test('imports carriers with their lanes unverified, and verifies one', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  await page.goto('/counterparties?add=import');
+  const dialog = page.getByRole('dialog', { name: 'Import counterparties' });
+  await dialog.getByLabel('Choose CSV file').setInputFiles({
+    name: 'synthetic-carriers.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      [
+        'Company,Country,Equipment,Loads In,Delivers To,Mode',
+        'Synthetic Import Hauling,Canada,Super B,AB,"MT, ND",',
+        '',
+      ].join('\n'),
+    ),
+  });
+  await expect(dialog.getByRole('list', { name: 'Columns found' })).toContainText('Loads In');
+  await expect(dialog.getByRole('list', { name: 'Columns found' })).toContainText('Mode');
+  // No Type column: the file's companies are carriers.
+  await dialog
+    .getByRole('group', { name: 'The companies in this file are' })
+    .getByRole('button', { name: 'Carriers' })
+    .click();
+  await dialog.getByRole('button', { name: 'Review import' }).click();
+  const review = dialog.getByRole('table', { name: 'Counterparties in this import' });
+  await expect(review).toContainText('Synthetic Import Hauling');
+  await dialog.getByRole('button', { name: 'Import 1 new counterparties' }).click();
+  await expect(dialog.getByText(/and 2 lanes to verify/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.goto('/counterparties?type=carrier&view=table');
+  await page
+    .getByRole('table', { name: 'Counterparties' })
+    .getByRole('link', { name: 'Synthetic Import Hauling' })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Synthetic Import Hauling' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Equipment' })).toContainText('Super B hopper');
+  const places = page.getByRole('list', { name: 'Places from Alberta' });
+  await places
+    .getByRole('button', { name: 'Montana, not verified: verify Alberta to Montana' })
+    .click();
+  await page
+    .getByRole('dialog', { name: 'Verify Alberta to Montana?' })
+    .getByRole('button', { name: 'Verify' })
+    .click();
+  await expect(page.getByText('Alberta to Montana verified.')).toBeVisible();
+  await expect(places.getByRole('button', { name: /Montana/ })).toHaveCount(0);
+  await expect(places.getByRole('button', { name: /North Dakota/ })).toHaveCount(1);
+
+  expect(errors).toEqual([]);
+});

@@ -121,6 +121,8 @@ describe('parseImportRow', () => {
         { commodity: 'canola', direction: 'sells' },
         { commodity: 'flaxseed', direction: 'sells' },
       ],
+      equipment: [],
+      lanes: [],
       notices: [],
     });
   });
@@ -145,6 +147,8 @@ describe('parseImportRow', () => {
       contact: null,
       facility: null,
       commodities: [],
+      equipment: [],
+      lanes: [],
       notices: [],
     });
   });
@@ -1096,6 +1100,125 @@ describe('formatPhone', () => {
     ).toMatchObject({
       counterparty: { phone: '(306) 555-0100' },
       contact: { phone: '(306) 555-0199' },
+    });
+  });
+});
+
+describe('a carrier’s equipment and lanes from a spreadsheet (owner’s request, 2026-11-01)', () => {
+  const carrier = { legalName: 'Synthetic Hauling', country: 'CA', types: 'Carrier' };
+
+  it('makes a lane of every Loads in and Delivers to pair, by the Mode given', () => {
+    const row = ok({
+      ...carrier,
+      equipment: 'Super B, dry vans',
+      loadsIn: 'AB, Saskatchewan',
+      deliversTo: 'MT; North Dakota',
+      laneMode: 'Truck',
+    });
+    expect(row.equipment).toEqual(['super_b', 'van']);
+    expect(row.lanes).toEqual([
+      { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
+      { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
+      { origin: 'CA-SK', destination: 'US-MT', transport: 'truck' },
+      { origin: 'CA-SK', destination: 'US-ND', transport: 'truck' },
+    ]);
+  });
+
+  it('leaves truck or rail not stated when Mode is empty, and reads Both', () => {
+    expect(ok({ ...carrier, loadsIn: 'MB', deliversTo: 'MN' }).lanes).toEqual([
+      { origin: 'CA-MB', destination: 'US-MN', transport: null },
+    ]);
+    expect(
+      ok({ ...carrier, loadsIn: 'MB', deliversTo: 'MN', laneMode: 'Truck & Rail' }).lanes[0]
+        ?.transport,
+    ).toBe('rail_and_truck');
+    expect(
+      ok({ ...carrier, loadsIn: 'MB', deliversTo: 'MN', laneMode: 'both' }).lanes[0]?.transport,
+    ).toBe('rail_and_truck');
+  });
+
+  it('reads a row of an empty type as a carrier when the file’s rows are carriers', () => {
+    const result = parseImportRow(
+      2,
+      { legalName: 'Synthetic Hauling', country: 'CA', loadsIn: 'AB', deliversTo: 'MT' },
+      { defaultTypes: ['carrier'] },
+    );
+    expect(result.status === 'ok' && result.row.lanes).toHaveLength(1);
+  });
+
+  it('refuses places, equipment and modes it does not know', () => {
+    expect(
+      issues({ ...carrier, loadsIn: 'Albrta', deliversTo: 'MT, Sonora', laneMode: 'Barge' }),
+    ).toEqual([
+      'loadsIn: "Albrta" is not a province or state (for example AB or Montana)',
+      'deliversTo: "Sonora" is not a province or state (for example AB or Montana)',
+      'laneMode: "Barge" must be Truck, Rail or Both, or left empty',
+    ]);
+    expect(issues({ ...carrier, equipment: 'Spaceship' })[0]).toMatch(
+      /^equipment: "Spaceship" must be/,
+    );
+  });
+
+  it('needs both ends of a lane', () => {
+    expect(issues({ ...carrier, loadsIn: 'AB' })).toEqual(['deliversTo: is needed with Loads in']);
+    expect(issues({ ...carrier, deliversTo: 'MT' })).toEqual([
+      'loadsIn: is needed with Delivers to',
+    ]);
+    expect(issues({ ...carrier, laneMode: 'Truck' })).toEqual([
+      'laneMode: is for a lane; give Loads in and Delivers to',
+    ]);
+  });
+
+  it('refuses equipment and lanes for a row that is not a carrier', () => {
+    expect(
+      issues({
+        legalName: 'Synthetic Mill',
+        country: 'US',
+        types: 'Buyer',
+        loadsIn: 'AB',
+        deliversTo: 'MT',
+      }),
+    ).toEqual(['loadsIn: is for carriers; this row is not a carrier']);
+  });
+
+  it('gathers a company’s rows: equipment each once, a lane each once, a stated mode kept', () => {
+    const { groups, warnings } = groupImportRows([
+      ok({ ...carrier, equipment: 'Dry van', loadsIn: 'AB', deliversTo: 'MT' }, 2),
+      ok(
+        { ...carrier, equipment: 'Super B', loadsIn: 'AB', deliversTo: 'MT, ND', laneMode: 'Rail' },
+        3,
+      ),
+      ok({ ...carrier, loadsIn: 'AB', deliversTo: 'ND', laneMode: 'Truck' }, 4),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.equipment).toEqual(['super_b', 'van']);
+    expect(groups[0]?.lanes).toEqual([
+      { origin: 'CA-AB', destination: 'US-MT', transport: 'rail' },
+      { origin: 'CA-AB', destination: 'US-ND', transport: 'rail' },
+    ]);
+    expect(warnings).toEqual([
+      {
+        line: 4,
+        field: 'laneMode',
+        message: 'differs from an earlier line for the same lane; the earlier Mode is used',
+      },
+    ]);
+  });
+});
+
+describe('the carrier header row given to the owner (2026-11-01)', () => {
+  it('matches every column to a field', () => {
+    const headers =
+      'Company,Type,Country,Website,Company Phone,Address,City,Province/State,Postal Code,Equipment,Loads In,Delivers To,Mode,Notes'.split(
+        ',',
+      );
+    const mapping = suggestMapping(headers);
+    expect(Object.values(mapping).sort()).toEqual([...headers].sort());
+    expect(mapping).toMatchObject({
+      equipment: 'Equipment',
+      loadsIn: 'Loads In',
+      deliversTo: 'Delivers To',
+      laneMode: 'Mode',
     });
   });
 });

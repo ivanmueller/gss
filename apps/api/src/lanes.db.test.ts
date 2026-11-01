@@ -1,4 +1,9 @@
-import { LANE_REGIONS, type FreightTerms, type LaneChange } from '@grain/domain';
+import {
+  LANE_REGIONS,
+  type FreightTerms,
+  type LaneChangeInput,
+  type ListedLane,
+} from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -74,9 +79,15 @@ afterAll(async () => {
   await admin.end();
 });
 
+/** Lanes without their time of verification; each added by hand, so each verified. */
+function placesAndTransport(lanes: readonly ListedLane[]) {
+  for (const lane of lanes) expect(lane.verifiedAt).not.toBeNull();
+  return lanes.map(({ origin, destination, transport }) => ({ origin, destination, transport }));
+}
+
 async function lanesOf(counterpartyId: string, userId = users.victor) {
   const detail = await db.getCounterparty(as(userId), counterpartyId);
-  return detail && { lanes: detail.lanes, quotedLanes: detail.quotedLanes };
+  return detail && { lanes: placesAndTransport(detail.lanes), quotedLanes: detail.quotedLanes };
 }
 
 describe("a carrier's lanes as app_api", () => {
@@ -124,7 +135,7 @@ describe("a carrier's lanes as app_api", () => {
   });
 
   it('a viewer, another organization and a non-carrier are refused', async () => {
-    const add: LaneChange = {
+    const add: LaneChangeInput = {
       add: [{ origin: 'CA-SK', destination: 'US-ND', transport: 'truck' }],
       remove: [],
     };
@@ -146,7 +157,7 @@ describe("a carrier's lanes as app_api", () => {
 
   it('an archived carrier keeps its lanes as they are', async () => {
     await admin`update app.counterparties set archived_at = now() where id = ${counterparties.spare}`;
-    const add: LaneChange = {
+    const add: LaneChangeInput = {
       add: [{ origin: 'CA-SK', destination: 'US-ND', transport: 'truck' }],
       remove: [],
     };
@@ -305,7 +316,7 @@ describe('a carrier added by hand (owner’s request, 2026-11-01)', () => {
     if (created.status !== 'created') throw new Error('not created');
     const detail = await db.getCounterparty(as(users.victor), created.id);
     expect(detail?.equipment).toEqual(['super_b', 'van']);
-    expect(detail?.lanes).toEqual([
+    expect(placesAndTransport(detail?.lanes ?? [])).toEqual([
       { origin: 'CA-AB', destination: 'US-MT', transport: null },
       { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
     ]);
@@ -318,9 +329,125 @@ describe('a carrier added by hand (owner’s request, 2026-11-01)', () => {
       add: [{ origin: 'CA-AB', destination: 'US-ND', transport: null }],
       remove: [],
     });
-    expect((await db.getCounterparty(as(users.victor), created.id))?.lanes).toEqual([
+    expect(
+      placesAndTransport((await db.getCounterparty(as(users.victor), created.id))?.lanes ?? []),
+    ).toEqual([
       { origin: 'CA-AB', destination: 'US-MT', transport: 'rail' },
       { origin: 'CA-AB', destination: 'US-ND', transport: null },
+    ]);
+  });
+});
+
+describe('lanes from a spreadsheet, verified by a rep (owner’s request, 2026-11-01)', () => {
+  it('imports a carrier’s lanes unverified, and a trader verifies one', async () => {
+    const counterparty = {
+      legalName: 'Synthetic Imported Hauling',
+      tradingName: null,
+      types: ['carrier' as const],
+      primaryCountry: 'CA' as const,
+      verificationStatus: 'unverified' as const,
+      website: null,
+      phone: null,
+      markets: [],
+      tier: null,
+      notes: null,
+    };
+    const batchId = await db.importCounterparties(as(users.olivia), orgs.a, () => ({
+      organizationId: orgs.a,
+      fileName: 'synthetic-carriers.csv',
+      contentSha256: 'e'.repeat(64),
+      rowCount: 1,
+      skippedCount: 0,
+      counterparties: [
+        {
+          counterparty,
+          contacts: [],
+          facilities: [],
+          commodities: [],
+          equipment: ['super_b'],
+          lanes: [
+            { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
+            { origin: 'CA-AB', destination: 'US-ND', transport: null },
+          ],
+        },
+      ],
+      additions: [],
+    }));
+    expect(batchId).not.toBeNull();
+    const [row] = await admin<{ id: string }[]>`
+      select id from app.counterparties where legal_name = 'Synthetic Imported Hauling'`;
+    const id = row?.id ?? '';
+    const imported = await db.getCounterparty(as(users.victor), id);
+    expect(imported?.equipment).toEqual(['super_b']);
+    expect(imported?.lanes).toEqual([
+      { origin: 'CA-AB', destination: 'US-MT', transport: 'truck', verifiedAt: null },
+      { origin: 'CA-AB', destination: 'US-ND', transport: null, verifiedAt: null },
+    ]);
+
+    // A rep calls the carrier and verifies one; a viewer cannot.
+    expect(
+      await db.changeLanes(as(users.victor), id, {
+        add: [],
+        remove: [],
+        verify: [{ origin: 'CA-AB', destination: 'US-MT' }],
+      }),
+    ).toEqual({ status: 'forbidden' });
+    expect(
+      await db.changeLanes(as(users.tess), id, {
+        add: [],
+        remove: [],
+        verify: [{ origin: 'CA-AB', destination: 'US-MT' }],
+      }),
+    ).toEqual({ status: 'saved' });
+    // Stating its truck or rail by hand verifies the other.
+    await db.changeLanes(as(users.olivia), id, {
+      add: [{ origin: 'CA-AB', destination: 'US-ND', transport: 'rail' }],
+      remove: [],
+    });
+    const lanes = (await db.getCounterparty(as(users.victor), id))?.lanes ?? [];
+    expect(lanes.map((lane) => lane.verifiedAt !== null)).toEqual([true, true]);
+    const [who] = await admin<{ verifiers: string[] }[]>`
+      select array_agg(verified_by::text order by destination) as verifiers
+      from app.carrier_lanes where carrier_id = ${id}`;
+    expect(who?.verifiers).toEqual([users.tess, users.olivia]);
+
+    // A later file adds only lanes not listed, unverified, and leaves the verified ones be.
+    const existing = (await db.existingCounterparties(as(users.olivia), orgs.a)).find(
+      (company) => company.id === id,
+    );
+    expect(existing?.lanes).toHaveLength(2);
+    expect(existing?.equipment).toEqual(['super_b']);
+    await db.importCounterparties(as(users.olivia), orgs.a, () => ({
+      organizationId: orgs.a,
+      fileName: 'synthetic-carriers-2.csv',
+      contentSha256: 'f'.repeat(64),
+      rowCount: 1,
+      skippedCount: 1,
+      counterparties: [],
+      additions: [
+        {
+          counterpartyId: id,
+          details: { equipment: ['super_b', 'van'] },
+          contacts: [],
+          facilities: [],
+          commodities: [],
+          lanes: [
+            { origin: 'CA-AB', destination: 'US-MT', transport: null },
+            { origin: 'CA-SK', destination: 'US-ND', transport: null },
+          ],
+          contactUpdates: [],
+          facilityUpdates: [],
+        },
+      ],
+    }));
+    const after = await db.getCounterparty(as(users.victor), id);
+    expect(after?.equipment).toEqual(['super_b', 'van']);
+    expect(
+      after?.lanes.map((lane) => [lane.destination, lane.transport, lane.verifiedAt !== null]),
+    ).toEqual([
+      ['US-MT', 'truck', true],
+      ['US-ND', 'rail', true],
+      ['US-ND', null, false],
     ]);
   });
 });

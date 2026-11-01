@@ -30,9 +30,24 @@ const DETAIL: CounterpartyDetail = {
   tier: null,
   equipment: [],
   lanes: [
-    { origin: 'CA-AB', destination: 'US-ND', transport: 'truck' },
-    { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
-    { origin: 'CA-AB', destination: 'CA-SK', transport: 'rail' },
+    {
+      origin: 'CA-AB',
+      destination: 'US-ND',
+      transport: 'truck',
+      verifiedAt: '2026-10-30T12:00:00.000Z',
+    },
+    {
+      origin: 'CA-AB',
+      destination: 'US-MT',
+      transport: 'truck',
+      verifiedAt: '2026-10-30T12:00:00.000Z',
+    },
+    {
+      origin: 'CA-AB',
+      destination: 'CA-SK',
+      transport: 'rail',
+      verifiedAt: '2026-10-30T12:00:00.000Z',
+    },
   ],
   quotedLanes: [
     { origin: 'CA-AB', destination: 'US-MT', transport: 'truck' },
@@ -111,7 +126,14 @@ describe('isCrossBorder', () => {
     expect(isCrossBorder({ lanes: [], quotedLanes: [] })).toBe(false);
     expect(
       isCrossBorder({
-        lanes: [{ origin: 'CA-AB', destination: 'CA-SK', transport: 'truck' }],
+        lanes: [
+          {
+            origin: 'CA-AB',
+            destination: 'CA-SK',
+            transport: 'truck',
+            verifiedAt: '2026-10-30T12:00:00.000Z',
+          },
+        ],
         quotedLanes: [{ origin: 'CA-MB', destination: 'US-MN', transport: 'rail' }],
       }),
     ).toBe(true);
@@ -186,7 +208,14 @@ describe('CarrierLanes', () => {
     const calls = mockApi({ [`PATCH /counterparties/${ID}/lanes`]: () => Response.json(DETAIL) });
     show('trader', {
       ...DETAIL,
-      lanes: [{ origin: 'CA-SK', destination: 'US-ND', transport: null }],
+      lanes: [
+        {
+          origin: 'CA-SK',
+          destination: 'US-ND',
+          transport: null,
+          verifiedAt: '2026-10-30T12:00:00.000Z',
+        },
+      ],
       quotedLanes: [],
     });
     const list = screen.getByRole('list', { name: 'Lanes' });
@@ -267,6 +296,51 @@ describe('CarrierLanes', () => {
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('This counterparty is archived.');
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('shows lanes from a spreadsheet unverified, and a rep verifies one after calling', async () => {
+    const calls = mockApi({ [`PATCH /counterparties/${ID}/lanes`]: () => Response.json(DETAIL) });
+    const onSaved = show('trader', {
+      ...DETAIL,
+      lanes: [
+        { origin: 'CA-AB', destination: 'US-MT', transport: 'truck', verifiedAt: null },
+        {
+          origin: 'CA-AB',
+          destination: 'US-ND',
+          transport: 'truck',
+          verifiedAt: '2026-10-30T12:00:00.000Z',
+        },
+      ],
+      quotedLanes: [],
+    });
+    const places = screen.getByRole('list', { name: 'Places from Alberta' });
+    expect(places).toHaveTextContent('MontanaNorth Dakota');
+    await userEvent.click(
+      within(places).getByRole('button', {
+        name: 'Montana, not verified: verify Alberta to Montana',
+      }),
+    );
+    // The verified one is not a button.
+    expect(within(places).queryByRole('button', { name: /North Dakota/ })).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: 'Verify Alberta to Montana?' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Verify' }));
+    expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
+      add: [],
+      remove: [],
+      verify: [{ origin: 'CA-AB', destination: 'US-MT' }],
+    });
+    expect(onSaved).toHaveBeenCalledWith('Alberta to Montana verified.');
+  });
+
+  it('shows a viewer the unverified lanes without a way to verify them', () => {
+    show('viewer', {
+      ...DETAIL,
+      lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: null, verifiedAt: null }],
+      quotedLanes: [],
+    });
+    const places = screen.getByRole('list', { name: 'Places from Alberta' });
+    expect(places).toHaveTextContent('Montana (not verified)');
+    expect(within(places).queryByRole('button')).toBeNull();
   });
 
   it('cannot be changed on an archived carrier', () => {
