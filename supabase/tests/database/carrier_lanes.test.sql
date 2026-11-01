@@ -5,7 +5,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(49);
+select plan(58);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: olivia (operations), adam (org_admin), victor (viewer), tom (trader), sam (suspended
@@ -237,6 +237,46 @@ select throws_ok(
     pg_temp.add('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
                 'CA-SK', 'US-MT', 'barge', '00000000-0000-4000-8000-0000000044aa')),
   '23514', null, 'only truck, rail or both');
+
+-- Starting a change (Codex's review of ba68201) ------------------------------------
+-- Runs app.begin_lane_change as app_api for the given user, in a subtransaction.
+create function pg_temp.begin_as(uid text, carrier text) returns text
+language plpgsql as $fn$
+declare
+  answer text;
+begin
+  perform set_config('app.user_id', coalesce(uid, ''), true);
+  set local role app_api;
+  answer := app.begin_lane_change(carrier::uuid);
+  reset role;
+  perform set_config('app.user_id', '', true);
+  return answer;
+end
+$fn$;
+
+select ok(has_function_privilege('app_api', 'app.begin_lane_change(uuid)', 'EXECUTE')
+  and not has_function_privilege('anon', 'app.begin_lane_change(uuid)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'app.begin_lane_change(uuid)', 'EXECUTE')
+  and not has_function_privilege('service_role', 'app.begin_lane_change(uuid)', 'EXECUTE'),
+  'only app_api starts a change of lanes');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000044aa', '00000000-0000-4000-8000-00000000c1aa'),
+  'carrier', 'a trader may change a carrier''s lanes');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000022aa', '00000000-0000-4000-8000-00000000c1aa'),
+  'carrier', 'so may an admin');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000033aa', '00000000-0000-4000-8000-00000000c1aa'),
+  'forbidden', 'a viewer may not');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000055aa', '00000000-0000-4000-8000-00000000c1aa'),
+  'not_found', 'a suspended member finds nothing');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000011bb', '00000000-0000-4000-8000-00000000c1aa'),
+  'not_found', 'another organization finds nothing');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000044aa', '00000000-0000-4000-8000-00000000c2aa'),
+  'not_carrier', 'a buyer is no carrier');
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000044aa', '00000000-0000-4000-8000-0000000000ff'),
+  'not_found', 'nor is a counterparty that does not exist');
+update app.counterparties set archived_at = now() where id = '00000000-0000-4000-8000-00000000c1aa';
+select is(pg_temp.begin_as('00000000-0000-4000-8000-0000000022aa', '00000000-0000-4000-8000-00000000c1aa'),
+  'archived', 'an archived carrier''s lanes do not change, even for an admin');
+update app.counterparties set archived_at = null where id = '00000000-0000-4000-8000-00000000c1aa';
 
 -- Equipment ---------------------------------------------------------------------------
 select is(pg_temp.api_changed('00000000-0000-4000-8000-0000000011aa',

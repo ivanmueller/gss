@@ -243,3 +243,114 @@ describe("a carrier's lanes as app_api", () => {
     expect(left?.count).toBe(0);
   });
 });
+
+/** Waits until `count` app_api sessions are blocked, directly or not, by session `pid`. */
+async function waitForBlocked(pid: number, count = 1) {
+  for (let tries = 0; ; tries += 1) {
+    const [waiting] = await admin<{ count: number }[]>`
+      select count(*)::int as count from pg_stat_activity
+      where ${pid}::int = any (pg_blocking_pids(pid))`;
+    if ((waiting?.count ?? 0) >= count) return;
+    if (tries > 200) throw new Error('nothing waited for the lock');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/** Runs `work` in a transaction of its own and holds it open until the returned release. */
+function holdOpen(work: (tx: postgres.TransactionSql) => Promise<unknown>) {
+  const connection = postgres(ADMIN_URL ?? '', { max: 1, onnotice: () => undefined });
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started: (pid: number) => void = () => undefined;
+  const pid = new Promise<number>((resolve) => {
+    started = resolve;
+  });
+  const done = connection
+    .begin(async (tx) => {
+      const [me] = await tx<{ pid: number }[]>`select pg_backend_pid() as pid`;
+      await work(tx);
+      started(me?.pid ?? 0);
+      await held;
+    })
+    .finally(() => connection.end());
+  return { pid, release, done };
+}
+
+// Codex's review of ba68201: two changes at the same moment.
+describe('lanes and concurrent changes', () => {
+  it('a removal waiting for an archiving under way is refused once it is archived', async () => {
+    await db.changeLanes(as(users.tess), counterparties.carrier, {
+      add: [{ origin: 'CA-MB', destination: 'US-MN', transport: 'truck' }],
+      remove: [],
+    });
+    const archiving = holdOpen(
+      (tx) => tx`update app.counterparties set archived_at = now()
+                 where id = ${counterparties.carrier}`,
+    );
+    const pid = await archiving.pid;
+    const removal = db.changeLanes(as(users.ada), counterparties.carrier, {
+      add: [],
+      remove: [{ origin: 'CA-MB', destination: 'US-MN' }],
+    });
+    await waitForBlocked(pid);
+    archiving.release();
+    await archiving.done;
+    const result = await removal;
+    const [kept] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.carrier_lanes
+      where carrier_id = ${counterparties.carrier} and origin = 'CA-MB'`;
+    await admin`update app.counterparties set archived_at = null where id = ${counterparties.carrier}`;
+    expect([result, kept?.count]).toEqual([{ status: 'archived' }, 1]);
+  });
+
+  it(
+    'a trader demoted while a removal runs: the removal finishes first, all of it',
+    { timeout: 20000 },
+    async () => {
+      await db.changeLanes(as(users.tess), counterparties.carrier, {
+        add: [
+          { origin: 'CA-SK', destination: 'US-MT', transport: 'truck' },
+          { origin: 'CA-SK', destination: 'US-SD', transport: 'truck' },
+        ],
+        remove: [],
+      });
+      // The first lane is held, so the removal stops at its first delete.
+      const holder = holdOpen(
+        (tx) => tx`select 1 from app.carrier_lanes
+                 where carrier_id = ${counterparties.carrier} and origin = 'CA-SK'
+                   and destination = 'US-MT'
+                 for update`,
+      );
+      const pid = await holder.pid;
+      const removal = db.changeLanes(as(users.tess), counterparties.carrier, {
+        add: [],
+        remove: [
+          { origin: 'CA-SK', destination: 'US-MT' },
+          { origin: 'CA-SK', destination: 'US-SD' },
+        ],
+      });
+      await waitForBlocked(pid);
+      // Meanwhile an admin makes the trader a viewer.
+      // On a connection of its own, sent now (postgres.js waits for an await otherwise).
+      const demoter = postgres(ADMIN_URL, { max: 1, onnotice: () => undefined });
+      const demotion = demoter`update app.organization_members set role = 'viewer'
+      where organization_id = ${orgs.a} and user_id = ${users.tess}`.execute();
+      // Let the demotion reach the database (it waits for the removal, or commits).
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      holder.release();
+      await holder.done;
+      const result = await removal;
+      await demotion;
+      await demoter.end();
+      const [left] = await admin<{ count: number }[]>`
+      select count(*)::int as count from app.carrier_lanes
+      where carrier_id = ${counterparties.carrier} and origin = 'CA-SK'`;
+      await admin`update app.organization_members set role = 'trader'
+      where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+      // Never half of it: the removal held the trader's membership, so all of it happened first.
+      expect([result, left?.count]).toEqual([{ status: 'saved' }, 0]);
+    },
+  );
+});

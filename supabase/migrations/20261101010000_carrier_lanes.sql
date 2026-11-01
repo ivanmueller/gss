@@ -106,6 +106,60 @@ create trigger carrier_lanes_audit
   after insert or update or delete on app.carrier_lanes
   for each row execute function app.record_audit_event();
 
+-- Starts a change of a carrier's lanes (Codex's review of ba68201): locks the caller's own
+-- membership, then the carrier, for the rest of the transaction, and says whether the change
+-- may go ahead. A role or status change, and archiving the carrier, then wait until the
+-- change is done, or were made first and are seen here; so a change is never half done by
+-- someone demoted midway, and never lands on a carrier archived while it waited (whatever
+-- the trigger lets an admin delete for deleting an archived carrier).
+--
+-- Answers 'carrier' or 'not_carrier' (go ahead), 'forbidden' (not a trader, operations or
+-- admin), 'archived', or 'not_found' (no such counterparty, or not in an organization the
+-- caller is an active member of: nothing about another organization is read or locked).
+-- SECURITY DEFINER: traders cannot lock memberships or counterparties themselves.
+create function app.begin_lane_change(carrier uuid)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  organization uuid;
+  member_role app.member_role;
+  archived boolean;
+  is_carrier boolean;
+begin
+  select c.organization_id into organization
+    from app.counterparties c
+   where c.id = carrier and app.is_active_member(c.organization_id);
+  if organization is null then
+    return 'not_found';
+  end if;
+  select m.role into member_role
+    from app.organization_members m
+   where m.organization_id = organization and m.user_id = app.current_user_id()
+     and m.status = 'active'
+   for share;
+  if member_role is null then
+    return 'not_found';
+  end if;
+  if member_role not in ('trader', 'operations', 'org_admin') then
+    return 'forbidden';
+  end if;
+  select c.archived_at is not null, 'carrier' = any (c.types) into archived, is_carrier
+    from app.counterparties c
+   where c.id = carrier and c.organization_id = organization
+   for share;
+  if archived is null then
+    return 'not_found';
+  end if;
+  if archived then
+    return 'archived';
+  end if;
+  return case when is_carrier then 'carrier' else 'not_carrier' end;
+end
+$$;
+
 alter table app.carrier_lanes enable row level security;
 
 create policy carrier_lanes_select_for_members on app.carrier_lanes
@@ -127,6 +181,9 @@ create policy carrier_lanes_delete_for_entrants on app.carrier_lanes
 revoke all on table app.carrier_lanes from public, anon, authenticated, service_role;
 revoke all on function app.check_carrier_lane()
   from public, anon, authenticated, service_role, app_api;
+revoke all on function app.begin_lane_change(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function app.begin_lane_change(uuid) to app_api;
 grant select, delete on app.carrier_lanes to app_api;
 grant insert (organization_id, carrier_id, origin, destination, transport, created_by)
   on app.carrier_lanes to app_api;

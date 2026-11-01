@@ -1534,19 +1534,27 @@ export function createDatabase(sql: postgres.Sql): Database {
 
     changeLanes(ctx, carrierId, change) {
       return asUser(ctx, async (tx) => {
-        // Visible only to members of its organization; the database refuses an archived one
-        // (GS005) after waiting for any archiving under way, so this answer is the usual case.
-        const [row] = await tx<
-          { organization_id: string; archived: boolean; carrier: boolean; allowed: boolean }[]
-        >`
-          select organization_id, archived_at is not null as archived,
-                 'carrier' = any (types) as carrier,
-                 app.can_enter_freight(organization_id) as allowed
-          from app.counterparties where id = ${carrierId}`;
-        if (!row) return NOT_FOUND;
-        if (!row.allowed) return { status: 'forbidden' };
-        if (row.archived) return { status: 'archived' };
-        if (!row.carrier && change.add.length > 0) return { status: 'not_carrier' };
+        // The person's membership and the carrier are locked for the rest of the transaction
+        // (Codex's review of ba68201): a demotion or an archiving waits for this change, or
+        // came first and is answered here, so the change is all done or not at all.
+        const [row] = await tx<{ state: string; organization_id: string | null }[]>`
+          select app.begin_lane_change(${carrierId}) as state,
+                 (select organization_id from app.counterparties where id = ${carrierId})
+                   as organization_id`;
+        switch (row?.state) {
+          case 'carrier':
+          case 'not_carrier':
+            break;
+          case 'forbidden':
+            return { status: 'forbidden' };
+          case 'archived':
+            return { status: 'archived' };
+          default:
+            return NOT_FOUND;
+        }
+        const organizationId = row.organization_id;
+        if (organizationId === null) return NOT_FOUND;
+        if (row.state === 'not_carrier' && change.add.length > 0) return { status: 'not_carrier' };
         for (const { origin, destination } of change.remove) {
           await tx`
             delete from app.carrier_lanes
@@ -1558,7 +1566,7 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`
             insert into app.carrier_lanes
               (organization_id, carrier_id, origin, destination, transport, created_by)
-            values (${row.organization_id}, ${carrierId}, ${origin}, ${destination},
+            values (${organizationId}, ${carrierId}, ${origin}, ${destination},
                     ${transport}, app.current_user_id())
             on conflict (organization_id, carrier_id, origin, destination) do update
               set transport = excluded.transport

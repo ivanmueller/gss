@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-01 — Codex's review of the carrier lanes
+
+- `docs/DECISIONS.md`, `docs/DATA_MODEL.md`: `app.begin_lane_change` locks the person's membership and the carrier for each change of lanes.
+
 ## 2026-11-01 — A carrier's page, lanes and equipment
 
 - `docs/DECISIONS.md`: the carrier page like a buyer's; lanes from a province or state to others by truck, rail or both, on a map from Natural Earth's public-domain outlines; lanes from freight rates; equipment; Cross-border from lanes; the Loads in and Delivers to filter.
