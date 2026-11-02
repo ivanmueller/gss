@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #111
+
+- `docs/HANDOFF.md`: Codex's fifth to eighth reviews of the Telnyx calls fixed (ivanmueller/gss#111) with its CI and Deploy staging runs; the accepted P3; the owner's first real call; the staging checklist.
+
 ## 2026-11-02 — Codex's seventh and eighth reviews of the Telnyx calls
 
 - `docs/DECISIONS.md`: the leg of a dial that came back after its caller was suspended, kept and hung up; the P3 of both reviews.
