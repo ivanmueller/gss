@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #108
+
+- `docs/HANDOFF.md`: Codex's review of the Telnyx calls fixed (ivanmueller/gss#108) with its CI and Deploy staging runs; Codex's six findings on `faa7813`; the trial account's one verified number; the staging checklist.
+
 ## 2026-11-02 — Codex's review of the Telnyx calls
 
 - `docs/DECISIONS.md`: the four findings on `a7dbf99` and their fixes.
