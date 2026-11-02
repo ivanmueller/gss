@@ -544,7 +544,8 @@ export async function transcribeNewRecordings(
 /**
  * The scheduled job every 2 minutes: transcription and the deletion of audio 24 hours old run
  * side by side, so a slow transcription never holds back a deletion (Codex's review of 3571e62,
- * finding 1), and a failure of one never stops the other.
+ * finding 1), and a failure of one never stops the other. A part that stopped (the database
+ * unreachable, say) is logged with a secret-free summary (Codex's review of 14e54fd).
  */
 export async function runRecordingsJob(
   env: ApiEnv['Bindings'],
@@ -552,10 +553,18 @@ export async function runRecordingsJob(
   telnyx: TelnyxFactory = telnyxClient,
   options: JobOptions = {},
 ) {
-  await Promise.allSettled([
+  const parts = ['transcription', 'audio deletion'] as const;
+  const results = await Promise.allSettled([
     transcribeNewRecordings(env, openDatabase, telnyx, options),
     deleteExpiredRecordings(env, openDatabase, telnyx, options),
   ]);
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') return;
+    const error: unknown = result.reason;
+    console.error(
+      `Recordings job stopped (${parts[index] ?? 'part'}): ${error instanceof TelnyxError ? `status=${String(error.status)} codes=${error.codes}` : failureSummary(error)}`,
+    );
+  });
 }
 
 /** Recordings deleted per batch, and batches per run (a backlog is worked through in one run). */

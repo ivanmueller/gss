@@ -1029,6 +1029,28 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
     expect(telnyx.transcribeRecording).toHaveBeenCalledWith('synthetic-rec-slow');
   });
 
+  it("logs why a part of the job stopped, without the database's message (Codex's review of 14e54fd)", async () => {
+    const down = Object.assign(new Error('password authentication failed for app_api'), {
+      code: '28P01',
+    });
+    db.claimRecordingsToTranscribe.mockRejectedValue(down);
+    db.recordingsToDelete.mockRejectedValue(new TelnyxError(503, 'none'));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(runRecordingsJob(TELNYX_ENV, openDatabase, () => telnyx)).resolves.toBeUndefined();
+    const logged = errors.mock.calls.map(([line]) => String(line));
+    expect(logged).toEqual([
+      expect.stringMatching(/^Recordings job stopped \(transcription\): code=28P01 kind=/),
+      'Recordings job stopped (audio deletion): status=503 codes=none',
+    ]);
+    expect(logged.join('\n')).not.toContain('password');
+  });
+
+  it('logs nothing when both parts of the job finish', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await runRecordingsJob(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
   it('leaves the rest of a deletion backlog for the next run once its time is spent', async () => {
     let clock = 0;
     db.recordingsToDelete.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
