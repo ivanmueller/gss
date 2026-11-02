@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #105
+
+- `docs/HANDOFF.md`: the documents brought up to #104 (ivanmueller/gss#105) with its CI and Deploy staging runs.
+
 ## 2026-11-02 — Documents brought up to #104
 
 - `AGENTS.md`: the status line with carriers added by hand or from a spreadsheet and lanes to verify.
