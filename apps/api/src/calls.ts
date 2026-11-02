@@ -301,8 +301,9 @@ async function sendCommands(
       if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
       outcome = { kind: 'failed' };
     }
-    const { followUp } = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
-    if (followUp !== null) queue.push(followUp);
+    const finished = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
+    if (finished.unresolved === true) deliverAgain = true;
+    if (finished.followUp !== null) queue.push(finished.followUp);
   }
   if (deliverAgain) throw new DeliverAgain();
 }

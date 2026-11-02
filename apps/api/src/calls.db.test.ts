@@ -652,3 +652,155 @@ describe("Codex's re-review of ivanmueller/gss#108", () => {
     });
   });
 });
+
+describe("Codex's third review (ivanmueller/gss#109)", () => {
+  const base = Date.now();
+  const at = (minutes: number) => new Date(base + minutes * 60_000).toISOString();
+
+  async function dialing(): Promise<{ callId: string; dial: string }> {
+    const callId = await callWith([['1', event('call.answered', 'you', { occurredAt: at(-3) })]]);
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid', occurredAt: at(-2) }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    return { callId, dial: pressed.commands[0]?.id ?? '' };
+  }
+
+  const lapse = (id: string) =>
+    admin`update app.call_commands set claimed_at = now() - interval '2 minutes' where id = ${id}`;
+
+  it('gives back a cleanup hang-up still being sent, so it is not acknowledged unsent (finding 1)', async () => {
+    const { callId, dial } = await dialing();
+    await db.claimCommand(as(users.tess), callId, dial); // A
+    await lapse(dial);
+    await db.claimCommand(as(users.tess), callId, dial); // B
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-3`,
+      event('call.hangup', 'you', { hangupCause: 'normal_clearing', occurredAt: at(-1) }),
+    );
+    const byB = await db.finishCommand(as(users.tess), callId, dial, 2, {
+      kind: 'done',
+      legId: 'v3:new-leg',
+    });
+    const cleanup = byB.followUp;
+    if (cleanup === null) throw new Error('no cleanup');
+    expect(await db.claimCommand(as(users.tess), callId, cleanup.id)).toMatchObject({
+      status: 'claimed',
+    });
+    // A comes back with the same leg while B is still hanging it up.
+    expect(
+      await db.finishCommand(as(users.tess), callId, dial, 1, {
+        kind: 'done',
+        legId: 'v3:new-leg',
+      }),
+    ).toEqual({ followUp: cleanup });
+    expect(await db.claimCommand(as(users.tess), callId, cleanup.id)).toEqual({ status: 'busy' });
+  });
+
+  it("lets a renewed claim's failure never undo a dial an older claim made (finding 2)", async () => {
+    const { callId, dial } = await dialing();
+    await db.claimCommand(as(users.tess), callId, dial);
+    await lapse(dial);
+    await db.claimCommand(as(users.tess), callId, dial);
+    expect(
+      await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'done', legId: 'v3:good' }),
+    ).toEqual({ followUp: null });
+    expect(await db.finishCommand(as(users.tess), callId, dial, 2, { kind: 'failed' })).toEqual({
+      followUp: null,
+    });
+    expect(await db.getCall(as(users.tess), callId)).toMatchObject({
+      status: 'calling_them',
+      outcome: null,
+    });
+    const [row] = await admin<{ status: string; counterparty_call_control_id: string }[]>`
+      select m.status, c.counterparty_call_control_id
+      from app.call_commands m join app.calls c on c.id = m.call_id where m.id = ${dial}`;
+    expect(row).toEqual({ status: 'done', counterparty_call_control_id: 'v3:good' });
+  });
+
+  it('keeps the leg of each event, so a late answer counts only from the known leg (finding 3)', async () => {
+    const callId = await callWith([
+      ['1', event('call.answered', 'you', { occurredAt: at(-8) })],
+      [
+        '2',
+        event('call.gather.ended', 'you', {
+          digits: '1',
+          gatherStatus: 'valid',
+          occurredAt: at(-7),
+        }),
+      ],
+      [
+        '3',
+        event('call.hangup', 'them', {
+          hangupCause: 'timeout',
+          occurredAt: at(-1),
+          callControlId: 'v3:x',
+        }),
+      ],
+      ['4', event('call.answered', 'them', { occurredAt: at(-6), callControlId: 'v3:y' })],
+    ]);
+    expect(await db.getCall(as(users.tess), callId)).toMatchObject({ outcome: 'no_answer' });
+    const [kept] = await admin<{ call_control_id: string }[]>`
+      select call_control_id from app.call_events where telnyx_event_id = ${`evt-${callId}-4`}`;
+    expect(kept?.call_control_id).toBe('v3:y');
+    // Even as the caller, straight in the database, Y's answer does not make it talked.
+    // Connected as app_api, as the Worker is (the test's admin may not switch roles in CI).
+    const api = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    try {
+      await expect(
+        api.begin(async (tx) => {
+          await tx`select set_config('app.user_id', ${users.tess}, true)`;
+          await tx`update app.calls set outcome = 'talked', connected_at = ${at(-6)}
+                   where id = ${callId}`;
+        }),
+      ).rejects.toMatchObject({ code: '23514' });
+    } finally {
+      await api.end();
+    }
+  });
+});
+
+describe("Codex's fourth review", () => {
+  it('keeps the delivery unacknowledged when a lapsed claim fails while a renewed one is still sending', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you'),
+    );
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    await db.claimCommand(as(users.tess), callId, dial); // A
+    await admin`update app.call_commands set claimed_at = now() - interval '2 minutes' where id = ${dial}`;
+    await db.claimCommand(as(users.tess), callId, dial); // B, still inside its request to Telnyx
+    expect(await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'failed' })).toEqual({
+      followUp: null,
+      unresolved: true,
+    });
+    expect(await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'retry' })).toEqual({
+      followUp: null,
+      unresolved: true,
+    });
+    // Once B has finished, an older claim's failure is simply ignored.
+    await db.finishCommand(as(users.tess), callId, dial, 2, { kind: 'done', legId: 'v3:b-leg' });
+    expect(await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'failed' })).toEqual({
+      followUp: null,
+    });
+    expect(await db.getCall(as(users.tess), callId)).toMatchObject({ status: 'calling_them' });
+  });
+});

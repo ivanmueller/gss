@@ -70,6 +70,15 @@ export type ClaimResult =
   /** Finished, cancelled, or no longer wanted by the call (then cancelled). */
   | { status: 'skipped' };
 
+/**
+ * What follows a completion: a hang-up to send, and whether the command is still unresolved by
+ * another claim, so the delivery must not be acknowledged (Codex's fourth review).
+ */
+export interface FinishResult {
+  followUp: PendingCommand | null;
+  unresolved?: true;
+}
+
 /** How sending a command went. */
 export type CommandOutcome =
   | { kind: 'done'; legId?: string }
@@ -136,7 +145,7 @@ export interface CallsDatabase {
     commandId: string,
     attempt: number,
     outcome: CommandOutcome,
-  ) => Promise<{ followUp: PendingCommand | null }>;
+  ) => Promise<FinishResult>;
 }
 
 type AsUser = <T>(
@@ -340,9 +349,10 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         if (!call) return { status: 'not_found' };
         const kept = await tx`
           insert into app.call_events
-            (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at)
+            (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at,
+             call_control_id)
           values (${call.organization_id}, ${callId}, ${telnyxEventId}, ${event.type},
-                  ${event.leg}, ${event.occurredAt}::timestamptz)
+                  ${event.leg}, ${event.occurredAt}::timestamptz, ${event.callControlId})
           on conflict (telnyx_event_id) do nothing
           returning id`;
         if (kept.length === 0) {
@@ -452,7 +462,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
     },
 
     finishCommand(ctx, callId, commandId, attempt, outcome) {
-      return asUser(ctx, async (tx): Promise<{ followUp: PendingCommand | null }> => {
+      return asUser(ctx, async (tx): Promise<FinishResult> => {
         const [call] = await tx<
           { status: CallStatus; counterparty_call_control_id: string | null }[]
         >`
@@ -478,7 +488,15 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
             where call_id = ${callId} and kind = 'hang_up' and call_control_id = ${leg}
               and status <> 'failed'
             order by created_at limit 1`;
-          if (kept) return { followUp: kept.status === 'pending' ? toPending(kept) : null };
+          // One still unfinished is given back, so the delivery claims it (or is told to come
+          // again while another holds it) instead of acknowledging it unsent (Codex's third
+          // review, finding 1).
+          if (kept) {
+            return {
+              followUp:
+                kept.status === 'pending' || kept.status === 'sending' ? toPending(kept) : null,
+            };
+          }
           const [row] = await tx<CommandRow[]>`
             insert into app.call_commands
               (organization_id, call_id, telnyx_event_id, kind, call_control_id)
@@ -489,9 +507,21 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         };
 
         if (!ours) {
-          // An older claim, or a command finished or cancelled meanwhile: it is left as it is.
-          // A leg its dial made is kept when the call still runs, and hung up when it ended,
+          // An older claim, or a command finished or cancelled meanwhile. Its failure or retry
+          // changes nothing. Its success finishes a command still unfinished, so that a renewed
+          // claim failing later cannot undo a dial that worked (Codex's third review, finding
+          // 2). A leg its dial made is kept when the call still runs, and hung up when it ended,
           // unless it is the very leg the call already holds (a repeat of the same dial).
+          // A failure or retry of an older claim leaves the command to the newer one; while
+          // that is unfinished, the delivery is not acknowledged (Codex's fourth review).
+          if (outcome.kind !== 'done') {
+            return command.status === 'pending' || command.status === 'sending'
+              ? { followUp: null, unresolved: true }
+              : { followUp: null };
+          }
+          if (command.status === 'pending' || command.status === 'sending') {
+            await tx`update app.call_commands set status = 'done' where id = ${commandId}`;
+          }
           if (legId === null) return { followUp: null };
           if (call.status === 'ended' || otherLeg(legId)) return hangUp(legId);
           await tx`

@@ -436,3 +436,10 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Commands read by the caller only:** other members, admins included, no longer read a call's commands (Telnyx's leg ids).
 - **A command's event of its own call:** a key on organization, call and event id.
 - **The late-answer correction narrowed:** only for a call whose counterparty was dialed (ended no answer, busy, cancelled or failed), whose leg to them is known and unchanged, at the time of a received `call.answered` from them, and only from that leg; a call whose caller's cell went unanswered is never made talked.
+
+**2026-11-02 — Codex's third review of the Telnyx calls (`d64168a`, three P2, after ivanmueller/gss#109 was merged).** All fixed, each with a test that failed without the fix:
+- **A cleanup hang-up still being sent is given back:** when an outcome calls for a hang-up already kept and still unfinished (pending or being sent by another delivery), it is given back to the delivery, which claims it or answers 503 so that Telnyx comes again; the event is never acknowledged while the hang-up is unresolved.
+- **An older claim's success finishes the command:** a dial that worked, reported by a claim that had lapsed, marks the command done, so a renewed claim failing afterwards changes nothing and never ends the call or hangs up the caller.
+- **Events keep their leg:** each kept event also keeps Telnyx's id for its leg (`call_events.call_control_id`, migration `20261102040000_call_event_legs.sql`), and the late-answer correction needs a received answer from the call's own known leg to them; events kept before the migration have none and never satisfy it.
+
+**2026-11-02 — Codex's fourth review of the Telnyx calls (`98c4e1a`, one P2).** Fixed with a test that failed without the fix: when a lapsed claim reports a failure (or that Telnyx could not be reached) while a renewed claim of the same command is still unfinished, the failure is still ignored, but the delivery now answers 503 `COMMAND_IN_FLIGHT` instead of 200, so Telnyx delivers the event again until the renewed claim finishes or lapses and is taken over.

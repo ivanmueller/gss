@@ -569,6 +569,15 @@ describe('POST /api/v1/telnyx/voice', () => {
     expect(telnyx.hangUp).toHaveBeenCalledWith('v3:staff-leg', STAFF_HANG_UP.id);
   });
 
+  it("answers 503 when a lapsed claim's failure leaves a renewed claim unresolved (fourth review)", async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'duplicate', commands: [DIAL] });
+    db.claimCommand.mockResolvedValue(claimed(DIAL));
+    db.finishCommand.mockResolvedValue({ followUp: null, unresolved: true });
+    telnyx.dial.mockRejectedValueOnce(new TelnyxError(422, '90046'));
+    const response = await webhook(answered);
+    expect(response.status).toBe(503);
+  });
+
   it('asks for the event again while another delivery holds a claim (re-review, finding 2)', async () => {
     db.applyCallEvent.mockResolvedValue({ status: 'duplicate', commands: [DIAL] });
     db.claimCommand.mockResolvedValue({ status: 'busy' });
