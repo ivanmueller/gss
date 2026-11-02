@@ -2,22 +2,24 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { AuthBindings, AuthUser } from './auth';
+import type { TelnyxBindings } from './telnyx';
 import type { Database, RequestContext } from './db';
 
 export interface ApiEnv {
-  Bindings: AuthBindings & {
-    /**
-     * Cloudflare Hyperdrive in front of Supabase (staging). Hyperdrive verifies Supabase's
-     * certificate against Supabase's own CA, which the Workers runtime cannot do itself.
-     */
-    HYPERDRIVE?: { connectionString: string };
-    /** Postgres URL for the `app_api` role, used when there is no Hyperdrive binding. */
-    DATABASE_URL?: string;
-    /** Geocodio API key (Worker secret) for looking facility addresses up. */
-    GEOCODIO_API_KEY?: string;
-    /** Supabase secret key (Worker secret), only for creating logins and setting passwords. */
-    SUPABASE_SECRET_KEY?: string;
-  };
+  Bindings: AuthBindings &
+    TelnyxBindings & {
+      /**
+       * Cloudflare Hyperdrive in front of Supabase (staging). Hyperdrive verifies Supabase's
+       * certificate against Supabase's own CA, which the Workers runtime cannot do itself.
+       */
+      HYPERDRIVE?: { connectionString: string };
+      /** Postgres URL for the `app_api` role, used when there is no Hyperdrive binding. */
+      DATABASE_URL?: string;
+      /** Geocodio API key (Worker secret) for looking facility addresses up. */
+      GEOCODIO_API_KEY?: string;
+      /** Supabase secret key (Worker secret), only for creating logins and setting passwords. */
+      SUPABASE_SECRET_KEY?: string;
+    };
   Variables: { user: AuthUser; requestId: string };
 }
 
@@ -192,7 +194,7 @@ function connectionLost(error: unknown): boolean {
 }
 
 /** Disconnects after the response is sent where the runtime allows it, so a slow close never delays an answer. */
-function closeLater(c: ApiContext, db: Database) {
+export function closeLater(c: ApiContext, db: Database) {
   const closing = db.close().catch(() => undefined);
   try {
     c.executionCtx.waitUntil(closing);

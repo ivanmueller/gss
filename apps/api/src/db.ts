@@ -26,6 +26,7 @@ import type {
 } from '@grain/domain';
 import postgres from 'postgres';
 
+import { callQueries, type CallsDatabase } from './calls-db';
 import { crmQueries, type CrmDatabase } from './crm-db';
 import { freightQueries, type FreightDatabase } from './freight-db';
 import { fxQueries, type FxDatabase } from './fx-db';
@@ -313,7 +314,8 @@ export const LIST_LIMIT = 5000;
 export const MAP_LIMIT = 5000;
 
 /** What the API reads from and writes to Postgres. Every call runs as the given, already verified user. */
-export interface Database extends QuoteDatabase, FreightDatabase, FxDatabase, CrmDatabase {
+export interface Database
+  extends QuoteDatabase, FreightDatabase, FxDatabase, CrmDatabase, CallsDatabase {
   memberships: (userId: string) => Promise<Membership[]>;
   canEditDirectory: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   listCounterparties: (
@@ -826,6 +828,7 @@ export function createDatabase(sql: postgres.Sql): Database {
     ...freightQueries(asUser),
     ...crmQueries(asUser),
     ...fxQueries(asUser, sql),
+    ...callQueries(asUser, sql),
 
     async memberships(userId) {
       const rows = await sql.begin(async (tx) => {

@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Calling counterparties through Telnyx
+
+- `docs/DECISIONS.md`: the owner's answers on Telnyx (calling, logging, texting, transcripts, drafted notes, who uses it, callbacks) and the choices for calling: the caller's cell first with press 1, the automatic contact log entry, signed events applied as the caller, and the later slices.
+- `docs/API.md`: `/api/v1/me/phone`, `/api/v1/calls` and `/api/v1/telnyx/voice`.
+- `docs/DATA_MODEL.md`: migration `20261102010000_telnyx_calls.sql` (`member_phones`, `calls`, `call_events`).
+- `README.md`: calling through Telnyx and its four Worker secrets.
+
 ## 2026-11-02 — Handoff record of #105
 
 - `docs/HANDOFF.md`: the documents brought up to #104 (ivanmueller/gss#105) with its CI and Deploy staging runs.

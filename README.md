@@ -162,6 +162,15 @@ The lookup needs a Geocodio API key, kept as a secret of the staging Worker in C
 
 Secrets stay in place when staging deploys. Replacing the key voids looked-up results not yet saved; look the addresses up again.
 
+### Calling through Telnyx
+
+On a counterparty's page, traders, operations and admins see **Call** beside each phone number the platform can dial (owner's request, 2026-11-02). Telnyx rings the caller's own cell first; they answer and press 1, and Telnyx dials the counterparty from GSS's Telnyx number and joins the two. A line at the top of the page follows the call; a call that connected is written to the contact history in the caller's name, with how long they talked. Each person saves their own cell phone under their name at the top right → **Your cell phone** (only they see it). A number with an extension has no Call button. Calls to GSS's number are given a busy signal for now. Telnyx is called only from the Worker; its settings are Worker secrets the owner adds in Cloudflare, never in Git or the browser:
+
+1. In Telnyx (portal.telnyx.com): a number; an Outbound Voice Profile allowing Canada and the United States; a **Voice API Application** with webhook URL `https://grain-trading-api-staging.<subdomain>.workers.dev/api/v1/telnyx/voice`, API v2, that profile, and the number assigned; and an API key (**Account Settings → Keys & Credentials → API Keys**).
+2. In Cloudflare (**Workers & Pages → grain-trading-api-staging → Settings → Variables and Secrets → Add**), each as type **Secret**, then **Deploy**: `TELNYX_API_KEY` (the API key), `TELNYX_PUBLIC_KEY` (**Account Settings → Keys & Credentials → Public Key**), `TELNYX_CONNECTION_ID` (the Voice API Application's **Application ID**) and `TELNYX_PHONE_NUMBER` (GSS's number, e.g. `+18255550199`). Secrets stay in place when staging deploys; variables of type Text added in Cloudflare would not.
+
+Until all four are there, the Call buttons do not show and Telnyx's events are refused.
+
 ## Staging database connection
 
 The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifies Supabase's certificate (`docs/DECISIONS.md`). To create or update it: give the Cloudflare API token Hyperdrive and SSL and Certificates edit permissions, add the GitHub secret `SUPABASE_HYPERDRIVE_URL` (`postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres`, Supabase's session pooler), then run **Actions → Set up Hyperdrive (staging)**. Its summary shows the configuration ID that `apps/api/wrangler.jsonc` binds as `HYPERDRIVE`. Locally, `wrangler dev --env staging` connects that binding to the database in `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (CI sets it to the throwaway database).

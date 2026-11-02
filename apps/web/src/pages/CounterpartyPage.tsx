@@ -47,6 +47,7 @@ import {
 
 import { BackLink } from '../components/BackLink';
 import { CarrierLanes, isCrossBorder } from '../components/CarrierLanes';
+import { CallButton, CallingProvider } from '../components/Calling';
 import {
   ContactHistoryCard,
   CrmMessage,
@@ -1183,12 +1184,21 @@ function CounterpartyView({
       hideNew={canFreight}
     />
   );
+  const callLogged = () => {
+    crm.changed('');
+  };
+
   const lanesCard = carrier && (
     <CarrierLanes token={token} role={organization.role} detail={detail} onSaved={done} />
   );
 
   return (
-    <>
+    <CallingProvider
+      token={token}
+      counterpartyId={detail.id}
+      enabled={crm.writer}
+      onLogged={callLogged}
+    >
       <p role="status" className="sr-only">
         {notice}
       </p>
@@ -1335,7 +1345,7 @@ function CounterpartyView({
             {detailsCard}
           </>
         ))}
-    </>
+    </CallingProvider>
   );
 }
 
@@ -1344,13 +1354,16 @@ function ContactLinks({ contact }: { contact: Contact }) {
   return (
     <>
       {contact.phone && (
-        <a
-          href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
-          className="flex w-fit items-center gap-1.5 underline underline-offset-4"
-        >
-          <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
-          {contact.phone}
-        </a>
+        <span className="flex flex-wrap items-center gap-2">
+          <a
+            href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
+            className="flex w-fit items-center gap-1.5 underline underline-offset-4"
+          >
+            <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
+            {contact.phone}
+          </a>
+          <CallButton contactId={contact.id} name={contact.name} phone={contact.phone} />
+        </span>
       )}
       {contact.email && (
         <a
@@ -1498,14 +1511,21 @@ function WebsiteAndPhone({ detail }: { detail: CounterpartyDetail }) {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       {detail.website && <CounterpartyWebsite website={detail.website} />}
       {detail.phone && (
-        <a
-          href={telHref(detail.phone)}
-          className="flex w-fit items-center gap-1.5 underline underline-offset-4"
-          aria-label={`Company phone ${detail.phone}`}
-        >
-          <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
-          {detail.phone}
-        </a>
+        <span className="flex flex-wrap items-center gap-2">
+          <a
+            href={telHref(detail.phone)}
+            className="flex w-fit items-center gap-1.5 underline underline-offset-4"
+            aria-label={`Company phone ${detail.phone}`}
+          >
+            <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
+            {detail.phone}
+          </a>
+          <CallButton
+            contactId={null}
+            name={detail.tradingName ?? detail.legalName}
+            phone={detail.phone}
+          />
+        </span>
       )}
     </div>
   );
