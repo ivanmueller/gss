@@ -1181,6 +1181,23 @@ describe('a carrier’s equipment and lanes from a spreadsheet (owner’s reques
     ).toEqual(['loadsIn: is for carriers; this row is not a carrier']);
   });
 
+  // Codex's review of 08a3957: the first row's type is the company's.
+  it('refuses a later row’s equipment or lanes when the company’s first row is not a carrier', () => {
+    const { groups, issues } = groupImportRows([
+      ok({ legalName: 'Synthetic Hauling', country: 'CA', types: 'Buyer' }, 2),
+      ok({ ...carrier, loadsIn: 'AB', deliversTo: 'MT' }, 3),
+    ]);
+    expect(groups[0]?.lanes).toEqual([]);
+    expect(issues).toEqual([
+      {
+        line: 3,
+        field: 'types',
+        message:
+          "differs from line 2, whose type is the company's: equipment and lanes need it to be a carrier there too",
+      },
+    ]);
+  });
+
   it('gathers a company’s rows: equipment each once, a lane each once, a stated mode kept', () => {
     const { groups, warnings } = groupImportRows([
       ok({ ...carrier, equipment: 'Dry van', loadsIn: 'AB', deliversTo: 'MT' }, 2),

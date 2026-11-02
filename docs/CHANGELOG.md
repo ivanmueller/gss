@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's review of the carrier import
+
+- `docs/DECISIONS.md`: the four findings on `08a3957` and their fixes.
+
 ## 2026-11-01 — Carrier spreadsheets; lanes to verify
 
 - `docs/DECISIONS.md`: the Equipment, Loads in, Delivers to and Mode columns; lanes from a file unverified until verified by a rep.

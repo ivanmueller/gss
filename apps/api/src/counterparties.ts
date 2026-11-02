@@ -453,8 +453,9 @@ export function planImport(
     else if (result.status === 'empty') emptyRows += 1;
     else issues.push(...result.issues);
   }
-  const { groups, warnings } = groupImportRows(parsed);
-  return { parsed, emptyRows, issues, warnings, groups };
+  const grouped = groupImportRows(parsed);
+  issues.push(...grouped.issues);
+  return { parsed, emptyRows, issues, warnings: grouped.warnings, groups: grouped.groups };
 }
 
 /** A file's companies matched against the list as it is: which are new, what others get. */
@@ -668,14 +669,16 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
 
       const contentSha256 = await sha256Hex(
         JSON.stringify(
-          // Without commodities, a company phone, markets or a tier, the same as before they
-          // could be imported.
+          // Without commodities, a company phone, markets, a tier, equipment or lanes, the same
+          // as before they could be imported; with them, they count (Codex's review of 08a3957).
           plan.groups.map(
             ({
               counterparty: { phone, markets, tier, ...counterparty },
               contacts,
               facilities,
               commodities,
+              equipment,
+              lanes,
             }) => ({
               counterparty: {
                 ...counterparty,
@@ -686,6 +689,8 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
               contacts,
               facilities,
               ...(commodities.length > 0 && { commodities }),
+              ...(equipment.length > 0 && { equipment }),
+              ...(lanes.length > 0 && { lanes }),
             }),
           ),
         ),

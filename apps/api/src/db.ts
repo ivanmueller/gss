@@ -1190,22 +1190,6 @@ export function createDatabase(sql: postgres.Sql): Database {
           await tx`insert into app.counterparty_commodities ${tx(part)} on conflict do nothing`;
         }
 
-        // A carrier's lanes, unverified until someone on the team verifies them (owner's
-        // request, 2026-11-01); one a carrier already lists stays as it is.
-        const lanes = targets.flatMap(({ id, lanes: list = [] }) =>
-          list.map((lane) => ({
-            organization_id: org,
-            carrier_id: id,
-            origin: lane.origin,
-            destination: lane.destination,
-            transport: lane.transport,
-            created_by: ctx.userId,
-          })),
-        );
-        for (const part of chunks(lanes)) {
-          await tx`insert into app.carrier_lanes ${tx(part)} on conflict do nothing`;
-        }
-
         // What the file changes on companies already listed, filled cells winning (owner's
         // answer, 2026-10-31): only the fields given, never cleared. The plan was made under
         // their locks, so it is what they have now.
@@ -1269,6 +1253,23 @@ export function createDatabase(sql: postgres.Sql): Database {
               returning id`,
             );
           }
+        }
+        // A carrier's lanes, unverified until someone on the team verifies them (owner's
+        // request, 2026-11-01); one a carrier already lists stays as it is. Written after the
+        // details above, so a listed company the file makes a carrier is one by then (Codex's
+        // review of 08a3957).
+        const lanes = targets.flatMap(({ id, lanes: list = [] }) =>
+          list.map((lane) => ({
+            organization_id: org,
+            carrier_id: id,
+            origin: lane.origin,
+            destination: lane.destination,
+            transport: lane.transport,
+            created_by: ctx.userId,
+          })),
+        );
+        for (const part of chunks(lanes)) {
+          await tx`insert into app.carrier_lanes ${tx(part)} on conflict do nothing`;
         }
         return batchId;
       });

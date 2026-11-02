@@ -245,6 +245,18 @@ describe('reading spreadsheet cells', () => {
     });
   });
 
+  // Codex's review of 08a3957: a name with "and" in it is one place.
+  it('keeps a province named with "and" whole', () => {
+    expect(parsePlaceList('Newfoundland and Labrador; Ontario')).toEqual({
+      places: ['CA-NL', 'CA-ON'],
+      unknown: [],
+    });
+    expect(parsePlaceList('Alberta and newfoundland AND labrador')).toEqual({
+      places: ['CA-AB', 'CA-NL'],
+      unknown: [],
+    });
+  });
+
   it('reads equipment by its name or a common one', () => {
     expect(parseEquipmentList('Super-B, Dry van & flat deck; railcar')).toEqual({
       equipment: ['super_b', 'van', 'flatdeck', 'hopper_car'],

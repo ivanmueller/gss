@@ -1229,9 +1229,12 @@ export interface ImportGroup {
 export function groupImportRows(rows: ParsedImportRow[]): {
   groups: ImportGroup[];
   warnings: ImportIssue[];
+  /** Rows that cannot join their company as given (a carrier's columns on a non-carrier). */
+  issues: ImportIssue[];
 } {
   const groups = new Map<string, ImportGroup>();
   const warnings: ImportIssue[] = [];
+  const issues: ImportIssue[] = [];
   const contactKeys = new Map<string, Set<string>>();
   const facilityKeys = new Map<string, Set<string>>();
 
@@ -1295,6 +1298,19 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       );
       if (!listed) group.commodities.push(interest);
     }
+    // The first row's type is the company's: a later row's equipment and lanes need it to be
+    // a carrier too (Codex's review of 08a3957).
+    if (
+      (row.equipment.length > 0 || row.lanes.length > 0) &&
+      !group.counterparty.types.includes('carrier')
+    ) {
+      issues.push({
+        line: row.line,
+        field: 'types',
+        message: `differs from line ${String(group.lines[0] ?? row.line)}, whose type is the company's: equipment and lanes need it to be a carrier there too`,
+      });
+      continue;
+    }
     group.equipment = EQUIPMENT_ORDER.filter(
       (item) => group.equipment.includes(item) || row.equipment.includes(item),
     );
@@ -1322,7 +1338,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       }
     }
   }
-  return { groups: [...groups.values()], warnings };
+  return { groups: [...groups.values()], warnings, issues };
 }
 
 function normalizeHeader(header: string): string {
