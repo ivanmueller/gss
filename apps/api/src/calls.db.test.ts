@@ -749,13 +749,18 @@ describe("Codex's third review (ivanmueller/gss#109)", () => {
       select call_control_id from app.call_events where telnyx_event_id = ${`evt-${callId}-4`}`;
     expect(kept?.call_control_id).toBe('v3:y');
     // Even as the caller, straight in the database, Y's answer does not make it talked.
-    await expect(
-      admin.begin(async (tx) => {
-        await tx`select set_config('app.user_id', ${users.tess}, true)`;
-        await tx`set local role app_api`;
-        await tx`update app.calls set outcome = 'talked', connected_at = ${at(-6)}
-                 where id = ${callId}`;
-      }),
-    ).rejects.toMatchObject({ code: '23514' });
+    // Connected as app_api, as the Worker is (the test's admin may not switch roles in CI).
+    const api = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    try {
+      await expect(
+        api.begin(async (tx) => {
+          await tx`select set_config('app.user_id', ${users.tess}, true)`;
+          await tx`update app.calls set outcome = 'talked', connected_at = ${at(-6)}
+                   where id = ${callId}`;
+        }),
+      ).rejects.toMatchObject({ code: '23514' });
+    } finally {
+      await api.end();
+    }
   });
 });
