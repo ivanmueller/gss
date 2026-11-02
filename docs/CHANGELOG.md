@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #100 to #104
+
+- `docs/HANDOFF.md`: the carrier import and lanes to verify (ivanmueller/gss#102, #103), the green found columns (#101), the lanes map without lines (#104) and the record of #99 (#100), with their CI and Deploy staging runs and Codex's review; the status summary, GT-020, GT-050, tests and the staging checklist.
+
 ## 2026-11-02 — No lines on the lanes map
 
 - `docs/DECISIONS.md`, `docs/PRODUCT.md`: the lanes map shades places only.
