@@ -764,3 +764,43 @@ describe("Codex's third review (ivanmueller/gss#109)", () => {
     }
   });
 });
+
+describe("Codex's fourth review", () => {
+  it('keeps the delivery unacknowledged when a lapsed claim fails while a renewed one is still sending', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you'),
+    );
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    await db.claimCommand(as(users.tess), callId, dial); // A
+    await admin`update app.call_commands set claimed_at = now() - interval '2 minutes' where id = ${dial}`;
+    await db.claimCommand(as(users.tess), callId, dial); // B, still inside its request to Telnyx
+    expect(await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'failed' })).toEqual({
+      followUp: null,
+      unresolved: true,
+    });
+    expect(await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'retry' })).toEqual({
+      followUp: null,
+      unresolved: true,
+    });
+    // Once B has finished, an older claim's failure is simply ignored.
+    await db.finishCommand(as(users.tess), callId, dial, 2, { kind: 'done', legId: 'v3:b-leg' });
+    expect(await db.finishCommand(as(users.tess), callId, dial, 1, { kind: 'failed' })).toEqual({
+      followUp: null,
+    });
+    expect(await db.getCall(as(users.tess), callId)).toMatchObject({ status: 'calling_them' });
+  });
+});

@@ -4,9 +4,9 @@
 
 - `docs/HANDOFF.md`: Codex's re-review of the Telnyx calls fixed (ivanmueller/gss#109) with its CI and Deploy staging runs; Codex's three findings on `d64168a`; the staging checklist.
 
-## 2026-11-02 — Codex's third review of the Telnyx calls
+## 2026-11-02 — Codex's third and fourth reviews of the Telnyx calls
 
-- `docs/DECISIONS.md`: the three findings on `d64168a` and their fixes.
+- `docs/DECISIONS.md`: the three findings on `d64168a`, the one on `98c4e1a`, and their fixes.
 - `docs/DATA_MODEL.md`: migration `20261102040000_call_event_legs.sql`.
 
 ## 2026-11-02 — Codex's re-review of the Telnyx calls
