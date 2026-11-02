@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's review of the transcript by side
+
+- `docs/DECISIONS.md`: the four findings on `3571e62` and their fixes (transcription and deletion side by side within a time budget, one claim at a time, transcripts cut to fit, text kept without segments).
+- `README.md`: the job's two parts side by side.
+
 ## 2026-11-02 — Handoff record of #117
 
 - `docs/HANDOFF.md`: the transcript split by side (ivanmueller/gss#117) with its CI and Deploy staging runs and Codex's review after the merge.

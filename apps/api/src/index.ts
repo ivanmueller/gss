@@ -4,11 +4,10 @@ import { Hono } from 'hono';
 import { requireUser } from './auth';
 import {
   callRoutes,
-  deleteExpiredRecordings,
   memberPhoneRoutes,
   RECORDINGS_CRON,
+  runRecordingsJob,
   telnyxWebhookRoutes,
-  transcribeNewRecordings,
 } from './calls';
 import { counterpartyRoutes } from './counterparties';
 import { contactLogRoutes, followUpRoutes } from './crm';
@@ -141,11 +140,7 @@ export default {
   // (RECORDINGS_CRON) new recordings transcribed by side and call audio 24 hours old deleted.
   scheduled(controller, env, ctx) {
     if (controller.cron === RECORDINGS_CRON) {
-      ctx.waitUntil(
-        transcribeNewRecordings(env, postgresDatabase).then(() =>
-          deleteExpiredRecordings(env, postgresDatabase),
-        ),
-      );
+      ctx.waitUntil(runRecordingsJob(env, postgresDatabase));
       return;
     }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));

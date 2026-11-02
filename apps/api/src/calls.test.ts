@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { deleteExpiredRecordings, transcribeNewRecordings } from './calls';
+import {
+  deleteExpiredRecordings,
+  RECORDINGS_JOB_BUDGET_MS,
+  runRecordingsJob,
+  transcribeNewRecordings,
+} from './calls';
 import { CLAIM_LEASE_SECONDS } from './calls-db';
 import {
   AUDIO_TIMEOUT_MS,
@@ -950,8 +955,15 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
     expect(db.markRecordingDeleted).toHaveBeenCalledWith('synthetic-rec-1');
   });
 
+  /** Claims one recording at a time, as the database does, from a queue. */
+  function queue(...recordingIds: string[]) {
+    db.claimRecordingsToTranscribe.mockImplementation((most) =>
+      Promise.resolve(recordingIds.splice(0, most)),
+    );
+  }
+
   it('transcribes new recordings by side, keeping their lines and plain text', async () => {
-    db.claimRecordingsToTranscribe.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
+    queue('synthetic-rec-1', 'synthetic-rec-2');
     telnyx.transcribeRecording
       .mockResolvedValueOnce([
         { side: 'caller', start: 0.4, text: 'Morning Pat.' },
@@ -960,7 +972,8 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
       .mockRejectedValueOnce(new TelnyxError(503, '90001'));
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
-    expect(db.claimRecordingsToTranscribe).toHaveBeenCalledWith(10);
+    // Claimed one at a time, as each is about to be transcribed (Codex's review of 3571e62, 2).
+    expect(db.claimRecordingsToTranscribe.mock.calls).toEqual([[1], [1], [1]]);
     expect(db.keepTranscriptLines).toHaveBeenCalledTimes(1);
     expect(db.keepTranscriptLines).toHaveBeenCalledWith(
       'synthetic-rec-1',
@@ -976,11 +989,68 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
   });
 
   it('keeps an empty transcript for a call where nothing was said, none when the audio is gone', async () => {
-    db.claimRecordingsToTranscribe.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
+    queue('synthetic-rec-1', 'synthetic-rec-2');
     telnyx.transcribeRecording.mockResolvedValueOnce([]).mockResolvedValueOnce(null);
     await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
     expect(db.keepTranscriptLines).toHaveBeenCalledTimes(1);
     expect(db.keepTranscriptLines).toHaveBeenCalledWith('synthetic-rec-1', [], '');
+  });
+
+  it('claims at most 10 recordings a run', async () => {
+    queue(...Array.from({ length: 12 }, (_, i) => `synthetic-rec-${String(i)}`));
+    await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(db.claimRecordingsToTranscribe).toHaveBeenCalledTimes(10);
+  });
+
+  it('claims no more once its time is spent, so slow transcriptions end within the run (Codex, 1 and 2)', async () => {
+    queue(...Array.from({ length: 10 }, (_, i) => `synthetic-rec-${String(i)}`));
+    let clock = 0;
+    // Each transcription times out after 3 minutes.
+    telnyx.transcribeRecording.mockImplementation(() => {
+      clock += 3 * 60_000;
+      return Promise.reject(new TelnyxError(0, 'timeout'));
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx, { now: () => clock });
+    // Claimed at 0, 3 and 6 minutes; none at 9, past the 8-minute budget.
+    expect(db.claimRecordingsToTranscribe).toHaveBeenCalledTimes(3);
+    expect(clock).toBeLessThan(15 * 60_000);
+    expect(RECORDINGS_JOB_BUDGET_MS).toBe(8 * 60_000);
+  });
+
+  it('deletes expired audio while a transcription is still running (Codex, finding 1)', async () => {
+    queue('synthetic-rec-slow');
+    telnyx.transcribeRecording.mockImplementation(() => new Promise(() => undefined));
+    db.recordingsToDelete.mockResolvedValueOnce(['synthetic-rec-old']).mockResolvedValue([]);
+    void runRecordingsJob(TELNYX_ENV, openDatabase, () => telnyx);
+    await vi.waitFor(() => {
+      expect(db.markRecordingDeleted).toHaveBeenCalledWith('synthetic-rec-old');
+    });
+    expect(telnyx.transcribeRecording).toHaveBeenCalledWith('synthetic-rec-slow');
+  });
+
+  it('leaves the rest of a deletion backlog for the next run once its time is spent', async () => {
+    let clock = 0;
+    db.recordingsToDelete.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
+    telnyx.deleteRecording.mockImplementation(() => {
+      clock += RECORDINGS_JOB_BUDGET_MS;
+      return Promise.resolve();
+    });
+    await deleteExpiredRecordings(TELNYX_ENV, openDatabase, () => telnyx, { now: () => clock });
+    expect(telnyx.deleteRecording).toHaveBeenCalledTimes(1);
+    expect(db.close).toHaveBeenCalled();
+  });
+
+  it('keeps a transcript too long for the database cut to fit, rather than nothing (Codex, finding 3)', async () => {
+    queue('synthetic-rec-long');
+    telnyx.transcribeRecording.mockResolvedValueOnce([
+      { side: 'caller', start: 0, text: 'x'.repeat(199_995) },
+      { side: 'counterparty', start: 9, text: 'Two loads.' },
+    ]);
+    await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    const [, lines, words] = db.keepTranscriptLines.mock.calls[0] ?? [];
+    expect(words?.length).toBe(200_000);
+    expect(lines).toEqual([{ side: 'caller', start: 0, text: 'x'.repeat(199_992) }]);
   });
 
   it('transcribes nothing without the Telnyx settings', async () => {
@@ -1077,6 +1147,17 @@ describe('the Telnyx client for transcripts by side', () => {
     expect(await telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1')).toEqual([
       { side: null, start: 0, text: 'Hello there.' },
     ]);
+  });
+
+  it('keeps the text when no segment is usable (Codex, finding 4)', async () => {
+    for (const segments of [[], [{ start: 1, text: '  ', channel: 0 }], [{ text: 'no start' }]]) {
+      serve(Response.json({ text: 'Speech', segments }));
+      expect(await telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1')).toEqual([
+        { side: null, start: 0, text: 'Speech' },
+      ]);
+    }
+    serve(Response.json({ text: ' ', segments: [] }));
+    expect(await telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1')).toEqual([]);
   });
 
   it('gives null when Telnyx no longer has the recording, and fails on an error', async () => {

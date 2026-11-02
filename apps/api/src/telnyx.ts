@@ -125,6 +125,11 @@ export const TELNYX_TIMEOUT_MS = 10_000;
  * download has a timeout of its own (Codex's review of 9de3e78).
  */
 export const AUDIO_TIMEOUT_MS = 5 * 60_000;
+/**
+ * Limit on transcribing one recording (Codex's review of 3571e62, findings 1 and 2): well within
+ * the 10-minute claim of a recording, and Cloudflare's 15 minutes for a scheduled run.
+ */
+export const TRANSCRIBE_TIMEOUT_MS = 3 * 60_000;
 
 /** The words the caller hears when their cell answers; no counterparty details are sent. */
 export const CONFIRM_PROMPT = 'This is your G S S call. Press 1 to connect.';
@@ -292,30 +297,31 @@ export const telnyxClient: TelnyxFactory = (env) => {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
         body: form,
-        signal: AbortSignal.timeout(AUDIO_TIMEOUT_MS),
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
       });
       if (!response.ok) throw new TelnyxError(response.status, await errorCodes(response));
       const body: unknown = await response.json();
-      const segments =
+      const { segments, text } =
         typeof body === 'object' && body !== null
-          ? (body as { segments?: unknown }).segments
-          : null;
-      if (!Array.isArray(segments)) {
-        const text =
-          typeof body === 'object' && body !== null ? (body as { text?: unknown }).text : null;
-        return typeof text === 'string' && text.trim() !== ''
-          ? [{ side: null, start: 0, text: text.trim() }]
-          : [];
-      }
-      return transcriptLines(
-        segments.flatMap((segment: unknown) => {
-          if (typeof segment !== 'object' || segment === null) return [];
-          const { start, text, channel } = segment as Record<string, unknown>;
-          return typeof start === 'number' && typeof text === 'string'
-            ? [{ start, text, channel: typeof channel === 'number' ? channel : null }]
-            : [];
-        }),
-      );
+          ? (body as { segments?: unknown; text?: unknown })
+          : {};
+      const lines = Array.isArray(segments)
+        ? transcriptLines(
+            segments.flatMap((segment: unknown) => {
+              if (typeof segment !== 'object' || segment === null) return [];
+              const { start, text: said, channel } = segment as Record<string, unknown>;
+              return typeof start === 'number' && typeof said === 'string'
+                ? [{ start, text: said, channel: typeof channel === 'number' ? channel : null }]
+                : [];
+            }),
+          )
+        : [];
+      if (lines.length > 0) return lines;
+      // No usable segment, but text (Codex's review of 3571e62, finding 4): kept as one line
+      // whose side is unknown, rather than lost as a call where nothing was said.
+      return typeof text === 'string' && text.trim() !== ''
+        ? [{ side: null, start: 0, text: text.trim() }]
+        : [];
     },
     async deleteRecording(recordingId) {
       try {
