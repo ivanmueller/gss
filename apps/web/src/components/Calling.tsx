@@ -6,6 +6,7 @@ import {
   dialablePhone,
   formatCallLength,
   type CallView,
+  type TranscriptLine,
 } from '@grain/domain';
 import { PhoneCall, PhoneOff, Play, X } from 'lucide-react';
 import {
@@ -39,8 +40,11 @@ const POLL_MS = 2000;
 const POLL_LIMIT_MS = 15 * 60 * 1000;
 /** How long the line of a call that has ended stays before it goes. */
 export const ENDED_LINE_MS = 5000;
-/** When the contact history is loaded again after a call, for its transcript. */
-const TRANSCRIPT_CHECKS_MS = [30_000, 90_000, 180_000];
+/**
+ * When the contact history is loaded again after a call, for its transcript: the Worker
+ * transcribes new recordings every 2 minutes, so it usually comes within 2 to 5 minutes.
+ */
+const TRANSCRIPT_CHECKS_MS = [30_000, 90_000, 180_000, 300_000];
 
 /** The person's own cell phone, which their calls ring first; only they see it. */
 export function CellPhoneDialog({
@@ -469,11 +473,19 @@ export function CallRecordingDetails({
   return (
     <div className="flex flex-col gap-2 text-sm">
       {recording.transcript === null ? (
-        <p className="text-xs text-muted-foreground">Transcript on its way…</p>
+        <p className="text-xs text-muted-foreground">
+          {recording.transcriptFailed ? 'No transcript for this call.' : 'Transcript on its way…'}
+        </p>
+      ) : recording.lines?.length === 0 || recording.transcript.trim() === '' ? (
+        <p className="text-xs text-muted-foreground">Nothing was said on this call.</p>
       ) : (
         <details className="rounded-control border px-3 py-2">
           <summary className="cursor-pointer text-xs font-medium">Transcript</summary>
-          <p className="mt-2 whitespace-pre-wrap">{recording.transcript}</p>
+          {recording.lines === null ? (
+            <p className="mt-2 whitespace-pre-wrap">{recording.transcript}</p>
+          ) : (
+            <TranscriptConversation recording={recording} lines={recording.lines} />
+          )}
         </details>
       )}
       {playable && audioUrl === null && (
@@ -506,5 +518,51 @@ export function CallRecordingDetails({
         </p>
       )}
     </div>
+  );
+}
+
+/** Seconds into the call as m:ss. */
+function clock(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(whole / 60))}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+/**
+ * The transcript as a conversation (the owner's request of 2026-11-02): each turn with who said
+ * it, the GSS caller's on one side and the counterparty's on the other.
+ */
+function TranscriptConversation({
+  recording,
+  lines,
+}: {
+  recording: CallRecordingView;
+  lines: readonly TranscriptLine[];
+}) {
+  return (
+    <ol className="mt-2 flex flex-col gap-2" aria-label="Transcript by side">
+      {lines.map((line, index) => {
+        const caller = line.side === 'caller';
+        const who =
+          line.side === 'caller'
+            ? recording.callerName
+            : line.side === 'counterparty'
+              ? recording.contactName
+              : 'Unknown speaker';
+        return (
+          <li
+            key={`${String(index)}-${String(line.start)}`}
+            data-side={line.side ?? 'unknown'}
+            className={`flex max-w-[85%] flex-col gap-0.5 rounded-control px-3 py-1.5 ${
+              caller ? 'self-start bg-muted' : 'self-end border bg-card'
+            }`}
+          >
+            <span className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">{who}</span> · {clock(line.start)}
+            </span>
+            <span className="whitespace-pre-wrap">{line.text}</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

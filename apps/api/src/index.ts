@@ -8,6 +8,7 @@ import {
   memberPhoneRoutes,
   RECORDINGS_CRON,
   telnyxWebhookRoutes,
+  transcribeNewRecordings,
 } from './calls';
 import { counterpartyRoutes } from './counterparties';
 import { contactLogRoutes, followUpRoutes } from './crm';
@@ -136,11 +137,15 @@ export const app = createApp(postgresDatabase);
 
 export default {
   fetch: app.fetch,
-  // wrangler.jsonc, triggers: the Bank of Canada's USD/CAD rate twice a day (FX_CRON), and every
-  // hour the deletion at Telnyx of call audio 24 hours old (RECORDINGS_CRON).
+  // wrangler.jsonc, triggers: the Bank of Canada's USD/CAD rate twice a day, and every 2 minutes
+  // (RECORDINGS_CRON) new recordings transcribed by side and call audio 24 hours old deleted.
   scheduled(controller, env, ctx) {
     if (controller.cron === RECORDINGS_CRON) {
-      ctx.waitUntil(deleteExpiredRecordings(env, postgresDatabase));
+      ctx.waitUntil(
+        transcribeNewRecordings(env, postgresDatabase).then(() =>
+          deleteExpiredRecordings(env, postgresDatabase),
+        ),
+      );
       return;
     }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));

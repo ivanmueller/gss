@@ -1,5 +1,5 @@
 import type { CallView } from '@grain/domain';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -225,6 +225,10 @@ describe('CallRecordingDetails', () => {
     callId: CALL,
     contactLogEntryId: '00000000-0000-4000-8000-0000000e11aa',
     transcript: 'We can do November at the posted price.',
+    lines: null,
+    callerName: 'Tess Trader',
+    contactName: 'Pat Buyer',
+    transcriptFailed: false,
     audioUntil: '2999-01-01T00:00:00.000Z',
   };
 
@@ -256,6 +260,52 @@ describe('CallRecordingDetails', () => {
     expect(screen.getByText('Transcript on its way…')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Play recording' })).not.toBeInTheDocument();
   });
+
+  it('shows the transcript as a conversation, each line with who said it', async () => {
+    render(
+      <CallRecordingDetails
+        token="synthetic-token"
+        recording={{
+          ...RECORDING,
+          transcript: 'Caller: Morning Pat.\nCounterparty: Two loads at the posted price.',
+          lines: [
+            { side: 'caller', start: 0.4, text: 'Morning Pat.' },
+            { side: 'counterparty', start: 72.5, text: 'Two loads at the posted price.' },
+            { side: null, start: 80, text: 'Bye.' },
+          ],
+        }}
+      />,
+    );
+    await userEvent.click(screen.getByText('Transcript'));
+    const items = within(screen.getByRole('list', { name: 'Transcript by side' })).getAllByRole(
+      'listitem',
+    );
+    expect(items.map((item) => item.getAttribute('data-side'))).toEqual([
+      'caller',
+      'counterparty',
+      'unknown',
+    ]);
+    expect(items[0]).toHaveTextContent('Tess Trader · 0:00Morning Pat.');
+    expect(items[1]).toHaveTextContent('Pat Buyer · 1:12Two loads at the posted price.');
+    expect(items[2]).toHaveTextContent('Unknown speaker · 1:20Bye.');
+  });
+
+  it('says when no transcript will come, and when nothing was said', () => {
+    const { rerender } = render(
+      <CallRecordingDetails
+        token="synthetic-token"
+        recording={{ ...RECORDING, transcript: null, transcriptFailed: true }}
+      />,
+    );
+    expect(screen.getByText('No transcript for this call.')).toBeVisible();
+    rerender(
+      <CallRecordingDetails
+        token="synthetic-token"
+        recording={{ ...RECORDING, transcript: '', lines: [] }}
+      />,
+    );
+    expect(screen.getByText('Nothing was said on this call.')).toBeVisible();
+  });
 });
 
 describe('the contact history after a call that connected', () => {
@@ -282,14 +332,14 @@ describe('the contact history after a call that connected', () => {
     const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
     await user.click(await screen.findByRole('button', { name: /Call Pat Buyer/ }));
     await screen.findByText(/call ended after/);
-    // The line goes after 5 seconds; the reloads at 30 s, 90 s and 3 min still happen.
+    // The line goes after 5 seconds; the reloads at 30 s, 90 s, 3 and 5 min still happen.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
     expect(screen.queryByText(/call ended after/)).not.toBeInTheDocument();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.advanceTimersByTimeAsync(300_000);
     });
-    expect(onLogged).toHaveBeenCalledTimes(3);
+    expect(onLogged).toHaveBeenCalledTimes(4);
   });
 });
