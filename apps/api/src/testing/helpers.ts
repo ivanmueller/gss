@@ -159,6 +159,10 @@ export function fakeDatabase(): Mocked<Database> {
     keepCallRecording: vi.fn<Database['keepCallRecording']>(() => Promise.resolve()),
     keepCallTranscript: vi.fn<Database['keepCallTranscript']>(() => Promise.resolve()),
     recordingsToDelete: vi.fn<Database['recordingsToDelete']>(() => Promise.resolve([])),
+    claimRecordingsToTranscribe: vi.fn<Database['claimRecordingsToTranscribe']>(() =>
+      Promise.resolve([]),
+    ),
+    keepTranscriptLines: vi.fn<Database['keepTranscriptLines']>(() => Promise.resolve()),
     markRecordingDeleted: vi.fn<Database['markRecordingDeleted']>(() => Promise.resolve()),
     listRecordings: vi.fn<Database['listRecordings']>(() => Promise.resolve([])),
     playableRecording: vi.fn<Database['playableRecording']>(() => Promise.resolve(null)),

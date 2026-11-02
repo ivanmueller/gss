@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  transcriptLines,
+  transcriptText,
   callLogNotes,
   dialablePhone,
   displayPhone,
@@ -66,5 +68,45 @@ describe('placeCallSchema', () => {
     expect(
       placeCallSchema.safeParse({ counterpartyId, contactId: null, phone: '+14035550100' }).success,
     ).toBe(false);
+  });
+});
+
+describe('transcriptLines', () => {
+  it('maps the first channel to the caller and the second to the counterparty, oldest first', () => {
+    expect(
+      transcriptLines([
+        { start: 3, text: 'Two loads.', channel: 1 },
+        { start: 0.5, text: ' Morning   Pat. ', channel: 0 },
+        { start: 4, text: 'At the posted price.', channel: 1 },
+        { start: 6, text: 'Deal.', channel: 0 },
+        { start: 7, text: '   ', channel: 1 },
+        { start: 8, text: 'Hmm.', channel: 2 },
+        { start: -1, text: 'Earlier.', channel: null },
+      ]),
+    ).toEqual([
+      { side: null, start: 0, text: 'Earlier.' },
+      { side: 'caller', start: 0.5, text: 'Morning Pat.' },
+      { side: 'counterparty', start: 3, text: 'Two loads. At the posted price.' },
+      { side: 'caller', start: 6, text: 'Deal.' },
+      { side: null, start: 8, text: 'Hmm.' },
+    ]);
+  });
+
+  it('gives no lines for silence', () => {
+    expect(transcriptLines([])).toEqual([]);
+    expect(transcriptLines([{ start: 1, text: ' ', channel: 0 }])).toEqual([]);
+  });
+});
+
+describe('transcriptText', () => {
+  it('writes one line per turn with its side', () => {
+    expect(
+      transcriptText([
+        { side: 'caller', start: 0, text: 'Morning Pat.' },
+        { side: 'counterparty', start: 2, text: 'Two loads.' },
+        { side: null, start: 4, text: 'Bye.' },
+      ]),
+    ).toBe('Caller: Morning Pat.\nCounterparty: Two loads.\nUnknown: Bye.');
+    expect(transcriptText([])).toBe('');
   });
 });

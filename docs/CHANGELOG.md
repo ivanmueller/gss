@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-11-02 — The transcript split by side
+
+- `docs/DECISIONS.md`: the owner's choice of speech-to-text after the call, by side, with its cost; the channel mapping to check on the first real call.
+- `docs/DATA_MODEL.md`: migration `20261102080000_transcript_lines.sql`.
+- `docs/API.md`: the recordings' `lines`, `callerName`, `contactName` and `transcriptFailed`.
+- `README.md`: transcription by side every 2 minutes, with the audio deletion.
+
+## 2026-11-02 — Handoff record of #116
+
+- `docs/HANDOFF.md`: the transcript's reloads (ivanmueller/gss#116) with its CI and Deploy staging runs; the owner's next request.
+
 ## 2026-11-02 — Handoff record of #115
 
 - `docs/HANDOFF.md`: transcripts with 24-hour audio and the call's status line (ivanmueller/gss#115) with its CI and Deploy staging runs and Codex's reviews; the staging checklist.

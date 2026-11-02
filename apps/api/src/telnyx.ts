@@ -1,4 +1,4 @@
-import { dialablePhone } from '@grain/domain';
+import { dialablePhone, transcriptLines, type TranscriptLine } from '@grain/domain';
 
 // Telnyx, called only from the Worker (the owner's decisions of 2026-11-02, docs/DECISIONS.md).
 // The API key and the other settings are Worker secrets the owner adds in Cloudflare; none of
@@ -102,6 +102,11 @@ export interface TelnyxClient {
   recordingAudio: (recordingId: string) => Promise<Response | null>;
   /** Deletes a recording at Telnyx; one already gone is fine. */
   deleteRecording: (recordingId: string) => Promise<void>;
+  /**
+   * Transcribes a recording's two channels separately with Telnyx's speech-to-text (Deepgram
+   * Nova-3): the transcript's lines by side, or null when Telnyx no longer has the recording.
+   */
+  transcribeRecording: (recordingId: string) => Promise<TranscriptLine[] | null>;
 }
 
 export type TelnyxFactory = (env: TelnyxBindings) => TelnyxClient | null;
@@ -172,6 +177,23 @@ export const telnyxClient: TelnyxFactory = (env) => {
     return (await request('POST', path, body)).json();
   }
 
+  /** A recording's short-lived MP3 link from Telnyx, or null when Telnyx no longer has it. */
+  async function recordingUrl(recordingId: string): Promise<string | null> {
+    let response: Response;
+    try {
+      response = await request('GET', `/recordings/${encodeURIComponent(recordingId)}`);
+    } catch (error) {
+      if (error instanceof TelnyxError && error.status === 404) return null;
+      throw error;
+    }
+    const body: unknown = await response.json();
+    const url =
+      typeof body === 'object' && body !== null
+        ? (body as { data?: { download_urls?: { mp3?: unknown } } }).data?.download_urls?.mp3
+        : undefined;
+    return typeof url === 'string' && url.startsWith('https://') ? url : null;
+  }
+
   const action = (callControlId: string, name: string, body: Record<string, unknown>) =>
     post(`/calls/${encodeURIComponent(callControlId)}/actions/${name}`, body);
 
@@ -225,9 +247,8 @@ export const telnyxClient: TelnyxFactory = (env) => {
         format: 'mp3',
         channels: 'dual',
         play_beep: false,
-        transcription: true,
-        transcription_engine: 'deepgram/nova-3',
-        transcription_language: 'en',
+        // Transcribed afterwards by side (transcribeRecording), not by Telnyx's recording
+        // transcription, which would be paid twice and gives one block of text.
         client_state: encodeClientState(clientState),
         command_id: commandId,
       });
@@ -247,23 +268,54 @@ export const telnyxClient: TelnyxFactory = (env) => {
       });
     },
     async recordingAudio(recordingId) {
-      let response: Response;
-      try {
-        response = await request('GET', `/recordings/${encodeURIComponent(recordingId)}`);
-      } catch (error) {
-        if (error instanceof TelnyxError && error.status === 404) return null;
-        throw error;
-      }
-      const body: unknown = await response.json();
-      const url =
-        typeof body === 'object' && body !== null
-          ? (body as { data?: { download_urls?: { mp3?: unknown } } }).data?.download_urls?.mp3
-          : undefined;
-      if (typeof url !== 'string' || !url.startsWith('https://')) return null;
+      const url = await recordingUrl(recordingId);
+      if (url === null) return null;
       // A short-lived link Telnyx gives for the file; fetched here, never sent to the browser.
       const audio = await fetch(url, { signal: AbortSignal.timeout(AUDIO_TIMEOUT_MS) });
       if (!audio.ok) throw new TelnyxError(audio.status, 'audio_download');
       return audio;
+    },
+    async transcribeRecording(recordingId) {
+      const url = await recordingUrl(recordingId);
+      if (url === null) return null;
+      const form = new FormData();
+      form.set('model', 'deepgram/nova-3');
+      form.set('file_url', url);
+      form.set('language', 'en');
+      form.set('response_format', 'verbose_json');
+      // Each channel on its own (billed for both), punctuated, numbers and prices written out.
+      form.set(
+        'model_config',
+        JSON.stringify({ multichannel: true, punctuate: true, smart_format: true }),
+      );
+      const response = await fetch(`${API}/ai/audio/transcriptions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
+        body: form,
+        signal: AbortSignal.timeout(AUDIO_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new TelnyxError(response.status, await errorCodes(response));
+      const body: unknown = await response.json();
+      const segments =
+        typeof body === 'object' && body !== null
+          ? (body as { segments?: unknown }).segments
+          : null;
+      if (!Array.isArray(segments)) {
+        const text =
+          typeof body === 'object' && body !== null ? (body as { text?: unknown }).text : null;
+        return typeof text === 'string' && text.trim() !== ''
+          ? [{ side: null, start: 0, text: text.trim() }]
+          : [];
+      }
+      return transcriptLines(
+        segments.flatMap((segment: unknown) => {
+          if (typeof segment !== 'object' || segment === null) return [];
+          const { start, text, channel } = segment as Record<string, unknown>;
+          return typeof start === 'number' && typeof text === 'string'
+            ? [{ start, text, channel: typeof channel === 'number' ? channel : null }]
+            : [];
+        }),
+      );
     },
     async deleteRecording(recordingId) {
       try {

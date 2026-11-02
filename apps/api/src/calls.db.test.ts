@@ -1049,4 +1049,46 @@ describe("recordings and transcripts (owner's request, 2026-11-02)", () => {
       transcript: 'We can do November at the posted price.',
     });
   });
+
+  it('transcribes a recording by side once, and names both sides for the team', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    const recording = `rec-lines-${callId}`;
+    await db.keepCallRecording(
+      callId,
+      recording,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    expect(await db.claimRecordingsToTranscribe(50)).toContain(recording);
+    expect(await db.claimRecordingsToTranscribe(50)).not.toContain(recording);
+    const lines = [
+      { side: 'caller' as const, start: 0.4, text: 'Morning Pat.' },
+      { side: 'counterparty' as const, start: 2.1, text: 'Two loads at the posted price.' },
+    ];
+    await db.keepTranscriptLines(recording, lines, 'Caller: Morning Pat.');
+    await db.keepTranscriptLines(recording, [], 'A second one is not kept.');
+    const [listed] = await db
+      .listRecordings(as(users.victor), counterparties.buyer)
+      .then((rows) => rows.filter((row) => row.callId === callId));
+    expect(listed).toMatchObject({
+      lines,
+      transcript: 'Caller: Morning Pat.',
+      contactName: 'Pat Buyer',
+      transcriptFailed: false,
+    });
+    expect(listed?.callerName).not.toBe('');
+
+    // One whose attempts ran out shows that no transcript will come.
+    const failed = `rec-failed-${callId}`;
+    await db.keepCallRecording(callId, failed, new Date().toISOString(), new Date().toISOString());
+    await admin`update app.call_recordings set transcribe_attempts = 5
+                where telnyx_recording_id = ${failed}`;
+    const [gaveUp] = await db
+      .listRecordings(as(users.victor), counterparties.buyer)
+      .then((rows) => rows.filter((row) => row.callId === callId && row.lines === null));
+    expect(gaveUp).toMatchObject({ transcript: null, transcriptFailed: true });
+  });
 });

@@ -1,4 +1,10 @@
-import { dialablePhone, displayPhone, placeCallSchema, savePhoneSchema } from '@grain/domain';
+import {
+  dialablePhone,
+  displayPhone,
+  placeCallSchema,
+  savePhoneSchema,
+  transcriptText,
+} from '@grain/domain';
 import { Hono } from 'hono';
 
 import type { CallEvent } from './call-steps';
@@ -470,20 +476,58 @@ async function sendCommands(
 }
 
 /**
- * Deletes at Telnyx the audio of recordings 24 hours after their call (the owner's request of
- * 2026-11-02); run by the Worker's hourly scheduled job. Their transcripts stay. A recording
- * Telnyx no longer has counts as deleted; one that cannot be deleted now is tried next hour.
+ * The scheduled job, every 2 minutes, that transcribes new recordings by side and deletes call
+ * audio 24 hours old (wrangler.jsonc, triggers). Kept here, not in the Worker's entry module,
+ * whose exports must all be handlers.
  */
+export const RECORDINGS_CRON = '*/2 * * * *';
+
+/** Recordings transcribed per run of the job. */
+const TRANSCRIBE_BATCH = 10;
+
 /**
- * The hourly scheduled job that deletes call audio 24 hours old (wrangler.jsonc, triggers). Kept
- * here, not in the Worker's entry module, whose exports must all be handlers.
+ * Transcribes by side the recordings that have no transcript yet (the owner's request of
+ * 2026-11-02): each is claimed, so two runs never transcribe one recording together; a failure
+ * is tried again after the claim lapses (10 minutes), up to 5 attempts.
  */
-export const RECORDINGS_CRON = '7 * * * *';
+export async function transcribeNewRecordings(
+  env: ApiEnv['Bindings'],
+  openDatabase: DatabaseFactory,
+  telnyx: TelnyxFactory = telnyxClient,
+) {
+  const client = telnyx(env);
+  const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
+  if (client === null || !url) return;
+  const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
+  try {
+    for (const recordingId of await db.claimRecordingsToTranscribe(TRANSCRIBE_BATCH)) {
+      try {
+        const lines = await client.transcribeRecording(recordingId);
+        // Telnyx no longer has the audio: tried again until the attempts run out.
+        if (lines === null) continue;
+        // A call where nothing was said keeps an empty transcript, so it is not tried again.
+        await db.keepTranscriptLines(recordingId, lines, transcriptText(lines));
+      } catch (error) {
+        console.error(
+          `Recording not transcribed: ${error instanceof TelnyxError ? `status=${String(error.status)} codes=${error.codes}` : failureSummary(error)}`,
+        );
+      }
+    }
+  } finally {
+    await db.close().catch(() => undefined);
+  }
+}
 
 /** Recordings deleted per batch, and batches per run (a backlog is worked through in one run). */
 const DELETE_BATCH = 100;
 const DELETE_BATCHES = 20;
 
+/**
+ * Deletes at Telnyx the audio of recordings 24 hours after their call (the owner's request of
+ * 2026-11-02); run by the Worker's scheduled job every 2 minutes. Their transcripts stay. A
+ * recording Telnyx no longer has counts as deleted; one that cannot be deleted now is tried on
+ * the next run.
+ */
 export async function deleteExpiredRecordings(
   env: ApiEnv['Bindings'],
   openDatabase: DatabaseFactory,
@@ -495,7 +539,7 @@ export async function deleteExpiredRecordings(
   const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
   try {
     let deleted = 0;
-    // Each recording is tried once per run; one Telnyx would not delete now waits for next hour.
+    // Each recording is tried once per run; one Telnyx would not delete now waits for the next run.
     const tried = new Set<string>();
     for (let batch = 0; batch < DELETE_BATCHES; batch += 1) {
       const due = (await db.recordingsToDelete(DELETE_BATCH + tried.size)).filter(

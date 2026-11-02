@@ -69,10 +69,68 @@ export interface CallRecordingView {
   callId: string;
   /** The contact log entry of the call, under which the transcript is shown. */
   contactLogEntryId: string | null;
-  /** Null until Telnyx's transcription arrives. */
+  /** Null until the transcript arrives. */
   transcript: string | null;
+  /** The transcript by side, oldest first; null for transcripts kept before it was split. */
+  lines: TranscriptLine[] | null;
+  /** Who placed the call, and the contact called: the names the lines are shown with. */
+  callerName: string;
+  contactName: string;
+  /** No transcript will come (the attempts ran out, or the audio was deleted first). */
+  transcriptFailed: boolean;
   /** Until when the audio can be played (UTC instant); null once deleted. */
   audioUntil: string | null;
+}
+
+/** Which side of a call said a line: the caller (GSS) or the counterparty; null when unknown. */
+export type TranscriptSide = 'caller' | 'counterparty';
+
+export interface TranscriptLine {
+  side: TranscriptSide | null;
+  /** Seconds from the start of the recording. */
+  start: number;
+  text: string;
+}
+
+/**
+ * Speech-to-text segments of a two-channel recording as the transcript's lines: the first
+ * channel is the caller's leg, the second the counterparty's; consecutive segments of the same
+ * side make one line; empty ones are left out; oldest first.
+ */
+export function transcriptLines(
+  segments: readonly { start: number; text: string; channel?: number | null }[],
+): TranscriptLine[] {
+  const sorted = segments
+    .filter((segment) => Number.isFinite(segment.start) && segment.text.trim() !== '')
+    .map((segment) => ({
+      side:
+        segment.channel === 0
+          ? ('caller' as const)
+          : segment.channel === 1
+            ? ('counterparty' as const)
+            : null,
+      start: Math.max(0, segment.start),
+      text: segment.text.trim().replace(/\s+/g, ' '),
+    }))
+    .sort((a, b) => a.start - b.start);
+  const lines: TranscriptLine[] = [];
+  for (const segment of sorted) {
+    const last = lines.at(-1);
+    // A side is never undefined, so there is no last line to join when there is none.
+    if (last?.side === segment.side) last.text = `${last.text} ${segment.text}`;
+    else lines.push({ ...segment });
+  }
+  return lines;
+}
+
+/** The plain transcript of the lines, one per turn: "Caller: …" and "Counterparty: …". */
+export function transcriptText(lines: readonly TranscriptLine[]): string {
+  return lines
+    .map(
+      (line) =>
+        `${line.side === 'caller' ? 'Caller' : line.side === 'counterparty' ? 'Counterparty' : 'Unknown'}: ${line.text}`,
+    )
+    .join('\n');
 }
 
 /** POST /api/v1/calls: the counterparty, and the contact called or null for its company phone. */

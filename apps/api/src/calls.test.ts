@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { deleteExpiredRecordings } from './calls';
+import { deleteExpiredRecordings, transcribeNewRecordings } from './calls';
 import { CLAIM_LEASE_SECONDS } from './calls-db';
 import {
   AUDIO_TIMEOUT_MS,
@@ -119,6 +119,7 @@ beforeEach(() => {
     recordingsOfLeg: vi.fn<TelnyxClient['recordingsOfLeg']>(() => Promise.resolve([])),
     recordingAudio: vi.fn<TelnyxClient['recordingAudio']>(() => Promise.resolve(null)),
     deleteRecording: vi.fn<TelnyxClient['deleteRecording']>(() => Promise.resolve()),
+    transcribeRecording: vi.fn<TelnyxClient['transcribeRecording']>(() => Promise.resolve(null)),
   };
   mockAuthServer(
     new Response(JSON.stringify({ id: USER_ID, email: 'tess@example.test' }), { status: 200 }),
@@ -843,7 +844,11 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
         id: RECORDING,
         callId: CALL,
         contactLogEntryId: null,
-        transcript: 'Hello.',
+        transcript: 'Caller: Hello.',
+        lines: [{ side: 'caller', start: 0.4, text: 'Hello.' }],
+        callerName: 'Tess Trader',
+        contactName: 'Pat Buyer',
+        transcriptFailed: false,
         audioUntil: '2026-11-03T16:07:12.000Z',
       },
     ]);
@@ -853,7 +858,9 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
       TELNYX_ENV,
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ recordings: [{ id: RECORDING }] });
+    expect(await response.json()).toMatchObject({
+      recordings: [{ id: RECORDING, lines: [{ side: 'caller' }], callerName: 'Tess Trader' }],
+    });
     expect(db.listRecordings).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID }),
       COUNTERPARTY,
@@ -938,14 +945,52 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
       .mockRejectedValueOnce(new TelnyxError(503, 'none'));
     await deleteExpiredRecordings(TELNYX_ENV, openDatabase, () => telnyx);
     expect(telnyx.deleteRecording).toHaveBeenCalledTimes(2);
-    // The one Telnyx could not delete now is tried again next hour.
+    // The one Telnyx could not delete now is tried again on the next run.
     expect(db.markRecordingDeleted).toHaveBeenCalledTimes(1);
     expect(db.markRecordingDeleted).toHaveBeenCalledWith('synthetic-rec-1');
+  });
+
+  it('transcribes new recordings by side, keeping their lines and plain text', async () => {
+    db.claimRecordingsToTranscribe.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
+    telnyx.transcribeRecording
+      .mockResolvedValueOnce([
+        { side: 'caller', start: 0.4, text: 'Morning Pat.' },
+        { side: 'counterparty', start: 2.1, text: 'Two loads at the posted price.' },
+      ])
+      .mockRejectedValueOnce(new TelnyxError(503, '90001'));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(db.claimRecordingsToTranscribe).toHaveBeenCalledWith(10);
+    expect(db.keepTranscriptLines).toHaveBeenCalledTimes(1);
+    expect(db.keepTranscriptLines).toHaveBeenCalledWith(
+      'synthetic-rec-1',
+      [
+        { side: 'caller', start: 0.4, text: 'Morning Pat.' },
+        { side: 'counterparty', start: 2.1, text: 'Two loads at the posted price.' },
+      ],
+      'Caller: Morning Pat.\nCounterparty: Two loads at the posted price.',
+    );
+    // The one that failed is tried again once its claim lapses; only the status is logged.
+    expect(errors).toHaveBeenCalledWith('Recording not transcribed: status=503 codes=90001');
+    expect(db.close).toHaveBeenCalled();
+  });
+
+  it('keeps an empty transcript for a call where nothing was said, none when the audio is gone', async () => {
+    db.claimRecordingsToTranscribe.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
+    telnyx.transcribeRecording.mockResolvedValueOnce([]).mockResolvedValueOnce(null);
+    await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(db.keepTranscriptLines).toHaveBeenCalledTimes(1);
+    expect(db.keepTranscriptLines).toHaveBeenCalledWith('synthetic-rec-1', [], '');
+  });
+
+  it('transcribes nothing without the Telnyx settings', async () => {
+    await transcribeNewRecordings(ENV, openDatabase);
+    expect(db.claimRecordingsToTranscribe).not.toHaveBeenCalled();
   });
 });
 
 describe('the Telnyx client for recordings', () => {
-  it('records both sides with transcription, and finds, plays and deletes recordings', async () => {
+  it('records both sides, and finds, plays and deletes recordings', async () => {
     const fetchMock = vi.fn<typeof fetch>((input) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url.includes('/actions/record_start'))
@@ -969,9 +1014,9 @@ describe('the Telnyx client for recordings', () => {
       format: 'mp3',
       channels: 'dual',
       play_beep: false,
-      transcription: true,
       command_id: 'cmd-r',
     });
+    expect(JSON.parse(init?.body as string)).not.toHaveProperty('transcription');
     expect(await client?.recordingsOfLeg('leg 1')).toEqual(['synthetic-rec-1']);
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       'https://api.telnyx.com/v2/recordings?filter[call_leg_id]=leg%201',
@@ -979,5 +1024,67 @@ describe('the Telnyx client for recordings', () => {
     expect(await (await client?.recordingAudio('synthetic-rec-1'))?.text()).toBe('mp3');
     expect(await client?.recordingAudio('gone')).toBeNull();
     await expect(client?.deleteRecording('gone')).resolves.toBeUndefined();
+  });
+});
+
+describe('the Telnyx client for transcripts by side', () => {
+  function serve(transcription: Response) {
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/recordings/synthetic-rec-1')) {
+        return Promise.resolve(
+          Response.json({ data: { download_urls: { mp3: 'https://files.example.test/rec.mp3' } } }),
+        );
+      }
+      if (url.endsWith('/ai/audio/transcriptions')) return Promise.resolve(transcription.clone());
+      return Promise.resolve(Response.json({ errors: [{ code: '10005' }] }, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it("asks Deepgram for each channel separately, the caller's first", async () => {
+    const fetchMock = serve(
+      Response.json({
+        text: 'ignored',
+        segments: [
+          { start: 2.1, end: 4, text: ' Two loads ', channel: 1 },
+          { start: 0.4, end: 1.5, text: 'Morning Pat.', channel: 0 },
+          { start: 4.2, end: 5, text: 'at the posted price.', channel: 1 },
+          { start: 6, end: 7, text: '   ', channel: 0 },
+          { start: 'x', text: 'not a segment', channel: 0 },
+        ],
+      }),
+    );
+    const lines = await telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1');
+    expect(lines).toEqual([
+      { side: 'caller', start: 0.4, text: 'Morning Pat.' },
+      { side: 'counterparty', start: 2.1, text: 'Two loads at the posted price.' },
+    ]);
+    const [url, init] = fetchMock.mock.calls[1] ?? [];
+    expect(url).toBe('https://api.telnyx.com/v2/ai/audio/transcriptions');
+    expect(init?.method).toBe('POST');
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer KEY_synthetic_test_only');
+    const form = init?.body as FormData;
+    expect(form.get('model')).toBe('deepgram/nova-3');
+    expect(form.get('file_url')).toBe('https://files.example.test/rec.mp3');
+    expect(form.get('response_format')).toBe('verbose_json');
+    expect(JSON.parse(form.get('model_config') as string)).toMatchObject({ multichannel: true });
+  });
+
+  it('keeps the text as one line when there are no segments', async () => {
+    serve(Response.json({ text: ' Hello there. ' }));
+    expect(await telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1')).toEqual([
+      { side: null, start: 0, text: 'Hello there.' },
+    ]);
+  });
+
+  it('gives null when Telnyx no longer has the recording, and fails on an error', async () => {
+    serve(Response.json({ errors: [{ code: '90001' }] }, { status: 500 }));
+    const client = telnyxClient(TELNYX_ENV);
+    expect(await client?.transcribeRecording('gone')).toBeNull();
+    await expect(client?.transcribeRecording('synthetic-rec-1')).rejects.toBeInstanceOf(
+      TelnyxError,
+    );
   });
 });

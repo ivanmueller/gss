@@ -5,6 +5,7 @@ import {
   type CallRecordingView,
   type CallStatus,
   type CallView,
+  type TranscriptLine,
 } from '@grain/domain';
 import type postgres from 'postgres';
 
@@ -138,6 +139,14 @@ export interface CallsDatabase {
   ) => Promise<void>;
   /** Keeps the transcript of a call's recording (the first one Telnyx sends). */
   keepCallTranscript: (callId: string, recordingId: string, transcript: string) => Promise<void>;
+  /** Claims up to `most` recordings to transcribe by side now (app.claim_recordings_to_transcribe). */
+  claimRecordingsToTranscribe: (most: number) => Promise<string[]>;
+  /** Keeps a recording's transcript by side (the first one kept). */
+  keepTranscriptLines: (
+    recordingId: string,
+    lines: TranscriptLine[],
+    words: string,
+  ) => Promise<void>;
   /** Telnyx ids of the recordings whose audio is due to be deleted (24 hours after the call). */
   recordingsToDelete: (most: number) => Promise<string[]>;
   markRecordingDeleted: (recordingId: string) => Promise<void>;
@@ -383,6 +392,17 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
       await sql`select app.keep_call_transcript(${callId}, ${recordingId}, ${transcript})`;
     },
 
+    async claimRecordingsToTranscribe(most) {
+      const rows = await sql<{ telnyx_recording_id: string }[]>`
+        select telnyx_recording_id from app.claim_recordings_to_transcribe(${most})`;
+      return rows.map((row) => row.telnyx_recording_id);
+    },
+
+    async keepTranscriptLines(recordingId, lines, words) {
+      await sql`select app.keep_call_transcript_lines(${recordingId},
+                                                      ${sql.json(lines.map((line) => ({ ...line })))}::jsonb, ${words})`;
+    },
+
     async recordingsToDelete(most) {
       const rows = await sql<{ telnyx_recording_id: string }[]>`
         select telnyx_recording_id from app.recordings_to_delete(${most})`;
@@ -401,10 +421,17 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
             call_id: string;
             contact_log_entry_id: string | null;
             transcript: string | null;
+            transcript_lines: TranscriptLine[] | null;
+            placed_by_name: string;
+            contact_name: string;
+            failed: boolean;
             audio_until: Date | null;
           }[]
         >`
-          select r.id, r.call_id, c.contact_log_entry_id, r.transcript,
+          select r.id, r.call_id, c.contact_log_entry_id, r.transcript, r.transcript_lines,
+                 c.placed_by_name, c.contact_name,
+                 r.transcript is null
+                   and (r.transcribe_attempts >= 5 or r.audio_deleted_at is not null) as failed,
                  case when r.audio_deleted_at is null and app.recording_audio_until(r) > now()
                       then app.recording_audio_until(r) end as audio_until
           from app.call_recordings r join app.calls c on c.id = r.call_id
@@ -416,6 +443,10 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           callId: row.call_id,
           contactLogEntryId: row.contact_log_entry_id,
           transcript: row.transcript,
+          lines: row.transcript_lines,
+          callerName: row.placed_by_name,
+          contactName: row.contact_name,
+          transcriptFailed: row.failed,
           audioUntil: row.audio_until?.toISOString() ?? null,
         }));
       });
