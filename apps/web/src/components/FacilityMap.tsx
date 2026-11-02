@@ -27,17 +27,13 @@ const START: [number, number, number, number] = [-120, 42, -88, 57];
 const SOURCE = 'facilities';
 const PINS = 'facilities';
 const SELECTED = 'facilities-selected';
-// A carrier's lanes (owner's request, 2026-11-01): shaded places and a line per lane.
+// A carrier's lanes (owner's request, 2026-11-01): the places it runs between, shaded.
 const AREAS = 'lane-areas';
-const LINES = 'lane-lines';
 const AREA_FILL = 'lane-areas-fill';
 const AREA_OUTLINE = 'lane-areas-outline';
 const AREA_OUTLINE_QUOTED = 'lane-areas-outline-quoted';
-const LANE_LINE = 'lane-lines-entered';
-const LANE_LINE_QUOTED = 'lane-lines-quoted';
 const EMPTY: LaneAreas = {
   regions: { type: 'FeatureCollection', features: [] },
-  lines: { type: 'FeatureCollection', features: [] },
 };
 
 export interface FacilityMapProps {
@@ -66,7 +62,7 @@ export interface FacilityMapProps {
   fitTo?: MapBounds | null;
   /**
    * A carrier's lanes: places shaded darker where lanes start, lighter where they end, and
-   * outlined with dashes where only its freight rates run; a line for each lane.
+   * outlined with dashes where only its freight rates run (no lines between them, 2026-11-02).
    */
   areas?: LaneAreas | null;
   /** The visible box after every move; null when none of it is on the map. */
@@ -107,11 +103,11 @@ function hideClutter(map: mapboxgl.Map) {
   }
 }
 
-/** Lane areas and lines take the colour of carriers' pins. */
+/** Lane areas take the colour of carriers' pins. */
 function paintAreas(map: mapboxgl.Map, colours: MapColours) {
   if (!map.getLayer(AREA_FILL)) return;
   map.setPaintProperty(AREA_FILL, 'fill-color', colours.mixed);
-  for (const layer of [AREA_OUTLINE, AREA_OUTLINE_QUOTED, LANE_LINE, LANE_LINE_QUOTED]) {
+  for (const layer of [AREA_OUTLINE, AREA_OUTLINE_QUOTED]) {
     map.setPaintProperty(layer, 'line-color', colours.mixed);
   }
 }
@@ -122,7 +118,6 @@ function addAreaLayers(map: mapboxgl.Map, areas: LaneAreas) {
   const quoted: mapboxgl.FilterSpecification = ['==', ['get', 'role'], 'quoted'];
   const entered: mapboxgl.FilterSpecification = ['!=', ['get', 'role'], 'quoted'];
   map.addSource(AREAS, { type: 'geojson', data: areas.regions });
-  map.addSource(LINES, { type: 'geojson', data: areas.lines });
   // Under the pins, whenever they were added.
   const below = map.getLayer(SELECTED) ? SELECTED : undefined;
   const addLayer = (layer: mapboxgl.LayerSpecification) => {
@@ -151,21 +146,6 @@ function addAreaLayers(map: mapboxgl.Map, areas: LaneAreas) {
     source: AREAS,
     filter: quoted,
     paint: { 'line-color': colours.mixed, 'line-width': 1.5, 'line-dasharray': [2, 2] },
-  });
-  addLayer({
-    id: LANE_LINE,
-    type: 'line',
-    source: LINES,
-    filter: ['!', ['get', 'quoted']],
-    layout: { 'line-cap': 'round' },
-    paint: { 'line-color': colours.mixed, 'line-width': 2.5 },
-  });
-  addLayer({
-    id: LANE_LINE_QUOTED,
-    type: 'line',
-    source: LINES,
-    filter: ['get', 'quoted'],
-    paint: { 'line-color': colours.mixed, 'line-width': 2, 'line-dasharray': [2, 2] },
   });
 }
 
@@ -319,7 +299,6 @@ export default function FacilityMap(props: FacilityMapProps) {
     }
     const areas = props.areas ?? EMPTY;
     instance.getSource<GeoJSONSource>(AREAS)?.setData(areas.regions);
-    instance.getSource<GeoJSONSource>(LINES)?.setData(areas.lines);
   }, [props.areas]);
 
   // Compared as text, so a new array with the same bounds does not move the map.

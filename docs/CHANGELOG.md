@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — No lines on the lanes map
+
+- `docs/DECISIONS.md`, `docs/PRODUCT.md`: the lanes map shades places only.
+
 ## 2026-11-02 — Codex's review of the carrier import
 
 - `docs/DECISIONS.md`: the four findings on `08a3957` and their fixes.
