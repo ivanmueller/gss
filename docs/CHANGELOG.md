@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #109
+
+- `docs/HANDOFF.md`: Codex's re-review of the Telnyx calls fixed (ivanmueller/gss#109) with its CI and Deploy staging runs; Codex's three findings on `d64168a`; the staging checklist.
+
 ## 2026-11-02 — Codex's third review of the Telnyx calls
 
 - `docs/DECISIONS.md`: the three findings on `d64168a` and their fixes.
