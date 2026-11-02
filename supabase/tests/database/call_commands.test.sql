@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(30);
+select plan(31);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000044aa', 'tom@example.test', '{"first_name": "Tom", "last_name": "Trader"}'),
@@ -205,9 +205,20 @@ select throws_ok(
 );
 -- Their answer eight minutes ago, received late.
 select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
-  insert into app.call_events (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at)
+  insert into app.call_events (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at,
+                               call_control_id)
   values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000ca11b',
-          'synthetic-answer-b', 'call.answered', 'them', now() - interval '8 minutes')$$);
+          'synthetic-answer-y', 'call.answered', 'them', now() - interval '8 minutes', 'v3:other')$$);
+select throws_ok(
+  $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+    'update app.calls set outcome = ''talked'', connected_at = now() - interval ''8 minutes'' where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,
+  '23514', null, 'not with an answer from another leg (third review, 3)'
+);
+select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
+  insert into app.call_events (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at,
+                               call_control_id)
+  values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000ca11b',
+          'synthetic-answer-b', 'call.answered', 'them', now() - interval '8 minutes', 'v3:them')$$);
 select throws_ok(
   $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
     'update app.calls set outcome = ''talked'', connected_at = now() - interval ''7 minutes'' where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,

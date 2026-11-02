@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's third review of the Telnyx calls
+
+- `docs/DECISIONS.md`: the three findings on `d64168a` and their fixes.
+- `docs/DATA_MODEL.md`: migration `20261102040000_call_event_legs.sql`.
+
 ## 2026-11-02 — Codex's re-review of the Telnyx calls
 
 - `docs/DECISIONS.md`: the six findings on `faa7813` and their fixes.
