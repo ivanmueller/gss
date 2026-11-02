@@ -153,8 +153,8 @@ export function fakeDatabase(): Mocked<Database> {
     applyCallEvent: vi.fn<Database['applyCallEvent']>(() =>
       Promise.resolve({ status: 'not_found' }),
     ),
-    claimCommand: vi.fn<Database['claimCommand']>(() => Promise.resolve(null)),
-    finishCommand: vi.fn<Database['finishCommand']>(() => Promise.resolve({ hangUp: null })),
+    claimCommand: vi.fn<Database['claimCommand']>(() => Promise.resolve({ status: 'skipped' })),
+    finishCommand: vi.fn<Database['finishCommand']>(() => Promise.resolve({ followUp: null })),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
   return db;

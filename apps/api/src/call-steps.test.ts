@@ -193,14 +193,21 @@ describe('nextCallStep after the call ended (events out of order)', () => {
       changes: { outcome: 'talked', connectedAt: '2026-11-02T16:01:00.000Z' },
       commands: [{ kind: 'hang_up', callControlId: THEM }],
     });
-    expect(
-      nextCallStep(ended({ outcome: 'cancelled', counterpartyCallControlId: null }), answered)
-        .changes,
-    ).toEqual({
+    expect(nextCallStep(ended({ outcome: 'cancelled' }), answered).changes).toEqual({
       outcome: 'talked',
       connectedAt: '2026-11-02T16:01:00.000Z',
-      counterpartyCallControlId: THEM,
     });
+    // Codex's re-review of ivanmueller/gss#108, finding 6: never for a call whose counterparty
+    // was not dialed, nor from a leg the call does not know.
+    expect(nextCallStep(ended({ outcome: 'you_missed' }), answered).changes).toEqual({});
+    expect(nextCallStep(ended({ outcome: 'not_confirmed' }), answered).changes).toEqual({});
+    expect(nextCallStep(ended({ counterpartyCallControlId: null }), answered)).toEqual({
+      changes: {},
+      commands: [{ kind: 'hang_up', callControlId: THEM }],
+    });
+    expect(
+      nextCallStep(ended({ counterpartyCallControlId: 'v3:other' }), answered).changes,
+    ).toEqual({});
   });
 
   it('hangs up a leg that answers or starts after the end', () => {

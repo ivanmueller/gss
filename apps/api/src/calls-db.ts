@@ -46,8 +46,9 @@ export type CallEventResult =
   /** The event was kept and applied; its commands are pending. */
   | { status: 'applied'; commands: PendingCommand[] }
   /**
-   * Telnyx sent this event before: nothing is applied again, but its commands that never got
-   * to Telnyx are still pending and are sent again.
+   * Telnyx sent this event before: nothing is applied again, but its commands not finished yet
+   * (pending, or claimed by a delivery that may have died) are given back, to be sent or waited
+   * for (claimCommand says which).
    */
   | { status: 'duplicate'; commands: PendingCommand[] }
   | { status: 'not_found' };
@@ -55,7 +56,19 @@ export type CallEventResult =
 /** A command claimed for sending, with the number to dial for dial_them. */
 export interface ClaimedCommand extends PendingCommand {
   counterpartyPhone: string;
+  /** Which claim this is; only this claim's completion counts (Codex's re-review, 1). */
+  attempt: number;
 }
+
+export type ClaimResult =
+  | { status: 'claimed'; command: ClaimedCommand }
+  /**
+   * Another delivery claimed it moments ago and has not finished: the event must be delivered
+   * again until that claim is resolved or has lapsed (Codex's re-review, 2).
+   */
+  | { status: 'busy' }
+  /** Finished, cancelled, or no longer wanted by the call (then cancelled). */
+  | { status: 'skipped' };
 
 /** How sending a command went. */
 export type CommandOutcome =
@@ -105,26 +118,25 @@ export interface CallsDatabase {
     event: CallEvent,
   ) => Promise<CallEventResult>;
   /**
-   * Claims a pending command for sending, under the call's lock, if the call still wants it:
-   * asking for 1 while confirming, dialing them while calling them with no leg to them yet;
-   * hang-ups always. A command the call no longer wants is cancelled and null returned.
+   * Claims a pending command (or one whose claim has lapsed) for sending, under the call's lock,
+   * if the call still wants it: asking for 1 while confirming, dialing them while calling them
+   * with no leg to them yet; hang-ups always. A command the call no longer wants is cancelled.
    */
-  claimCommand: (
-    ctx: RequestContext,
-    callId: string,
-    commandId: string,
-  ) => Promise<ClaimedCommand | null>;
+  claimCommand: (ctx: RequestContext, callId: string, commandId: string) => Promise<ClaimResult>;
   /**
-   * Records how sending went. Returns a leg to hang up: the new leg of a dial whose call ended
-   * meanwhile, or the caller's leg when asking for 1 or dialing them was refused (the call then
-   * ends as failed).
+   * Records how sending went, for the given claim only: a completion of an older claim never
+   * changes the command (Codex's re-review, 1). Returns a hang-up the outcome calls for, kept as
+   * a pending command of the same event (Codex's re-review, 3): the new leg of a dial whose call
+   * ended meanwhile, or the caller's leg when asking for 1 or dialing them was refused (the call
+   * then ends as failed).
    */
   finishCommand: (
     ctx: RequestContext,
     callId: string,
     commandId: string,
+    attempt: number,
     outcome: CommandOutcome,
-  ) => Promise<{ hangUp: string | null }>;
+  ) => Promise<{ followUp: PendingCommand | null }>;
 }
 
 type AsUser = <T>(
@@ -176,7 +188,7 @@ const RINGING_WINDOW = '15 minutes';
 const CONNECTED_WINDOW = '4 hours 15 minutes';
 
 /** A claim older than this is taken again (the Worker that claimed it did not finish). */
-const STALE_CLAIM = '1 minute';
+const STALE_CLAIM = '30 seconds';
 
 interface CommandRow {
   id: string;
@@ -337,8 +349,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           const unsent = await tx<CommandRow[]>`
             select id, kind, call_control_id from app.call_commands
             where telnyx_event_id = ${telnyxEventId} and call_id = ${callId}
-              and (status = 'pending'
-                   or (status = 'sending' and claimed_at < now() - ${STALE_CLAIM}::interval))
+              and status in ('pending', 'sending')
             order by created_at, id`;
           return { status: 'duplicate', commands: unsent.map(toPending) };
         }
@@ -396,7 +407,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
     },
 
     claimCommand(ctx, callId, commandId) {
-      return asUser(ctx, async (tx): Promise<ClaimedCommand | null> => {
+      return asUser(ctx, async (tx): Promise<ClaimResult> => {
         const [call] = await tx<
           {
             status: CallStatus;
@@ -406,14 +417,18 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         >`
           select status::text as status, counterparty_call_control_id, counterparty_phone
           from app.calls where id = ${callId} for update`;
-        if (!call) return null;
-        const [command] = await tx<(CommandRow & { claimable: boolean })[]>`
-          select id, kind, call_control_id,
-                 (status = 'pending'
-                  or (status = 'sending' and claimed_at < now() - ${STALE_CLAIM}::interval))
-                   as claimable
+        if (!call) return { status: 'skipped' };
+        const [command] = await tx<
+          (CommandRow & { status: string; attempts: number; lapsed: boolean })[]
+        >`
+          select id, kind, call_control_id, status, attempts,
+                 coalesce(claimed_at < now() - ${STALE_CLAIM}::interval, true) as lapsed
           from app.call_commands where id = ${commandId} and call_id = ${callId}`;
-        if (!command?.claimable) return null;
+        if (!command) return { status: 'skipped' };
+        if (command.status === 'sending' && !command.lapsed) return { status: 'busy' };
+        if (command.status !== 'pending' && command.status !== 'sending') {
+          return { status: 'skipped' };
+        }
         const wanted =
           command.kind === 'hang_up' ||
           (command.kind === 'confirm' && call.status === 'confirming') ||
@@ -422,48 +437,87 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
             call.counterparty_call_control_id === null);
         if (!wanted) {
           await tx`update app.call_commands set status = 'cancelled' where id = ${commandId}`;
-          return null;
+          return { status: 'skipped' };
         }
+        const attempt = command.attempts + 1;
         await tx`
           update app.call_commands
-          set status = 'sending', attempts = attempts + 1, claimed_at = now()
+          set status = 'sending', attempts = ${attempt}, claimed_at = now()
           where id = ${commandId}`;
-        return { ...toPending(command), counterpartyPhone: call.counterparty_phone };
+        return {
+          status: 'claimed',
+          command: { ...toPending(command), counterpartyPhone: call.counterparty_phone, attempt },
+        };
       });
     },
 
-    finishCommand(ctx, callId, commandId, outcome) {
-      return asUser(ctx, async (tx): Promise<{ hangUp: string | null }> => {
-        const [call] = await tx<{ status: CallStatus }[]>`
-          select status::text as status from app.calls where id = ${callId} for update`;
-        const [command] = await tx<(CommandRow & { status: string })[]>`
-          select id, kind, call_control_id, status from app.call_commands
-          where id = ${commandId} and call_id = ${callId}`;
-        if (!call || !command) return { hangUp: null };
+    finishCommand(ctx, callId, commandId, attempt, outcome) {
+      return asUser(ctx, async (tx): Promise<{ followUp: PendingCommand | null }> => {
+        const [call] = await tx<
+          { status: CallStatus; counterparty_call_control_id: string | null }[]
+        >`
+          select status::text as status, counterparty_call_control_id
+          from app.calls where id = ${callId} for update`;
+        const [command] = await tx<
+          (CommandRow & { status: string; attempts: number; telnyx_event_id: string })[]
+        >`
+          select id, kind, call_control_id, status, attempts, telnyx_event_id
+          from app.call_commands where id = ${commandId} and call_id = ${callId}`;
+        if (!call || !command) return { followUp: null };
         const legId = outcome.kind === 'done' ? (outcome.legId ?? null) : null;
-        if (command.status !== 'sending') {
-          // Cancelled while it was being sent: a leg it made is not wanted.
-          return { hangUp: legId };
+        const ours = command.status === 'sending' && command.attempts === attempt;
+        // A second leg to them, when the call already holds a different one, is not wanted.
+        const otherLeg = (leg: string) =>
+          call.counterparty_call_control_id !== null && call.counterparty_call_control_id !== leg;
+
+        // A hang-up the outcome calls for, kept as a pending command of the same event, unless
+        // one for that leg is already kept (then given back while still pending).
+        const hangUp = async (leg: string): Promise<{ followUp: PendingCommand | null }> => {
+          const [kept] = await tx<(CommandRow & { status: string })[]>`
+            select id, kind, call_control_id, status from app.call_commands
+            where call_id = ${callId} and kind = 'hang_up' and call_control_id = ${leg}
+              and status <> 'failed'
+            order by created_at limit 1`;
+          if (kept) return { followUp: kept.status === 'pending' ? toPending(kept) : null };
+          const [row] = await tx<CommandRow[]>`
+            insert into app.call_commands
+              (organization_id, call_id, telnyx_event_id, kind, call_control_id)
+            select organization_id, ${callId}, ${command.telnyx_event_id}, 'hang_up', ${leg}
+            from app.calls where id = ${callId}
+            returning id, kind, call_control_id`;
+          return { followUp: row ? toPending(row) : null };
+        };
+
+        if (!ours) {
+          // An older claim, or a command finished or cancelled meanwhile: it is left as it is.
+          // A leg its dial made is kept when the call still runs, and hung up when it ended,
+          // unless it is the very leg the call already holds (a repeat of the same dial).
+          if (legId === null) return { followUp: null };
+          if (call.status === 'ended' || otherLeg(legId)) return hangUp(legId);
+          await tx`
+            update app.calls set counterparty_call_control_id = ${legId}
+            where id = ${callId} and counterparty_call_control_id is null`;
+          return { followUp: null };
         }
         if (outcome.kind === 'retry') {
           await tx`update app.call_commands set status = 'pending' where id = ${commandId}`;
-          return { hangUp: null };
+          return { followUp: null };
         }
         if (outcome.kind === 'failed') {
           await tx`update app.call_commands set status = 'failed' where id = ${commandId}`;
-          if (command.kind === 'hang_up') return { hangUp: null };
+          if (command.kind === 'hang_up') return { followUp: null };
           await tx`update app.calls
                    set status = 'ended', outcome = 'failed', ended_at = now()
                    where id = ${callId} and status not in ('ended', 'connected')`;
-          return { hangUp: command.call_control_id };
+          return hangUp(command.call_control_id);
         }
         await tx`update app.call_commands set status = 'done' where id = ${commandId}`;
-        if (legId === null) return { hangUp: null };
-        if (call.status === 'ended') return { hangUp: legId };
+        if (legId === null) return { followUp: null };
+        if (call.status === 'ended' || otherLeg(legId)) return hangUp(legId);
         await tx`
           update app.calls set counterparty_call_control_id = ${legId}
           where id = ${callId} and counterparty_call_control_id is null`;
-        return { hangUp: null };
+        return { followUp: null };
       });
     },
   };

@@ -109,26 +109,28 @@ export function nextCallStep(call: CallState, event: CallEvent): CallStep {
   return { changes: { ...ids, ...step.changes }, commands: step.commands };
 }
 
+/** How a call ended when its counterparty was dialed but, as far as was known, not reached. */
+const DIALED_THEM = new Set<CallOutcome>(['no_answer', 'busy', 'cancelled', 'failed']);
+
 /** A late event of an ended call. */
 function afterTheEnd(call: CallState, event: CallEvent): CallStep {
   if (event.type !== 'call.initiated' && event.type !== 'call.answered') return NOTHING;
   const leg = event.callControlId;
+  // Only a call whose counterparty was dialed, by the leg it knows (the database checks the
+  // same; Codex's re-review of ivanmueller/gss#108, finding 6).
   const lateAnswer =
     event.type === 'call.answered' &&
     event.leg === 'them' &&
-    call.outcome !== 'talked' &&
+    call.outcome !== null &&
+    DIALED_THEM.has(call.outcome) &&
+    call.counterpartyCallControlId !== null &&
+    leg === call.counterpartyCallControlId &&
     call.connectedAt === null &&
     call.endedAt !== null &&
     Date.parse(event.occurredAt) <= Date.parse(call.endedAt);
   if (lateAnswer) {
     return {
-      changes: {
-        outcome: 'talked',
-        connectedAt: event.occurredAt,
-        ...(call.counterpartyCallControlId === null && leg !== null
-          ? { counterpartyCallControlId: leg }
-          : {}),
-      },
+      changes: { outcome: 'talked', connectedAt: event.occurredAt },
       // Both legs should be gone already; hanging up one that is gone does no harm.
       commands: hangUp(leg),
     };

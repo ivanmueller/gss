@@ -240,11 +240,20 @@ const CALL_EVENTS = new Set([
   'call.hangup',
 ]);
 
+/** Some command of the event is not resolved yet: Telnyx must deliver the event again. */
+class DeliverAgain extends Error {
+  constructor() {
+    super('A command of this event is still being sent');
+    this.name = 'DeliverAgain';
+  }
+}
+
 /**
  * Sends the pending commands of an event, each claimed first so that only a command the call
- * still wants is sent (Codex's review of ivanmueller/gss#107). A command Telnyx refuses ends the
- * call as failed; when Telnyx cannot be reached, the command stays pending and the error is
- * thrown, so the webhook answers 500 and Telnyx sends the event again.
+ * still wants is sent (Codex's reviews of ivanmueller/gss#107 and #108). A command Telnyx refuses
+ * ends the call as failed. When Telnyx cannot be reached, or another delivery holds a claim not
+ * yet resolved, the command stays unfinished and the webhook answers 500, so that Telnyx
+ * delivers the event again. A hang-up an outcome calls for is kept as a command and sent here.
  */
 async function sendCommands(
   c: ApiContext,
@@ -254,9 +263,13 @@ async function sendCommands(
   callId: string,
   commands: PendingCommand[],
 ) {
-  for (const pending of commands) {
-    const command = await db.claimCommand(ctx, callId, pending.id);
-    if (command === null) continue;
+  const queue = [...commands];
+  let deliverAgain = false;
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    const claim = await db.claimCommand(ctx, callId, next.id);
+    if (claim.status === 'busy') deliverAgain = true;
+    if (claim.status !== 'claimed') continue;
+    const command = claim.command;
     let outcome: CommandOutcome;
     try {
       switch (command.kind) {
@@ -281,20 +294,17 @@ async function sendCommands(
       }
     } catch (error) {
       if (!(error instanceof TelnyxError)) {
-        await db.finishCommand(ctx, callId, command.id, { kind: 'retry' });
+        await db.finishCommand(ctx, callId, command.id, command.attempt, { kind: 'retry' });
         throw error;
       }
       // A leg already gone cannot be hung up; that is not a problem.
       if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
       outcome = { kind: 'failed' };
     }
-    const { hangUp } = await db.finishCommand(ctx, callId, command.id, outcome);
-    if (hangUp !== null) {
-      await client.hangUp(hangUp).catch((error: unknown) => {
-        if (!(error instanceof TelnyxError)) throw error;
-      });
-    }
+    const { followUp } = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
+    if (followUp !== null) queue.push(followUp);
   }
+  if (deliverAgain) throw new DeliverAgain();
 }
 
 /**
@@ -384,6 +394,12 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
       }
       return c.json({ received: true });
     } catch (error) {
+      if (error instanceof DeliverAgain) {
+        console.warn(
+          `Telnyx event in request ${c.get('requestId')}: a command is still being sent; asking for it again`,
+        );
+        return apiError(c, 503, 'COMMAND_IN_FLIGHT', 'Deliver this event again.');
+      }
       // Telnyx sends the event again; the event id keeps it from being applied twice.
       console.error(
         `Telnyx event not applied in request ${c.get('requestId')}: ${failureSummary(error)}`,
