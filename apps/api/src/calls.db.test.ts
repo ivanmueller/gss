@@ -948,7 +948,16 @@ describe("Codex's seventh review", () => {
           legId: 'v3:new-s',
         }),
       ).toEqual({ followUp: null, callerGone: true });
-      await db.keepStrayLeg(dial, 'v3:new-s');
+      // Two deliveries at the same moment keep it once.
+      const second = postgresDatabase(API_URL);
+      try {
+        await Promise.all([
+          db.keepStrayLeg(dial, 'v3:new-s'),
+          second.keepStrayLeg(dial, 'v3:new-s'),
+        ]);
+      } finally {
+        await second.close();
+      }
       await db.keepStrayLeg(dial, 'v3:new-s');
       expect(await db.callLegs(callId)).toContain('v3:new-s');
       const [kept] = await admin<{ n: number }[]>`
@@ -959,5 +968,20 @@ describe("Codex's seventh review", () => {
       await admin`update app.organization_members set status = 'active'
                   where organization_id = ${orgs.a} and user_id = ${users.tess}`;
     }
+  });
+});
+
+describe("Codex's eighth review", () => {
+  it('treats a command hidden by a suspension as the caller gone, so the returned leg is kept', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    // A command id the caller cannot see stands for the suspension between the two reads.
+    expect(
+      await db.finishCommand(as(users.tess), placed.callId, crypto.randomUUID(), 1, {
+        kind: 'done',
+        legId: 'v3:x',
+      }),
+    ).toEqual({ followUp: null, callerGone: true });
   });
 });

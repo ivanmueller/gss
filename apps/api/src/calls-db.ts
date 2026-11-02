@@ -530,9 +530,10 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         >`
           select id, kind, call_control_id, status, attempts, telnyx_event_id
           from app.call_commands where id = ${commandId} and call_id = ${callId}`;
-        // The caller can no longer see the call (suspended or removed).
-        if (!call) return { followUp: null, callerGone: true };
-        if (!command) return { followUp: null };
+        // The command was claimed by this delivery, so it exists: if either is hidden, the
+        // caller can no longer see the call (suspended or removed, even between these reads;
+        // Codex's eighth review).
+        if (!call || !command) return { followUp: null, callerGone: true };
         const legId = outcome.kind === 'done' ? (outcome.legId ?? null) : null;
         const ours = command.status === 'sending' && command.attempts === attempt;
         // A second leg to them, when the call already holds a different one, is not wanted.

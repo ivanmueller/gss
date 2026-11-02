@@ -17,6 +17,11 @@ begin
   if leg is null or length(leg) not between 1 and 200 then
     raise exception 'a leg id is 1 to 200 characters' using errcode = 'invalid_parameter_value';
   end if;
+  -- One at a time per call, so that two deliveries keeping the same leg add it once (Codex's
+  -- eighth review).
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    'app.call_commands:' || coalesce((select m.call_id::text from app.call_commands m
+                                       where m.id = command), ''), 0));
   insert into app.call_commands (organization_id, call_id, telnyx_event_id, kind, call_control_id)
   select m.organization_id, m.call_id, m.telnyx_event_id, 'hang_up', leg
     from app.call_commands m
