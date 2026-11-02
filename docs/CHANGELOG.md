@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — The call's status line goes after the call
+
+- `docs/DECISIONS.md`: the line goes 5 seconds after the call ends.
+
 ## 2026-11-02 — Handoff record of #111
 
 - `docs/HANDOFF.md`: Codex's fifth to eighth reviews of the Telnyx calls fixed (ivanmueller/gss#111) with its CI and Deploy staging runs; the accepted P3; the owner's first real call; the staging checklist.

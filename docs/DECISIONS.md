@@ -458,3 +458,5 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **P3, fixed too:** whether the caller still sees the call and which of its commands are unsettled are read in one statement; claims are timed with the clock at the moment (`clock_timestamp()`), not the start of their transaction.
 
 **2026-11-02 — Codex's eighth review of the Telnyx calls (`aca48c4`): no P1 or P2.** Its two non-blocking P3 fixed with tests that failed without the fix: a command hidden by a suspension between `finishCommand`'s two reads is taken as the caller gone (the command was claimed by the same delivery, so it exists), so the returned leg is kept; `app.keep_stray_leg` takes a per-call lock, so two deliveries keeping the same leg add it once.
+
+**2026-11-02 — The call's status line goes once the call has ended (owner's request, after the first real call).** The line above the counterparty's name that follows a call ("Calling your cell…", "Connected") shows how the call ended for 5 seconds, then goes by itself; a message that the call could not be placed stays until dismissed.

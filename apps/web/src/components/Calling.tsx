@@ -35,6 +35,8 @@ interface PhoneSetting {
 /** How often the page asks for a call's progress, and for how long at most. */
 const POLL_MS = 2000;
 const POLL_LIMIT_MS = 15 * 60 * 1000;
+/** How long the line of a call that has ended stays before it goes. */
+export const ENDED_LINE_MS = 5000;
 
 /** The person's own cell phone, which their calls ring first; only they see it. */
 export function CellPhoneDialog({
@@ -212,6 +214,20 @@ export function CallingProvider({
   const active = notice?.kind === 'call' ? notice : null;
   const callId = active?.call.id ?? null;
   const ended = active?.call.status === 'ended';
+
+  // Once the call has ended, its line stays a few seconds, then goes (the owner's request of
+  // 2026-11-02); a call that connected is in the contact history by then.
+  useEffect(() => {
+    if (callId === null || !ended) return;
+    const timer = setTimeout(() => {
+      setNotice((current) =>
+        current?.kind === 'call' && current.call.id === callId ? null : current,
+      );
+    }, ENDED_LINE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [callId, ended]);
 
   // Follows the call until it ends.
   useEffect(() => {

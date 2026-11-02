@@ -111,7 +111,14 @@ describe('CallButton', () => {
     ).toBeVisible();
     expect(onLogged).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: /Call Pat Buyer/ })).toBeEnabled();
-  }, 12_000);
+    // The line goes by itself a few seconds after the call ended.
+    await vi.waitFor(
+      () => {
+        expect(screen.queryByText(/call ended after/)).not.toBeInTheDocument();
+      },
+      { timeout: 7000 },
+    );
+  }, 20_000);
 
   it('says why a call did not connect', async () => {
     mockApi({
