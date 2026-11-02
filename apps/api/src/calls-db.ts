@@ -127,6 +127,12 @@ export interface CallsDatabase {
     event: CallEvent,
   ) => Promise<CallEventResult>;
   /**
+   * Every command of a call not settled yet (pending, or being sent), oldest first. A delivery
+   * is acknowledged only when there is none (Codex's fifth review): whatever event a command
+   * came from, the call's events keep coming back until all its commands are settled.
+   */
+  unsettledCommands: (ctx: RequestContext, callId: string) => Promise<PendingCommand[]>;
+  /**
    * Claims a pending command (or one whose claim has lapsed) for sending, under the call's lock,
    * if the call still wants it: asking for 1 while confirming, dialing them while calling them
    * with no leg to them yet; hang-ups always. A command the call no longer wants is cancelled.
@@ -395,10 +401,14 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
             where id = ${callId}`;
         }
         if (c.status === 'ended') {
-          // Nothing queued for the call happens once it has ended, but hanging up its legs.
+          // Nothing queued for the call happens once it has ended, but hanging up its legs. A
+          // command already on its way to Telnyx stays as it is until its result is known, so
+          // that its outcome (a leg to hang up, for one) is still followed up (Codex's fifth
+          // review, finding 2); a claim that lapses is then not taken over (the call no longer
+          // wants it) and its leg, if any, is hung up when its first event arrives.
           await tx`
             update app.call_commands set status = 'cancelled'
-            where call_id = ${callId} and kind <> 'hang_up' and status in ('pending', 'sending')`;
+            where call_id = ${callId} and kind <> 'hang_up' and status = 'pending'`;
         }
         const commands: PendingCommand[] = [];
         for (const command of step.commands) {
@@ -413,6 +423,16 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         }
         if (c.outcome === 'talked') await logCall(tx, callId);
         return { status: 'applied', commands };
+      });
+    },
+
+    unsettledCommands(ctx, callId) {
+      return asUser(ctx, async (tx) => {
+        const rows = await tx<CommandRow[]>`
+          select id, kind, call_control_id from app.call_commands
+          where call_id = ${callId} and status in ('pending', 'sending')
+          order by created_at, id`;
+        return rows.map(toPending);
       });
     },
 

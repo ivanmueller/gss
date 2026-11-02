@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's fifth review of the Telnyx calls
+
+- `docs/DECISIONS.md`: acknowledged only when every command of the call is settled; commands on their way never cancelled; temporary refusals retried.
+- `docs/API.md`: the same for `POST /api/v1/telnyx/voice`.
+
 ## 2026-11-02 — Handoff record of #109
 
 - `docs/HANDOFF.md`: Codex's re-review of the Telnyx calls fixed (ivanmueller/gss#109) with its CI and Deploy staging runs; Codex's three findings on `d64168a`; the staging checklist.

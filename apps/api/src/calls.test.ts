@@ -573,6 +573,8 @@ describe('POST /api/v1/telnyx/voice', () => {
     db.applyCallEvent.mockResolvedValue({ status: 'duplicate', commands: [DIAL] });
     db.claimCommand.mockResolvedValue(claimed(DIAL));
     db.finishCommand.mockResolvedValue({ followUp: null, unresolved: true });
+    // The renewed claim still holds the dial.
+    db.unsettledCommands.mockResolvedValue([DIAL]);
     telnyx.dial.mockRejectedValueOnce(new TelnyxError(422, '90046'));
     const response = await webhook(answered);
     expect(response.status).toBe(503);
@@ -581,9 +583,54 @@ describe('POST /api/v1/telnyx/voice', () => {
   it('asks for the event again while another delivery holds a claim (re-review, finding 2)', async () => {
     db.applyCallEvent.mockResolvedValue({ status: 'duplicate', commands: [DIAL] });
     db.claimCommand.mockResolvedValue({ status: 'busy' });
+    db.unsettledCommands.mockResolvedValue([DIAL]);
     const response = await webhook(answered);
     expect(response.status).toBe(503);
     expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it('is acknowledged only when every command of the call is settled (fifth review, 1 and 2)', async () => {
+    // This event's own commands are done, but a cleanup hang-up of the call, made by another
+    // delivery, is still being sent by it: the event comes again.
+    const CLEANUP = {
+      id: '00000000-0000-4000-8000-0000000c0d07',
+      kind: 'hang_up' as const,
+      callControlId: 'v3:stray',
+    };
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [] });
+    db.unsettledCommands.mockResolvedValue([CLEANUP]);
+    db.claimCommand.mockResolvedValue({ status: 'busy' });
+    const busy = await webhook(answered);
+    expect(busy.status).toBe(503);
+    expect(db.claimCommand).toHaveBeenCalledWith(expect.anything(), CALL, CLEANUP.id);
+
+    // Once that delivery's claim has lapsed, this delivery sends it and is acknowledged.
+    db.unsettledCommands.mockReset();
+    db.unsettledCommands.mockResolvedValueOnce([CLEANUP]).mockResolvedValueOnce([]);
+    db.claimCommand.mockResolvedValue(claimed(CLEANUP, 2));
+    const sent = await webhook(answered);
+    expect(sent.status).toBe(200);
+    expect(telnyx.hangUp).toHaveBeenCalledWith('v3:stray', CLEANUP.id);
+  });
+
+  it('keeps a hang-up pending when Telnyx refuses it for now (fifth review, 3)', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [HANG_UP] });
+    db.claimCommand.mockResolvedValue(claimed(HANG_UP));
+    for (const status of [503, 429, 500, 408]) {
+      telnyx.hangUp.mockRejectedValueOnce(new TelnyxError(status, 'none'));
+      const response = await webhook(answered);
+      expect(response.status).toBe(500);
+      expect(db.finishCommand).toHaveBeenLastCalledWith(expect.anything(), CALL, HANG_UP.id, 1, {
+        kind: 'retry',
+      });
+    }
+    // A leg already gone (422) is a final answer.
+    telnyx.hangUp.mockRejectedValueOnce(new TelnyxError(422, '90018'));
+    const gone = await webhook(answered);
+    expect(gone.status).toBe(200);
+    expect(db.finishCommand).toHaveBeenLastCalledWith(expect.anything(), CALL, HANG_UP.id, 1, {
+      kind: 'failed',
+    });
   });
 
   it('keeps a cleanup hang-up that could not reach Telnyx for the next delivery (re-review, finding 3)', async () => {

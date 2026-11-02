@@ -264,48 +264,67 @@ async function sendCommands(
   commands: PendingCommand[],
 ) {
   const queue = [...commands];
-  let deliverAgain = false;
-  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    const claim = await db.claimCommand(ctx, callId, next.id);
-    if (claim.status === 'busy') deliverAgain = true;
-    if (claim.status !== 'claimed') continue;
-    const command = claim.command;
-    let outcome: CommandOutcome;
-    try {
-      switch (command.kind) {
-        case 'confirm':
-          await client.confirm(command.callControlId, { call: callId, leg: 'you' }, command.id);
-          outcome = { kind: 'done' };
-          break;
-        case 'dial_them': {
-          const legId = await client.dial({
-            to: command.counterpartyPhone,
-            clientState: { call: callId, leg: 'them' },
-            timeoutSecs: COUNTERPARTY_RING_SECONDS,
-            bridgeTo: command.callControlId,
-          });
-          outcome = legId === null ? { kind: 'done' } : { kind: 'done', legId };
-          break;
+  // Each command is tried at most once per delivery.
+  const tried = new Set<string>();
+  for (;;) {
+    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+      if (tried.has(next.id)) continue;
+      tried.add(next.id);
+      const claim = await db.claimCommand(ctx, callId, next.id);
+      if (claim.status !== 'claimed') continue;
+      const command = claim.command;
+      let outcome: CommandOutcome;
+      try {
+        switch (command.kind) {
+          case 'confirm':
+            await client.confirm(command.callControlId, { call: callId, leg: 'you' }, command.id);
+            outcome = { kind: 'done' };
+            break;
+          case 'dial_them': {
+            const legId = await client.dial({
+              to: command.counterpartyPhone,
+              clientState: { call: callId, leg: 'them' },
+              timeoutSecs: COUNTERPARTY_RING_SECONDS,
+              bridgeTo: command.callControlId,
+            });
+            outcome = legId === null ? { kind: 'done' } : { kind: 'done', legId };
+            break;
+          }
+          case 'hang_up':
+            await client.hangUp(command.callControlId, command.id);
+            outcome = { kind: 'done' };
+            break;
         }
-        case 'hang_up':
-          await client.hangUp(command.callControlId, command.id);
-          outcome = { kind: 'done' };
-          break;
+      } catch (error) {
+        // Telnyx unreachable, or a temporary refusal (too many requests, a server error): the
+        // command stays pending and the event is delivered again (Codex's fifth review, 3).
+        if (!(error instanceof TelnyxError) || temporary(error)) {
+          await db.finishCommand(ctx, callId, command.id, command.attempt, { kind: 'retry' });
+          throw error;
+        }
+        // A leg already gone cannot be hung up; that is not a problem.
+        if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
+        outcome = { kind: 'failed' };
       }
-    } catch (error) {
-      if (!(error instanceof TelnyxError)) {
-        await db.finishCommand(ctx, callId, command.id, command.attempt, { kind: 'retry' });
-        throw error;
-      }
-      // A leg already gone cannot be hung up; that is not a problem.
-      if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
-      outcome = { kind: 'failed' };
+      const finished = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
+      if (finished.followUp !== null) queue.push(finished.followUp);
     }
-    const finished = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
-    if (finished.unresolved === true) deliverAgain = true;
-    if (finished.followUp !== null) queue.push(finished.followUp);
+    // Acknowledged only when every command of the call is settled: those not tried yet in this
+    // delivery (from another event or another Worker) are sent now; any still unsettled after
+    // that (being sent by another delivery) has the event delivered again.
+    const unsettled = await db.unsettledCommands(ctx, callId);
+    const untried = unsettled.filter((command) => !tried.has(command.id));
+    if (untried.length === 0) {
+      if (unsettled.length > 0) throw new DeliverAgain();
+      return;
+    }
+    queue.push(...untried);
   }
-  if (deliverAgain) throw new DeliverAgain();
+}
+
+/** A refusal Telnyx may not repeat: a timeout, too many requests, or a server error. */
+function temporary(error: TelnyxError): boolean {
+  return error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
 /**
