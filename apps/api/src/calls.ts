@@ -240,6 +240,38 @@ const CALL_EVENTS = new Set([
   'call.hangup',
 ]);
 
+/** The caller can no longer see the call (suspended or removed): it is ended at Telnyx. */
+class CallerGone extends Error {
+  constructor() {
+    super('The caller can no longer reach the call');
+    this.name = 'CallerGone';
+  }
+}
+
+/**
+ * Ends at Telnyx a call whose caller can no longer reach it (Codex's sixth review, finding 2):
+ * every leg it knows of, and the event's own, is hung up. A leg already gone is fine; when
+ * Telnyx cannot be reached or refuses for now, the error is thrown, so the event comes again.
+ */
+async function endAtTelnyx(
+  c: ApiContext,
+  db: Database,
+  client: TelnyxClient,
+  callId: string,
+  eventLeg: string | null,
+) {
+  console.warn(
+    `Telnyx event in request ${c.get('requestId')} for a call its caller can no longer reach: hanging up its legs`,
+  );
+  const legs = new Set(await db.callLegs(callId));
+  if (eventLeg !== null) legs.add(eventLeg);
+  for (const leg of legs) {
+    await client.hangUp(leg).catch((error: unknown) => {
+      if (!(error instanceof TelnyxError) || temporary(error)) throw error;
+    });
+  }
+}
+
 /** Some command of the event is not resolved yet: Telnyx must deliver the event again. */
 class DeliverAgain extends Error {
   constructor() {
@@ -264,48 +296,76 @@ async function sendCommands(
   commands: PendingCommand[],
 ) {
   const queue = [...commands];
-  let deliverAgain = false;
-  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    const claim = await db.claimCommand(ctx, callId, next.id);
-    if (claim.status === 'busy') deliverAgain = true;
-    if (claim.status !== 'claimed') continue;
-    const command = claim.command;
-    let outcome: CommandOutcome;
-    try {
-      switch (command.kind) {
-        case 'confirm':
-          await client.confirm(command.callControlId, { call: callId, leg: 'you' }, command.id);
-          outcome = { kind: 'done' };
-          break;
-        case 'dial_them': {
-          const legId = await client.dial({
-            to: command.counterpartyPhone,
-            clientState: { call: callId, leg: 'them' },
-            timeoutSecs: COUNTERPARTY_RING_SECONDS,
-            bridgeTo: command.callControlId,
-          });
-          outcome = legId === null ? { kind: 'done' } : { kind: 'done', legId };
-          break;
+  // Each command is tried at most once per delivery.
+  const tried = new Set<string>();
+  for (;;) {
+    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+      if (tried.has(next.id)) continue;
+      tried.add(next.id);
+      const claim = await db.claimCommand(ctx, callId, next.id);
+      if (claim.status !== 'claimed') continue;
+      const command = claim.command;
+      let outcome: CommandOutcome;
+      try {
+        switch (command.kind) {
+          case 'confirm':
+            await client.confirm(command.callControlId, { call: callId, leg: 'you' }, command.id);
+            outcome = { kind: 'done' };
+            break;
+          case 'dial_them': {
+            const legId = await client.dial({
+              to: command.counterpartyPhone,
+              clientState: { call: callId, leg: 'them' },
+              timeoutSecs: COUNTERPARTY_RING_SECONDS,
+              bridgeTo: command.callControlId,
+            });
+            outcome = legId === null ? { kind: 'done' } : { kind: 'done', legId };
+            break;
+          }
+          case 'hang_up':
+            await client.hangUp(command.callControlId, command.id);
+            outcome = { kind: 'done' };
+            break;
         }
-        case 'hang_up':
-          await client.hangUp(command.callControlId, command.id);
-          outcome = { kind: 'done' };
-          break;
+      } catch (error) {
+        // Telnyx unreachable, or a temporary refusal (too many requests, a server error): the
+        // command stays pending and the event is delivered again (Codex's fifth review, 3).
+        if (!(error instanceof TelnyxError) || temporary(error)) {
+          await db.finishCommand(ctx, callId, command.id, command.attempt, { kind: 'retry' });
+          throw error;
+        }
+        // A leg already gone cannot be hung up; that is not a problem.
+        if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
+        outcome = { kind: 'failed' };
       }
-    } catch (error) {
-      if (!(error instanceof TelnyxError)) {
-        await db.finishCommand(ctx, callId, command.id, command.attempt, { kind: 'retry' });
-        throw error;
+      const finished = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
+      if (finished.callerGone === true) {
+        // Suspended while Telnyx was dialing: the leg it returned is kept to be hung up with the
+        // call's others (Codex's seventh review).
+        if (outcome.kind === 'done' && outcome.legId !== undefined) {
+          await db.keepStrayLeg(command.id, outcome.legId);
+        }
+        throw new CallerGone();
       }
-      // A leg already gone cannot be hung up; that is not a problem.
-      if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
-      outcome = { kind: 'failed' };
+      if (finished.followUp !== null) queue.push(finished.followUp);
     }
-    const finished = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
-    if (finished.unresolved === true) deliverAgain = true;
-    if (finished.followUp !== null) queue.push(finished.followUp);
+    // Acknowledged only when every command of the call is settled: those not tried yet in this
+    // delivery (from another event or another Worker) are sent now; any still unsettled after
+    // that (being sent by another delivery) has the event delivered again.
+    const unsettled = await db.unsettledCommands(ctx, callId);
+    if (unsettled === null) throw new CallerGone();
+    const untried = unsettled.filter((command) => !tried.has(command.id));
+    if (untried.length === 0) {
+      if (unsettled.length > 0) throw new DeliverAgain();
+      return;
+    }
+    queue.push(...untried);
   }
-  if (deliverAgain) throw new DeliverAgain();
+}
+
+/** A refusal Telnyx may not repeat: a timeout, too many requests, or a server error. */
+function temporary(error: TelnyxError): boolean {
+  return error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500;
 }
 
 /**
@@ -390,8 +450,14 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
         hangupCause: text(event.payload, 'hangup_cause', 40),
       };
       const result = await db.applyCallEvent(ctx, state.call, event.id, callEvent);
-      if (result.status !== 'not_found') {
+      try {
+        // The call exists (app.call_placer found it), so not found means its caller can no
+        // longer see it.
+        if (result.status === 'not_found') throw new CallerGone();
         await sendCommands(c, db, ctx, client, state.call, result.commands);
+      } catch (error) {
+        if (!(error instanceof CallerGone)) throw error;
+        await endAtTelnyx(c, db, client, state.call, callControlId);
       }
       return c.json({ received: true });
     } catch (error) {

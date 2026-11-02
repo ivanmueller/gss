@@ -1,5 +1,25 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's seventh and eighth reviews of the Telnyx calls
+
+- `docs/DECISIONS.md`: the leg of a dial that came back after its caller was suspended, kept and hung up; the P3 of both reviews.
+- `docs/DATA_MODEL.md`: migration `20261102060000_keep_stray_leg.sql`.
+
+## 2026-11-02 — Codex's sixth review of the Telnyx calls
+
+- `docs/DECISIONS.md`: a 10-second limit on every Telnyx request; calls of a suspended caller ended at Telnyx.
+- `docs/DATA_MODEL.md`: migration `20261102050000_call_legs.sql`.
+- `docs/API.md`: the same for `POST /api/v1/telnyx/voice`.
+
+## 2026-11-02 — Handoff record of #110
+
+- `docs/HANDOFF.md`: Codex's third and fourth reviews of the Telnyx calls fixed (ivanmueller/gss#110) with its CI and Deploy staging runs; Codex's fifth review; the staging checklist.
+
+## 2026-11-02 — Codex's fifth review of the Telnyx calls
+
+- `docs/DECISIONS.md`: acknowledged only when every command of the call is settled; commands on their way never cancelled; temporary refusals retried.
+- `docs/API.md`: the same for `POST /api/v1/telnyx/voice`.
+
 ## 2026-11-02 — Handoff record of #109
 
 - `docs/HANDOFF.md`: Codex's re-review of the Telnyx calls fixed (ivanmueller/gss#109) with its CI and Deploy staging runs; Codex's three findings on `d64168a`; the staging checklist.

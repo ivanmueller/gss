@@ -804,3 +804,184 @@ describe("Codex's fourth review", () => {
     expect(await db.getCall(as(users.tess), callId)).toMatchObject({ status: 'calling_them' });
   });
 });
+
+describe("Codex's fifth review", () => {
+  it('keeps a dial in flight unsettled when the call ends, until its result is known (finding 2)', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you'),
+    );
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    await db.claimCommand(as(users.tess), callId, dial); // A, inside its request to Telnyx
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-3`,
+      event('call.hangup', 'you', { hangupCause: 'normal_clearing' }),
+    );
+    // The call has ended, but A's dial is still unsettled: no delivery is acknowledged.
+    expect(await db.unsettledCommands(as(users.tess), callId)).toMatchObject([{ id: dial }]);
+    // A gets its leg: it is to be hung up, and that hang-up is unsettled until sent.
+    const finished = await db.finishCommand(as(users.tess), callId, dial, 1, {
+      kind: 'done',
+      legId: 'v3:late',
+    });
+    expect(finished.followUp).toMatchObject({ kind: 'hang_up', callControlId: 'v3:late' });
+    expect(await db.unsettledCommands(as(users.tess), callId)).toEqual([finished.followUp]);
+    // Telnyx cannot be reached for the hang-up: still unsettled, so the next delivery sends it.
+    const cleanup = finished.followUp?.id ?? '';
+    await db.claimCommand(as(users.tess), callId, cleanup);
+    await db.finishCommand(as(users.tess), callId, cleanup, 1, { kind: 'retry' });
+    expect(await db.unsettledCommands(as(users.tess), callId)).toEqual([finished.followUp]);
+    await db.claimCommand(as(users.tess), callId, cleanup);
+    await db.finishCommand(as(users.tess), callId, cleanup, 2, { kind: 'done' });
+    expect(await db.unsettledCommands(as(users.tess), callId)).toEqual([]);
+  });
+
+  it('are read by the caller only', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    await db.applyCallEvent(
+      as(users.tess),
+      placed.callId,
+      `evt-${placed.callId}-1`,
+      event('call.answered', 'you'),
+    );
+    expect(await db.unsettledCommands(as(users.tess), placed.callId)).toHaveLength(1);
+    expect(await db.unsettledCommands(as(users.olga), placed.callId)).toEqual([]);
+  });
+});
+
+describe("Codex's sixth review", () => {
+  it('tells a call its caller can no longer reach from a settled one, and still knows its legs (finding 2)', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.recordLeg(as(users.tess), callId, 'you', 'v3:staff-s');
+    const answered = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you', { callControlId: 'v3:staff-s' }),
+    );
+    if (answered.status !== 'applied') throw new Error('not applied');
+    await admin`update app.organization_members set status = 'suspended'
+                where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    try {
+      expect(await db.unsettledCommands(as(users.tess), callId)).toBeNull();
+      expect(
+        await db.applyCallEvent(
+          as(users.tess),
+          callId,
+          `evt-${callId}-2`,
+          event('call.hangup', 'you', { callControlId: 'v3:staff-s' }),
+        ),
+      ).toEqual({ status: 'not_found' });
+      expect(await db.callLegs(callId)).toEqual(['v3:staff-s']);
+    } finally {
+      await admin`update app.organization_members set status = 'active'
+                  where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    }
+    expect(await db.unsettledCommands(as(users.tess), callId)).toHaveLength(1);
+  });
+
+  it('lists a stray leg waiting to be hung up among the call legs', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(as(users.tess), callId, `evt-${callId}-1`, event('call.hangup', 'you'));
+    // A leg that starts after the end is to be hung up.
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.initiated', 'them', { callControlId: 'v3:stray-s' }),
+    );
+    expect(await db.callLegs(callId)).toContain('v3:stray-s');
+    expect(await db.callLegs(crypto.randomUUID())).toEqual([]);
+  });
+});
+
+describe("Codex's seventh review", () => {
+  it('keeps the leg of a dial that came back after its caller was suspended', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you'),
+    );
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    await db.claimCommand(as(users.tess), callId, dial);
+    await admin`update app.organization_members set status = 'suspended'
+                where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    try {
+      expect(
+        await db.finishCommand(as(users.tess), callId, dial, 1, {
+          kind: 'done',
+          legId: 'v3:new-s',
+        }),
+      ).toEqual({ followUp: null, callerGone: true });
+      // Two deliveries at the same moment keep it once.
+      const second = postgresDatabase(API_URL);
+      try {
+        await Promise.all([
+          db.keepStrayLeg(dial, 'v3:new-s'),
+          second.keepStrayLeg(dial, 'v3:new-s'),
+        ]);
+      } finally {
+        await second.close();
+      }
+      await db.keepStrayLeg(dial, 'v3:new-s');
+      expect(await db.callLegs(callId)).toContain('v3:new-s');
+      const [kept] = await admin<{ n: number }[]>`
+        select count(*)::int as n from app.call_commands
+        where call_id = ${callId} and kind = 'hang_up' and call_control_id = 'v3:new-s'`;
+      expect(kept?.n).toBe(1);
+    } finally {
+      await admin`update app.organization_members set status = 'active'
+                  where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    }
+  });
+});
+
+describe("Codex's eighth review", () => {
+  it('treats a command hidden by a suspension as the caller gone, so the returned leg is kept', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    // A command id the caller cannot see stands for the suspension between the two reads.
+    expect(
+      await db.finishCommand(as(users.tess), placed.callId, crypto.randomUUID(), 1, {
+        kind: 'done',
+        legId: 'v3:x',
+      }),
+    ).toEqual({ followUp: null, callerGone: true });
+  });
+});
