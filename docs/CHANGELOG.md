@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #116
+
+- `docs/HANDOFF.md`: the transcript's reloads (ivanmueller/gss#116) with its CI and Deploy staging runs; the owner's next request.
+
 ## 2026-11-02 — Handoff record of #115
 
 - `docs/HANDOFF.md`: transcripts with 24-hour audio and the call's status line (ivanmueller/gss#115) with its CI and Deploy staging runs and Codex's reviews; the staging checklist.
