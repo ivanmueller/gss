@@ -94,6 +94,14 @@ export interface TelnyxClient {
   hangUp: (callControlId: string, commandId?: string) => Promise<void>;
   /** Refuses an incoming call with a busy signal. */
   reject: (callControlId: string) => Promise<void>;
+  /** Records both sides of the call on this leg, with Telnyx's transcription afterwards. */
+  record: (callControlId: string, clientState: ClientState, commandId: string) => Promise<void>;
+  /** The ids of the recordings made on a call leg (Telnyx's call_leg_id). */
+  recordingsOfLeg: (callLegId: string) => Promise<string[]>;
+  /** A recording's audio (MP3), or null when Telnyx no longer has it. */
+  recordingAudio: (recordingId: string) => Promise<Response | null>;
+  /** Deletes a recording at Telnyx; one already gone is fine. */
+  deleteRecording: (recordingId: string) => Promise<void>;
 }
 
 export type TelnyxFactory = (env: TelnyxBindings) => TelnyxClient | null;
@@ -135,19 +143,27 @@ export const telnyxClient: TelnyxFactory = (env) => {
   const config = telnyxConfig(env);
   if (config === null) return null;
 
-  async function post(path: string, body: Record<string, unknown>): Promise<unknown> {
+  async function request(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<Response> {
     const response = await fetch(`${API}${path}`, {
-      method: 'POST',
+      method,
       headers: {
         Authorization: `Bearer ${config?.apiKey ?? ''}`,
-        'Content-Type': 'application/json',
         Accept: 'application/json',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      body: JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(TELNYX_TIMEOUT_MS),
     });
     if (!response.ok) throw new TelnyxError(response.status, await errorCodes(response));
-    return response.json();
+    return response;
+  }
+
+  async function post(path: string, body: Record<string, unknown>): Promise<unknown> {
+    return (await request('POST', path, body)).json();
   }
 
   const action = (callControlId: string, name: string, body: Record<string, unknown>) =>
@@ -197,6 +213,59 @@ export const telnyxClient: TelnyxFactory = (env) => {
     },
     async reject(callControlId) {
       await action(callControlId, 'reject', { cause: 'USER_BUSY' });
+    },
+    async record(callControlId, clientState, commandId) {
+      await action(callControlId, 'record_start', {
+        format: 'mp3',
+        channels: 'dual',
+        play_beep: false,
+        transcription: true,
+        transcription_engine: 'deepgram/nova-3',
+        transcription_language: 'en',
+        client_state: encodeClientState(clientState),
+        command_id: commandId,
+      });
+    },
+    async recordingsOfLeg(callLegId) {
+      const response = await request(
+        'GET',
+        `/recordings?filter[call_leg_id]=${encodeURIComponent(callLegId)}`,
+      );
+      const body: unknown = await response.json();
+      const data =
+        typeof body === 'object' && body !== null ? (body as { data?: unknown }).data : null;
+      if (!Array.isArray(data)) return [];
+      return data.flatMap((item: unknown) => {
+        const id = typeof item === 'object' && item !== null ? (item as { id?: unknown }).id : null;
+        return typeof id === 'string' && id.length > 0 && id.length <= 200 ? [id] : [];
+      });
+    },
+    async recordingAudio(recordingId) {
+      let response: Response;
+      try {
+        response = await request('GET', `/recordings/${encodeURIComponent(recordingId)}`);
+      } catch (error) {
+        if (error instanceof TelnyxError && error.status === 404) return null;
+        throw error;
+      }
+      const body: unknown = await response.json();
+      const url =
+        typeof body === 'object' && body !== null
+          ? (body as { data?: { download_urls?: { mp3?: unknown } } }).data?.download_urls?.mp3
+          : undefined;
+      if (typeof url !== 'string' || !url.startsWith('https://')) return null;
+      // A short-lived link Telnyx gives for the file; fetched here, never sent to the browser.
+      const audio = await fetch(url, { signal: AbortSignal.timeout(TELNYX_TIMEOUT_MS) });
+      if (!audio.ok) throw new TelnyxError(audio.status, 'audio_download');
+      return audio;
+    },
+    async deleteRecording(recordingId) {
+      try {
+        await request('DELETE', `/recordings/${encodeURIComponent(recordingId)}`);
+      } catch (error) {
+        if (error instanceof TelnyxError && error.status === 404) return;
+        throw error;
+      }
     },
   };
 };

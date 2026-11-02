@@ -23,6 +23,7 @@ import {
   type ClientState,
   type TelnyxClient,
   type TelnyxFactory,
+  telnyxClient,
 } from './telnyx';
 
 // Calling counterparties through Telnyx (the owner's request of 2026-11-02):
@@ -186,6 +187,50 @@ export function callRoutes(openDatabase: DatabaseFactory, telnyx: TelnyxFactory)
     });
   });
 
+  // A counterparty's call recordings and transcripts, for everyone on the team.
+  routes.get('/recordings', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const counterpartyId = c.req.query('counterparty_id') ?? '';
+    if (!isUuid(counterpartyId)) {
+      return apiError(c, 422, 'VALIDATION_FAILED', 'counterparty_id must be a UUID.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) =>
+      c.json({ recordings: await db.listRecordings(ctx, counterpartyId) }),
+    );
+  });
+
+  // A recording's audio, for 24 hours after the call: fetched from Telnyx by the Worker and
+  // passed on, never a link to Telnyx.
+  routes.get('/recordings/:id/audio', (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such recording.');
+    const client = telnyx(c.env);
+    if (client === null) return apiError(c, 503, 'CALLING_NOT_CONFIGURED', NOT_CONFIGURED);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const recordingId = await db.playableRecording(ctx, id);
+      if (recordingId === null) {
+        return apiError(c, 404, 'NOT_FOUND', 'This recording is no longer kept.');
+      }
+      let audio: Response | null;
+      try {
+        audio = await client.recordingAudio(recordingId);
+      } catch (error) {
+        telnyxFailed(c, error, 'a recording');
+        return apiError(c, 502, 'TELNYX_FAILED', 'Telnyx could not give the recording. Try again.');
+      }
+      if (audio === null) return apiError(c, 404, 'NOT_FOUND', 'This recording is no longer kept.');
+      return new Response(audio.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    });
+  });
+
   routes.get('/:id', (c) => {
     c.header('Cache-Control', 'no-store');
     const id = c.req.param('id');
@@ -233,6 +278,50 @@ function text(payload: Record<string, unknown>, key: string, max = 200): string 
 }
 
 /** The events a call's steps use; every other event is acknowledged and ignored. */
+/** Telnyx's events about a recording, kept outside the call's steps. */
+const RECORDING_EVENTS = new Set(['call.recording.saved', 'call.recording.transcription.saved']);
+
+/** The longest transcript kept (the database allows as much). */
+const TRANSCRIPT_MAX = 200_000;
+
+/**
+ * Keeps a call's recording (call.recording.saved, which carries no recording id: the ids of the
+ * leg's recordings are asked of Telnyx) or its transcript (call.recording.transcription.saved).
+ * Written through the database's own functions, so a suspended caller's call still gets them.
+ */
+async function keepRecording(
+  db: Database,
+  client: TelnyxClient,
+  callId: string,
+  type: string,
+  payload: Record<string, unknown>,
+) {
+  if (type === 'call.recording.transcription.saved') {
+    const recordingId = text(payload, 'recording_id');
+    const words = typeof payload.transcription_text === 'string' ? payload.transcription_text : '';
+    if (recordingId !== null && words.trim() !== '') {
+      await db.keepCallTranscript(callId, recordingId, words.slice(0, TRANSCRIPT_MAX));
+    }
+    return;
+  }
+  const legId = text(payload, 'call_leg_id');
+  if (legId === null) return;
+  const instant = (key: string) => {
+    const value = text(payload, key, 40);
+    return value !== null && !Number.isNaN(Date.parse(value))
+      ? new Date(value).toISOString()
+      : null;
+  };
+  for (const recordingId of await client.recordingsOfLeg(legId)) {
+    await db.keepCallRecording(
+      callId,
+      recordingId,
+      instant('recording_started_at'),
+      instant('recording_ended_at'),
+    );
+  }
+}
+
 const CALL_EVENTS = new Set([
   'call.initiated',
   'call.answered',
@@ -326,6 +415,10 @@ async function sendCommands(
             await client.hangUp(command.callControlId, command.id);
             outcome = { kind: 'done' };
             break;
+          case 'record':
+            await client.record(command.callControlId, { call: callId, leg: 'you' }, command.id);
+            outcome = { kind: 'done' };
+            break;
         }
       } catch (error) {
         // Telnyx unreachable, or a temporary refusal (too many requests, a server error): the
@@ -360,6 +453,39 @@ async function sendCommands(
       return;
     }
     queue.push(...untried);
+  }
+}
+
+/**
+ * Deletes at Telnyx the audio of recordings 24 hours after their call (the owner's request of
+ * 2026-11-02); run by the Worker's hourly scheduled job. Their transcripts stay. A recording
+ * Telnyx no longer has counts as deleted; one that cannot be deleted now is tried next hour.
+ */
+export async function deleteExpiredRecordings(
+  env: ApiEnv['Bindings'],
+  openDatabase: DatabaseFactory,
+  telnyx: TelnyxFactory = telnyxClient,
+) {
+  const client = telnyx(env);
+  const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
+  if (client === null || !url) return;
+  const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
+  try {
+    let deleted = 0;
+    for (const recordingId of await db.recordingsToDelete(100)) {
+      try {
+        await client.deleteRecording(recordingId);
+        await db.markRecordingDeleted(recordingId);
+        deleted += 1;
+      } catch (error) {
+        console.error(
+          `Recording not deleted at Telnyx: ${error instanceof TelnyxError ? `status=${String(error.status)}` : failureSummary(error)}`,
+        );
+      }
+    }
+    if (deleted > 0) console.log(`Recordings deleted at Telnyx after 24 hours: ${String(deleted)}`);
+  } finally {
+    await db.close().catch(() => undefined);
   }
 }
 
@@ -409,7 +535,32 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
       return apiError(c, 400, 'MALFORMED', 'The event is not JSON.');
     }
     const event = readEvent(body);
-    if (event === null || !CALL_EVENTS.has(event.type)) return c.json({ received: true });
+    if (event === null) return c.json({ received: true });
+    if (RECORDING_EVENTS.has(event.type)) {
+      const recordingOf = decodeClientState(event.payload.client_state);
+      if (recordingOf === null) return c.json({ received: true });
+      const url = c.env.HYPERDRIVE?.connectionString ?? c.env.DATABASE_URL;
+      if (!url) return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
+      let recordingDb: Database;
+      try {
+        recordingDb = openDatabase(url, { viaHyperdrive: c.env.HYPERDRIVE !== undefined });
+      } catch {
+        return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
+      }
+      try {
+        await keepRecording(recordingDb, client, recordingOf.call, event.type, event.payload);
+        return c.json({ received: true });
+      } catch (error) {
+        // Telnyx sends the event again; keeping a recording or transcript twice changes nothing.
+        console.error(
+          `Telnyx recording event not kept in request ${c.get('requestId')}: ${error instanceof TelnyxError ? `status=${String(error.status)}` : failureSummary(error)}`,
+        );
+        return apiError(c, 500, 'INTERNAL_ERROR', 'The event could not be kept.');
+      } finally {
+        closeLater(c, recordingDb);
+      }
+    }
+    if (!CALL_EVENTS.has(event.type)) return c.json({ received: true });
 
     const callControlId = text(event.payload, 'call_control_id');
     const state: ClientState | null = decodeClientState(event.payload.client_state);

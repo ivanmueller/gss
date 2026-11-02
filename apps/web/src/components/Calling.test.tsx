@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mockApi, SESSION } from '../test/api';
-import { CallButton, CallingProvider, CellPhoneDialog } from './Calling';
+import { CallButton, CallingProvider, CallRecordingDetails, CellPhoneDialog } from './Calling';
 
 // Synthetic names, ids and 555 numbers only.
 const COUNTERPARTY = '00000000-0000-4000-8000-00000000c1aa';
@@ -216,5 +216,44 @@ describe('CellPhoneDialog', () => {
     await vi.waitFor(() => {
       expect(calls.some((call) => call.method === 'DELETE')).toBe(true);
     });
+  });
+});
+
+describe('CallRecordingDetails', () => {
+  const RECORDING = {
+    id: '00000000-0000-4000-8000-0000000eec01',
+    callId: CALL,
+    contactLogEntryId: '00000000-0000-4000-8000-0000000e11aa',
+    transcript: 'We can do November at the posted price.',
+    audioUntil: '2999-01-01T00:00:00.000Z',
+  };
+
+  it('shows the transcript and plays the audio through the API', async () => {
+    const calls = mockApi({
+      [`GET /calls/recordings/${RECORDING.id}/audio`]: () =>
+        new Response('mp3', { headers: { 'Content-Type': 'audio/mpeg' } }),
+    });
+    const createObjectURL = vi.fn(() => 'blob:synthetic');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
+    render(<CallRecordingDetails token="synthetic-token" recording={RECORDING} />);
+    expect(screen.getByText('Transcript')).toBeVisible();
+    expect(screen.getByText('We can do November at the posted price.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Play recording' }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('audio')).toHaveAttribute('src', 'blob:synthetic');
+    });
+    expect(calls[0]?.headers.get('Authorization')).toBe('Bearer synthetic-token');
+  });
+
+  it('says a transcript is on its way, and offers no audio once it is gone', () => {
+    render(
+      <CallRecordingDetails
+        token="synthetic-token"
+        recording={{ ...RECORDING, transcript: null, audioUntil: null }}
+      />,
+    );
+    expect(screen.getByText('Transcript on its way…')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Play recording' })).not.toBeInTheDocument();
   });
 });

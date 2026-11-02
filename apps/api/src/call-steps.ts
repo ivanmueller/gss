@@ -56,7 +56,9 @@ export type CallCommand =
   | { kind: 'confirm'; callControlId: string }
   /** Dial the counterparty and join them to the caller's leg when they answer. */
   | { kind: 'dial_them'; staffCallControlId: string }
-  | { kind: 'hang_up'; callControlId: string };
+  | { kind: 'hang_up'; callControlId: string }
+  /** Record both sides of the connected call, with Telnyx's transcription (owner's request). */
+  | { kind: 'record'; callControlId: string };
 
 export interface CallStep {
   changes: CallChanges;
@@ -184,7 +186,11 @@ function stepFor(
   switch (event.type) {
     case 'call.answered':
       if (status !== 'calling_them') return NOTHING;
-      return { changes: { status: 'connected', connectedAt: event.occurredAt }, commands: [] };
+      return {
+        changes: { status: 'connected', connectedAt: event.occurredAt },
+        // Recorded on the caller's leg, which carries both sides once they are joined.
+        commands: staffId === null ? [] : [{ kind: 'record', callControlId: staffId }],
+      };
     case 'call.hangup':
       if (status === 'connected') return ended(event, 'talked', hangUp(staffId));
       if (status !== 'calling_them') return NOTHING;

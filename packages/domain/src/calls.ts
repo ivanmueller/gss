@@ -60,6 +60,21 @@ export interface CallView {
   contactLogEntryId: string | null;
 }
 
+/**
+ * A recording of a call placed from the platform, with its transcript (the owner's request of
+ * 2026-11-02): everyone on the team reads it; its audio plays for 24 hours, then is deleted.
+ */
+export interface CallRecordingView {
+  id: string;
+  callId: string;
+  /** The contact log entry of the call, under which the transcript is shown. */
+  contactLogEntryId: string | null;
+  /** Null until Telnyx's transcription arrives. */
+  transcript: string | null;
+  /** Until when the audio can be played (UTC instant); null once deleted. */
+  audioUntil: string | null;
+}
+
 /** POST /api/v1/calls: the counterparty, and the contact called or null for its company phone. */
 export const placeCallSchema = z.strictObject({
   counterpartyId: z.uuid(),

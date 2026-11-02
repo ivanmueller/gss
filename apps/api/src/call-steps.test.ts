@@ -76,11 +76,11 @@ describe('nextCallStep', () => {
     }
   });
 
-  it('connects when they answer', () => {
+  it("connects when they answer, and starts recording on the caller's leg", () => {
     const step = nextCallStep(call({ status: 'calling_them' }), event('call.answered', 'them'));
     expect(step).toEqual({
       changes: { status: 'connected', connectedAt: AT, counterpartyCallControlId: THEM },
-      commands: [],
+      commands: [{ kind: 'record', callControlId: STAFF }],
     });
   });
 

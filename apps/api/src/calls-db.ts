@@ -2,6 +2,7 @@ import {
   callLogNotes,
   dialablePhone,
   type CallOutcome,
+  type CallRecordingView,
   type CallStatus,
   type CallView,
 } from '@grain/domain';
@@ -128,6 +129,22 @@ export interface CallsDatabase {
     telnyxEventId: string,
     event: CallEvent,
   ) => Promise<CallEventResult>;
+  /** Keeps a recording of a call (from Telnyx's call.recording.saved), once per recording. */
+  keepCallRecording: (
+    callId: string,
+    recordingId: string,
+    startedAt: string | null,
+    endedAt: string | null,
+  ) => Promise<void>;
+  /** Keeps the transcript of a call's recording (the first one Telnyx sends). */
+  keepCallTranscript: (callId: string, recordingId: string, transcript: string) => Promise<void>;
+  /** Telnyx ids of the recordings whose audio is due to be deleted (24 hours after the call). */
+  recordingsToDelete: (most: number) => Promise<string[]>;
+  markRecordingDeleted: (recordingId: string) => Promise<void>;
+  /** A counterparty's call recordings and transcripts, for everyone on the team. */
+  listRecordings: (ctx: RequestContext, counterpartyId: string) => Promise<CallRecordingView[]>;
+  /** One recording's Telnyx id while its audio can still be played, or null. */
+  playableRecording: (ctx: RequestContext, id: string) => Promise<string | null>;
   /**
    * Every command of a call not settled yet (pending, or being sent), oldest first. A delivery
    * is acknowledged only when there is none (Codex's fifth review): whatever event a command
@@ -357,6 +374,63 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
       });
     },
 
+    async keepCallRecording(callId, recordingId, startedAt, endedAt) {
+      await sql`select app.keep_call_recording(${callId}, ${recordingId},
+                                               ${startedAt}::timestamptz, ${endedAt}::timestamptz)`;
+    },
+
+    async keepCallTranscript(callId, recordingId, transcript) {
+      await sql`select app.keep_call_transcript(${callId}, ${recordingId}, ${transcript})`;
+    },
+
+    async recordingsToDelete(most) {
+      const rows = await sql<{ telnyx_recording_id: string }[]>`
+        select telnyx_recording_id from app.recordings_to_delete(${most})`;
+      return rows.map((row) => row.telnyx_recording_id);
+    },
+
+    async markRecordingDeleted(recordingId) {
+      await sql`select app.mark_recording_deleted(${recordingId})`;
+    },
+
+    listRecordings(ctx, counterpartyId) {
+      return asUser(ctx, async (tx) => {
+        const rows = await tx<
+          {
+            id: string;
+            call_id: string;
+            contact_log_entry_id: string | null;
+            transcript: string | null;
+            audio_until: Date | null;
+          }[]
+        >`
+          select r.id, r.call_id, c.contact_log_entry_id, r.transcript,
+                 case when r.audio_deleted_at is null and app.recording_audio_until(r) > now()
+                      then app.recording_audio_until(r) end as audio_until
+          from app.call_recordings r join app.calls c on c.id = r.call_id
+          where c.counterparty_id = ${counterpartyId}
+          order by r.created_at desc
+          limit 500`;
+        return rows.map((row) => ({
+          id: row.id,
+          callId: row.call_id,
+          contactLogEntryId: row.contact_log_entry_id,
+          transcript: row.transcript,
+          audioUntil: row.audio_until?.toISOString() ?? null,
+        }));
+      });
+    },
+
+    playableRecording(ctx, id) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ telnyx_recording_id: string }[]>`
+          select r.telnyx_recording_id from app.call_recordings r
+          where r.id = ${id} and r.audio_deleted_at is null
+            and app.recording_audio_until(r) > now()`;
+        return row?.telnyx_recording_id ?? null;
+      });
+    },
+
     async keepStrayLeg(commandId, leg) {
       await sql`select app.keep_stray_leg(${commandId}, ${leg})`;
     },
@@ -498,6 +572,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         }
         const wanted =
           command.kind === 'hang_up' ||
+          (command.kind === 'record' && call.status === 'connected') ||
           (command.kind === 'confirm' && call.status === 'confirming') ||
           (command.kind === 'dial_them' &&
             call.status === 'calling_them' &&
@@ -595,7 +670,9 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         }
         if (outcome.kind === 'failed') {
           await tx`update app.call_commands set status = 'failed' where id = ${commandId}`;
-          if (command.kind === 'hang_up') return { followUp: null };
+          // A hang-up of a leg already gone, or a recording that could not start, leaves the
+          // call as it is.
+          if (command.kind === 'hang_up' || command.kind === 'record') return { followUp: null };
           await tx`update app.calls
                    set status = 'ended', outcome = 'failed', ended_at = now()
                    where id = ${callId} and status not in ('ended', 'connected')`;

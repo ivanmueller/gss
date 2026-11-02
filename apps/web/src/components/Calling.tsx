@@ -1,11 +1,13 @@
 import {
   CALL_OUTCOME_LABELS,
   CALL_STATUS_LABELS,
+  formatAlberta,
+  type CallRecordingView,
   dialablePhone,
   formatCallLength,
   type CallView,
 } from '@grain/domain';
-import { PhoneCall, PhoneOff, X } from 'lucide-react';
+import { PhoneCall, PhoneOff, Play, X } from 'lucide-react';
 import {
   createContext,
   useCallback,
@@ -17,7 +19,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { ApiError, apiJson, sendJson } from '../lib/api';
+import { ApiError, apiFetch, apiJson, sendJson } from '../lib/api';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Input } from './ui/input';
@@ -398,5 +400,88 @@ export function CallButton({
       <PhoneCall aria-hidden="true" />
       Call
     </Button>
+  );
+}
+
+/**
+ * Under a call's entry in the contact history: its transcript, and for 24 hours its audio
+ * (the owner's request of 2026-11-02). The audio comes through the API with the person's
+ * sign-in, never from a link to Telnyx.
+ */
+export function CallRecordingDetails({
+  token,
+  recording,
+}: {
+  token: string;
+  recording: CallRecordingView;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(
+    () => () => {
+      if (audioUrl !== null) URL.revokeObjectURL(audioUrl);
+    },
+    [audioUrl],
+  );
+
+  // Read once when shown; the page is loaded again after a call, and the API checks again.
+  const [shownAt] = useState(() => Date.now());
+  const playable = recording.audioUntil !== null && Date.parse(recording.audioUntil) > shownAt;
+
+  async function play() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiFetch(`/calls/recordings/${recording.id}/audio`, token);
+      setAudioUrl(URL.createObjectURL(await response.blob()));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The recording could not be played.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      {recording.transcript === null ? (
+        <p className="text-xs text-muted-foreground">Transcript on its way…</p>
+      ) : (
+        <details className="rounded-control border px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">Transcript</summary>
+          <p className="mt-2 whitespace-pre-wrap">{recording.transcript}</p>
+        </details>
+      )}
+      {playable && audioUrl === null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2"
+            disabled={loading}
+            onClick={() => {
+              void play();
+            }}
+          >
+            <Play aria-hidden="true" />
+            {loading ? 'Loading…' : 'Play recording'}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Kept until {formatAlberta(recording.audioUntil ?? '')}
+          </span>
+        </div>
+      )}
+      {audioUrl !== null && (
+        <audio controls autoPlay src={audioUrl} className="w-full max-w-md">
+          The recording cannot be played in this browser.
+        </audio>
+      )}
+      {error !== null && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
