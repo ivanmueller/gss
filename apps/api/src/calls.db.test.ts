@@ -159,7 +159,37 @@ describe('a call from start to finish', () => {
     );
     expect(answered).toMatchObject({
       status: 'applied',
-      step: { commands: [{ kind: 'confirm', callControlId: 'v3:synthetic-staff' }] },
+      commands: [{ kind: 'confirm', callControlId: 'v3:synthetic-staff' }],
+    });
+    if (answered.status !== 'applied') throw new Error('not applied');
+    const confirm = answered.commands[0]?.id ?? '';
+    // Delivered again before the command went out: the command is still to send.
+    expect(
+      await db.applyCallEvent(
+        as(users.tess),
+        callId,
+        `evt-${callId}-1`,
+        event('call.answered', 'you'),
+      ),
+    ).toEqual({ status: 'duplicate', commands: answered.commands });
+    expect(await db.claimCommand(as(users.tess), callId, confirm)).toMatchObject({
+      kind: 'confirm',
+    });
+    // Claimed by one delivery, it is not claimed by another meanwhile.
+    expect(await db.claimCommand(as(users.tess), callId, confirm)).toBeNull();
+    // Telnyx could not be reached: pending again, sent with the event's next delivery.
+    await db.finishCommand(as(users.tess), callId, confirm, { kind: 'retry' });
+    expect(
+      await db.applyCallEvent(
+        as(users.tess),
+        callId,
+        `evt-${callId}-1`,
+        event('call.answered', 'you'),
+      ),
+    ).toEqual({ status: 'duplicate', commands: answered.commands });
+    expect(await db.claimCommand(as(users.tess), callId, confirm)).not.toBeNull();
+    expect(await db.finishCommand(as(users.tess), callId, confirm, { kind: 'done' })).toEqual({
+      hangUp: null,
     });
     expect(
       await db.applyCallEvent(
@@ -168,16 +198,28 @@ describe('a call from start to finish', () => {
         `evt-${callId}-1`,
         event('call.answered', 'you'),
       ),
-    ).toEqual({ status: 'duplicate' });
+    ).toEqual({ status: 'duplicate', commands: [] });
     const pressed = await db.applyCallEvent(
       as(users.tess),
       callId,
       `evt-${callId}-2`,
       event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
     );
-    expect(pressed).toMatchObject({ step: { commands: [{ kind: 'dial_them' }] } });
-    expect(await db.callNumber(as(users.tess), callId)).toBe('+14035550100');
-    await db.recordLeg(as(users.tess), callId, 'them', 'v3:synthetic-them');
+    expect(pressed).toMatchObject({
+      commands: [{ kind: 'dial_them', callControlId: 'v3:synthetic-staff' }],
+    });
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    expect(await db.claimCommand(as(users.tess), callId, dial)).toMatchObject({
+      kind: 'dial_them',
+      counterpartyPhone: '+14035550100',
+    });
+    expect(
+      await db.finishCommand(as(users.tess), callId, dial, {
+        kind: 'done',
+        legId: 'v3:synthetic-them',
+      }),
+    ).toEqual({ hangUp: null });
     await db.applyCallEvent(
       as(users.tess),
       callId,
@@ -195,7 +237,7 @@ describe('a call from start to finish', () => {
       event('call.hangup', 'them', { hangupCause: 'normal_clearing' }),
     );
     expect(ended).toMatchObject({
-      step: { commands: [{ kind: 'hang_up', callControlId: 'v3:synthetic-staff' }] },
+      commands: [{ kind: 'hang_up', callControlId: 'v3:synthetic-staff' }],
     });
     const call = await db.getCall(as(users.victor), callId);
     expect(call).toMatchObject({ status: 'ended', outcome: 'talked' });
@@ -217,7 +259,7 @@ describe('a call from start to finish', () => {
       `evt-${callId}-5`,
       event('call.hangup', 'you', { hangupCause: 'normal_clearing' }),
     );
-    expect(late).toMatchObject({ status: 'applied', step: { changes: {}, commands: [] } });
+    expect(late).toEqual({ status: 'applied', commands: [] });
     const after = await db.listContactLog(as(users.victor), counterparties.buyer);
     expect(after.filter((e) => e.current.notes?.startsWith('Phone call placed'))).toHaveLength(1);
   });
@@ -247,7 +289,7 @@ describe('a call that does not connect', () => {
       `evt-${placed.callId}-2`,
       event('call.gather.ended', 'you', { gatherStatus: 'timeout' }),
     );
-    expect(step).toMatchObject({ step: { changes: { outcome: 'not_confirmed' } } });
+    expect(step).toMatchObject({ commands: [{ kind: 'hang_up' }] });
     expect(await db.getCall(as(users.tess), placed.callId)).toMatchObject({
       status: 'ended',
       outcome: 'not_confirmed',
@@ -323,5 +365,144 @@ describe('two clicks at the same moment', () => {
     } finally {
       await second.close();
     }
+  });
+});
+
+/** Ends tess's calls under way, so that the next test can place one. */
+async function endTessCalls() {
+  await admin`update app.calls
+              set status = 'ended', ended_at = now(),
+                  outcome = case when connected_at is null then 'failed' else 'talked' end::app.call_outcome
+              where placed_by = ${users.tess} and status <> 'ended'`;
+}
+
+/** A call by tess to Pat with the given events applied in order; returns its id. */
+async function callWith(events: [string, CallEvent][]): Promise<string> {
+  await endTessCalls();
+  const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+  if (placed.status !== 'created') throw new Error('not placed');
+  for (const [suffix, e] of events) {
+    await db.applyCallEvent(as(users.tess), placed.callId, `evt-${placed.callId}-${suffix}`, e);
+  }
+  return placed.callId;
+}
+
+describe("Codex's review of ivanmueller/gss#107", () => {
+  // Times relative to one moment, so the same minute gives the same instant.
+  const base = Date.now();
+  const at = (minutes: number) => new Date(base + minutes * 60_000).toISOString();
+
+  it('never sends a dial queued before the caller hung up (finding 2)', async () => {
+    const callId = await callWith([['1', event('call.answered', 'you', { occurredAt: at(-3) })]]);
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid', occurredAt: at(-2) }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    // The caller hangs up before the dial is sent.
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-3`,
+      event('call.hangup', 'you', { hangupCause: 'normal_clearing', occurredAt: at(-1) }),
+    );
+    expect(await db.getCall(as(users.tess), callId)).toMatchObject({ outcome: 'cancelled' });
+    expect(await db.claimCommand(as(users.tess), callId, dial)).toBeNull();
+    const [row] = await admin<{ status: string }[]>`
+      select status from app.call_commands where id = ${dial}`;
+    expect(row?.status).toBe('cancelled');
+  });
+
+  it('hangs up the leg of a dial that was in flight when the call ended (finding 2)', async () => {
+    const callId = await callWith([['1', event('call.answered', 'you', { occurredAt: at(-3) })]]);
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid', occurredAt: at(-2) }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    expect(await db.claimCommand(as(users.tess), callId, dial)).not.toBeNull();
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-3`,
+      event('call.hangup', 'you', { hangupCause: 'normal_clearing', occurredAt: at(-1) }),
+    );
+    expect(
+      await db.finishCommand(as(users.tess), callId, dial, { kind: 'done', legId: 'v3:late-leg' }),
+    ).toEqual({ hangUp: 'v3:late-leg' });
+  });
+
+  it('keeps a conversation whose answer arrives after its hangup (finding 3)', async () => {
+    const callId = await callWith([
+      ['1', event('call.answered', 'you', { occurredAt: at(-8) })],
+      [
+        '2',
+        event('call.gather.ended', 'you', {
+          digits: '1',
+          gatherStatus: 'valid',
+          occurredAt: at(-7),
+        }),
+      ],
+      // T2, the hangup, delivered before T1, the answer.
+      ['3', event('call.hangup', 'them', { hangupCause: 'normal_clearing', occurredAt: at(-1) })],
+    ]);
+    expect(await db.getCall(as(users.tess), callId)).toMatchObject({
+      outcome: 'no_answer',
+      contactLogEntryId: null,
+    });
+    const late = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-4`,
+      event('call.answered', 'them', { occurredAt: at(-6) }),
+    );
+    expect(late).toMatchObject({ status: 'applied', commands: [{ kind: 'hang_up' }] });
+    const call = await db.getCall(as(users.victor), callId);
+    expect(call).toMatchObject({ status: 'ended', outcome: 'talked', connectedAt: at(-6) });
+    expect(call?.contactLogEntryId).not.toBeNull();
+    const log = await db.listContactLog(as(users.victor), counterparties.buyer);
+    expect(log.find((e) => e.id === call?.contactLogEntryId)?.current.notes).toBe(
+      'Phone call placed from the platform; talked 5 min 0 s.',
+    );
+  });
+
+  it('blocks a new call while one is still connected, however long (finding 4)', async () => {
+    await endTessCalls();
+    // A connected call placed 16 minutes ago (placed as tess, by the table owner).
+    await admin.begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.tess}, true)`;
+      const [row] = await tx<{ id: string }[]>`
+        insert into app.calls (organization_id, counterparty_id, contact_id, contact_name, placed_by,
+                               placed_by_name, from_phone, counterparty_phone, created_at)
+        values (${orgs.a}, ${counterparties.buyer}, ${contacts.pat}, 'Pat Buyer', ${users.tess},
+                'x', ${FROM}, '+14035550100', now() - interval '16 minutes')
+        returning id`;
+      await tx`update app.calls set status = 'connected', connected_at = now() - interval '15 minutes'
+               where id = ${row?.id ?? ''}`;
+    });
+    expect(await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM)).toEqual({
+      status: 'in_progress',
+    });
+    // One still ringing after 16 minutes is treated as over (its legs rang 30 and 45 s).
+    await endTessCalls();
+    await admin.begin(async (tx) => {
+      await tx`select set_config('app.user_id', ${users.tess}, true)`;
+      await tx`
+        insert into app.calls (organization_id, counterparty_id, contact_id, contact_name, placed_by,
+                               placed_by_name, from_phone, counterparty_phone, created_at)
+        values (${orgs.a}, ${counterparties.buyer}, ${contacts.pat}, 'Pat Buyer', ${users.tess},
+                'x', ${FROM}, '+14035550100', now() - interval '16 minutes')`;
+    });
+    expect(
+      await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM),
+    ).toMatchObject({
+      status: 'created',
+    });
   });
 });

@@ -200,6 +200,7 @@ describe('the Telnyx client', () => {
       timeout_secs: 45,
       client_state: encodeClientState({ call: CALL, leg: 'them' }),
       command_id: `${CALL}-them`,
+      time_limit_secs: 14400,
       link_to: 'v3:staff-leg',
       bridge_on_answer: true,
     });
@@ -211,8 +212,8 @@ describe('the Telnyx client', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     const client = telnyxClient(TELNYX_ENV);
-    await client?.confirm('v3:staff/leg', { call: CALL, leg: 'you' });
-    await client?.hangUp('v3:staff-leg');
+    await client?.confirm('v3:staff/leg', { call: CALL, leg: 'you' }, 'cmd-1');
+    await client?.hangUp('v3:staff-leg', 'cmd-2');
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'https://api.telnyx.com/v2/calls/v3%3Astaff%2Fleg/actions/gather_using_speak',
       'https://api.telnyx.com/v2/calls/v3%3Astaff-leg/actions/hangup',
@@ -221,7 +222,15 @@ describe('the Telnyx client', () => {
       string,
       unknown
     >;
-    expect(confirm).toMatchObject({ valid_digits: '1', maximum_digits: 1, language: 'en-US' });
+    expect(confirm).toMatchObject({
+      valid_digits: '1',
+      maximum_digits: 1,
+      language: 'en-US',
+      command_id: 'cmd-1',
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({
+      command_id: 'cmd-2',
+    });
     expect(JSON.stringify(confirm)).not.toContain('Pat');
 
     fetchMock.mockResolvedValueOnce(
@@ -405,15 +414,29 @@ describe('POST /api/v1/telnyx/voice', () => {
     expect(response.status).toBe(503);
   });
 
+  const CONFIRM = {
+    id: '00000000-0000-4000-8000-0000000c0d01',
+    kind: 'confirm' as const,
+    callControlId: 'v3:staff-leg',
+  };
+  const DIAL = {
+    id: '00000000-0000-4000-8000-0000000c0d02',
+    kind: 'dial_them' as const,
+    callControlId: 'v3:staff-leg',
+  };
+  const HANG_UP = {
+    id: '00000000-0000-4000-8000-0000000c0d03',
+    kind: 'hang_up' as const,
+    callControlId: 'v3:their-leg',
+  };
+  const claimed = <T extends object>(command: T) => ({
+    ...command,
+    counterpartyPhone: '+14035550100',
+  });
+
   it('applies an event as the person who placed the call, then sends what follows', async () => {
-    db.applyCallEvent.mockResolvedValue({
-      status: 'applied',
-      organizationId: ORG,
-      step: {
-        changes: { status: 'confirming' },
-        commands: [{ kind: 'confirm', callControlId: 'v3:staff-leg' }],
-      },
-    });
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [CONFIRM] });
+    db.claimCommand.mockResolvedValue(claimed(CONFIRM));
     const response = await webhook(answered);
     expect(response.status).toBe(200);
     expect(db.callPlacer).toHaveBeenCalledWith(CALL);
@@ -431,25 +454,57 @@ describe('POST /api/v1/telnyx/voice', () => {
         hangupCause: null,
       },
     );
-    expect(telnyx.confirm).toHaveBeenCalledWith('v3:staff-leg', { call: CALL, leg: 'you' });
+    expect(db.claimCommand).toHaveBeenCalledWith(expect.anything(), CALL, CONFIRM.id);
+    expect(telnyx.confirm).toHaveBeenCalledWith(
+      'v3:staff-leg',
+      { call: CALL, leg: 'you' },
+      CONFIRM.id,
+    );
+    expect(db.finishCommand).toHaveBeenCalledWith(expect.anything(), CALL, CONFIRM.id, {
+      kind: 'done',
+    });
   });
 
-  it('sends nothing again for an event Telnyx repeats', async () => {
-    db.applyCallEvent.mockResolvedValue({ status: 'duplicate' });
+  it("sends a command again when Telnyx could not be reached, on the event's next delivery", async () => {
+    // Codex's review of ivanmueller/gss#107, finding 1: the first attempt fails with a network
+    // error after the event was kept; Telnyx sends the event again and the command goes out.
+    db.applyCallEvent
+      .mockResolvedValueOnce({ status: 'applied', commands: [CONFIRM] })
+      .mockResolvedValueOnce({ status: 'duplicate', commands: [CONFIRM] });
+    db.claimCommand.mockResolvedValue(claimed(CONFIRM));
+    telnyx.confirm.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const first = await webhook(answered);
+    expect(first.status).toBe(500);
+    expect(db.finishCommand).toHaveBeenCalledWith(expect.anything(), CALL, CONFIRM.id, {
+      kind: 'retry',
+    });
+    const again = await webhook(answered);
+    expect(again.status).toBe(200);
+    expect(telnyx.confirm).toHaveBeenCalledTimes(2);
+    expect(db.finishCommand).toHaveBeenLastCalledWith(expect.anything(), CALL, CONFIRM.id, {
+      kind: 'done',
+    });
+  });
+
+  it('sends nothing for a repeated event whose commands went out', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'duplicate', commands: [] });
     const response = await webhook(answered);
     expect(response.status).toBe(200);
     expect(telnyx.confirm).not.toHaveBeenCalled();
   });
 
+  it('sends nothing the call no longer wants (the claim is refused)', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [DIAL] });
+    db.claimCommand.mockResolvedValue(null);
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(telnyx.dial).not.toHaveBeenCalled();
+    expect(db.finishCommand).not.toHaveBeenCalled();
+  });
+
   it("dials them joined to the caller's leg once 1 is pressed", async () => {
-    db.applyCallEvent.mockResolvedValue({
-      status: 'applied',
-      organizationId: ORG,
-      step: {
-        changes: { status: 'calling_them' },
-        commands: [{ kind: 'dial_them', staffCallControlId: 'v3:staff-leg' }],
-      },
-    });
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [DIAL] });
+    db.claimCommand.mockResolvedValue(claimed(DIAL));
     await webhook(
       telnyxEvent('call.gather.ended', {
         call_control_id: 'v3:staff-leg',
@@ -464,38 +519,44 @@ describe('POST /api/v1/telnyx/voice', () => {
       timeoutSecs: 45,
       bridgeTo: 'v3:staff-leg',
     });
-    expect(db.recordLeg).toHaveBeenCalledWith(expect.anything(), CALL, 'them', 'v3:new-leg');
+    expect(db.finishCommand).toHaveBeenCalledWith(expect.anything(), CALL, DIAL.id, {
+      kind: 'done',
+      legId: 'v3:new-leg',
+    });
   });
 
-  it('ends the call and hangs up the caller when Telnyx refuses to dial them', async () => {
-    db.applyCallEvent.mockResolvedValue({
-      status: 'applied',
-      organizationId: ORG,
-      step: {
-        changes: { status: 'calling_them' },
-        commands: [{ kind: 'dial_them', staffCallControlId: 'v3:staff-leg' }],
-      },
-    });
+  it('hangs up the new leg of a dial whose call ended meanwhile', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [DIAL] });
+    db.claimCommand.mockResolvedValue(claimed(DIAL));
+    db.finishCommand.mockResolvedValue({ hangUp: 'v3:new-leg' });
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(telnyx.hangUp).toHaveBeenCalledWith('v3:new-leg');
+  });
+
+  it('records a refusal and hangs up the leg the database names', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [DIAL] });
+    db.claimCommand.mockResolvedValue(claimed(DIAL));
+    db.finishCommand.mockResolvedValue({ hangUp: 'v3:staff-leg' });
     telnyx.dial.mockRejectedValueOnce(new TelnyxError(422, '90046'));
     const response = await webhook(answered);
     expect(response.status).toBe(200);
-    expect(db.failCall).toHaveBeenCalledWith(expect.anything(), CALL, 'failed');
+    expect(db.finishCommand).toHaveBeenCalledWith(expect.anything(), CALL, DIAL.id, {
+      kind: 'failed',
+    });
     expect(telnyx.hangUp).toHaveBeenCalledWith('v3:staff-leg');
   });
 
   it('keeps going when a leg to hang up is already gone', async () => {
-    db.applyCallEvent.mockResolvedValue({
-      status: 'applied',
-      organizationId: ORG,
-      step: {
-        changes: { status: 'ended', outcome: 'talked' },
-        commands: [{ kind: 'hang_up', callControlId: 'v3:their-leg' }],
-      },
-    });
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [HANG_UP] });
+    db.claimCommand.mockResolvedValue(claimed(HANG_UP));
     telnyx.hangUp.mockRejectedValueOnce(new TelnyxError(422, '90018'));
     const response = await webhook(answered);
     expect(response.status).toBe(200);
-    expect(db.failCall).not.toHaveBeenCalled();
+    expect(telnyx.hangUp).toHaveBeenCalledWith('v3:their-leg', HANG_UP.id);
+    expect(db.finishCommand).toHaveBeenCalledWith(expect.anything(), CALL, HANG_UP.id, {
+      kind: 'failed',
+    });
   });
 
   it('gives an incoming call a busy signal, as callbacks are not routed yet', async () => {

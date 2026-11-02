@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's review of the Telnyx calls
+
+- `docs/DECISIONS.md`: the four findings on `a7dbf99` and their fixes.
+- `docs/DATA_MODEL.md`: migration `20261102020000_call_commands.sql` (`call_commands`; the late-answer correction in `check_call`).
+- `docs/API.md`: commands kept until sent, late events, the 4-hour limit.
+
 ## 2026-11-02 — Handoff record of #106 and #107
 
 - `docs/HANDOFF.md`: calling counterparties through Telnyx (ivanmueller/gss#107) and the handoff record of #105 (#106), with their CI and Deploy staging runs; Codex's four findings on `a7dbf99`; the Telnyx Worker secrets and setup; the status summary, tests and the staging checklist.

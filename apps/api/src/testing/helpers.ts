@@ -147,13 +147,14 @@ export function fakeDatabase(): Mocked<Database> {
       }),
     ),
     getCall: vi.fn<Database['getCall']>(() => Promise.resolve(null)),
-    callNumber: vi.fn<Database['callNumber']>(() => Promise.resolve('+14035550100')),
     recordLeg: vi.fn<Database['recordLeg']>(() => Promise.resolve()),
     failCall: vi.fn<Database['failCall']>(() => Promise.resolve()),
     callPlacer: vi.fn<Database['callPlacer']>(() => Promise.resolve(null)),
     applyCallEvent: vi.fn<Database['applyCallEvent']>(() =>
       Promise.resolve({ status: 'not_found' }),
     ),
+    claimCommand: vi.fn<Database['claimCommand']>(() => Promise.resolve(null)),
+    finishCommand: vi.fn<Database['finishCommand']>(() => Promise.resolve({ hangUp: null })),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
   return db;

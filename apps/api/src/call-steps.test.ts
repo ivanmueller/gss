@@ -10,9 +10,11 @@ const AT = '2026-11-02T16:00:00.000Z';
 function call(overrides: Partial<CallState> = {}): CallState {
   return {
     status: 'calling_you',
+    outcome: null,
     staffCallControlId: STAFF,
     counterpartyCallControlId: null,
     connectedAt: null,
+    endedAt: null,
     ...overrides,
   };
 }
@@ -144,9 +146,8 @@ describe('nextCallStep', () => {
     });
   });
 
-  it('changes nothing for an ended call or an event out of turn', () => {
+  it('changes nothing for an event out of turn', () => {
     const none = { changes: {}, commands: [] };
-    expect(nextCallStep(call({ status: 'ended' }), event('call.answered', 'you'))).toEqual(none);
     expect(nextCallStep(call({ status: 'connected' }), event('call.answered', 'you'))).toEqual(
       none,
     );
@@ -170,6 +171,61 @@ describe('nextCallStep', () => {
     );
     expect(step.changes.hangupCause).toBeUndefined();
     expect(step.changes.outcome).toBe('failed');
+  });
+});
+
+describe('nextCallStep after the call ended (events out of order)', () => {
+  const ENDED = '2026-11-02T16:05:00.000Z';
+  const ended = (overrides: Partial<CallState> = {}) =>
+    call({
+      status: 'ended',
+      outcome: 'no_answer',
+      counterpartyCallControlId: THEM,
+      endedAt: ENDED,
+      ...overrides,
+    });
+
+  it('makes it talked when their answer, from before the end, arrives late', () => {
+    // Codex's review of ivanmueller/gss#107, finding 3: the hangup at T2 came before the
+    // answer at T1.
+    const answered = event('call.answered', 'them', { occurredAt: '2026-11-02T16:01:00.000Z' });
+    expect(nextCallStep(ended(), answered)).toEqual({
+      changes: { outcome: 'talked', connectedAt: '2026-11-02T16:01:00.000Z' },
+      commands: [{ kind: 'hang_up', callControlId: THEM }],
+    });
+    expect(
+      nextCallStep(ended({ outcome: 'cancelled', counterpartyCallControlId: null }), answered)
+        .changes,
+    ).toEqual({
+      outcome: 'talked',
+      connectedAt: '2026-11-02T16:01:00.000Z',
+      counterpartyCallControlId: THEM,
+    });
+  });
+
+  it('hangs up a leg that answers or starts after the end', () => {
+    expect(
+      nextCallStep(ended(), event('call.answered', 'them', { occurredAt: '2026-11-02T16:06:00Z' })),
+    ).toEqual({ changes: {}, commands: [{ kind: 'hang_up', callControlId: THEM }] });
+    expect(nextCallStep(ended(), event('call.initiated', 'them'))).toEqual({
+      changes: {},
+      commands: [{ kind: 'hang_up', callControlId: THEM }],
+    });
+    expect(nextCallStep(ended(), event('call.answered', 'you'))).toEqual({
+      changes: {},
+      commands: [{ kind: 'hang_up', callControlId: STAFF }],
+    });
+  });
+
+  it('leaves a talked call as it is, and ignores late hangups and gathers', () => {
+    const none = { changes: {}, commands: [] };
+    const talked = ended({ outcome: 'talked', connectedAt: '2026-11-02T16:01:00.000Z' });
+    expect(
+      nextCallStep(talked, event('call.answered', 'them', { occurredAt: '2026-11-02T16:01:00Z' }))
+        .changes,
+    ).toEqual({});
+    expect(nextCallStep(ended(), event('call.hangup', 'you'))).toEqual(none);
+    expect(nextCallStep(ended(), event('call.gather.ended', 'you', { digits: '1' }))).toEqual(none);
   });
 });
 
