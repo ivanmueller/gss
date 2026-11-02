@@ -114,6 +114,12 @@ const EQUIPMENT_NAMES = new Map<string, Equipment>([
   [equipmentKey('Rail car'), 'hopper_car'],
 ]);
 
+/** Places whose names hold "and", as [ISO code, name]. */
+const NAMES_WITH_AND: [string, string][] = [
+  ...Object.entries(CA_REGIONS).map(([code, name]) => [`CA-${code}`, name] as [string, string]),
+  ...Object.entries(US_REGIONS).map(([code, name]) => [`US-${code}`, name] as [string, string]),
+].filter(([, name]) => / and /i.test(name));
+
 /** A province, territory or state by its code or name, in either country; null when not one. */
 function placeFrom(name: string): string | null {
   const wanted = name.trim().replace(/\./g, '').toLowerCase();
@@ -139,7 +145,13 @@ function placeFrom(name: string): string | null {
 export function parsePlaceList(text: string): { places: string[]; unknown: string[] } {
   const places: string[] = [];
   const unknown: string[] = [];
-  for (const part of text.split(/[;,/|\n]+| and | & /i)) {
+  // A name with "and" in it ("Newfoundland and Labrador") is one place, read before "and"
+  // separates places (Codex's review of 08a3957).
+  let rest = text;
+  for (const [code, name] of NAMES_WITH_AND) {
+    rest = rest.replace(new RegExp(name.replace(/ and /i, '\\s+and\\s+'), 'gi'), code);
+  }
+  for (const part of rest.split(/[;,/|\n]+| and | & /i)) {
     const name = part.trim();
     if (name === '') continue;
     const place = placeFrom(name);

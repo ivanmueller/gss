@@ -452,6 +452,42 @@ describe('lanes from a spreadsheet, verified by a rep (owner’s request, 2026-1
   });
 });
 
+// Codex's review of 08a3957: a listed buyer becoming a carrier gets its lanes in the same import.
+describe('a listed buyer a file makes a carrier', () => {
+  it('gains the Carrier type before its lanes are written', async () => {
+    const id = crypto.randomUUID();
+    await admin`insert into app.counterparties
+        (id, organization_id, legal_name, types, primary_country, source, created_by) values
+      (${id}, ${orgs.a}, 'Synthetic Buyer Turned Hauler', '{buyer}', 'CA', 'manual', ${users.olivia})`;
+    const batchId = await db.importCounterparties(as(users.olivia), orgs.a, () => ({
+      organizationId: orgs.a,
+      fileName: 'synthetic-carriers-3.csv',
+      contentSha256: 'd'.repeat(64),
+      rowCount: 1,
+      skippedCount: 1,
+      counterparties: [],
+      additions: [
+        {
+          counterpartyId: id,
+          details: { types: ['buyer', 'carrier'] },
+          contacts: [],
+          facilities: [],
+          commodities: [],
+          lanes: [{ origin: 'CA-AB', destination: 'US-MT', transport: null }],
+          contactUpdates: [],
+          facilityUpdates: [],
+        },
+      ],
+    }));
+    expect(batchId).not.toBeNull();
+    const detail = await db.getCounterparty(as(users.victor), id);
+    expect(detail?.types).toEqual(['buyer', 'carrier']);
+    expect(detail?.lanes).toEqual([
+      { origin: 'CA-AB', destination: 'US-MT', transport: null, verifiedAt: null },
+    ]);
+  });
+});
+
 // Codex's review of ba68201: two changes at the same moment.
 describe('lanes and concurrent changes', () => {
   it('a removal waiting for an archiving under way is refused once it is archived', async () => {

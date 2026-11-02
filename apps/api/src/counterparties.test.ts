@@ -1184,6 +1184,44 @@ describe('POST /api/v1/counterparties/import with carriers (owner’s request, 2
     expect(await res.json()).toMatchObject({ error: { code: 'NOTHING_TO_IMPORT' } });
   });
 
+  // Codex's review of 08a3957: the stored checksum of a file's content holds its lanes and
+  // equipment too.
+  it('records a different content checksum when only a lane or equipment differs', async () => {
+    const checksum = async (values: Record<string, string>, call: number) => {
+      await postImport({ ...body, rows: [{ line: 2, values }] });
+      return planned([], call)?.contentSha256;
+    };
+    const base = { legalName: 'Synthetic Hauling', country: 'CA', loadsIn: 'AB', deliversTo: 'MT' };
+    const first = await checksum({ ...base, equipment: 'Super B' }, 0);
+    const otherLane = await checksum({ ...base, deliversTo: 'ND', equipment: 'Super B' }, 1);
+    const otherEquipment = await checksum({ ...base, equipment: 'Dry van' }, 2);
+    expect(new Set([first, otherLane, otherEquipment]).size).toBe(3);
+  });
+
+  it('refuses a carrier’s lanes on a company whose first row is a buyer', async () => {
+    const res = await sendImport({
+      ...body,
+      commit: false,
+      rows: [
+        { line: 2, values: { legalName: 'Synthetic Hauling', country: 'CA', types: 'Buyer' } },
+        {
+          line: 3,
+          values: {
+            legalName: 'Synthetic Hauling',
+            country: 'CA',
+            types: 'Carrier',
+            loadsIn: 'AB',
+            deliversTo: 'MT',
+          },
+        },
+      ],
+    });
+    expect(await res.json()).toMatchObject({
+      summary: { invalidRows: 1 },
+      issues: [{ line: 3, field: 'types' }],
+    });
+  });
+
   it('refuses lanes on a row that is not a carrier', async () => {
     const res = await sendImport({
       ...body,
