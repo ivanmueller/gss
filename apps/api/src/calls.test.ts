@@ -664,6 +664,21 @@ describe('POST /api/v1/telnyx/voice', () => {
     expect((await webhook(answered)).status).toBe(200);
   });
 
+  it('keeps and hangs up the leg of a dial whose caller was suspended meanwhile (seventh review)', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [DIAL] });
+    db.claimCommand.mockResolvedValue(claimed(DIAL));
+    // Suspended while Telnyx dialed: the call is hidden when the dial comes back.
+    db.finishCommand.mockResolvedValue({ followUp: null, callerGone: true });
+    db.callLegs.mockResolvedValue(['v3:staff-leg', 'v3:new-leg']);
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(db.keepStrayLeg).toHaveBeenCalledWith(DIAL.id, 'v3:new-leg');
+    expect(telnyx.hangUp.mock.calls.map(([leg]) => leg).sort()).toEqual([
+      'v3:new-leg',
+      'v3:staff-leg',
+    ]);
+  });
+
   it('keeps a hang-up pending when Telnyx refuses it for now (fifth review, 3)', async () => {
     db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [HANG_UP] });
     db.claimCommand.mockResolvedValue(claimed(HANG_UP));

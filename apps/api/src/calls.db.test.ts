@@ -917,3 +917,47 @@ describe("Codex's sixth review", () => {
     expect(await db.callLegs(crypto.randomUUID())).toEqual([]);
   });
 });
+
+describe("Codex's seventh review", () => {
+  it('keeps the leg of a dial that came back after its caller was suspended', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you'),
+    );
+    const pressed = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
+    );
+    if (pressed.status !== 'applied') throw new Error('not applied');
+    const dial = pressed.commands[0]?.id ?? '';
+    await db.claimCommand(as(users.tess), callId, dial);
+    await admin`update app.organization_members set status = 'suspended'
+                where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    try {
+      expect(
+        await db.finishCommand(as(users.tess), callId, dial, 1, {
+          kind: 'done',
+          legId: 'v3:new-s',
+        }),
+      ).toEqual({ followUp: null, callerGone: true });
+      await db.keepStrayLeg(dial, 'v3:new-s');
+      await db.keepStrayLeg(dial, 'v3:new-s');
+      expect(await db.callLegs(callId)).toContain('v3:new-s');
+      const [kept] = await admin<{ n: number }[]>`
+        select count(*)::int as n from app.call_commands
+        where call_id = ${callId} and kind = 'hang_up' and call_control_id = 'v3:new-s'`;
+      expect(kept?.n).toBe(1);
+    } finally {
+      await admin`update app.organization_members set status = 'active'
+                  where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    }
+  });
+});

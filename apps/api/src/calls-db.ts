@@ -77,6 +77,8 @@ export type ClaimResult =
 export interface FinishResult {
   followUp: PendingCommand | null;
   unresolved?: true;
+  /** The caller can no longer see the call: it is to be ended at Telnyx. */
+  callerGone?: true;
 }
 
 /** How sending a command went. */
@@ -139,6 +141,12 @@ export interface CallsDatabase {
    * call whose caller can no longer reach it (suspended or removed; Codex's sixth review, 2).
    */
   callLegs: (callId: string) => Promise<string[]>;
+  /**
+   * Keeps the leg a dial returned as a pending hang-up of its call, without a signed-in user
+   * (app.keep_stray_leg): for a dial that came back after its caller was suspended (Codex's
+   * seventh review), so that the leg is hung up with the call's others.
+   */
+  keepStrayLeg: (commandId: string, leg: string) => Promise<void>;
   /**
    * Claims a pending command (or one whose claim has lapsed) for sending, under the call's lock,
    * if the call still wants it: asking for 1 while confirming, dialing them while calling them
@@ -349,6 +357,10 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
       });
     },
 
+    async keepStrayLeg(commandId, leg) {
+      await sql`select app.keep_stray_leg(${commandId}, ${leg})`;
+    },
+
     async callLegs(callId) {
       const rows = await sql<{ call_control_id: string }[]>`
         select call_control_id from app.call_legs(${callId})`;
@@ -442,13 +454,22 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
 
     unsettledCommands(ctx, callId) {
       return asUser(ctx, async (tx) => {
-        const [visible] = await tx<{ id: string }[]>`select id from app.calls where id = ${callId}`;
-        if (!visible) return null;
-        const rows = await tx<CommandRow[]>`
-          select id, kind, call_control_id from app.call_commands
-          where call_id = ${callId} and status in ('pending', 'sending')
-          order by created_at, id`;
-        return rows.map(toPending);
+        // One statement, so that the call and its commands are read at the same moment.
+        const rows = await tx<
+          { id: string | null; kind: CommandRow['kind'] | null; call_control_id: string | null }[]
+        >`
+          select m.id, m.kind, m.call_control_id
+          from app.calls c
+          left join app.call_commands m
+            on m.call_id = c.id and m.status in ('pending', 'sending')
+          where c.id = ${callId}
+          order by m.created_at, m.id`;
+        if (rows.length === 0) return null;
+        return rows.flatMap((row) =>
+          row.id !== null && row.kind !== null && row.call_control_id !== null
+            ? [{ id: row.id, kind: row.kind, callControlId: row.call_control_id }]
+            : [],
+        );
       });
     },
 
@@ -468,7 +489,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           (CommandRow & { status: string; attempts: number; lapsed: boolean })[]
         >`
           select id, kind, call_control_id, status, attempts,
-                 coalesce(claimed_at < now() - ${STALE_CLAIM}::interval, true) as lapsed
+                 coalesce(claimed_at < clock_timestamp() - ${STALE_CLAIM}::interval, true) as lapsed
           from app.call_commands where id = ${commandId} and call_id = ${callId}`;
         if (!command) return { status: 'skipped' };
         if (command.status === 'sending' && !command.lapsed) return { status: 'busy' };
@@ -488,7 +509,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         const attempt = command.attempts + 1;
         await tx`
           update app.call_commands
-          set status = 'sending', attempts = ${attempt}, claimed_at = now()
+          set status = 'sending', attempts = ${attempt}, claimed_at = clock_timestamp()
           where id = ${commandId}`;
         return {
           status: 'claimed',
@@ -509,7 +530,9 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
         >`
           select id, kind, call_control_id, status, attempts, telnyx_event_id
           from app.call_commands where id = ${commandId} and call_id = ${callId}`;
-        if (!call || !command) return { followUp: null };
+        // The caller can no longer see the call (suspended or removed).
+        if (!call) return { followUp: null, callerGone: true };
+        if (!command) return { followUp: null };
         const legId = outcome.kind === 'done' ? (outcome.legId ?? null) : null;
         const ours = command.status === 'sending' && command.attempts === attempt;
         // A second leg to them, when the call already holds a different one, is not wanted.

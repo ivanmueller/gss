@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(32);
+select plan(33);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000044aa', 'tom@example.test', '{"first_name": "Tom", "last_name": "Trader"}'),
@@ -103,6 +103,13 @@ select ok(
     and not has_function_privilege('authenticated', 'app.call_legs(uuid)', 'execute')
     and not has_function_privilege('service_role', 'app.call_legs(uuid)', 'execute'),
   'app_api alone reads a call''s legs with app.call_legs (sixth review, 2)'
+);
+select ok(
+  has_function_privilege('app_api', 'app.keep_stray_leg(uuid, text)', 'execute')
+    and not has_function_privilege('anon', 'app.keep_stray_leg(uuid, text)', 'execute')
+    and not has_function_privilege('authenticated', 'app.keep_stray_leg(uuid, text)', 'execute')
+    and not has_function_privilege('service_role', 'app.keep_stray_leg(uuid, text)', 'execute'),
+  'app_api alone keeps a stray leg with app.keep_stray_leg (seventh review)'
 );
 
 -- Adding and moving commands --------------------------------------------------------------

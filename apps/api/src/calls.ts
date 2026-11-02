@@ -339,6 +339,14 @@ async function sendCommands(
         outcome = { kind: 'failed' };
       }
       const finished = await db.finishCommand(ctx, callId, command.id, command.attempt, outcome);
+      if (finished.callerGone === true) {
+        // Suspended while Telnyx was dialing: the leg it returned is kept to be hung up with the
+        // call's others (Codex's seventh review).
+        if (outcome.kind === 'done' && outcome.legId !== undefined) {
+          await db.keepStrayLeg(command.id, outcome.legId);
+        }
+        throw new CallerGone();
+      }
       if (finished.followUp !== null) queue.push(finished.followUp);
     }
     // Acknowledged only when every command of the call is settled: those not tried yet in this

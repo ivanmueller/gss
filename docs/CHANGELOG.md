@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's seventh review of the Telnyx calls
+
+- `docs/DECISIONS.md`: the leg of a dial that came back after its caller was suspended, kept and hung up; the two P3.
+- `docs/DATA_MODEL.md`: migration `20261102060000_keep_stray_leg.sql`.
+
 ## 2026-11-02 — Codex's sixth review of the Telnyx calls
 
 - `docs/DECISIONS.md`: a 10-second limit on every Telnyx request; calls of a suspended caller ended at Telnyx.

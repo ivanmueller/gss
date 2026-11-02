@@ -155,6 +155,7 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     unsettledCommands: vi.fn<Database['unsettledCommands']>(() => Promise.resolve([])),
     callLegs: vi.fn<Database['callLegs']>(() => Promise.resolve([])),
+    keepStrayLeg: vi.fn<Database['keepStrayLeg']>(() => Promise.resolve()),
     claimCommand: vi.fn<Database['claimCommand']>(() => Promise.resolve({ status: 'skipped' })),
     finishCommand: vi.fn<Database['finishCommand']>(() => Promise.resolve({ followUp: null })),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
