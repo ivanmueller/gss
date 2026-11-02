@@ -257,3 +257,39 @@ describe('CallRecordingDetails', () => {
     expect(screen.queryByRole('button', { name: 'Play recording' })).not.toBeInTheDocument();
   });
 });
+
+describe('the contact history after a call that connected', () => {
+  it('is loaded again for the transcript after the line has gone', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockApi({
+      'GET /me/phone': () => Response.json({ phone: '(403) 555-0142', callingAvailable: true }),
+      'POST /calls': () =>
+        Response.json(
+          {
+            call: {
+              ...VIEW,
+              status: 'ended',
+              outcome: 'talked',
+              connectedAt: '2026-11-02T16:00:30.000Z',
+              endedAt: '2026-11-02T16:06:42.000Z',
+              contactLogEntryId: '00000000-0000-4000-8000-0000000e11aa',
+            },
+          },
+          { status: 201 },
+        ),
+    });
+    const onLogged = page();
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    await user.click(await screen.findByRole('button', { name: /Call Pat Buyer/ }));
+    await screen.findByText(/call ended after/);
+    // The line goes after 5 seconds; the reloads at 30 s, 90 s and 3 min still happen.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(screen.queryByText(/call ended after/)).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(180_000);
+    });
+    expect(onLogged).toHaveBeenCalledTimes(3);
+  });
+});
