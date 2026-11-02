@@ -1,7 +1,8 @@
 import { dialablePhone, displayPhone, placeCallSchema, savePhoneSchema } from '@grain/domain';
 import { Hono } from 'hono';
 
-import type { CallCommand, CallEvent } from './call-steps';
+import type { CallEvent } from './call-steps';
+import type { CommandOutcome, PendingCommand } from './calls-db';
 import type { Database, RequestContext } from './db';
 import {
   apiError,
@@ -173,7 +174,8 @@ export function callRoutes(openDatabase: DatabaseFactory, telnyx: TelnyxFactory)
           clientState: { call: placed.callId, leg: 'you' },
           timeoutSecs: STAFF_RING_SECONDS,
         });
-        await db.recordLeg(ctx, placed.callId, 'you', legId);
+        // Without an id in the answer, the leg is learned from its first event.
+        if (legId !== null) await db.recordLeg(ctx, placed.callId, 'you', legId);
       } catch (error) {
         telnyxFailed(c, error, 'a call');
         await db.failCall(ctx, placed.callId, 'failed');
@@ -238,47 +240,59 @@ const CALL_EVENTS = new Set([
   'call.hangup',
 ]);
 
-/** Sends the commands that follow an event; a refused command ends the call as failed. */
+/**
+ * Sends the pending commands of an event, each claimed first so that only a command the call
+ * still wants is sent (Codex's review of ivanmueller/gss#107). A command Telnyx refuses ends the
+ * call as failed; when Telnyx cannot be reached, the command stays pending and the error is
+ * thrown, so the webhook answers 500 and Telnyx sends the event again.
+ */
 async function sendCommands(
   c: ApiContext,
   db: Database,
   ctx: RequestContext,
   client: TelnyxClient,
   callId: string,
-  commands: CallCommand[],
+  commands: PendingCommand[],
 ) {
-  for (const command of commands) {
+  for (const pending of commands) {
+    const command = await db.claimCommand(ctx, callId, pending.id);
+    if (command === null) continue;
+    let outcome: CommandOutcome;
     try {
       switch (command.kind) {
         case 'confirm':
-          await client.confirm(command.callControlId, { call: callId, leg: 'you' });
+          await client.confirm(command.callControlId, { call: callId, leg: 'you' }, command.id);
+          outcome = { kind: 'done' };
           break;
         case 'dial_them': {
-          const number = await db.callNumber(ctx, callId);
-          if (number === null) throw new TelnyxError(0, 'no_number');
           const legId = await client.dial({
-            to: number,
+            to: command.counterpartyPhone,
             clientState: { call: callId, leg: 'them' },
             timeoutSecs: COUNTERPARTY_RING_SECONDS,
-            bridgeTo: command.staffCallControlId,
+            bridgeTo: command.callControlId,
           });
-          await db.recordLeg(ctx, callId, 'them', legId);
+          outcome = legId === null ? { kind: 'done' } : { kind: 'done', legId };
           break;
         }
         case 'hang_up':
-          await client.hangUp(command.callControlId);
+          await client.hangUp(command.callControlId, command.id);
+          outcome = { kind: 'done' };
           break;
       }
     } catch (error) {
-      if (!(error instanceof TelnyxError)) throw error;
-      telnyxFailed(c, error, `the ${command.kind} command`);
-      // A leg already gone cannot be hung up; anything else ends the call.
-      if (command.kind !== 'hang_up') {
-        await db.failCall(ctx, callId, 'failed');
-        const staff =
-          command.kind === 'confirm' ? command.callControlId : command.staffCallControlId;
-        await client.hangUp(staff).catch(() => undefined);
+      if (!(error instanceof TelnyxError)) {
+        await db.finishCommand(ctx, callId, command.id, { kind: 'retry' });
+        throw error;
       }
+      // A leg already gone cannot be hung up; that is not a problem.
+      if (command.kind !== 'hang_up') telnyxFailed(c, error, `the ${command.kind} command`);
+      outcome = { kind: 'failed' };
+    }
+    const { hangUp } = await db.finishCommand(ctx, callId, command.id, outcome);
+    if (hangUp !== null) {
+      await client.hangUp(hangUp).catch((error: unknown) => {
+        if (!(error instanceof TelnyxError)) throw error;
+      });
     }
   }
 }
@@ -365,8 +379,8 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
         hangupCause: text(event.payload, 'hangup_cause', 40),
       };
       const result = await db.applyCallEvent(ctx, state.call, event.id, callEvent);
-      if (result.status === 'applied') {
-        await sendCommands(c, db, ctx, client, state.call, result.step.commands);
+      if (result.status !== 'not_found') {
+        await sendCommands(c, db, ctx, client, state.call, result.commands);
       }
       return c.json({ received: true });
     } catch (error) {

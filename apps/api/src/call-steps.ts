@@ -10,16 +10,21 @@ import type { CallOutcome, CallStatus } from '@grain/domain';
 //    (calling_them, then connected).
 // 3. When either side hangs up, the other leg is hung up and the call ends with its outcome;
 //    a call that connected is written to the contact log.
-// Events for an ended call, and events that do not fit the call's state, change nothing.
+// Events that do not fit the call's state change nothing. Telnyx's events can come out of order
+// (Codex's review of ivanmueller/gss#107): for an ended call, the counterparty's "answered" that
+// happened before the end makes it a call where they talked, and a leg still showing signs of
+// life after the end is hung up.
 
 /** The two legs: the caller's own cell (you) and the counterparty (them). */
 export type CallLeg = 'you' | 'them';
 
 export interface CallState {
   status: CallStatus;
+  outcome: CallOutcome | null;
   staffCallControlId: string | null;
   counterpartyCallControlId: string | null;
   connectedAt: string | null;
+  endedAt: string | null;
 }
 
 /** A Telnyx call event, reduced to what the steps need. */
@@ -88,7 +93,7 @@ function hangUp(callControlId: string | null): CallCommand[] {
 
 /** The changes and commands that follow an event, for a call in the given state. */
 export function nextCallStep(call: CallState, event: CallEvent): CallStep {
-  if (call.status === 'ended') return NOTHING;
+  if (call.status === 'ended') return afterTheEnd(call, event);
   const staffId = call.staffCallControlId ?? (event.leg === 'you' ? event.callControlId : null);
   const theirId =
     call.counterpartyCallControlId ?? (event.leg === 'them' ? event.callControlId : null);
@@ -102,6 +107,33 @@ export function nextCallStep(call: CallState, event: CallEvent): CallStep {
   };
   const step = stepFor(call, event, staffId, theirId);
   return { changes: { ...ids, ...step.changes }, commands: step.commands };
+}
+
+/** A late event of an ended call. */
+function afterTheEnd(call: CallState, event: CallEvent): CallStep {
+  if (event.type !== 'call.initiated' && event.type !== 'call.answered') return NOTHING;
+  const leg = event.callControlId;
+  const lateAnswer =
+    event.type === 'call.answered' &&
+    event.leg === 'them' &&
+    call.outcome !== 'talked' &&
+    call.connectedAt === null &&
+    call.endedAt !== null &&
+    Date.parse(event.occurredAt) <= Date.parse(call.endedAt);
+  if (lateAnswer) {
+    return {
+      changes: {
+        outcome: 'talked',
+        connectedAt: event.occurredAt,
+        ...(call.counterpartyCallControlId === null && leg !== null
+          ? { counterpartyCallControlId: leg }
+          : {}),
+      },
+      // Both legs should be gone already; hanging up one that is gone does no harm.
+      commands: hangUp(leg),
+    };
+  }
+  return { changes: {}, commands: hangUp(leg) };
 }
 
 function stepFor(

@@ -80,12 +80,18 @@ export interface DialRequest {
   bridgeTo?: string;
 }
 
+/** Every leg ends after 4 hours, Telnyx's longest; a connected call blocks a new one until then. */
+export const CALL_TIME_LIMIT_SECONDS = 4 * 60 * 60;
+
 export interface TelnyxClient {
-  /** Dials a number; returns the new leg's call_control_id. */
-  dial: (request: DialRequest) => Promise<string>;
-  /** Asks the person on the leg to press 1. */
-  confirm: (callControlId: string, clientState: ClientState) => Promise<void>;
-  hangUp: (callControlId: string) => Promise<void>;
+  /**
+   * Dials a number; returns the new leg's call_control_id, or null when Telnyx answered without
+   * one (a dial it had already taken: its leg is then learned from its events).
+   */
+  dial: (request: DialRequest) => Promise<string | null>;
+  /** Asks the person on the leg to press 1. `commandId` makes a repeat harmless. */
+  confirm: (callControlId: string, clientState: ClientState, commandId: string) => Promise<void>;
+  hangUp: (callControlId: string, commandId?: string) => Promise<void>;
   /** Refuses an incoming call with a busy signal. */
   reject: (callControlId: string) => Promise<void>;
 }
@@ -146,6 +152,7 @@ export const telnyxClient: TelnyxFactory = (env) => {
         to: request.to,
         from: config.fromNumber,
         timeout_secs: request.timeoutSecs,
+        time_limit_secs: CALL_TIME_LIMIT_SECONDS,
         client_state: encodeClientState(request.clientState),
         // Telnyx ignores a second Dial with the same command_id.
         command_id: `${request.clientState.call}-${request.clientState.leg}`,
@@ -157,12 +164,9 @@ export const telnyxClient: TelnyxFactory = (env) => {
         typeof result === 'object' && result !== null
           ? (result as { data?: { call_control_id?: unknown } }).data?.call_control_id
           : undefined;
-      if (typeof id !== 'string' || id.length === 0 || id.length > 200) {
-        throw new TelnyxError(200, 'no_call_control_id');
-      }
-      return id;
+      return typeof id === 'string' && id.length > 0 && id.length <= 200 ? id : null;
     },
-    async confirm(callControlId, clientState) {
+    async confirm(callControlId, clientState, commandId) {
       await action(callControlId, 'gather_using_speak', {
         payload: CONFIRM_PROMPT,
         voice: 'AWS.Polly.Joanna-Neural',
@@ -173,11 +177,15 @@ export const telnyxClient: TelnyxFactory = (env) => {
         maximum_tries: 3,
         timeout_millis: 6000,
         client_state: encodeClientState(clientState),
-        command_id: `${clientState.call}-confirm`,
+        command_id: commandId,
       });
     },
-    async hangUp(callControlId) {
-      await action(callControlId, 'hangup', {});
+    async hangUp(callControlId, commandId) {
+      await action(
+        callControlId,
+        'hangup',
+        commandId === undefined ? {} : { command_id: commandId },
+      );
     },
     async reject(callControlId) {
       await action(callControlId, 'reject', { cause: 'USER_BUSY' });
