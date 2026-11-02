@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — The recordings job logs a part that stopped
+
+- `docs/DECISIONS.md`: Codex's re-review of `14e54fd` and the P3 fixed (a stopped part of the job logged, secret-free).
+
 ## 2026-11-02 — Codex's review of the transcript by side
 
 - `docs/DECISIONS.md`: the four findings on `3571e62` and their fixes (transcription and deletion side by side within a time budget, one claim at a time, transcripts cut to fit, text kept without segments).
