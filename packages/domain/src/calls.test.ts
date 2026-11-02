@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  fitTranscript,
+  TRANSCRIPT_MAX_CHARS,
   transcriptLines,
   transcriptText,
   callLogNotes,
@@ -108,5 +110,51 @@ describe('transcriptText', () => {
       ]),
     ).toBe('Caller: Morning Pat.\nCounterparty: Two loads.\nUnknown: Bye.');
     expect(transcriptText([])).toBe('');
+  });
+});
+
+describe('fitTranscript', () => {
+  it('keeps a transcript that fits as it is', () => {
+    const lines = [
+      { side: 'caller' as const, start: 0, text: 'Morning Pat.' },
+      { side: 'counterparty' as const, start: 2, text: 'Two loads.' },
+    ];
+    expect(fitTranscript(lines)).toEqual(lines);
+  });
+
+  it("cuts the plain transcript to the database's 200,000 characters, the last line cut short", () => {
+    const lines = [
+      { side: 'caller' as const, start: 0, text: 'x'.repeat(199_995) },
+      { side: 'counterparty' as const, start: 9, text: 'Two loads.' },
+    ];
+    const fitted = fitTranscript(lines);
+    expect(transcriptText(fitted)).toHaveLength(TRANSCRIPT_MAX_CHARS);
+    expect(fitted).toEqual([{ side: 'caller', start: 0, text: 'x'.repeat(199_992) }]);
+    // "Caller: abc" (11) + newline + "Counterparty: " (14) leaves 4 characters of the second.
+    expect(
+      fitTranscript(
+        [
+          { side: 'caller', start: 0, text: 'abc' },
+          { side: 'counterparty', start: 1, text: 'Two loads.' },
+        ],
+        30,
+      ),
+    ).toEqual([
+      { side: 'caller', start: 0, text: 'abc' },
+      { side: 'counterparty', start: 1, text: 'Two ' },
+    ]);
+  });
+
+  it('never splits a character in two, and keeps at most the number of lines given', () => {
+    // "Caller: " (8) + "a" leaves room for half of the emoji.
+    expect(fitTranscript([{ side: 'caller', start: 0, text: 'a\u{1F33E}b' }], 10)).toEqual([
+      { side: 'caller', start: 0, text: 'a' },
+    ]);
+    const many = Array.from({ length: 5 }, (_, i) => ({
+      side: i % 2 === 0 ? ('caller' as const) : ('counterparty' as const),
+      start: i,
+      text: 'Yes.',
+    }));
+    expect(fitTranscript(many, 1000, 3)).toHaveLength(3);
   });
 });

@@ -1,6 +1,7 @@
 import {
   dialablePhone,
   displayPhone,
+  fitTranscript,
   placeCallSchema,
   savePhoneSchema,
   transcriptText,
@@ -482,30 +483,52 @@ async function sendCommands(
  */
 export const RECORDINGS_CRON = '*/2 * * * *';
 
-/** Recordings transcribed per run of the job. */
-const TRANSCRIBE_BATCH = 10;
+/** Recordings transcribed per run of the job, at most. */
+const TRANSCRIBE_MOST = 10;
+
+/**
+ * How long each part of a run may start new work. Cloudflare stops a scheduled run after 15
+ * minutes (Codex's review of 3571e62, finding 1): a recording claimed just before the budget
+ * ends takes at most TRANSCRIBE_TIMEOUT_MS plus a 10-second request, and a deletion 10 seconds,
+ * so both parts end well within it.
+ */
+export const RECORDINGS_JOB_BUDGET_MS = 8 * 60_000;
+
+interface JobOptions {
+  /** The clock, for tests. */
+  now?: () => number;
+}
 
 /**
  * Transcribes by side the recordings that have no transcript yet (the owner's request of
- * 2026-11-02): each is claimed, so two runs never transcribe one recording together; a failure
- * is tried again after the claim lapses (10 minutes), up to 5 attempts.
+ * 2026-11-02). Each is claimed only when it is about to be transcribed (Codex's review of
+ * 3571e62, finding 2), so its 10-minute claim covers its own transcription, which is limited to
+ * TRANSCRIBE_TIMEOUT_MS, and two runs never transcribe one recording together; a failure is
+ * tried again after the claim lapses, up to 5 attempts. The transcript kept is bounded to what
+ * the database keeps (finding 3), so a long one is kept rather than refused and paid again.
  */
 export async function transcribeNewRecordings(
   env: ApiEnv['Bindings'],
   openDatabase: DatabaseFactory,
   telnyx: TelnyxFactory = telnyxClient,
+  { now = Date.now }: JobOptions = {},
 ) {
   const client = telnyx(env);
   const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
   if (client === null || !url) return;
+  const started = now();
   const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
   try {
-    for (const recordingId of await db.claimRecordingsToTranscribe(TRANSCRIBE_BATCH)) {
+    for (let count = 0; count < TRANSCRIBE_MOST; count += 1) {
+      if (now() - started >= RECORDINGS_JOB_BUDGET_MS) break;
+      const [recordingId] = await db.claimRecordingsToTranscribe(1);
+      if (recordingId === undefined) break;
       try {
-        const lines = await client.transcribeRecording(recordingId);
+        const found = await client.transcribeRecording(recordingId);
         // Telnyx no longer has the audio: tried again until the attempts run out.
-        if (lines === null) continue;
+        if (found === null) continue;
         // A call where nothing was said keeps an empty transcript, so it is not tried again.
+        const lines = fitTranscript(found);
         await db.keepTranscriptLines(recordingId, lines, transcriptText(lines));
       } catch (error) {
         console.error(
@@ -516,6 +539,23 @@ export async function transcribeNewRecordings(
   } finally {
     await db.close().catch(() => undefined);
   }
+}
+
+/**
+ * The scheduled job every 2 minutes: transcription and the deletion of audio 24 hours old run
+ * side by side, so a slow transcription never holds back a deletion (Codex's review of 3571e62,
+ * finding 1), and a failure of one never stops the other.
+ */
+export async function runRecordingsJob(
+  env: ApiEnv['Bindings'],
+  openDatabase: DatabaseFactory,
+  telnyx: TelnyxFactory = telnyxClient,
+  options: JobOptions = {},
+) {
+  await Promise.allSettled([
+    transcribeNewRecordings(env, openDatabase, telnyx, options),
+    deleteExpiredRecordings(env, openDatabase, telnyx, options),
+  ]);
 }
 
 /** Recordings deleted per batch, and batches per run (a backlog is worked through in one run). */
@@ -532,21 +572,25 @@ export async function deleteExpiredRecordings(
   env: ApiEnv['Bindings'],
   openDatabase: DatabaseFactory,
   telnyx: TelnyxFactory = telnyxClient,
+  { now = Date.now }: JobOptions = {},
 ) {
   const client = telnyx(env);
   const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
   if (client === null || !url) return;
+  const started = now();
   const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
   try {
     let deleted = 0;
     // Each recording is tried once per run; one Telnyx would not delete now waits for the next run.
     const tried = new Set<string>();
-    for (let batch = 0; batch < DELETE_BATCHES; batch += 1) {
+    batches: for (let batch = 0; batch < DELETE_BATCHES; batch += 1) {
       const due = (await db.recordingsToDelete(DELETE_BATCH + tried.size)).filter(
         (recordingId) => !tried.has(recordingId),
       );
       if (due.length === 0) break;
       for (const recordingId of due.slice(0, DELETE_BATCH)) {
+        // Left for the next run once the budget is spent, within Cloudflare's 15 minutes.
+        if (now() - started >= RECORDINGS_JOB_BUDGET_MS) break batches;
         tried.add(recordingId);
         try {
           await client.deleteRecording(recordingId);

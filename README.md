@@ -171,7 +171,7 @@ On a counterparty's page, traders, operations and admins see **Call** beside eac
 
 Until all four are there, the Call buttons do not show and Telnyx's events are refused.
 
-Every call that connects is recorded (both sides). Every 2 minutes (`*/2 * * * *`) the Worker has Telnyx's speech-to-text (Deepgram) transcribe new recordings, each side separately; under the call in the contact history, everyone on the team sees **Transcript** as a conversation (who said each line) and, for 24 hours, **Play recording**. The audio stays at Telnyx and is deleted there 24 hours after the call by the same job; the transcript stays.
+Every call that connects is recorded (both sides). Every 2 minutes (`*/2 * * * *`) the Worker has Telnyx's speech-to-text (Deepgram) transcribe new recordings, each side separately; under the call in the contact history, everyone on the team sees **Transcript** as a conversation (who said each line) and, for 24 hours, **Play recording**. The audio stays at Telnyx and is deleted there 24 hours after the call by the same job, side by side with the transcription so one never holds back the other; the transcript stays.
 
 ## Staging database connection
 

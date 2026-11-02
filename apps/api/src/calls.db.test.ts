@@ -1,3 +1,4 @@
+import { fitTranscript, transcriptText } from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -1090,5 +1091,30 @@ describe("recordings and transcripts (owner's request, 2026-11-02)", () => {
       .listRecordings(as(users.victor), counterparties.buyer)
       .then((rows) => rows.filter((row) => row.callId === callId && row.lines === null));
     expect(gaveUp).toMatchObject({ transcript: null, transcriptFailed: true });
+  });
+
+  it('keeps a transcript cut to fit, where the uncut one is refused (Codex, finding 3)', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const recording = `rec-long-${placed.callId}`;
+    await db.keepCallRecording(
+      placed.callId,
+      recording,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    const lines = [{ side: 'caller' as const, start: 0, text: 'x'.repeat(199_995) }];
+    await expect(
+      db.keepTranscriptLines(recording, lines, transcriptText(lines)),
+    ).rejects.toMatchObject({
+      code: '23514',
+    });
+    const fitted = fitTranscript(lines);
+    await db.keepTranscriptLines(recording, fitted, transcriptText(fitted));
+    const [kept] = await admin<{ length: number }[]>`
+      select length(transcript) as length from app.call_recordings
+      where telnyx_recording_id = ${recording}`;
+    expect(kept?.length).toBe(200_000);
   });
 });

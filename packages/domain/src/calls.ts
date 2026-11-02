@@ -123,14 +123,47 @@ export function transcriptLines(
   return lines;
 }
 
+/** The label of a side in the plain transcript. */
+function sideLabel(side: TranscriptSide | null): string {
+  return side === 'caller' ? 'Caller' : side === 'counterparty' ? 'Counterparty' : 'Unknown';
+}
+
 /** The plain transcript of the lines, one per turn: "Caller: …" and "Counterparty: …". */
 export function transcriptText(lines: readonly TranscriptLine[]): string {
-  return lines
-    .map(
-      (line) =>
-        `${line.side === 'caller' ? 'Caller' : line.side === 'counterparty' ? 'Counterparty' : 'Unknown'}: ${line.text}`,
-    )
-    .join('\n');
+  return lines.map((line) => `${sideLabel(line.side)}: ${line.text}`).join('\n');
+}
+
+/** What the database keeps of a transcript (app.call_recordings): characters and lines. */
+export const TRANSCRIPT_MAX_CHARS = 200_000;
+export const TRANSCRIPT_MAX_LINES = 20_000;
+
+/**
+ * The lines cut to what the database keeps (Codex's review of 3571e62, finding 3): their plain
+ * transcript at most TRANSCRIPT_MAX_CHARS characters and at most TRANSCRIPT_MAX_LINES lines,
+ * the first ones kept and the last one kept cut short, never splitting a character in two.
+ */
+export function fitTranscript(
+  lines: readonly TranscriptLine[],
+  maxChars = TRANSCRIPT_MAX_CHARS,
+  maxLines = TRANSCRIPT_MAX_LINES,
+): TranscriptLine[] {
+  const kept: TranscriptLine[] = [];
+  let length = 0;
+  for (const line of lines) {
+    if (kept.length >= maxLines) break;
+    // The newline between lines, then "Caller: ".
+    const prefix = (kept.length === 0 ? 0 : 1) + sideLabel(line.side).length + 2;
+    const room = maxChars - length - prefix;
+    if (room <= 0) break;
+    let text = line.text.length <= room ? line.text : line.text.slice(0, room);
+    // A high surrogate left alone at the end would be refused by the database.
+    if (text.length < line.text.length && /[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+    if (text === '') break;
+    kept.push({ ...line, text });
+    length += prefix + text.length;
+    if (text.length < line.text.length) break;
+  }
+  return kept;
 }
 
 /** POST /api/v1/calls: the counterparty, and the contact called or null for its company phone. */
