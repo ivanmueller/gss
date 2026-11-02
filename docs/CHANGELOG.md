@@ -1,5 +1,13 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Documents brought up to #104
+
+- `AGENTS.md`: the status line with carriers added by hand or from a spreadsheet and lanes to verify.
+- `README.md`: the import's green columns, the Carriers choice and the carrier columns; the lanes map without lines.
+- `docs/PRODUCT.md`, `docs/BUILD_PLAN.md`: carrier imports and unverified lanes.
+- `docs/DESIGN_SYSTEM.md`: the lanes map, unverified lanes and the import's found columns.
+- `docs/DATA_MODEL.md`: `carrier_lanes` among the tables.
+
 ## 2026-11-02 — Handoff record of #100 to #104
 
 - `docs/HANDOFF.md`: the carrier import and lanes to verify (ivanmueller/gss#102, #103), the green found columns (#101), the lanes map without lines (#104) and the record of #99 (#100), with their CI and Deploy staging runs and Codex's review; the status summary, GT-020, GT-050, tests and the staging checklist.
