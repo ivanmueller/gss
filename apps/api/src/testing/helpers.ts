@@ -136,6 +136,24 @@ export function fakeDatabase(): Mocked<Database> {
     storeBankOfCanadaRates: vi.fn<Database['storeBankOfCanadaRates']>((rates) =>
       Promise.resolve(rates.map((rate) => ({ rate, outcome: 'stored' as const }))),
     ),
+    getMemberPhone: vi.fn<Database['getMemberPhone']>(() => Promise.resolve(null)),
+    saveMemberPhone: vi.fn<Database['saveMemberPhone']>(() => Promise.resolve('saved')),
+    placeCall: vi.fn<Database['placeCall']>(() =>
+      Promise.resolve({
+        status: 'created',
+        callId: '00000000-0000-4000-8000-0000000ca11a',
+        staffPhone: '+14035550142',
+        counterpartyPhone: '+14035550100',
+      }),
+    ),
+    getCall: vi.fn<Database['getCall']>(() => Promise.resolve(null)),
+    callNumber: vi.fn<Database['callNumber']>(() => Promise.resolve('+14035550100')),
+    recordLeg: vi.fn<Database['recordLeg']>(() => Promise.resolve()),
+    failCall: vi.fn<Database['failCall']>(() => Promise.resolve()),
+    callPlacer: vi.fn<Database['callPlacer']>(() => Promise.resolve(null)),
+    applyCallEvent: vi.fn<Database['applyCallEvent']>(() =>
+      Promise.resolve({ status: 'not_found' }),
+    ),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
   return db;

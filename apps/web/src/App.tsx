@@ -185,6 +185,7 @@ export function App({ account }: { account?: Account }) {
           name: me.status === 'ok' ? me.name : null,
           check: me.status,
           onSignOut: account.signOut,
+          token: account.accessToken,
         },
       })}
     >

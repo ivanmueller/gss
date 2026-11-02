@@ -2,6 +2,7 @@ import { choosePasswordSchema, MIN_PASSWORD_LENGTH } from '@grain/domain';
 import { Hono } from 'hono';
 
 import { requireUser } from './auth';
+import { callRoutes, memberPhoneRoutes, telnyxWebhookRoutes } from './calls';
 import { counterpartyRoutes } from './counterparties';
 import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
@@ -12,10 +13,12 @@ import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { memberRoutes } from './members';
 import { commodityRoutes, quoteRoutes } from './quotes';
 import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
+import { telnyxClient, type TelnyxFactory } from './telnyx';
 
 export type { ApiEnv, DatabaseFactory } from './respond';
 
-export function createApp(openDatabase: DatabaseFactory) {
+export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: TelnyxFactory } = {}) {
+  const telnyx = options.telnyx ?? telnyxClient;
   const app = new Hono<ApiEnv>().basePath('/api/v1');
 
   // Every response carries a request id; writes record it in the audit trail.
@@ -39,6 +42,9 @@ export function createApp(openDatabase: DatabaseFactory) {
     c.header('Cache-Control', 'no-store');
     return c.json({ status: 'ok', service: 'api' });
   });
+
+  // Telnyx's call events carry no signed-in user; each is checked by its Ed25519 signature.
+  app.route('/telnyx', telnyxWebhookRoutes(openDatabase, telnyx));
 
   // Everything registered after this line requires a signed-in user with MFA,
   // including unknown paths, so a new route cannot be left public by mistake.
@@ -114,6 +120,8 @@ export function createApp(openDatabase: DatabaseFactory) {
   app.route('/fx-quotes', fxQuoteRoutes(openDatabase));
   app.route('/contact-log', contactLogRoutes(openDatabase));
   app.route('/follow-ups', followUpRoutes(openDatabase));
+  app.route('/me/phone', memberPhoneRoutes(openDatabase));
+  app.route('/calls', callRoutes(openDatabase, telnyx));
 
   return app;
 }

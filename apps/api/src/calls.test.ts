@@ -1,0 +1,525 @@
+import type { CallView } from '@grain/domain';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Database } from './db';
+import { createApp } from './index';
+import {
+  decodeClientState,
+  encodeClientState,
+  telnyxClient,
+  telnyxConfig,
+  TelnyxError,
+  verifyTelnyxSignature,
+  type TelnyxClient,
+} from './telnyx';
+import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
+
+// Synthetic values only: 555 numbers, made-up ids and keys generated in the test.
+const CALL = '00000000-0000-4000-8000-0000000ca11a';
+const COUNTERPARTY = '00000000-0000-4000-8000-00000000c1aa';
+const CONTACT = '00000000-0000-4000-8000-00000000d1aa';
+const ORG = '00000000-0000-4000-8000-0000000000aa';
+const PLACER = '00000000-0000-4000-8000-0000000044aa';
+const AUTH = { Authorization: `Bearer ${VALID_TOKEN}`, 'Content-Type': 'application/json' };
+
+const keys = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+  'sign',
+  'verify',
+])) as CryptoKeyPair;
+const PUBLIC_KEY = btoa(
+  String.fromCharCode(
+    ...new Uint8Array((await crypto.subtle.exportKey('raw', keys.publicKey)) as ArrayBuffer),
+  ),
+);
+
+const TELNYX_ENV = {
+  ...ENV,
+  TELNYX_API_KEY: 'KEY_synthetic_test_only',
+  TELNYX_PUBLIC_KEY: PUBLIC_KEY,
+  TELNYX_CONNECTION_ID: '1234567890',
+  TELNYX_PHONE_NUMBER: '+1 (825) 555-0199',
+};
+
+const CALL_VIEW: CallView = {
+  id: CALL,
+  counterpartyId: COUNTERPARTY,
+  contactName: 'Pat Buyer',
+  status: 'calling_you',
+  outcome: null,
+  createdAt: '2026-11-02T16:00:00.000Z',
+  connectedAt: null,
+  endedAt: null,
+  contactLogEntryId: null,
+};
+
+let db = fakeDatabase();
+const openDatabase = vi.fn<(url: string) => Database>(() => db);
+let telnyx: { [K in keyof TelnyxClient]: ReturnType<typeof vi.fn<TelnyxClient[K]>> };
+const app = createApp(openDatabase, { telnyx: (env) => (telnyxConfig(env) ? telnyx : null) });
+
+async function sign(body: string, timestamp: number): Promise<string> {
+  const signature = await crypto.subtle.sign(
+    'Ed25519',
+    keys.privateKey,
+    new TextEncoder().encode(`${String(timestamp)}|${body}`),
+  );
+  return btoa(String.fromCharCode(...new Uint8Array(signature)));
+}
+
+async function webhook(body: unknown, options: { timestamp?: number; tamper?: boolean } = {}) {
+  const raw = JSON.stringify(body);
+  const timestamp = options.timestamp ?? Math.floor(Date.now() / 1000);
+  const signature = await sign(raw, timestamp);
+  return app.request(
+    '/api/v1/telnyx/voice',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'telnyx-signature-ed25519': signature,
+        'telnyx-timestamp': String(timestamp),
+      },
+      body: options.tamper ? raw.replace('call.answered', 'call.hangup') : raw,
+    },
+    TELNYX_ENV,
+  );
+}
+
+function telnyxEvent(
+  type: string,
+  payload: Record<string, unknown>,
+  id = '00000000-0000-4000-8000-0000000e7e01',
+) {
+  return {
+    data: {
+      record_type: 'event',
+      id,
+      event_type: type,
+      occurred_at: '2026-11-02T16:00:05Z',
+      payload,
+    },
+  };
+}
+
+beforeEach(() => {
+  db = fakeDatabase();
+  db.memberships.mockResolvedValue([
+    { organizationId: ORG, organizationName: 'Synthetic Org A', role: 'trader' },
+  ]);
+  telnyx = {
+    dial: vi.fn<TelnyxClient['dial']>(() => Promise.resolve('v3:new-leg')),
+    confirm: vi.fn<TelnyxClient['confirm']>(() => Promise.resolve()),
+    hangUp: vi.fn<TelnyxClient['hangUp']>(() => Promise.resolve()),
+    reject: vi.fn<TelnyxClient['reject']>(() => Promise.resolve()),
+  };
+  mockAuthServer(
+    new Response(JSON.stringify({ id: USER_ID, email: 'tess@example.test' }), { status: 200 }),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('Telnyx settings and client state', () => {
+  it('needs the API key, the application id and a number it can dial', () => {
+    expect(telnyxConfig(TELNYX_ENV)).toEqual({
+      apiKey: 'KEY_synthetic_test_only',
+      connectionId: '1234567890',
+      fromNumber: '+18255550199',
+    });
+    expect(telnyxConfig({ ...TELNYX_ENV, TELNYX_API_KEY: ' ' })).toBeNull();
+    expect(telnyxConfig({ ...TELNYX_ENV, TELNYX_CONNECTION_ID: '' })).toBeNull();
+    expect(telnyxConfig({ ...TELNYX_ENV, TELNYX_PHONE_NUMBER: '555-0199' })).toBeNull();
+  });
+
+  it('round-trips the call and leg, and refuses anything else', () => {
+    const state = encodeClientState({ call: CALL, leg: 'them' });
+    expect(decodeClientState(state)).toEqual({ call: CALL, leg: 'them' });
+    expect(decodeClientState(btoa(JSON.stringify({ c: 'not-a-uuid', l: 'you' })))).toBeNull();
+    expect(decodeClientState(btoa(JSON.stringify({ c: CALL, l: 'boss' })))).toBeNull();
+    expect(decodeClientState('%%%')).toBeNull();
+    expect(decodeClientState(undefined)).toBeNull();
+  });
+});
+
+describe('verifyTelnyxSignature', () => {
+  const now = 1_793_000_000;
+
+  it('accepts the signature Telnyx makes of the timestamp, a bar and the body', async () => {
+    const body = '{"data":{}}';
+    expect(
+      await verifyTelnyxSignature(PUBLIC_KEY, body, await sign(body, now), String(now), now + 10),
+    ).toBe(true);
+  });
+
+  it('refuses a changed body, an old timestamp, a missing header or a bad key', async () => {
+    const body = '{"data":{}}';
+    const signature = await sign(body, now);
+    expect(await verifyTelnyxSignature(PUBLIC_KEY, `${body} `, signature, String(now), now)).toBe(
+      false,
+    );
+    expect(await verifyTelnyxSignature(PUBLIC_KEY, body, signature, String(now), now + 301)).toBe(
+      false,
+    );
+    expect(await verifyTelnyxSignature(PUBLIC_KEY, body, signature, String(now + 1), now)).toBe(
+      false,
+    );
+    expect(await verifyTelnyxSignature(PUBLIC_KEY, body, undefined, String(now), now)).toBe(false);
+    expect(await verifyTelnyxSignature(PUBLIC_KEY, body, signature, undefined, now)).toBe(false);
+    expect(await verifyTelnyxSignature('not-a-key', body, signature, String(now), now)).toBe(false);
+    expect(await verifyTelnyxSignature(PUBLIC_KEY, body, 'AAAA', String(now), now)).toBe(false);
+  });
+});
+
+describe('the Telnyx client', () => {
+  it("dials from GSS's number with the call in client_state, and joins a leg when asked", async () => {
+    const fetchMock = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ data: { call_control_id: 'v3:their-leg' } }), {
+          status: 200,
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = telnyxClient(TELNYX_ENV);
+    const id = await client?.dial({
+      to: '+14035550100',
+      clientState: { call: CALL, leg: 'them' },
+      timeoutSecs: 45,
+      bridgeTo: 'v3:staff-leg',
+    });
+    expect(id).toBe('v3:their-leg');
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.telnyx.com/v2/calls');
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer KEY_synthetic_test_only');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      connection_id: '1234567890',
+      to: '+14035550100',
+      from: '+18255550199',
+      timeout_secs: 45,
+      client_state: encodeClientState({ call: CALL, leg: 'them' }),
+      command_id: `${CALL}-them`,
+      link_to: 'v3:staff-leg',
+      bridge_on_answer: true,
+    });
+  });
+
+  it('asks for 1 and hangs up through the call actions; refusals carry codes only', async () => {
+    const fetchMock = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response('{"data":{"result":"ok"}}', { status: 200 })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = telnyxClient(TELNYX_ENV);
+    await client?.confirm('v3:staff/leg', { call: CALL, leg: 'you' });
+    await client?.hangUp('v3:staff-leg');
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.telnyx.com/v2/calls/v3%3Astaff%2Fleg/actions/gather_using_speak',
+      'https://api.telnyx.com/v2/calls/v3%3Astaff-leg/actions/hangup',
+    ]);
+    const confirm = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(confirm).toMatchObject({ valid_digits: '1', maximum_digits: 1, language: 'en-US' });
+    expect(JSON.stringify(confirm)).not.toContain('Pat');
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errors: [{ code: '90018', detail: 'Pat Buyer is gone' }] }), {
+        status: 422,
+      }),
+    );
+    const refused = await client?.hangUp('v3:staff-leg').catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(TelnyxError);
+    expect(refused).toMatchObject({ status: 422, codes: '90018' });
+    expect(String(refused)).not.toContain('Pat');
+  });
+
+  it('is not made without the settings', () => {
+    expect(telnyxClient({ TELNYX_API_KEY: 'KEY_synthetic_test_only' })).toBeNull();
+  });
+});
+
+describe('/api/v1/me/phone', () => {
+  it("reads the person's own cell and whether calling is set up", async () => {
+    db.getMemberPhone.mockResolvedValue('+14035550142');
+    const response = await app.request('/api/v1/me/phone', { headers: AUTH }, TELNYX_ENV);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ phone: '(403) 555-0142', callingAvailable: true });
+    expect(db.getMemberPhone).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      ORG,
+    );
+    const unset = await app.request('/api/v1/me/phone', { headers: AUTH }, ENV);
+    expect(await unset.json()).toMatchObject({ callingAvailable: false });
+  });
+
+  it('saves a cell typed any usual way, as E.164', async () => {
+    const response = await app.request(
+      '/api/v1/me/phone',
+      { method: 'PUT', headers: AUTH, body: JSON.stringify({ phone: '403.555.0142' }) },
+      TELNYX_ENV,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ phone: '(403) 555-0142' });
+    expect(db.saveMemberPhone).toHaveBeenCalledWith(expect.anything(), ORG, '+14035550142');
+  });
+
+  it('refuses a number it cannot dial and someone who is not a member', async () => {
+    const bad = await app.request(
+      '/api/v1/me/phone',
+      { method: 'PUT', headers: AUTH, body: JSON.stringify({ phone: '555-0142 x3' }) },
+      TELNYX_ENV,
+    );
+    expect(bad.status).toBe(422);
+    db.memberships.mockResolvedValue([]);
+    const outsider = await app.request('/api/v1/me/phone', { headers: AUTH }, TELNYX_ENV);
+    expect(outsider.status).toBe(403);
+    expect(db.saveMemberPhone).not.toHaveBeenCalled();
+  });
+
+  it('needs sign-in', async () => {
+    const response = await app.request('/api/v1/me/phone', {}, TELNYX_ENV);
+    expect(response.status).toBe(401);
+  });
+
+  it('removes the cell', async () => {
+    const response = await app.request(
+      '/api/v1/me/phone',
+      { method: 'DELETE', headers: AUTH },
+      TELNYX_ENV,
+    );
+    expect(response.status).toBe(200);
+    expect(db.saveMemberPhone).toHaveBeenCalledWith(expect.anything(), ORG, null);
+  });
+});
+
+describe('POST /api/v1/calls', () => {
+  const place = (
+    env: typeof ENV = TELNYX_ENV,
+    body: unknown = { counterpartyId: COUNTERPARTY, contactId: CONTACT },
+  ) =>
+    app.request(
+      '/api/v1/calls',
+      { method: 'POST', headers: AUTH, body: JSON.stringify(body) },
+      env,
+    );
+
+  it("records the call, rings the caller's cell and returns its progress", async () => {
+    db.getCall.mockResolvedValue(CALL_VIEW);
+    const response = await place();
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ call: CALL_VIEW });
+    expect(db.placeCall).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      COUNTERPARTY,
+      CONTACT,
+      '+18255550199',
+    );
+    expect(telnyx.dial).toHaveBeenCalledWith({
+      to: '+14035550142',
+      clientState: { call: CALL, leg: 'you' },
+      timeoutSecs: 30,
+    });
+    expect(db.recordLeg).toHaveBeenCalledWith(expect.anything(), CALL, 'you', 'v3:new-leg');
+  });
+
+  it('is refused until calling is set up', async () => {
+    const response = await place(ENV);
+    expect(response.status).toBe(503);
+    expect(db.placeCall).not.toHaveBeenCalled();
+  });
+
+  it('says what stands in the way', async () => {
+    const cases = [
+      ['not_found', 404, 'NOT_FOUND'],
+      ['forbidden', 403, 'FORBIDDEN'],
+      ['archived', 409, 'ARCHIVED'],
+      ['no_number', 422, 'NO_NUMBER'],
+      ['not_dialable', 422, 'NOT_DIALABLE'],
+      ['no_cell', 409, 'NO_CELL_PHONE'],
+      ['in_progress', 409, 'CALL_IN_PROGRESS'],
+    ] as const;
+    for (const [status, code, error] of cases) {
+      db.placeCall.mockResolvedValueOnce({ status });
+      const response = await place();
+      expect(response.status).toBe(code);
+      expect(await response.json()).toMatchObject({ error: { code: error } });
+    }
+    expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it('ends the call as failed when Telnyx refuses to dial', async () => {
+    telnyx.dial.mockRejectedValueOnce(new TelnyxError(403, '10010'));
+    const response = await place();
+    expect(response.status).toBe(502);
+    expect(db.failCall).toHaveBeenCalledWith(expect.anything(), CALL, 'failed');
+  });
+
+  it('refuses a malformed request', async () => {
+    const response = await place(TELNYX_ENV, { counterpartyId: COUNTERPARTY, phone: '+1555' });
+    expect(response.status).toBe(422);
+  });
+
+  it('shows a call to the members who can see it', async () => {
+    db.getCall.mockResolvedValue(CALL_VIEW);
+    const response = await app.request(`/api/v1/calls/${CALL}`, { headers: AUTH }, TELNYX_ENV);
+    expect(await response.json()).toEqual({ call: CALL_VIEW });
+    db.getCall.mockResolvedValue(null);
+    const hidden = await app.request(`/api/v1/calls/${CALL}`, { headers: AUTH }, TELNYX_ENV);
+    expect(hidden.status).toBe(404);
+  });
+});
+
+describe('POST /api/v1/telnyx/voice', () => {
+  const answered = telnyxEvent('call.answered', {
+    call_control_id: 'v3:staff-leg',
+    client_state: encodeClientState({ call: CALL, leg: 'you' }),
+  });
+
+  beforeEach(() => {
+    db.callPlacer.mockResolvedValue({ organizationId: ORG, placedBy: PLACER });
+  });
+
+  it('refuses an event whose signature does not match, before reading it', async () => {
+    const tampered = await webhook(answered, { tamper: true });
+    expect(tampered.status).toBe(401);
+    const stale = await webhook(answered, { timestamp: Math.floor(Date.now() / 1000) - 600 });
+    expect(stale.status).toBe(401);
+    const unsigned = await app.request(
+      '/api/v1/telnyx/voice',
+      { method: 'POST', body: JSON.stringify(answered) },
+      TELNYX_ENV,
+    );
+    expect(unsigned.status).toBe(401);
+    expect(db.callPlacer).not.toHaveBeenCalled();
+    expect(db.applyCallEvent).not.toHaveBeenCalled();
+  });
+
+  it('is refused until calling is set up', async () => {
+    const response = await app.request(
+      '/api/v1/telnyx/voice',
+      { method: 'POST', body: '{}' },
+      { ...TELNYX_ENV, TELNYX_PUBLIC_KEY: '' },
+    );
+    expect(response.status).toBe(503);
+  });
+
+  it('applies an event as the person who placed the call, then sends what follows', async () => {
+    db.applyCallEvent.mockResolvedValue({
+      status: 'applied',
+      organizationId: ORG,
+      step: {
+        changes: { status: 'confirming' },
+        commands: [{ kind: 'confirm', callControlId: 'v3:staff-leg' }],
+      },
+    });
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(db.callPlacer).toHaveBeenCalledWith(CALL);
+    expect(db.applyCallEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: PLACER }),
+      CALL,
+      '00000000-0000-4000-8000-0000000e7e01',
+      {
+        type: 'call.answered',
+        leg: 'you',
+        occurredAt: '2026-11-02T16:00:05.000Z',
+        callControlId: 'v3:staff-leg',
+        digits: null,
+        gatherStatus: null,
+        hangupCause: null,
+      },
+    );
+    expect(telnyx.confirm).toHaveBeenCalledWith('v3:staff-leg', { call: CALL, leg: 'you' });
+  });
+
+  it('sends nothing again for an event Telnyx repeats', async () => {
+    db.applyCallEvent.mockResolvedValue({ status: 'duplicate' });
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(telnyx.confirm).not.toHaveBeenCalled();
+  });
+
+  it("dials them joined to the caller's leg once 1 is pressed", async () => {
+    db.applyCallEvent.mockResolvedValue({
+      status: 'applied',
+      organizationId: ORG,
+      step: {
+        changes: { status: 'calling_them' },
+        commands: [{ kind: 'dial_them', staffCallControlId: 'v3:staff-leg' }],
+      },
+    });
+    await webhook(
+      telnyxEvent('call.gather.ended', {
+        call_control_id: 'v3:staff-leg',
+        client_state: encodeClientState({ call: CALL, leg: 'you' }),
+        digits: '1',
+        status: 'valid',
+      }),
+    );
+    expect(telnyx.dial).toHaveBeenCalledWith({
+      to: '+14035550100',
+      clientState: { call: CALL, leg: 'them' },
+      timeoutSecs: 45,
+      bridgeTo: 'v3:staff-leg',
+    });
+    expect(db.recordLeg).toHaveBeenCalledWith(expect.anything(), CALL, 'them', 'v3:new-leg');
+  });
+
+  it('ends the call and hangs up the caller when Telnyx refuses to dial them', async () => {
+    db.applyCallEvent.mockResolvedValue({
+      status: 'applied',
+      organizationId: ORG,
+      step: {
+        changes: { status: 'calling_them' },
+        commands: [{ kind: 'dial_them', staffCallControlId: 'v3:staff-leg' }],
+      },
+    });
+    telnyx.dial.mockRejectedValueOnce(new TelnyxError(422, '90046'));
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(db.failCall).toHaveBeenCalledWith(expect.anything(), CALL, 'failed');
+    expect(telnyx.hangUp).toHaveBeenCalledWith('v3:staff-leg');
+  });
+
+  it('keeps going when a leg to hang up is already gone', async () => {
+    db.applyCallEvent.mockResolvedValue({
+      status: 'applied',
+      organizationId: ORG,
+      step: {
+        changes: { status: 'ended', outcome: 'talked' },
+        commands: [{ kind: 'hang_up', callControlId: 'v3:their-leg' }],
+      },
+    });
+    telnyx.hangUp.mockRejectedValueOnce(new TelnyxError(422, '90018'));
+    const response = await webhook(answered);
+    expect(response.status).toBe(200);
+    expect(db.failCall).not.toHaveBeenCalled();
+  });
+
+  it('gives an incoming call a busy signal, as callbacks are not routed yet', async () => {
+    const response = await webhook(
+      telnyxEvent('call.initiated', { call_control_id: 'v3:incoming', direction: 'incoming' }),
+    );
+    expect(response.status).toBe(200);
+    expect(telnyx.reject).toHaveBeenCalledWith('v3:incoming');
+    expect(db.callPlacer).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges events it does not use and calls it does not know', async () => {
+    const other = await webhook(telnyxEvent('call.bridged', { client_state: 'x' }));
+    expect(other.status).toBe(200);
+    db.callPlacer.mockResolvedValue(null);
+    const unknown = await webhook(answered);
+    expect(unknown.status).toBe(200);
+    expect(db.applyCallEvent).not.toHaveBeenCalled();
+  });
+
+  it('asks Telnyx to send again when the database fails', async () => {
+    db.applyCallEvent.mockRejectedValue(Object.assign(new Error('boom'), { code: '08006' }));
+    const response = await webhook(answered);
+    expect(response.status).toBe(500);
+    expect(telnyx.confirm).not.toHaveBeenCalled();
+  });
+});
