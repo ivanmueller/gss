@@ -865,3 +865,55 @@ describe("Codex's fifth review", () => {
     expect(await db.unsettledCommands(as(users.olga), placed.callId)).toEqual([]);
   });
 });
+
+describe("Codex's sixth review", () => {
+  it('tells a call its caller can no longer reach from a settled one, and still knows its legs (finding 2)', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.recordLeg(as(users.tess), callId, 'you', 'v3:staff-s');
+    const answered = await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-1`,
+      event('call.answered', 'you', { callControlId: 'v3:staff-s' }),
+    );
+    if (answered.status !== 'applied') throw new Error('not applied');
+    await admin`update app.organization_members set status = 'suspended'
+                where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    try {
+      expect(await db.unsettledCommands(as(users.tess), callId)).toBeNull();
+      expect(
+        await db.applyCallEvent(
+          as(users.tess),
+          callId,
+          `evt-${callId}-2`,
+          event('call.hangup', 'you', { callControlId: 'v3:staff-s' }),
+        ),
+      ).toEqual({ status: 'not_found' });
+      expect(await db.callLegs(callId)).toEqual(['v3:staff-s']);
+    } finally {
+      await admin`update app.organization_members set status = 'active'
+                  where organization_id = ${orgs.a} and user_id = ${users.tess}`;
+    }
+    expect(await db.unsettledCommands(as(users.tess), callId)).toHaveLength(1);
+  });
+
+  it('lists a stray leg waiting to be hung up among the call legs', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    await db.applyCallEvent(as(users.tess), callId, `evt-${callId}-1`, event('call.hangup', 'you'));
+    // A leg that starts after the end is to be hung up.
+    await db.applyCallEvent(
+      as(users.tess),
+      callId,
+      `evt-${callId}-2`,
+      event('call.initiated', 'them', { callControlId: 'v3:stray-s' }),
+    );
+    expect(await db.callLegs(callId)).toContain('v3:stray-s');
+    expect(await db.callLegs(crypto.randomUUID())).toEqual([]);
+  });
+});

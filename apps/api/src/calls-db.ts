@@ -129,9 +129,16 @@ export interface CallsDatabase {
   /**
    * Every command of a call not settled yet (pending, or being sent), oldest first. A delivery
    * is acknowledged only when there is none (Codex's fifth review): whatever event a command
-   * came from, the call's events keep coming back until all its commands are settled.
+   * came from, the call's events keep coming back until all its commands are settled. Null
+   * when the caller can no longer see the call (they were suspended or removed): that is not
+   * settled, and the call is then ended at Telnyx instead.
    */
-  unsettledCommands: (ctx: RequestContext, callId: string) => Promise<PendingCommand[]>;
+  unsettledCommands: (ctx: RequestContext, callId: string) => Promise<PendingCommand[] | null>;
+  /**
+   * Telnyx's ids for every leg of a call, without a signed-in user (app.call_legs): for ending a
+   * call whose caller can no longer reach it (suspended or removed; Codex's sixth review, 2).
+   */
+  callLegs: (callId: string) => Promise<string[]>;
   /**
    * Claims a pending command (or one whose claim has lapsed) for sending, under the call's lock,
    * if the call still wants it: asking for 1 while confirming, dialing them while calling them
@@ -203,7 +210,8 @@ const RINGING_WINDOW = '15 minutes';
 const CONNECTED_WINDOW = '4 hours 15 minutes';
 
 /** A claim older than this is taken again (the Worker that claimed it did not finish). */
-const STALE_CLAIM = '30 seconds';
+export const CLAIM_LEASE_SECONDS = 30;
+const STALE_CLAIM = `${String(CLAIM_LEASE_SECONDS)} seconds`;
 
 interface CommandRow {
   id: string;
@@ -341,6 +349,12 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
       });
     },
 
+    async callLegs(callId) {
+      const rows = await sql<{ call_control_id: string }[]>`
+        select call_control_id from app.call_legs(${callId})`;
+      return rows.map((row) => row.call_control_id);
+    },
+
     async callPlacer(callId) {
       const [row] = await sql<{ organization_id: string; placed_by: string }[]>`
         select organization_id, placed_by from app.call_placer(${callId})`;
@@ -428,6 +442,8 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
 
     unsettledCommands(ctx, callId) {
       return asUser(ctx, async (tx) => {
+        const [visible] = await tx<{ id: string }[]>`select id from app.calls where id = ${callId}`;
+        if (!visible) return null;
         const rows = await tx<CommandRow[]>`
           select id, kind, call_control_id from app.call_commands
           where call_id = ${callId} and status in ('pending', 'sending')

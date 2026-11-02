@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(31);
+select plan(32);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000044aa', 'tom@example.test', '{"first_name": "Tom", "last_name": "Trader"}'),
@@ -96,6 +96,13 @@ select ok(
 select ok(
   (select relrowsecurity from pg_class where oid = 'app.call_commands'::regclass),
   'row level security is on for commands'
+);
+select ok(
+  has_function_privilege('app_api', 'app.call_legs(uuid)', 'execute')
+    and not has_function_privilege('anon', 'app.call_legs(uuid)', 'execute')
+    and not has_function_privilege('authenticated', 'app.call_legs(uuid)', 'execute')
+    and not has_function_privilege('service_role', 'app.call_legs(uuid)', 'execute'),
+  'app_api alone reads a call''s legs with app.call_legs (sixth review, 2)'
 );
 
 -- Adding and moving commands --------------------------------------------------------------

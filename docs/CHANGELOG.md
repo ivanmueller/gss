@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Codex's sixth review of the Telnyx calls
+
+- `docs/DECISIONS.md`: a 10-second limit on every Telnyx request; calls of a suspended caller ended at Telnyx.
+- `docs/DATA_MODEL.md`: migration `20261102050000_call_legs.sql`.
+- `docs/API.md`: the same for `POST /api/v1/telnyx/voice`.
+
 ## 2026-11-02 — Handoff record of #110
 
 - `docs/HANDOFF.md`: Codex's third and fourth reviews of the Telnyx calls fixed (ivanmueller/gss#110) with its CI and Deploy staging runs; Codex's fifth review; the staging checklist.

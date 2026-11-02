@@ -240,6 +240,38 @@ const CALL_EVENTS = new Set([
   'call.hangup',
 ]);
 
+/** The caller can no longer see the call (suspended or removed): it is ended at Telnyx. */
+class CallerGone extends Error {
+  constructor() {
+    super('The caller can no longer reach the call');
+    this.name = 'CallerGone';
+  }
+}
+
+/**
+ * Ends at Telnyx a call whose caller can no longer reach it (Codex's sixth review, finding 2):
+ * every leg it knows of, and the event's own, is hung up. A leg already gone is fine; when
+ * Telnyx cannot be reached or refuses for now, the error is thrown, so the event comes again.
+ */
+async function endAtTelnyx(
+  c: ApiContext,
+  db: Database,
+  client: TelnyxClient,
+  callId: string,
+  eventLeg: string | null,
+) {
+  console.warn(
+    `Telnyx event in request ${c.get('requestId')} for a call its caller can no longer reach: hanging up its legs`,
+  );
+  const legs = new Set(await db.callLegs(callId));
+  if (eventLeg !== null) legs.add(eventLeg);
+  for (const leg of legs) {
+    await client.hangUp(leg).catch((error: unknown) => {
+      if (!(error instanceof TelnyxError) || temporary(error)) throw error;
+    });
+  }
+}
+
 /** Some command of the event is not resolved yet: Telnyx must deliver the event again. */
 class DeliverAgain extends Error {
   constructor() {
@@ -313,6 +345,7 @@ async function sendCommands(
     // delivery (from another event or another Worker) are sent now; any still unsettled after
     // that (being sent by another delivery) has the event delivered again.
     const unsettled = await db.unsettledCommands(ctx, callId);
+    if (unsettled === null) throw new CallerGone();
     const untried = unsettled.filter((command) => !tried.has(command.id));
     if (untried.length === 0) {
       if (unsettled.length > 0) throw new DeliverAgain();
@@ -409,8 +442,14 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
         hangupCause: text(event.payload, 'hangup_cause', 40),
       };
       const result = await db.applyCallEvent(ctx, state.call, event.id, callEvent);
-      if (result.status !== 'not_found') {
+      try {
+        // The call exists (app.call_placer found it), so not found means its caller can no
+        // longer see it.
+        if (result.status === 'not_found') throw new CallerGone();
         await sendCommands(c, db, ctx, client, state.call, result.commands);
+      } catch (error) {
+        if (!(error instanceof CallerGone)) throw error;
+        await endAtTelnyx(c, db, client, state.call, callControlId);
       }
       return c.json({ received: true });
     } catch (error) {

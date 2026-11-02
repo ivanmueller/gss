@@ -100,6 +100,13 @@ export type TelnyxFactory = (env: TelnyxBindings) => TelnyxClient | null;
 
 const API = 'https://api.telnyx.com/v2';
 
+/**
+ * Every request to Telnyx gives up after this long, well within a command's claim
+ * (CLAIM_LEASE_SECONDS in calls-db.ts), so a claim that has lapsed belongs to a request that is
+ * certainly over (Codex's sixth review, finding 1).
+ */
+export const TELNYX_TIMEOUT_MS = 10_000;
+
 /** The words the caller hears when their cell answers; no counterparty details are sent. */
 export const CONFIRM_PROMPT = 'This is your G S S call. Press 1 to connect.';
 
@@ -137,6 +144,7 @@ export const telnyxClient: TelnyxFactory = (env) => {
         Accept: 'application/json',
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TELNYX_TIMEOUT_MS),
     });
     if (!response.ok) throw new TelnyxError(response.status, await errorCodes(response));
     return response.json();
