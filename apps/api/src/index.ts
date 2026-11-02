@@ -2,7 +2,13 @@ import { choosePasswordSchema, MIN_PASSWORD_LENGTH } from '@grain/domain';
 import { Hono } from 'hono';
 
 import { requireUser } from './auth';
-import { callRoutes, memberPhoneRoutes, telnyxWebhookRoutes } from './calls';
+import {
+  callRoutes,
+  deleteExpiredRecordings,
+  memberPhoneRoutes,
+  RECORDINGS_CRON,
+  telnyxWebhookRoutes,
+} from './calls';
 import { counterpartyRoutes } from './counterparties';
 import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
@@ -130,8 +136,13 @@ export const app = createApp(postgresDatabase);
 
 export default {
   fetch: app.fetch,
-  // The Bank of Canada's USD/CAD rate, twice a day (wrangler.jsonc, triggers).
-  scheduled(_controller, env, ctx) {
+  // wrangler.jsonc, triggers: the Bank of Canada's USD/CAD rate twice a day (FX_CRON), and every
+  // hour the deletion at Telnyx of call audio 24 hours old (RECORDINGS_CRON).
+  scheduled(controller, env, ctx) {
+    if (controller.cron === RECORDINGS_CRON) {
+      ctx.waitUntil(deleteExpiredRecordings(env, postgresDatabase));
+      return;
+    }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));
   },
 } satisfies ExportedHandler<ApiEnv['Bindings']>;

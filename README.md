@@ -171,6 +171,8 @@ On a counterparty's page, traders, operations and admins see **Call** beside eac
 
 Until all four are there, the Call buttons do not show and Telnyx's events are refused.
 
+Every call that connects is recorded (both sides) and transcribed by Telnyx; under the call in the contact history, everyone on the team sees **Transcript** and, for 24 hours, **Play recording**. The audio stays at Telnyx and is deleted there 24 hours after the call by the Worker's hourly job (`7 * * * *`); the transcript stays.
+
 ## Staging database connection
 
 The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifies Supabase's certificate (`docs/DECISIONS.md`). To create or update it: give the Cloudflare API token Hyperdrive and SSL and Certificates edit permissions, add the GitHub secret `SUPABASE_HYPERDRIVE_URL` (`postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres`, Supabase's session pooler), then run **Actions → Set up Hyperdrive (staging)**. Its summary shows the configuration ID that `apps/api/wrangler.jsonc` binds as `HYPERDRIVE`. Locally, `wrangler dev --env staging` connects that binding to the database in `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (CI sets it to the throwaway database).

@@ -1,11 +1,13 @@
 import {
   CALL_OUTCOME_LABELS,
   CALL_STATUS_LABELS,
+  formatAlberta,
+  type CallRecordingView,
   dialablePhone,
   formatCallLength,
   type CallView,
 } from '@grain/domain';
-import { PhoneCall, PhoneOff, X } from 'lucide-react';
+import { PhoneCall, PhoneOff, Play, X } from 'lucide-react';
 import {
   createContext,
   useCallback,
@@ -17,7 +19,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import { ApiError, apiJson, sendJson } from '../lib/api';
+import { ApiError, apiFetch, apiJson, sendJson } from '../lib/api';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Input } from './ui/input';
@@ -35,6 +37,10 @@ interface PhoneSetting {
 /** How often the page asks for a call's progress, and for how long at most. */
 const POLL_MS = 2000;
 const POLL_LIMIT_MS = 15 * 60 * 1000;
+/** How long the line of a call that has ended stays before it goes. */
+export const ENDED_LINE_MS = 5000;
+/** When the contact history is loaded again after a call, for its transcript. */
+const TRANSCRIPT_CHECKS_MS = [30_000, 90_000, 180_000];
 
 /** The person's own cell phone, which their calls ring first; only they see it. */
 export function CellPhoneDialog({
@@ -189,9 +195,9 @@ export function CallingProvider({
   const [available, setAvailable] = useState(false);
   const [notice, setNotice] = useState<CallNotice | null>(null);
   const [cellOpen, setCellOpen] = useState(false);
-  const logged = useRef(onLogged);
+  const loggedRef = useRef(onLogged);
   useEffect(() => {
-    logged.current = onLogged;
+    loggedRef.current = onLogged;
   });
 
   useEffect(() => {
@@ -213,6 +219,35 @@ export function CallingProvider({
   const callId = active?.call.id ?? null;
   const ended = active?.call.status === 'ended';
 
+  // A call that connected gets its transcript a little after it ends: the contact history is
+  // loaded again a few times, so it appears without reloading the page.
+  const logged = active?.call.contactLogEntryId ?? null;
+  useEffect(() => {
+    if (logged === null) return;
+    const timers = TRANSCRIPT_CHECKS_MS.map((delay) =>
+      setTimeout(() => {
+        loggedRef.current();
+      }, delay),
+    );
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, [logged]);
+
+  // Once the call has ended, its line stays a few seconds, then goes (the owner's request of
+  // 2026-11-02); a call that connected is in the contact history by then.
+  useEffect(() => {
+    if (callId === null || !ended) return;
+    const timer = setTimeout(() => {
+      setNotice((current) =>
+        current?.kind === 'call' && current.call.id === callId ? null : current,
+      );
+    }, ENDED_LINE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [callId, ended]);
+
   // Follows the call until it ends.
   useEffect(() => {
     if (callId === null || ended) return;
@@ -230,7 +265,7 @@ export function CallingProvider({
                 : current,
             );
             if (call.status === 'ended') {
-              if (call.contactLogEntryId !== null) logged.current();
+              if (call.contactLogEntryId !== null) loggedRef.current();
             } else if (Date.now() - started < POLL_LIMIT_MS) {
               poll();
             }
@@ -382,5 +417,88 @@ export function CallButton({
       <PhoneCall aria-hidden="true" />
       Call
     </Button>
+  );
+}
+
+/**
+ * Under a call's entry in the contact history: its transcript, and for 24 hours its audio
+ * (the owner's request of 2026-11-02). The audio comes through the API with the person's
+ * sign-in, never from a link to Telnyx.
+ */
+export function CallRecordingDetails({
+  token,
+  recording,
+}: {
+  token: string;
+  recording: CallRecordingView;
+}) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(
+    () => () => {
+      if (audioUrl !== null) URL.revokeObjectURL(audioUrl);
+    },
+    [audioUrl],
+  );
+
+  // Read once when shown; the page is loaded again after a call, and the API checks again.
+  const [shownAt] = useState(() => Date.now());
+  const playable = recording.audioUntil !== null && Date.parse(recording.audioUntil) > shownAt;
+
+  async function play() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiFetch(`/calls/recordings/${recording.id}/audio`, token);
+      setAudioUrl(URL.createObjectURL(await response.blob()));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The recording could not be played.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      {recording.transcript === null ? (
+        <p className="text-xs text-muted-foreground">Transcript on its way…</p>
+      ) : (
+        <details className="rounded-control border px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">Transcript</summary>
+          <p className="mt-2 whitespace-pre-wrap">{recording.transcript}</p>
+        </details>
+      )}
+      {playable && audioUrl === null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2"
+            disabled={loading}
+            onClick={() => {
+              void play();
+            }}
+          >
+            <Play aria-hidden="true" />
+            {loading ? 'Loading…' : 'Play recording'}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Kept until {formatAlberta(recording.audioUntil ?? '')}
+          </span>
+        </div>
+      )}
+      {audioUrl !== null && (
+        <audio controls autoPlay src={audioUrl} className="w-full max-w-md">
+          The recording cannot be played in this browser.
+        </audio>
+      )}
+      {error !== null && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

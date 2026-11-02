@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
+import { deleteExpiredRecordings } from './calls';
 import { CLAIM_LEASE_SECONDS } from './calls-db';
 import {
+  AUDIO_TIMEOUT_MS,
   TELNYX_TIMEOUT_MS,
   decodeClientState,
   encodeClientState,
@@ -113,6 +115,10 @@ beforeEach(() => {
     confirm: vi.fn<TelnyxClient['confirm']>(() => Promise.resolve()),
     hangUp: vi.fn<TelnyxClient['hangUp']>(() => Promise.resolve()),
     reject: vi.fn<TelnyxClient['reject']>(() => Promise.resolve()),
+    record: vi.fn<TelnyxClient['record']>(() => Promise.resolve()),
+    recordingsOfLeg: vi.fn<TelnyxClient['recordingsOfLeg']>(() => Promise.resolve([])),
+    recordingAudio: vi.fn<TelnyxClient['recordingAudio']>(() => Promise.resolve(null)),
+    deleteRecording: vi.fn<TelnyxClient['deleteRecording']>(() => Promise.resolve()),
   };
   mockAuthServer(
     new Response(JSON.stringify({ id: USER_ID, email: 'tess@example.test' }), { status: 200 }),
@@ -617,6 +623,10 @@ describe('POST /api/v1/telnyx/voice', () => {
     expect(telnyx.hangUp).toHaveBeenCalledWith('v3:stray', CLEANUP.id);
   });
 
+  it('gives an audio download more time than a command (Codex, finding 2)', () => {
+    expect(AUDIO_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+  });
+
   it('gives every Telnyx request less time than a claim lasts (sixth review, 1)', () => {
     // A lapsed claim's request is certainly over, with room for the database round trips.
     expect(CLAIM_LEASE_SECONDS * 1000).toBeGreaterThanOrEqual(2 * TELNYX_TIMEOUT_MS + 5000);
@@ -751,5 +761,223 @@ describe('POST /api/v1/telnyx/voice', () => {
     const response = await webhook(answered);
     expect(response.status).toBe(500);
     expect(telnyx.confirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("call recordings and transcripts (owner's request, 2026-11-02)", () => {
+  const RECORD = {
+    id: '00000000-0000-4000-8000-0000000c0d08',
+    kind: 'record' as const,
+    callControlId: 'v3:staff-leg',
+  };
+  const RECORDING = '00000000-0000-4000-8000-0000000eec01';
+  const recordingState = encodeClientState({ call: CALL, leg: 'you' });
+
+  it('starts recording once they are connected', async () => {
+    db.callPlacer.mockResolvedValue({ organizationId: ORG, placedBy: PLACER });
+    db.applyCallEvent.mockResolvedValue({ status: 'applied', commands: [RECORD] });
+    db.claimCommand.mockResolvedValue({
+      status: 'claimed',
+      command: { ...RECORD, counterpartyPhone: '+14035550100', attempt: 1 },
+    });
+    const response = await webhook(
+      telnyxEvent('call.answered', {
+        call_control_id: 'v3:their-leg',
+        client_state: encodeClientState({ call: CALL, leg: 'them' }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(telnyx.record).toHaveBeenCalledWith(
+      'v3:staff-leg',
+      { call: CALL, leg: 'you' },
+      RECORD.id,
+    );
+  });
+
+  it("keeps a call's recording, asking Telnyx for the leg's recording ids", async () => {
+    telnyx.recordingsOfLeg.mockResolvedValue(['synthetic-rec-1']);
+    const response = await webhook(
+      telnyxEvent('call.recording.saved', {
+        call_leg_id: 'leg-1',
+        client_state: recordingState,
+        recording_started_at: '2026-11-02T16:01:00Z',
+        recording_ended_at: '2026-11-02T16:07:12Z',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(telnyx.recordingsOfLeg).toHaveBeenCalledWith('leg-1');
+    expect(db.keepCallRecording).toHaveBeenCalledWith(
+      CALL,
+      'synthetic-rec-1',
+      '2026-11-02T16:01:00.000Z',
+      '2026-11-02T16:07:12.000Z',
+    );
+  });
+
+  it('keeps its transcript, and asks for the event again when it cannot', async () => {
+    const transcribed = telnyxEvent('call.recording.transcription.saved', {
+      client_state: recordingState,
+      recording_id: 'synthetic-rec-1',
+      transcription_text: 'We can do November at the posted price.',
+      status: 'completed',
+    });
+    expect((await webhook(transcribed)).status).toBe(200);
+    expect(db.keepCallTranscript).toHaveBeenCalledWith(
+      CALL,
+      'synthetic-rec-1',
+      'We can do November at the posted price.',
+    );
+    db.keepCallTranscript.mockRejectedValueOnce(Object.assign(new Error('x'), { code: '08006' }));
+    expect((await webhook(transcribed)).status).toBe(500);
+  });
+
+  it('ignores a recording event that is not about one of its calls', async () => {
+    const response = await webhook(telnyxEvent('call.recording.saved', { call_leg_id: 'leg-1' }));
+    expect(response.status).toBe(200);
+    expect(telnyx.recordingsOfLeg).not.toHaveBeenCalled();
+  });
+
+  it("lists a counterparty's recordings for everyone on the team", async () => {
+    db.listRecordings.mockResolvedValue([
+      {
+        id: RECORDING,
+        callId: CALL,
+        contactLogEntryId: null,
+        transcript: 'Hello.',
+        audioUntil: '2026-11-03T16:07:12.000Z',
+      },
+    ]);
+    const response = await app.request(
+      `/api/v1/calls/recordings?counterparty_id=${COUNTERPARTY}`,
+      { headers: AUTH },
+      TELNYX_ENV,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ recordings: [{ id: RECORDING }] });
+    expect(db.listRecordings).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      COUNTERPARTY,
+    );
+  });
+
+  it('passes on the audio for 24 hours, and nothing after', async () => {
+    db.playableRecording.mockResolvedValue('synthetic-rec-1');
+    telnyx.recordingAudio.mockResolvedValue(new Response('ID3-synthetic', { status: 200 }));
+    const audio = await app.request(
+      `/api/v1/calls/recordings/${RECORDING}/audio`,
+      { headers: AUTH },
+      TELNYX_ENV,
+    );
+    expect(audio.status).toBe(200);
+    expect(audio.headers.get('Content-Type')).toBe('audio/mpeg');
+    expect(audio.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(await audio.text()).toBe('ID3-synthetic');
+
+    db.playableRecording.mockResolvedValue(null);
+    const gone = await app.request(
+      `/api/v1/calls/recordings/${RECORDING}/audio`,
+      { headers: AUTH },
+      TELNYX_ENV,
+    );
+    expect(gone.status).toBe(404);
+    const unsigned = await app.request(
+      `/api/v1/calls/recordings/${RECORDING}/audio`,
+      {},
+      TELNYX_ENV,
+    );
+    expect(unsigned.status).toBe(401);
+  });
+
+  it('keeps a long transcript (Codex, finding 1)', async () => {
+    const words = 'November at the posted price. '.repeat(2500);
+    expect(words.length).toBeGreaterThan(70_000);
+    const response = await webhook(
+      telnyxEvent('call.recording.transcription.saved', {
+        client_state: recordingState,
+        recording_id: 'synthetic-rec-1',
+        transcription_text: words,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(db.keepCallTranscript).toHaveBeenCalledWith(CALL, 'synthetic-rec-1', words);
+  });
+
+  it('asks for a recording event again while Telnyx does not list the recording yet', async () => {
+    telnyx.recordingsOfLeg.mockResolvedValue([]);
+    const response = await webhook(
+      telnyxEvent('call.recording.saved', { call_leg_id: 'leg-1', client_state: recordingState }),
+    );
+    expect(response.status).toBe(500);
+    expect(db.keepCallRecording).not.toHaveBeenCalled();
+  });
+
+  it('works through a backlog of expired recordings in one run (Codex, finding 3)', async () => {
+    const due = Array.from({ length: 101 }, (_, i) => `synthetic-rec-${String(i)}`);
+    const deleted = new Set<string>();
+    db.recordingsToDelete.mockImplementation((most) =>
+      Promise.resolve(due.filter((id) => !deleted.has(id)).slice(0, most)),
+    );
+    db.markRecordingDeleted.mockImplementation((id) => {
+      deleted.add(id);
+      return Promise.resolve();
+    });
+    await deleteExpiredRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(deleted.size).toBe(101);
+  });
+
+  it('deletes at Telnyx the audio of recordings 24 hours old, keeping their transcripts', async () => {
+    db.recordingsToDelete.mockImplementation(() =>
+      Promise.resolve(
+        ['synthetic-rec-1', 'synthetic-rec-2'].filter(
+          (id) => !db.markRecordingDeleted.mock.calls.some(([deleted]) => deleted === id),
+        ),
+      ),
+    );
+    telnyx.deleteRecording
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce(new TelnyxError(503, 'none'));
+    await deleteExpiredRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(telnyx.deleteRecording).toHaveBeenCalledTimes(2);
+    // The one Telnyx could not delete now is tried again next hour.
+    expect(db.markRecordingDeleted).toHaveBeenCalledTimes(1);
+    expect(db.markRecordingDeleted).toHaveBeenCalledWith('synthetic-rec-1');
+  });
+});
+
+describe('the Telnyx client for recordings', () => {
+  it('records both sides with transcription, and finds, plays and deletes recordings', async () => {
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/actions/record_start'))
+        return Promise.resolve(Response.json({ data: {} }));
+      if (url.includes('/recordings?')) {
+        return Promise.resolve(Response.json({ data: [{ id: 'synthetic-rec-1' }, { id: 7 }] }));
+      }
+      if (url.endsWith('/recordings/synthetic-rec-1')) {
+        return Promise.resolve(
+          Response.json({ data: { download_urls: { mp3: 'https://files.example.test/rec.mp3' } } }),
+        );
+      }
+      if (url === 'https://files.example.test/rec.mp3') return Promise.resolve(new Response('mp3'));
+      return Promise.resolve(Response.json({ errors: [{ code: '10005' }] }, { status: 404 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = telnyxClient(TELNYX_ENV);
+    await client?.record('v3:staff-leg', { call: CALL, leg: 'you' }, 'cmd-r');
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(init?.body as string)).toMatchObject({
+      format: 'mp3',
+      channels: 'dual',
+      play_beep: false,
+      transcription: true,
+      command_id: 'cmd-r',
+    });
+    expect(await client?.recordingsOfLeg('leg 1')).toEqual(['synthetic-rec-1']);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'https://api.telnyx.com/v2/recordings?filter[call_leg_id]=leg%201',
+    );
+    expect(await (await client?.recordingAudio('synthetic-rec-1'))?.text()).toBe('mp3');
+    expect(await client?.recordingAudio('gone')).toBeNull();
+    await expect(client?.deleteRecording('gone')).resolves.toBeUndefined();
   });
 });

@@ -1,5 +1,21 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Transcripts of calls, audio kept 24 hours (and Codex's review of them)
+
+- `docs/DECISIONS.md`: recording and transcription of every call that connects; audio at Telnyx for 24 hours, playable by everyone on the team, then deleted; transcripts kept.
+- `docs/DATA_MODEL.md`: migration `20261102070000_call_recordings.sql`.
+- `docs/API.md`: `/api/v1/calls/recordings` and its audio; the recording events.
+- `README.md`: transcripts and the hourly deletion.
+- `docs/DECISIONS.md`: Codex's review of `9de3e78` and CI run #251 (the entry module's exports).
+
+## 2026-11-02 — The call's status line goes after the call
+
+- `docs/DECISIONS.md`: the line goes 5 seconds after the call ends.
+
+## 2026-11-02 — Handoff record of #111
+
+- `docs/HANDOFF.md`: Codex's fifth to eighth reviews of the Telnyx calls fixed (ivanmueller/gss#111) with its CI and Deploy staging runs; the accepted P3; the owner's first real call; the staging checklist.
+
 ## 2026-11-02 — Codex's seventh and eighth reviews of the Telnyx calls
 
 - `docs/DECISIONS.md`: the leg of a dial that came back after its caller was suspended, kept and hung up; the P3 of both reviews.

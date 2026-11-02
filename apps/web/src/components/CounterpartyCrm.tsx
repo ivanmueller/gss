@@ -5,6 +5,7 @@ import {
   type ContactLogEntry,
   type FollowUp,
   type TeamMemberName,
+  type CallRecordingView,
 } from '@grain/domain';
 import { History, Mail, MapPin, MessageSquarePlus, Pencil, Phone, Plus, Users } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -15,6 +16,7 @@ import { albertaNowInput } from '../lib/time';
 import { useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ContactLogForm, FollowUpForm } from './CrmForms';
+import { CallRecordingDetails } from './Calling';
 import { FollowUpItem } from './FollowUpItem';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
@@ -70,12 +72,15 @@ function Entry({
   contactNames,
   canCorrect,
   onChanged,
+  recordings,
 }: {
   session: DirectorySession;
   entry: ContactLogEntry;
   contactNames: readonly string[];
   canCorrect: boolean;
   onChanged: (message: string) => void;
+  /** Recordings of the call this entry was written for (a call placed from the platform). */
+  recordings: readonly CallRecordingView[];
 }) {
   const [correcting, setCorrecting] = useState(false);
   const [history, setHistory] = useState(false);
@@ -131,6 +136,9 @@ function Entry({
             {earlier.length > 0 &&
               ` · corrected by ${current.recordedByName}, ${formatAlberta(current.recordedAt)}`}
           </p>
+          {recordings.map((recording) => (
+            <CallRecordingDetails key={recording.id} token={session.token} recording={recording} />
+          ))}
           {earlier.length > 0 && (
             <div className="flex flex-col gap-2">
               <button
@@ -199,6 +207,8 @@ export interface CounterpartyCrmState {
   team: TeamMemberName[] | null;
   log: Resource<ContactLogResponse>;
   followUps: Resource<FollowUpListResponse>;
+  /** Recordings and transcripts of calls placed from the platform to this counterparty. */
+  recordings: Resource<{ recordings: CallRecordingView[] }>;
   /** The form that is open: logging a contact or planning a follow-up. */
   adding: CrmAdding;
   startAdding: (what: Exclude<CrmAdding, null>) => void;
@@ -222,6 +232,10 @@ export function useCounterpartyCrm(
     `/contact-log?counterparty_id=${counterparty.id}`,
     token,
   );
+  const [recordings, reloadRecordings] = useApiResource<{ recordings: CallRecordingView[] }>(
+    `/calls/recordings?counterparty_id=${counterparty.id}`,
+    token,
+  );
   const [followUps, reloadFollowUps] = useApiResource<FollowUpListResponse>(
     `/follow-ups?counterparty_id=${counterparty.id}&status=all`,
     token,
@@ -235,6 +249,7 @@ export function useCounterpartyCrm(
     team,
     log,
     followUps,
+    recordings,
     adding,
     startAdding: (what) => {
       setAdding(what);
@@ -250,6 +265,7 @@ export function useCounterpartyCrm(
       setMessage(next === '' ? null : next);
       reloadLog();
       reloadFollowUps();
+      reloadRecordings();
     },
   };
 }
@@ -472,6 +488,13 @@ export function ContactHistoryCard({ crm }: { crm: CounterpartyCrmState }) {
                 contactNames={counterparty.contactNames}
                 canCorrect={writer}
                 onChanged={changed}
+                recordings={
+                  crm.recordings.status === 'ok'
+                    ? crm.recordings.data.recordings.filter(
+                        (recording) => recording.contactLogEntryId === entry.id,
+                      )
+                    : []
+                }
               />
             ))}
           </ul>

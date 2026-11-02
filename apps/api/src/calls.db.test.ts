@@ -985,3 +985,68 @@ describe("Codex's eighth review", () => {
     ).toEqual({ followUp: null, callerGone: true });
   });
 });
+
+describe("recordings and transcripts (owner's request, 2026-11-02)", () => {
+  it('records a connected call, keeps its transcript for the team, and plays its audio for 24 hours', async () => {
+    await endTessCalls();
+    const placed = await db.placeCall(as(users.tess), counterparties.buyer, contacts.pat, FROM);
+    if (placed.status !== 'created') throw new Error('not placed');
+    const callId = placed.callId;
+    const ctx = as(users.tess);
+    await db.applyCallEvent(ctx, callId, `evt-${callId}-1`, event('call.answered', 'you'));
+    await db.applyCallEvent(
+      ctx,
+      callId,
+      `evt-${callId}-2`,
+      event('call.gather.ended', 'you', { digits: '1', gatherStatus: 'valid' }),
+    );
+    const connected = await db.applyCallEvent(
+      ctx,
+      callId,
+      `evt-${callId}-3`,
+      event('call.answered', 'them'),
+    );
+    expect(connected).toMatchObject({
+      commands: [{ kind: 'record', callControlId: 'v3:synthetic-staff' }],
+    });
+    if (connected.status !== 'applied') throw new Error('not applied');
+    const record = connected.commands[0]?.id ?? '';
+    expect(await db.claimCommand(ctx, callId, record)).toMatchObject({ status: 'claimed' });
+    // A recording that cannot start leaves the call as it is.
+    expect(await db.finishCommand(ctx, callId, record, 1, { kind: 'failed' })).toEqual({
+      followUp: null,
+    });
+    expect(await db.getCall(ctx, callId)).toMatchObject({ status: 'connected' });
+
+    const recording = `rec-${callId}`;
+    await db.keepCallRecording(
+      callId,
+      recording,
+      new Date().toISOString(),
+      new Date().toISOString(),
+    );
+    await db.keepCallTranscript(callId, recording, 'We can do November at the posted price.');
+    const [listed] = await db
+      .listRecordings(as(users.victor), counterparties.buyer)
+      .then((rows) => rows.filter((row) => row.callId === callId));
+    expect(listed).toMatchObject({ transcript: 'We can do November at the posted price.' });
+    expect(listed?.audioUntil).not.toBeNull();
+    expect(await db.playableRecording(as(users.victor), listed?.id ?? '')).toBe(recording);
+    expect(await db.listRecordings(as(users.bob), counterparties.buyer)).toEqual([]);
+
+    // 24 hours later its audio is due, then gone; the transcript stays.
+    await admin`update app.call_recordings set recording_ended_at = now() - interval '25 hours'
+                where telnyx_recording_id = ${recording}`;
+    expect(await db.recordingsToDelete(500)).toContain(recording);
+    expect(await db.playableRecording(as(users.victor), listed?.id ?? '')).toBeNull();
+    await db.markRecordingDeleted(recording);
+    expect(await db.recordingsToDelete(500)).not.toContain(recording);
+    const [after] = await db
+      .listRecordings(as(users.victor), counterparties.buyer)
+      .then((rows) => rows.filter((row) => row.callId === callId));
+    expect(after).toMatchObject({
+      audioUntil: null,
+      transcript: 'We can do November at the posted price.',
+    });
+  });
+});
