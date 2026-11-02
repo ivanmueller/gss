@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(30);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000044aa', 'tom@example.test', '{"first_name": "Tom", "last_name": "Trader"}'),
@@ -120,6 +120,24 @@ select is(
   pg_temp.api_text('00000000-0000-4000-8000-0000000011bb', 'select count(*)::text from app.call_commands'),
   '0', 'another organization sees none'
 );
+select is(
+  pg_temp.api_text('00000000-0000-4000-8000-0000000011aa', 'select count(*)::text from app.call_commands'),
+  '0', 'a colleague in the same organization sees none of the caller''s commands (re-review, 4)'
+);
+select is(
+  pg_temp.api_text('00000000-0000-4000-8000-0000000044aa', 'select count(*)::text from app.call_commands'),
+  '1', 'the caller sees their own'
+);
+-- An event of Tom's other call, and of another organization's call.
+select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
+  insert into app.call_events (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at)
+  values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000ca11b',
+          'synthetic-event-b', 'call.initiated', 'you', now())$$);
+select throws_ok(
+  $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+    'insert into app.call_commands (organization_id, call_id, telnyx_event_id, kind, call_control_id) values (''00000000-0000-4000-8000-0000000000aa'', ''00000000-0000-4000-8000-0000000ca11a'', ''synthetic-event-b'', ''hang_up'', ''v3:staff'')')$$,
+  '23503', null, 'a command names an event of its own call only (re-review, 5)'
+);
 select throws_ok(
   $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
     'insert into app.call_commands (organization_id, call_id, telnyx_event_id, kind, call_control_id, status, attempts, claimed_at) values (''00000000-0000-4000-8000-0000000000aa'', ''00000000-0000-4000-8000-0000000ca11a'', ''synthetic-event-1'', ''hang_up'', ''v3:staff'', ''sending'', 1, now())')$$,
@@ -174,16 +192,31 @@ select throws_ok(
 );
 
 -- A late answer -----------------------------------------------------------------------------
--- Call b ended without an answer five minutes ago.
+-- Call b was dialed to them (their leg known) and ended without an answer five minutes ago.
 select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
   update app.calls set status = 'ended', outcome = 'no_answer', ended_at = now() - interval '5 minutes',
-                       hangup_cause = 'normal_clearing'
+                       hangup_cause = 'normal_clearing', counterparty_call_control_id = 'v3:them'
    where id = '00000000-0000-4000-8000-0000000ca11b'$$);
 
 select throws_ok(
   $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
-    'update app.calls set outcome = ''talked'', connected_at = now() where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,
-  '23514', null, 'a late answer after the end does not make it talked'
+    'update app.calls set outcome = ''talked'', connected_at = now() - interval ''8 minutes'' where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,
+  '23514', null, 'no late answer without their "answered" event (re-review, 6)'
+);
+-- Their answer eight minutes ago, received late.
+select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
+  insert into app.call_events (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at)
+  values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000ca11b',
+          'synthetic-answer-b', 'call.answered', 'them', now() - interval '8 minutes')$$);
+select throws_ok(
+  $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+    'update app.calls set outcome = ''talked'', connected_at = now() - interval ''7 minutes'' where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,
+  '23514', null, 'only at the time of their answer'
+);
+select throws_ok(
+  $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+    'update app.calls set outcome = ''talked'', connected_at = now() - interval ''8 minutes'', counterparty_call_control_id = ''v3:other'' where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,
+  '23514', null, 'with their leg unchanged'
 );
 select throws_ok(
   $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
@@ -197,10 +230,9 @@ select throws_ok(
 );
 select is(
   pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
-    update app.calls set outcome = 'talked', connected_at = now() - interval '8 minutes',
-                         counterparty_call_control_id = 'v3:them'
+    update app.calls set outcome = 'talked', connected_at = now() - interval '8 minutes'
      where id = '00000000-0000-4000-8000-0000000ca11b'$$),
-  1, 'their answer from before the end makes it talked, with their leg'
+  1, 'their answer from before the end, received, makes it talked'
 );
 select throws_ok(
   $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
@@ -211,6 +243,21 @@ select throws_ok(
   $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
     'update app.calls set connected_at = now() - interval ''9 minutes'' where id = ''00000000-0000-4000-8000-0000000ca11b''')$$,
   '23514', null, 'with the time it connected kept'
+);
+
+-- Call a, never dialed to them: the caller's cell went unanswered.
+select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
+  update app.calls set status = 'ended', outcome = 'you_missed', ended_at = now() - interval '1 minute',
+                       hangup_cause = 'timeout'
+   where id = '00000000-0000-4000-8000-0000000ca11a'$$);
+select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa', $$
+  insert into app.call_events (organization_id, call_id, telnyx_event_id, event_type, leg, occurred_at)
+  values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000ca11a',
+          'synthetic-answer-a', 'call.answered', 'them', now() - interval '1 minute')$$);
+select throws_ok(
+  $$select pg_temp.api_changed('00000000-0000-4000-8000-0000000044aa',
+    'update app.calls set outcome = ''talked'', connected_at = ended_at, counterparty_call_control_id = ''v3:invented'' where id = ''00000000-0000-4000-8000-0000000ca11a''')$$,
+  '23514', null, 'a call never dialed to them is never made talked (re-review, 6)'
 );
 
 select * from finish();
