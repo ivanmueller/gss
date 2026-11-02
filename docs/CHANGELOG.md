@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — Handoff record of #117
+
+- `docs/HANDOFF.md`: the transcript split by side (ivanmueller/gss#117) with its CI and Deploy staging runs and Codex's review after the merge.
+
 ## 2026-11-02 — The transcript split by side
 
 - `docs/DECISIONS.md`: the owner's choice of speech-to-text after the call, by side, with its cost; the channel mapping to check on the first real call.
