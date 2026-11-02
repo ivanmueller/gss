@@ -195,6 +195,9 @@ export function CallingProvider({
   const [available, setAvailable] = useState(false);
   const [notice, setNotice] = useState<CallNotice | null>(null);
   const [cellOpen, setCellOpen] = useState(false);
+  // The contact log entry of the last call that connected, kept after its line has gone, so
+  // that the contact history keeps being loaded again for its transcript.
+  const [refreshFor, setRefreshFor] = useState<string | null>(null);
   const loggedRef = useRef(onLogged);
   useEffect(() => {
     loggedRef.current = onLogged;
@@ -221,9 +224,8 @@ export function CallingProvider({
 
   // A call that connected gets its transcript a little after it ends: the contact history is
   // loaded again a few times, so it appears without reloading the page.
-  const logged = active?.call.contactLogEntryId ?? null;
   useEffect(() => {
-    if (logged === null) return;
+    if (refreshFor === null) return;
     const timers = TRANSCRIPT_CHECKS_MS.map((delay) =>
       setTimeout(() => {
         loggedRef.current();
@@ -232,7 +234,7 @@ export function CallingProvider({
     return () => {
       timers.forEach(clearTimeout);
     };
-  }, [logged]);
+  }, [refreshFor]);
 
   // Once the call has ended, its line stays a few seconds, then goes (the owner's request of
   // 2026-11-02); a call that connected is in the contact history by then.
@@ -265,7 +267,10 @@ export function CallingProvider({
                 : current,
             );
             if (call.status === 'ended') {
-              if (call.contactLogEntryId !== null) loggedRef.current();
+              if (call.contactLogEntryId !== null) {
+                loggedRef.current();
+                setRefreshFor(call.contactLogEntryId);
+              }
             } else if (Date.now() - started < POLL_LIMIT_MS) {
               poll();
             }
@@ -288,6 +293,7 @@ export function CallingProvider({
       sendJson<{ call: CallView }>('/calls', token, 'POST', { counterpartyId, contactId })
         .then(({ call }) => {
           setNotice({ kind: 'call', call, name });
+          if (call.contactLogEntryId !== null) setRefreshFor(call.contactLogEntryId);
         })
         .catch((reason: unknown) => {
           const needsCell = reason instanceof ApiError && reason.code === 'NO_CELL_PHONE';

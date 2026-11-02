@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-02 — The transcript's reloads outlive the call's line
+
+- `docs/DECISIONS.md`: Codex's re-review of `319f801`; one P3 fixed, one accepted.
+
 ## 2026-11-02 — Transcripts of calls, audio kept 24 hours (and Codex's review of them)
 
 - `docs/DECISIONS.md`: recording and transcription of every call that connects; audio at Telnyx for 24 hours, playable by everyone on the team, then deleted; transcripts kept.
