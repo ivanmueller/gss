@@ -32,8 +32,11 @@ import {
 // - /api/v1/telnyx/voice: Telnyx's call events, checked by signature, with no signed-in user.
 
 const MAX_BODY_BYTES = 4 * 1024;
-/** Telnyx's events are small; anything far larger is not one. */
-const MAX_WEBHOOK_BYTES = 64 * 1024;
+/**
+ * Telnyx's largest event is a transcript (kept up to 200,000 characters, which JSON may write
+ * as up to six bytes each); anything far larger is not one (Codex's review of 9de3e78).
+ */
+const MAX_WEBHOOK_BYTES = 1024 * 1024;
 /** How long the caller's cell rings, under most voicemail pick-ups. */
 const STAFF_RING_SECONDS = 30;
 const COUNTERPARTY_RING_SECONDS = 45;
@@ -278,6 +281,13 @@ function text(payload: Record<string, unknown>, key: string, max = 200): string 
 }
 
 /** The events a call's steps use; every other event is acknowledged and ignored. */
+class RecordingNotListed extends Error {
+  constructor() {
+    super('Telnyx does not list the recording yet');
+    this.name = 'RecordingNotListed';
+  }
+}
+
 /** Telnyx's events about a recording, kept outside the call's steps. */
 const RECORDING_EVENTS = new Set(['call.recording.saved', 'call.recording.transcription.saved']);
 
@@ -312,7 +322,10 @@ async function keepRecording(
       ? new Date(value).toISOString()
       : null;
   };
-  for (const recordingId of await client.recordingsOfLeg(legId)) {
+  const recordings = await client.recordingsOfLeg(legId);
+  // Not listed by Telnyx yet: the event is to come again rather than be acknowledged unkept.
+  if (recordings.length === 0) throw new RecordingNotListed();
+  for (const recordingId of recordings) {
     await db.keepCallRecording(
       callId,
       recordingId,
@@ -461,6 +474,16 @@ async function sendCommands(
  * 2026-11-02); run by the Worker's hourly scheduled job. Their transcripts stay. A recording
  * Telnyx no longer has counts as deleted; one that cannot be deleted now is tried next hour.
  */
+/**
+ * The hourly scheduled job that deletes call audio 24 hours old (wrangler.jsonc, triggers). Kept
+ * here, not in the Worker's entry module, whose exports must all be handlers.
+ */
+export const RECORDINGS_CRON = '7 * * * *';
+
+/** Recordings deleted per batch, and batches per run (a backlog is worked through in one run). */
+const DELETE_BATCH = 100;
+const DELETE_BATCHES = 20;
+
 export async function deleteExpiredRecordings(
   env: ApiEnv['Bindings'],
   openDatabase: DatabaseFactory,
@@ -472,15 +495,24 @@ export async function deleteExpiredRecordings(
   const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
   try {
     let deleted = 0;
-    for (const recordingId of await db.recordingsToDelete(100)) {
-      try {
-        await client.deleteRecording(recordingId);
-        await db.markRecordingDeleted(recordingId);
-        deleted += 1;
-      } catch (error) {
-        console.error(
-          `Recording not deleted at Telnyx: ${error instanceof TelnyxError ? `status=${String(error.status)}` : failureSummary(error)}`,
-        );
+    // Each recording is tried once per run; one Telnyx would not delete now waits for next hour.
+    const tried = new Set<string>();
+    for (let batch = 0; batch < DELETE_BATCHES; batch += 1) {
+      const due = (await db.recordingsToDelete(DELETE_BATCH + tried.size)).filter(
+        (recordingId) => !tried.has(recordingId),
+      );
+      if (due.length === 0) break;
+      for (const recordingId of due.slice(0, DELETE_BATCH)) {
+        tried.add(recordingId);
+        try {
+          await client.deleteRecording(recordingId);
+          await db.markRecordingDeleted(recordingId);
+          deleted += 1;
+        } catch (error) {
+          console.error(
+            `Recording not deleted at Telnyx: ${error instanceof TelnyxError ? `status=${String(error.status)}` : failureSummary(error)}`,
+          );
+        }
       }
     }
     if (deleted > 0) console.log(`Recordings deleted at Telnyx after 24 hours: ${String(deleted)}`);

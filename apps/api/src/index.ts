@@ -6,6 +6,7 @@ import {
   callRoutes,
   deleteExpiredRecordings,
   memberPhoneRoutes,
+  RECORDINGS_CRON,
   telnyxWebhookRoutes,
 } from './calls';
 import { counterpartyRoutes } from './counterparties';
@@ -132,9 +133,6 @@ export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: Tel
 }
 
 export const app = createApp(postgresDatabase);
-
-/** The hourly scheduled job that deletes call audio 24 hours old (wrangler.jsonc, triggers). */
-export const RECORDINGS_CRON = '7 * * * *';
 
 export default {
   fetch: app.fetch,

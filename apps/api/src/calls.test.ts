@@ -6,6 +6,7 @@ import { createApp } from './index';
 import { deleteExpiredRecordings } from './calls';
 import { CLAIM_LEASE_SECONDS } from './calls-db';
 import {
+  AUDIO_TIMEOUT_MS,
   TELNYX_TIMEOUT_MS,
   decodeClientState,
   encodeClientState,
@@ -622,6 +623,10 @@ describe('POST /api/v1/telnyx/voice', () => {
     expect(telnyx.hangUp).toHaveBeenCalledWith('v3:stray', CLEANUP.id);
   });
 
+  it('gives an audio download more time than a command (Codex, finding 2)', () => {
+    expect(AUDIO_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+  });
+
   it('gives every Telnyx request less time than a claim lasts (sixth review, 1)', () => {
     // A lapsed claim's request is certainly over, with room for the database round trips.
     expect(CLAIM_LEASE_SECONDS * 1000).toBeGreaterThanOrEqual(2 * TELNYX_TIMEOUT_MS + 5000);
@@ -883,8 +888,51 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
     expect(unsigned.status).toBe(401);
   });
 
+  it('keeps a long transcript (Codex, finding 1)', async () => {
+    const words = 'November at the posted price. '.repeat(2500);
+    expect(words.length).toBeGreaterThan(70_000);
+    const response = await webhook(
+      telnyxEvent('call.recording.transcription.saved', {
+        client_state: recordingState,
+        recording_id: 'synthetic-rec-1',
+        transcription_text: words,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(db.keepCallTranscript).toHaveBeenCalledWith(CALL, 'synthetic-rec-1', words);
+  });
+
+  it('asks for a recording event again while Telnyx does not list the recording yet', async () => {
+    telnyx.recordingsOfLeg.mockResolvedValue([]);
+    const response = await webhook(
+      telnyxEvent('call.recording.saved', { call_leg_id: 'leg-1', client_state: recordingState }),
+    );
+    expect(response.status).toBe(500);
+    expect(db.keepCallRecording).not.toHaveBeenCalled();
+  });
+
+  it('works through a backlog of expired recordings in one run (Codex, finding 3)', async () => {
+    const due = Array.from({ length: 101 }, (_, i) => `synthetic-rec-${String(i)}`);
+    const deleted = new Set<string>();
+    db.recordingsToDelete.mockImplementation((most) =>
+      Promise.resolve(due.filter((id) => !deleted.has(id)).slice(0, most)),
+    );
+    db.markRecordingDeleted.mockImplementation((id) => {
+      deleted.add(id);
+      return Promise.resolve();
+    });
+    await deleteExpiredRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(deleted.size).toBe(101);
+  });
+
   it('deletes at Telnyx the audio of recordings 24 hours old, keeping their transcripts', async () => {
-    db.recordingsToDelete.mockResolvedValue(['synthetic-rec-1', 'synthetic-rec-2']);
+    db.recordingsToDelete.mockImplementation(() =>
+      Promise.resolve(
+        ['synthetic-rec-1', 'synthetic-rec-2'].filter(
+          (id) => !db.markRecordingDeleted.mock.calls.some(([deleted]) => deleted === id),
+        ),
+      ),
+    );
     telnyx.deleteRecording
       .mockResolvedValueOnce()
       .mockRejectedValueOnce(new TelnyxError(503, 'none'));

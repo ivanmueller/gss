@@ -39,6 +39,8 @@ const POLL_MS = 2000;
 const POLL_LIMIT_MS = 15 * 60 * 1000;
 /** How long the line of a call that has ended stays before it goes. */
 export const ENDED_LINE_MS = 5000;
+/** When the contact history is loaded again after a call, for its transcript. */
+const TRANSCRIPT_CHECKS_MS = [30_000, 90_000, 180_000];
 
 /** The person's own cell phone, which their calls ring first; only they see it. */
 export function CellPhoneDialog({
@@ -193,9 +195,9 @@ export function CallingProvider({
   const [available, setAvailable] = useState(false);
   const [notice, setNotice] = useState<CallNotice | null>(null);
   const [cellOpen, setCellOpen] = useState(false);
-  const logged = useRef(onLogged);
+  const loggedRef = useRef(onLogged);
   useEffect(() => {
-    logged.current = onLogged;
+    loggedRef.current = onLogged;
   });
 
   useEffect(() => {
@@ -216,6 +218,21 @@ export function CallingProvider({
   const active = notice?.kind === 'call' ? notice : null;
   const callId = active?.call.id ?? null;
   const ended = active?.call.status === 'ended';
+
+  // A call that connected gets its transcript a little after it ends: the contact history is
+  // loaded again a few times, so it appears without reloading the page.
+  const logged = active?.call.contactLogEntryId ?? null;
+  useEffect(() => {
+    if (logged === null) return;
+    const timers = TRANSCRIPT_CHECKS_MS.map((delay) =>
+      setTimeout(() => {
+        loggedRef.current();
+      }, delay),
+    );
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, [logged]);
 
   // Once the call has ended, its line stays a few seconds, then goes (the owner's request of
   // 2026-11-02); a call that connected is in the contact history by then.
@@ -248,7 +265,7 @@ export function CallingProvider({
                 : current,
             );
             if (call.status === 'ended') {
-              if (call.contactLogEntryId !== null) logged.current();
+              if (call.contactLogEntryId !== null) loggedRef.current();
             } else if (Date.now() - started < POLL_LIMIT_MS) {
               poll();
             }

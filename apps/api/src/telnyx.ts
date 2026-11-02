@@ -115,6 +115,12 @@ const API = 'https://api.telnyx.com/v2';
  */
 export const TELNYX_TIMEOUT_MS = 10_000;
 
+/**
+ * A recording's audio streams to the person playing it for longer than a command takes, so its
+ * download has a timeout of its own (Codex's review of 9de3e78).
+ */
+export const AUDIO_TIMEOUT_MS = 5 * 60_000;
+
 /** The words the caller hears when their cell answers; no counterparty details are sent. */
 export const CONFIRM_PROMPT = 'This is your G S S call. Press 1 to connect.';
 
@@ -255,7 +261,7 @@ export const telnyxClient: TelnyxFactory = (env) => {
           : undefined;
       if (typeof url !== 'string' || !url.startsWith('https://')) return null;
       // A short-lived link Telnyx gives for the file; fetched here, never sent to the browser.
-      const audio = await fetch(url, { signal: AbortSignal.timeout(TELNYX_TIMEOUT_MS) });
+      const audio = await fetch(url, { signal: AbortSignal.timeout(AUDIO_TIMEOUT_MS) });
       if (!audio.ok) throw new TelnyxError(audio.status, 'audio_download');
       return audio;
     },
