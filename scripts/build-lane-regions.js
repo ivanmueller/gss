@@ -10,7 +10,7 @@
 //   node scripts/build-lane-regions.js path/to/ne_50m_admin_1_states_provinces.geojson
 //
 // It keeps the 64 places a lane can run between, simplifies their outlines (about 2 km), and
-// keeps Natural Earth's label point for each, where lane lines start and end.
+// keeps Natural Earth's label point for each (the map no longer draws lines between them).
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const [source] = process.argv.slice(2);

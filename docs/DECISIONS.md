@@ -413,3 +413,5 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 
 **2026-11-02 — Codex's review of the carrier import (`08a3957`, two P2, two P3).** All fixed, each with a test that failed without the fix: a listed buyer a file makes a carrier now gains the Carrier type before its lanes are written (the import failed as a whole); a company whose first row is not a carrier no longer takes a later row's equipment or lanes: that row is a problem on the Check step ("differs from line 2, whose type is the company's"), instead of a failure when importing; "Newfoundland and Labrador" is read as one place, not split at "and"; the import's stored checksum of a file's content holds its equipment and lanes.
 
+**2026-11-02 — No lines on the lanes map (owner's request).** The lanes map shades the provinces and states a carrier loads in (darker) and delivers to (lighter), and outlines with dashes those only its freight rates run between; the line drawn for each lane is removed.
+

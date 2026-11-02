@@ -43,7 +43,7 @@ const roles = (areas: ReturnType<typeof laneAreas>) =>
   );
 
 describe('laneAreas', () => {
-  it('shades where lanes start darker than where they end, and draws a line for each', () => {
+  it('shades where lanes start darker than where they end, with no lines between them', () => {
     const areas = laneAreas(
       DATA,
       [
@@ -53,17 +53,8 @@ describe('laneAreas', () => {
       [],
     );
     expect(roles(areas)).toEqual({ 'CA-AB': 'from', 'US-MT': 'to', 'US-ND': 'to' });
-    expect(areas.lines.features.map((line) => line.geometry.coordinates)).toEqual([
-      [
-        [-115, 55],
-        [-110, 47],
-      ],
-      [
-        [-115, 55],
-        [-100, 47],
-      ],
-    ]);
-    expect(areas.lines.features.every((line) => !line.properties.quoted)).toBe(true);
+    // Only shaded places (owner's request, 2026-11-02).
+    expect(Object.keys(areas)).toEqual(['regions']);
   });
 
   it('adds the freight rates’ other places and lanes, dashed', () => {
@@ -77,10 +68,9 @@ describe('laneAreas', () => {
     );
     // Montana is a lane's end, so it stays shaded; only Saskatchewan is the rates' alone.
     expect(roles(areas)).toEqual({ 'CA-AB': 'from', 'US-MT': 'to', 'CA-SK': 'quoted' });
-    expect(areas.lines.features.map((line) => line.properties.quoted)).toEqual([false, true]);
   });
 
-  it('marks a place lanes start and end in as a start, with no line within it', () => {
+  it('marks a place lanes start and end in as a start', () => {
     const areas = laneAreas(
       DATA,
       [
@@ -90,7 +80,6 @@ describe('laneAreas', () => {
       [],
     );
     expect(roles(areas)).toEqual({ 'CA-AB': 'from', 'CA-SK': 'from' });
-    expect(areas.lines.features).toHaveLength(1);
   });
 });
 

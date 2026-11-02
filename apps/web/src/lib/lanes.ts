@@ -4,8 +4,8 @@ import type { MultiPolygon } from 'geojson';
 import type { MapBounds } from './mapbox';
 
 // A carrier's lanes on a map (owner's request, 2026-11-01): the provinces and states it loads
-// in and delivers to, shaded, with a line for each lane; the places its freight rates run
-// between, dashed.
+// in and delivers to, shaded; the places its freight rates run between, dashed. No lines
+// between places (owner's request, 2026-11-02).
 
 /** The outlines of the 64 places, from apps/web/src/data/lane-regions.json. */
 export interface LaneRegionData {
@@ -32,14 +32,6 @@ export interface LaneAreas {
       geometry: MultiPolygon;
     }[];
   };
-  lines: {
-    type: 'FeatureCollection';
-    features: {
-      type: 'Feature';
-      properties: { quoted: boolean };
-      geometry: { type: 'LineString'; coordinates: number[][] };
-    }[];
-  };
 }
 
 const key = (lane: Pick<CarrierLane, 'origin' | 'destination'>) =>
@@ -54,7 +46,10 @@ export function quotedOnly(
   return quotedLanes.filter((lane) => !entered.has(key(lane)));
 }
 
-/** The places and lines to draw for a carrier's lanes and its freight rates' lanes. */
+/**
+ * The places to shade for a carrier's lanes and its freight rates' lanes; no lines between
+ * them (owner's request, 2026-11-02).
+ */
 export function laneAreas(
   data: LaneRegionData,
   lanes: readonly CarrierLane[],
@@ -69,19 +64,6 @@ export function laneAreas(
   for (const lane of lanes) roles.set(lane.origin, 'from');
 
   const byCode = new Map(data.features.map((feature) => [feature.properties.code, feature]));
-  const line = (lane: CarrierLane, quoted: boolean): LaneAreas['lines']['features'] => {
-    const from = byCode.get(lane.origin)?.properties.center;
-    const to = byCode.get(lane.destination)?.properties.center;
-    if (!from || !to || lane.origin === lane.destination) return [];
-    return [
-      {
-        type: 'Feature',
-        properties: { quoted },
-        geometry: { type: 'LineString', coordinates: [from, to] },
-      },
-    ];
-  };
-
   return {
     regions: {
       type: 'FeatureCollection',
@@ -91,13 +73,6 @@ export function laneAreas(
           ? [{ type: 'Feature', properties: { code, role }, geometry: feature.geometry }]
           : [];
       }),
-    },
-    lines: {
-      type: 'FeatureCollection',
-      features: [
-        ...lanes.flatMap((lane) => line(lane, false)),
-        ...quotedOnly(lanes, quotedLanes).flatMap((lane) => line(lane, true)),
-      ],
     },
   };
 }
