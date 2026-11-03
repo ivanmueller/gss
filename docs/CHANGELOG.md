@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #123, and the status brought up to date
+
+- `docs/HANDOFF.md`: the live call box (ivanmueller/gss#123) with its CI and Deploy staging runs; the status (transcripts by side, the less cluttered page, the call box); the next checks on staging and the next choices (texting and callbacks, notes drafted from transcripts, a Hang up button, the open Dependabot updates).
+- `AGENTS.md`: the status line with calling, transcripts and the contact history's pins and removals; Telnyx under the architecture.
+- `README.md`: calling by clicking a phone number, the live call box.
+
 ## 2026-11-03 — A live call box
 
 - `docs/DECISIONS.md`: the call's progress in a box in the bottom right corner, with its steps and a running clock.
