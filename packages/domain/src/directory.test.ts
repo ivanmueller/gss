@@ -394,12 +394,11 @@ describe('groupImportRows', () => {
         field: 'verificationStatus',
         message: "differs from line 2 for the same company; line 2's value is used",
       },
-      {
-        line: 3,
-        field: 'website',
-        message: "differs from line 2 for the same company; line 2's value is used",
-      },
     ]);
+    // Line 2 gave no website, so line 3's is taken without a warning.
+    expect(groupImportRows(rows).groups[0]?.counterparty.website).toBe(
+      'https://mills-two.example.com',
+    );
   });
 });
 
@@ -614,16 +613,106 @@ describe('company phones', () => {
     });
   });
 
-  it('warn when a later row of the same company disagrees', () => {
-    const { warnings } = groupImportRows([
-      ok({ legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0100' }, 2),
-      ok({ legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0101' }, 3),
+  it("keep a later row's different number in the notes, with its place (owner's answer, 2026-11-03)", () => {
+    const { groups, warnings } = groupImportRows([
+      ok(
+        { legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0100', city: 'Alpha' },
+        2,
+      ),
+      ok(
+        { legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0101', city: 'Beta' },
+        3,
+      ),
+      ok(
+        { legalName: 'Synthetic Mill', country: 'CA', companyPhone: '306 555 0100', city: 'Gamma' },
+        4,
+      ),
     ]);
+    expect(warnings).toEqual([]);
+    expect(groups[0]?.counterparty).toMatchObject({
+      phone: '(306) 555-0100',
+      notes: 'Company phone also: (306) 555-0101 (Beta)',
+    });
+  });
+});
+
+describe("one company's rows combined (owner's answers, 2026-11-03)", () => {
+  const mill = { legalName: 'Synthetic Mill', country: 'CA', types: 'seller' };
+
+  it("keeps every row's notes, each with its place, and the same notes once", () => {
+    const { groups, warnings } = groupImportRows([
+      ok({ ...mill, notes: 'Picks up Tuesdays.', city: 'Olds', region: 'AB' }, 2),
+      ok({ ...mill, notes: 'Rail siding.', facilityName: 'North yard', city: 'Didsbury' }, 3),
+      ok({ ...mill, notes: 'Picks up Tuesdays.', city: 'Olds', region: 'AB' }, 4),
+      ok({ ...mill, notes: 'Call ahead.' }, 5),
+    ]);
+    expect(warnings).toEqual([]);
+    expect(groups[0]?.counterparty.notes).toBe(
+      'Olds, AB: Picks up Tuesdays.\nNorth yard, Didsbury: Rail siding.\nrow 5: Call ahead.',
+    );
+    // The same notes on every row stay as they are.
+    const same = groupImportRows([
+      ok({ ...mill, notes: 'Synthetic note.', city: 'Olds' }, 2),
+      ok({ ...mill, notes: 'Synthetic note.', city: 'Didsbury' }, 3),
+    ]);
+    expect(same.groups[0]?.counterparty.notes).toBe('Synthetic note.');
+  });
+
+  it('keeps what fits in the notes, with a warning for the rest', () => {
+    const long = 'x'.repeat(1500);
+    const { groups, warnings } = groupImportRows([
+      ok({ ...mill, notes: long, city: 'Olds' }, 2),
+      ok({ ...mill, notes: `${long}y`, city: 'Didsbury' }, 3),
+    ]);
+    expect(groups[0]?.counterparty.notes).toBe(`Olds: ${long}`);
     expect(warnings).toEqual([
       {
         line: 3,
-        field: 'companyPhone',
-        message: "differs from line 2 for the same company; line 2's value is used",
+        field: 'notes',
+        message:
+          "not added to the company's notes: together they would be longer than 2000 characters",
+      },
+    ]);
+  });
+
+  it('combines grain types and markets, and takes the highest tier', () => {
+    const { groups, warnings } = groupImportRows([
+      ok({ ...mill, grainTypes: 'Organic', tier: 'B' }, 2),
+      ok({ ...mill, grainTypes: 'Feed', tier: 'A' }, 3),
+      ok({ ...mill, tier: 'C' }, 4),
+    ]);
+    expect(groups[0]?.counterparty).toMatchObject({ grainTypes: ['feed', 'organic'], tier: 'A' });
+    expect(warnings).toEqual([
+      {
+        line: 3,
+        field: 'tier',
+        message: 'differs from line 2 for the same company; the highest tier, A, is used',
+      },
+      {
+        line: 4,
+        field: 'tier',
+        message: 'differs from line 3 for the same company; the highest tier, A, is used',
+      },
+    ]);
+    const buyer = { legalName: 'Synthetic Feeds', country: 'CA', types: 'buyer' };
+    expect(
+      groupImportRows([ok({ ...buyer, markets: 'Pet' }, 2), ok({ ...buyer, markets: 'Bird' }, 3)])
+        .groups[0]?.counterparty.markets,
+    ).toEqual(['pet', 'bird']);
+  });
+
+  it('takes the first seller kind given, warning when a later row differs', () => {
+    const { groups, warnings } = groupImportRows([
+      ok({ ...mill }, 2),
+      ok({ ...mill, sellerKind: 'Farm', annualTonnes: '4500' }, 3),
+      ok({ ...mill, sellerKind: 'Elevator' }, 4),
+    ]);
+    expect(groups[0]?.counterparty).toMatchObject({ sellerKind: 'farm', annualTonnes: 4500 });
+    expect(warnings).toEqual([
+      {
+        line: 4,
+        field: 'sellerKind',
+        message: "differs from line 3 for the same company; line 3's value is used",
       },
     ]);
   });

@@ -1539,11 +1539,37 @@ export interface ImportGroup {
   lines: number[];
 }
 
+/** Where a row is, to label its notes and phone in its company's: "Olds, AB", else "row 7". */
+function rowPlace(row: ParsedImportRow): string {
+  const facility = row.facility;
+  const where = facility
+    ? [facility.name, facility.city, facility.region].filter(Boolean).join(', ')
+    : '';
+  return where === '' ? `row ${String(row.line)}` : where;
+}
+
+/** A company's details that take the first value given, warned about when another differs. */
+const FIRST_GIVEN = [
+  ['website', 'website'],
+  ['sellerKind', 'sellerKind'],
+  ['annualTonnes', 'annualTonnes'],
+  ['organicCertifier', 'organicCertifier'],
+  ['organicCertifiedUntil', 'organicCertifiedUntil'],
+] as const satisfies readonly (readonly [keyof CounterpartyInput, ImportFieldId])[];
+
 /**
  * Rows with the same legal name and country become one counterparty with several
- * contacts and locations. The first row's company details are used; a later row that
- * disagrees produces a warning, not an error. Repeated contacts and locations are kept once;
- * every row's commodities are kept, each once.
+ * contacts and locations: one company with its locations, each on its own row (owner's
+ * answer, 2026-11-03). Its details are combined:
+ * - notes: every row's, each labelled with its location when the rows' notes differ;
+ * - company phone: the first given; the others go to the notes with their location;
+ * - markets and grain types: all of the rows', each once;
+ * - tier: the highest (A, then B, then C), with a warning when rows differ;
+ * - website, seller kind, tonnes a year and organic certificate: the first given, with a
+ *   warning when a later row differs;
+ * - name spelling, types and verification: the first row's, with a warning.
+ * Combined notes longer than MAX_IMPORT_VALUE_LENGTH keep what fits, with a warning. Repeated
+ * contacts and locations are kept once; every row's commodities are kept, each once.
  */
 export function groupImportRows(rows: ParsedImportRow[]): {
   groups: ImportGroup[];
@@ -1556,14 +1582,20 @@ export function groupImportRows(rows: ParsedImportRow[]): {
   const issues: ImportIssue[] = [];
   const contactKeys = new Map<string, Set<string>>();
   const facilityKeys = new Map<string, Set<string>>();
+  // Per company: each row's notes and phone, combined once every row is read.
+  const notesOf = new Map<string, { line: number; place: string; text: string }[]>();
+  const phonesOf = new Map<string, { line: number; place: string; phone: string }[]>();
+  // Per company: the line that gave each first-given detail and the tier.
+  const fromLine = new Map<string, Partial<Record<keyof CounterpartyInput, number>>>();
 
   for (const row of rows) {
     const key = counterpartyKey(row.counterparty.primaryCountry, row.counterparty.legalName);
+    const place = rowPlace(row);
     let group = groups.get(key);
     if (!group) {
       group = {
         key,
-        counterparty: row.counterparty,
+        counterparty: { ...row.counterparty },
         givenVerification: row.givenVerification,
         contacts: [],
         facilities: [],
@@ -1575,43 +1607,72 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       groups.set(key, group);
       contactKeys.set(key, new Set());
       facilityKeys.set(key, new Set());
+      notesOf.set(key, []);
+      phonesOf.set(key, []);
+      const from: Partial<Record<keyof CounterpartyInput, number>> = {};
+      for (const [detail] of FIRST_GIVEN) {
+        if (row.counterparty[detail] !== null) from[detail] = row.line;
+      }
+      if (row.counterparty.tier !== null) from.tier = row.line;
+      fromLine.set(key, from);
     } else {
-      const first = group.counterparty;
+      const kept = group.counterparty;
       const firstLine = group.lines[0] ?? row.line;
+      const from = fromLine.get(key) ?? {};
+      const differs = (
+        field: ImportFieldId,
+        line: number,
+        how = `line ${String(line)}'s value is used`,
+      ) => {
+        warnings.push({
+          line: row.line,
+          field,
+          message: `differs from line ${String(line)} for the same company; ${how}`,
+        });
+      };
       const compare: [ImportFieldId, string | null, string | null][] = [
         // Capitals alone are not worth a note; other spelling differences are.
-        ['legalName', first.legalName.toLowerCase(), row.counterparty.legalName.toLowerCase()],
-        ['tradingName', first.tradingName, row.counterparty.tradingName],
-        ['types', first.types.join(', '), row.counterparty.types.join(', ')],
-        ['verificationStatus', first.verificationStatus, row.counterparty.verificationStatus],
-        ['website', first.website, row.counterparty.website],
-        ['companyPhone', first.phone, row.counterparty.phone],
-        ['markets', first.markets.join(', '), row.counterparty.markets.join(', ') || null],
-        ['tier', first.tier, row.counterparty.tier],
-        ['grainTypes', first.grainTypes.join(', '), row.counterparty.grainTypes.join(', ') || null],
-        ['sellerKind', first.sellerKind, row.counterparty.sellerKind],
-        [
-          'annualTonnes',
-          first.annualTonnes === null ? null : String(first.annualTonnes),
-          row.counterparty.annualTonnes === null ? null : String(row.counterparty.annualTonnes),
-        ],
-        ['organicCertifier', first.organicCertifier, row.counterparty.organicCertifier],
-        [
-          'organicCertifiedUntil',
-          first.organicCertifiedUntil,
-          row.counterparty.organicCertifiedUntil,
-        ],
-        ['notes', first.notes, row.counterparty.notes],
+        ['legalName', kept.legalName.toLowerCase(), row.counterparty.legalName.toLowerCase()],
+        ['tradingName', kept.tradingName, row.counterparty.tradingName],
+        ['types', kept.types.join(', '), row.counterparty.types.join(', ')],
+        ['verificationStatus', kept.verificationStatus, row.counterparty.verificationStatus],
       ];
-      for (const [field, kept, ignored] of compare) {
-        if (ignored !== null && ignored !== kept) {
-          warnings.push({
-            line: row.line,
-            field,
-            message: `differs from line ${String(firstLine)} for the same company; line ${String(firstLine)}'s value is used`,
-          });
+      for (const [field, value, other] of compare) {
+        if (other !== null && other !== value) differs(field, firstLine);
+      }
+      for (const [detail, field] of FIRST_GIVEN) {
+        const value = row.counterparty[detail];
+        if (value === null) continue;
+        if (kept[detail] === null) {
+          Object.assign(kept, { [detail]: value });
+          from[detail] = row.line;
+        } else if (kept[detail] !== value) differs(field, from[detail] ?? firstLine);
+      }
+      kept.markets = MARKETS.filter(
+        (market) => kept.markets.includes(market) || row.counterparty.markets.includes(market),
+      );
+      kept.grainTypes = GRAIN_TYPES.filter(
+        (type) => kept.grainTypes.includes(type) || row.counterparty.grainTypes.includes(type),
+      );
+      const tier = row.counterparty.tier;
+      if (tier !== null && tier !== kept.tier) {
+        if (kept.tier === null || TIERS.indexOf(tier) < TIERS.indexOf(kept.tier)) {
+          if (kept.tier !== null) {
+            differs('tier', from.tier ?? firstLine, `the highest tier, ${tier}, is used`);
+          }
+          kept.tier = tier;
+          from.tier = row.line;
+        } else {
+          differs('tier', from.tier ?? firstLine, `the highest tier, ${kept.tier}, is used`);
         }
       }
+    }
+    if (row.counterparty.notes !== null) {
+      notesOf.get(key)?.push({ line: row.line, place, text: row.counterparty.notes });
+    }
+    if (row.counterparty.phone !== null) {
+      group.counterparty.phone ??= row.counterparty.phone;
+      phonesOf.get(key)?.push({ line: row.line, place, phone: row.counterparty.phone });
     }
     group.lines.push(row.line);
     warnings.push(...row.notices);
@@ -1669,6 +1730,39 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         group.facilities.push(row.facility);
       }
     }
+  }
+  for (const group of groups.values()) {
+    const notes = notesOf.get(group.key) ?? [];
+    const texts = [...new Set(notes.map((note) => note.text))];
+    // The same notes on every row are kept as they are; different ones each with its place.
+    const parts =
+      texts.length <= 1
+        ? notes.slice(0, 1).map((note) => ({ line: note.line, text: note.text }))
+        : notes
+            .filter((note, index) => notes.findIndex((other) => other.text === note.text) === index)
+            .map((note) => ({ line: note.line, text: `${note.place}: ${note.text}` }));
+    const phones = (phonesOf.get(group.key) ?? []).filter(
+      (entry, index, all) =>
+        entry.phone !== group.counterparty.phone &&
+        all.findIndex((other) => other.phone === entry.phone) === index,
+    );
+    for (const entry of phones) {
+      parts.push({ line: entry.line, text: `Company phone also: ${entry.phone} (${entry.place})` });
+    }
+    let combined: string | null = null;
+    for (const part of parts) {
+      const next: string = combined === null ? part.text : `${combined}\n${part.text}`;
+      if (next.length > MAX_IMPORT_VALUE_LENGTH) {
+        warnings.push({
+          line: part.line,
+          field: part.text.startsWith('Company phone also:') ? 'companyPhone' : 'notes',
+          message: `not added to the company's notes: together they would be longer than ${String(MAX_IMPORT_VALUE_LENGTH)} characters`,
+        });
+        continue;
+      }
+      combined = next;
+    }
+    group.counterparty.notes = combined;
   }
   return { groups: [...groups.values()], warnings, issues };
 }

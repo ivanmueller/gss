@@ -189,7 +189,16 @@ function mappedRows(sheet: Sheet, mapping: Mapping) {
   });
 }
 
-function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) {
+/** Problems block the import and are fixed in the file; warnings only say what was done. */
+function IssueList({
+  title,
+  issues,
+  warnings = false,
+}: {
+  title: string;
+  issues: ImportIssue[];
+  warnings?: boolean;
+}) {
   if (issues.length === 0) return null;
   return (
     <Card className="overflow-hidden">
@@ -211,7 +220,8 @@ function IssueList({ title, issues }: { title: string; issues: ImportIssue[] }) 
       </ul>
       {issues.length > SHOWN_ISSUES && (
         <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-          Showing the first {SHOWN_ISSUES}. Fix these and choose the file again.
+          Showing the first {SHOWN_ISSUES}.{' '}
+          {warnings ? 'Warnings do not stop the import.' : 'Fix these and choose the file again.'}
         </p>
       )}
     </Card>
@@ -627,7 +637,7 @@ export function ImportSpreadsheet({
         <>
           <ReviewSummary result={step.result} />
           <IssueList title="Problems to fix" issues={step.result.issues} />
-          <IssueList title="Warnings" issues={step.result.warnings} />
+          <IssueList title="Warnings" issues={step.result.warnings} warnings />
           {step.error && (
             <p role="alert" className="text-sm text-danger">
               {step.error}
