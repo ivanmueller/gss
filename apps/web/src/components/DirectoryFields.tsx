@@ -57,7 +57,7 @@ export interface FieldsProps {
   disabled?: boolean;
 }
 
-/** A field problem as a sentence, e.g. "Legal name is required." */
+/** A field problem as a sentence, e.g. "Company name is required." */
 export function issueText(label: string, message: string): string {
   const sentence = /^(is|are|needs|must)\b/.test(message) ? `${label} ${message}` : message;
   return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
@@ -393,7 +393,8 @@ export function CompanyFields(props: FieldsProps) {
       </fieldset>
       <TextField
         field="legalName"
-        label="Legal name"
+        label="Company name"
+        hint="The name the company goes by in public."
         props={props}
         required
         className="sm:col-span-2"

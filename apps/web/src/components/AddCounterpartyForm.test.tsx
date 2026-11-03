@@ -65,7 +65,7 @@ describe('AddCounterpartyForm', () => {
 
     const company = section('Company');
     await userEvent.type(
-      within(company).getByLabelText('Legal name (required)'),
+      within(company).getByLabelText('Company name (required)'),
       'Synthetic Farms',
     );
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Seller' }));
@@ -153,7 +153,7 @@ describe('AddCounterpartyForm', () => {
     });
     form();
     const company = section('Company');
-    await userEvent.type(within(company).getByLabelText('Legal name (required)'), 'Synthetic Co');
+    await userEvent.type(within(company).getByLabelText('Company name (required)'), 'Synthetic Co');
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Carrier' }));
     await choose(within(company).getByLabelText('Country (required)'), 'Canada');
     // A carrier's location is its home yard, not asked whether rail or trucks serve it.
@@ -174,7 +174,7 @@ describe('AddCounterpartyForm', () => {
     const company = section('Company');
     expect(within(company).getByText('Tier')).toBeInTheDocument();
     await userEvent.type(
-      within(company).getByLabelText('Legal name (required)'),
+      within(company).getByLabelText('Company name (required)'),
       'Synthetic Hauling',
     );
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Carrier' }));
@@ -234,7 +234,10 @@ describe('AddCounterpartyForm', () => {
     });
     form();
     const company = section('Company');
-    await userEvent.type(within(company).getByLabelText('Legal name (required)'), 'Synthetic Mill');
+    await userEvent.type(
+      within(company).getByLabelText('Company name (required)'),
+      'Synthetic Mill',
+    );
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Buyer' }));
     await choose(within(company).getByLabelText('Country (required)'), 'Canada');
     expect(screen.queryByRole('region', { name: 'Equipment and lanes' })).toBeNull();
@@ -253,8 +256,8 @@ describe('AddCounterpartyForm', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
 
     const company = section('Company');
-    expect(within(company).getByLabelText('Legal name (required)')).toHaveAccessibleDescription(
-      'Legal name is required.',
+    expect(within(company).getByLabelText('Company name (required)')).toHaveAccessibleDescription(
+      'Company name is required.',
     );
     expect(within(company).getByLabelText('Country (required)')).toHaveAccessibleDescription(
       'Country is required.',
@@ -283,7 +286,7 @@ describe('AddCounterpartyForm', () => {
     form();
     const company = section('Company');
     await userEvent.type(
-      within(company).getByLabelText('Legal name (required)'),
+      within(company).getByLabelText('Company name (required)'),
       'Synthetic Mills',
     );
     await userEvent.click(within(company).getByRole('checkbox', { name: 'Buyer' }));

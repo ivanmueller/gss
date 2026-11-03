@@ -119,7 +119,7 @@ describe('ImportSpreadsheet', () => {
       ['Grower,Country,Bushels,Notes', 'Synthetic Grower,Canada,5000,Synthetic', ''].join('\n'),
     );
 
-    expect(await screen.findByLabelText('Legal name (required)')).toHaveTextContent('Grower');
+    expect(await screen.findByLabelText('Company name (required)')).toHaveTextContent('Grower');
     expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent('Bushels');
     expect(screen.getByText(/1 column in your file is not used/)).toBeInTheDocument();
     // The columns found are listed in green, and their fields marked found (owner's request,
@@ -128,7 +128,7 @@ describe('ImportSpreadsheet', () => {
       'GrowerCountryNotes',
     );
     expect(screen.getByText(/3 columns found in your file/)).toBeInTheDocument();
-    const legalName = screen.getByLabelText('Legal name (required)').closest('[data-found]');
+    const legalName = screen.getByLabelText('Company name (required)').closest('[data-found]');
     expect(legalName).toHaveClass('bg-success-subtle');
     expect(legalName).toHaveTextContent('Found in your file.');
     expect(screen.getByLabelText('Website').closest('[data-found]')).toBeNull();
@@ -192,7 +192,7 @@ describe('ImportSpreadsheet', () => {
         '',
       ].join('\n'),
     );
-    await screen.findByLabelText('Legal name (required)');
+    await screen.findByLabelText('Company name (required)');
     const side = screen.getByRole('group', { name: 'The companies in this file are' });
     await userEvent.click(within(side).getByRole('button', { name: 'Buyers' }));
     expect(screen.getByLabelText('Market')).toHaveTextContent('Market');
@@ -269,7 +269,7 @@ describe('ImportSpreadsheet', () => {
     await chooseFile(CSV);
 
     expect(await screen.findByText(/3 rows, 6 columns/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Legal name (required)')).toHaveTextContent('Company Name');
+    expect(screen.getByLabelText('Company name (required)')).toHaveTextContent('Company Name');
     expect(screen.getByLabelText('Province or state')).toHaveTextContent('Prov');
     // Contacts are added on the counterparty's page, so its columns are not used (owner's
     // request, 2026-11-03).
@@ -373,7 +373,7 @@ describe('ImportSpreadsheet', () => {
     expect(
       screen.getByText('Row 2, Country: "Mexico" is not Canada or the United States'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Row 3, Legal name: is required')).toBeInTheDocument();
+    expect(screen.getByText('Row 3, Company name: is required')).toBeInTheDocument();
     expect(calls).toHaveLength(0);
   });
 
@@ -383,10 +383,10 @@ describe('ImportSpreadsheet', () => {
     await chooseFile('Firm,Nation\nSynthetic Mills,Canada\n');
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Choose a column for Legal name and Country.',
+      'Choose a column for Company name and Country.',
     );
     expect(screen.getByRole('button', { name: 'Review import' })).toBeDisabled();
-    await choose(screen.getByLabelText('Legal name (required)'), 'Firm');
+    await choose(screen.getByLabelText('Company name (required)'), 'Firm');
     await choose(screen.getByLabelText('Country (required)'), 'Nation');
     expect(screen.getByRole('status')).toHaveTextContent('1 rows ready.');
     expect(screen.getByRole('button', { name: 'Review import' })).toBeEnabled();

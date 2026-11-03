@@ -46,7 +46,7 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
     .click();
   const dialog = page.getByRole('dialog', { name: 'Import counterparties' });
   await dialog.getByLabel('Choose CSV file').setInputFiles(csvFile('synthetic-buyers.csv'));
-  await expect(dialog.getByLabel('Legal name (required)')).toContainText('Company Name');
+  await expect(dialog.getByLabel('Company name (required)')).toContainText('Company Name');
   await dialog.getByRole('button', { name: 'Review import' }).click();
   await expect(dialog.getByRole('table', { name: 'Counterparties in this import' })).toBeVisible();
   await dialog.getByRole('button', { name: 'Import 2 new counterparties' }).click();
@@ -176,7 +176,7 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   const company = dialog.getByRole('region', { name: 'Company' });
   // Type first, then the name; no trading name (owner's request, 2026-10-30).
   await company.getByRole('checkbox', { name: 'Seller' }).check();
-  await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
+  await company.getByLabel('Company name (required)').fill('Synthetic Hand Grower');
   await expect(company.getByLabel('Trading name')).toHaveCount(0);
   // A seller has grain types and its own details, not a buyer's market (owner's request,
   // 2026-11-03).
@@ -353,7 +353,7 @@ test('deletes an archived counterparty, with a confirmation', async ({ page }) =
   const dialog = page.getByRole('dialog', { name: 'Add a counterparty' });
   const company = dialog.getByRole('region', { name: 'Company' });
   await company.getByRole('checkbox', { name: 'Buyer' }).check();
-  await company.getByLabel('Legal name (required)').fill('Synthetic Short-Lived Co');
+  await company.getByLabel('Company name (required)').fill('Synthetic Short-Lived Co');
   await choose(company.getByLabel('Country (required)'), 'Canada');
   await dialog.getByRole('button', { name: 'Add counterparty' }).click();
   await expect(page.getByRole('heading', { name: 'Synthetic Short-Lived Co' })).toBeVisible();
@@ -649,7 +649,7 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   const company = page
     .getByRole('dialog', { name: 'Add a counterparty' })
     .getByRole('region', { name: 'Company' });
-  await company.getByLabel('Legal name (required)').fill('Synthetic Hauling');
+  await company.getByLabel('Company name (required)').fill('Synthetic Hauling');
   await company.getByRole('checkbox', { name: 'Carrier' }).check();
   await choose(company.getByLabel('Country (required)'), 'Canada');
   // Its equipment when it is added (owner's request, 2026-11-01); lanes follow on its page.
