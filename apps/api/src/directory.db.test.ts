@@ -898,7 +898,7 @@ describe('the counterparty directory as app_api', () => {
               legalName: 'Synthetic Seller Farms',
               country: 'CA',
               types: 'seller',
-              markets: 'Non-GMO; Organic',
+              grainTypes: 'Non-GMO; Organic',
               annualTonnes: '4,500',
               organicCertifiedUntil: '2028-01-15',
               city: 'Synthetic Siding',

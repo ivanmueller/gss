@@ -1275,7 +1275,7 @@ describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
           values: {
             legalName: 'Synthetic Grower',
             country: 'CA',
-            markets: 'Feed; Organic',
+            grainTypes: 'Feed; Organic',
             sellerKind: 'Farm',
             annualTonnes: '3,000',
             organicCertifier: 'Synthetic Certifier',

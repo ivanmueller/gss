@@ -934,21 +934,14 @@ describe("a seller's details", () => {
     ).toMatchObject({ grainTypes: ['feed'], markets: [] });
   });
 
-  it("read a seller-only row's Market column as its grain types, with a notice", () => {
-    const row = ok({ ...seller, markets: 'Feed; Human' });
-    expect(row.counterparty).toMatchObject({
-      markets: [],
-      grainTypes: ['feed', 'human_consumption'],
-    });
-    expect(row.notices.map((notice) => `${notice.field ?? '-'}: ${notice.message}`)).toEqual([
-      "markets: is read as the seller's Grain type: Feed; Human",
-    ]);
-    // A buyer's markets on a seller's row are left out, with a warning, not a problem.
-    const pet = ok({ ...seller, markets: 'Pet; Bird' });
-    expect(pet.counterparty).toMatchObject({ markets: [], grainTypes: [] });
-    expect(pet.notices.map((notice) => `${notice.field ?? '-'}: ${notice.message}`)).toEqual([
-      "markets: is a buyer's (Pet, Bird, Equine, Specialty, Small Animal, Exotic, Wildlife, Aqua), so it is not imported for a seller; a seller's is its Grain type: Feed, Human consumption, Organic, Non-GMO / IP",
-    ]);
+  it("leave a seller-only row's Market out, with a warning, never as grain types", () => {
+    for (const markets of ['Feed; Human', 'Pet; Bird']) {
+      const row = ok({ ...seller, markets });
+      expect(row.counterparty).toMatchObject({ markets: [], grainTypes: [] });
+      expect(row.notices.map((notice) => `${notice.field ?? '-'}: ${notice.message}`)).toEqual([
+        "markets: is a buyer's, so it is not imported for a seller; use Grain type",
+      ]);
+    }
     // A buyer and seller keeps its Market; its grain types come from Grain type.
     expect(
       ok({ legalName: 'Synthetic Mills', country: 'CA', types: 'buyer;seller', markets: 'Pet' })

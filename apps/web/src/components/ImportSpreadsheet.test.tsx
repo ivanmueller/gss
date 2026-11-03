@@ -149,7 +149,7 @@ describe('ImportSpreadsheet', () => {
   });
 
   // The owner's request of 2026-11-03: the columns offered follow who the file's companies are.
-  it("starts a sellers' file on Sellers, its own columns offered, Market kept as Market", async () => {
+  it("starts a sellers' file on Sellers, its own columns offered and no Market", async () => {
     const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
     importer();
     await chooseFile(
@@ -163,9 +163,9 @@ describe('ImportSpreadsheet', () => {
     expect(await screen.findByLabelText('Seller kind')).toHaveTextContent('Seller Kind');
     expect(screen.getByLabelText('Tonnes a year')).toHaveTextContent('Tonnes a year');
     expect(screen.getByLabelText('Served by')).toHaveTextContent('Served by');
-    // The Market column stays Market, said to be read as the grain type (Codex's review of
-    // cee5d4e): Pet is not a grain type, so it is left out with a warning, not refused.
-    expect(screen.getByLabelText('Market (read as grain type)')).toHaveTextContent('Market');
+    // Market is a buyer's: not offered for sellers, so the column is not used.
+    expect(screen.queryByLabelText(/^Market/)).not.toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(/^Market$/);
     expect(screen.getByText('1 rows ready.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
     const review = calls.find((call) => call.method === 'POST');
@@ -174,10 +174,13 @@ describe('ImportSpreadsheet', () => {
       rows: [
         {
           line: 2,
-          values: { markets: 'Pet', sellerKind: 'Farm', annualTonnes: '4500', servedBy: 'Rail' },
+          values: { sellerKind: 'Farm', annualTonnes: '4500', servedBy: 'Rail' },
         },
       ],
     });
+    expect(
+      (review?.body as { rows: { values: Record<string, string> }[] }).rows[0]?.values,
+    ).not.toHaveProperty('markets');
   });
 
   it("offers a buyers' file no seller's or carrier's columns", async () => {
