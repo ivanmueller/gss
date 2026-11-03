@@ -65,7 +65,7 @@ export class TelnyxError extends Error {
   constructor(
     readonly status: number,
     readonly codes: string,
-    /** Telnyx's own short explanation, made safe to log (safeReason); empty when none. */
+    /** What a refusal was about, one of a fixed set of words (reasonCategory); empty when none. */
     readonly reason = '',
   ) {
     super(`Telnyx answered ${String(status)}`);
@@ -147,19 +147,105 @@ async function errorCodes(response: Response): Promise<string> {
 }
 
 /**
- * Telnyx's explanation made safe for the Worker's log: links and anything long enough to be a
- * key or a signature removed, printable characters only, 160 at most. Telnyx's errors name the
- * request's problem (a field or a format), never call content.
+ * What a refusal was about, as one of a fixed set of words (Codex's review of 5c72810, finding
+ * 2): Telnyx's own text is never logged, as it might echo something private; only the first
+ * category its words match.
  */
-export function safeReason(text: string): string {
-  return text
-    .replace(/https?:\/\/\S+/gi, '<link>')
-    .replace(/[A-Za-z0-9_\-+/=]{24,}/g, '<redacted>')
-    .replace(/[^\x20-\x7E]/g, ' ')
-    .replace(/"/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160);
+const REASON_CATEGORIES: readonly (readonly [RegExp, string])[] = [
+  [/model_config|multichannel|smart_format|punctuate/i, 'model_config'],
+  [/response_format|verbose/i, 'response_format'],
+  [/unsupported|format|codec|file type|mime|extension|decode/i, 'file_format'],
+  [/too large|too big|size|exceed/i, 'file_size'],
+  [/file_url|\burl\b|download|fetch|remote/i, 'file_url'],
+  [/\bfile\b|upload|multipart/i, 'file'],
+  [/language/i, 'language'],
+  [/\bmodel\b/i, 'model'],
+  [/required|missing/i, 'missing_field'],
+  [/unauthori[sz]ed|forbidden|permission|api key|not allowed|not enabled/i, 'permission'],
+  [/balance|credit|payment|billing/i, 'balance'],
+  [/rate limit|too many/i, 'rate_limit'],
+];
+
+export function reasonCategory(text: string): string {
+  if (text.trim() === '') return '';
+  return REASON_CATEGORIES.find(([pattern]) => pattern.test(text))?.[1] ?? 'other';
+}
+
+/**
+ * A multipart/form-data body whose file part streams from `file.body` (Codex's review of
+ * 5c72810, finding 1): nothing is buffered, and the file must be exactly `file.size` bytes, so
+ * the upload's own length is known (FixedLengthStream in the Worker sets Content-Length).
+ */
+export function multipartUpload(
+  fields: readonly (readonly [string, string])[],
+  file: {
+    name: string;
+    filename: string;
+    type: string;
+    size: number;
+    body: ReadableStream<Uint8Array>;
+  },
+): { body: ReadableStream<Uint8Array>; contentType: string; length: number } {
+  const boundary = `gss-${crypto.randomUUID()}`;
+  const encoder = new TextEncoder();
+  const head = encoder.encode(
+    fields
+      .map(
+        ([name, value]) =>
+          `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+      )
+      .join('') +
+      `--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.type}\r\n\r\n`,
+  );
+  const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+  let sent = 0;
+  const counted = file.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        sent += chunk.byteLength;
+        if (sent > file.size) controller.error(new TelnyxError(413, 'audio_too_large'));
+        else controller.enqueue(chunk);
+      },
+      flush(controller) {
+        if (sent !== file.size) controller.error(new TelnyxError(502, 'audio_length'));
+      },
+    }),
+  );
+  const reader = counted.getReader();
+  let stage: 'head' | 'file' | 'tail' | 'done' = 'head';
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (stage === 'head') {
+        stage = 'file';
+        controller.enqueue(head);
+      } else if (stage === 'file') {
+        const { done, value } = await reader.read();
+        if (!done) {
+          controller.enqueue(value);
+          return;
+        }
+        stage = 'tail';
+        controller.enqueue(tail);
+      } else {
+        stage = 'done';
+        controller.close();
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+  const length = head.byteLength + file.size + tail.byteLength;
+  const Fixed = (
+    globalThis as {
+      FixedLengthStream?: new (length: number) => TransformStream<Uint8Array, Uint8Array>;
+    }
+  ).FixedLengthStream;
+  return {
+    body: Fixed === undefined ? body : body.pipeThrough(new Fixed(length)),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    length,
+  };
 }
 
 /** The codes of a Telnyx error body, and its first explanation (made safe to log). */
@@ -200,7 +286,7 @@ async function errorDetails(response: Response): Promise<{ codes: string; reason
   ].find((value): value is string => typeof value === 'string' && value.trim() !== '');
   return {
     codes: codes.length > 0 ? codes.slice(0, 5).join(',') : 'none',
-    reason: reason === undefined ? '' : safeReason(reason),
+    reason: reason === undefined ? '' : reasonCategory(reason),
   };
 }
 
@@ -338,26 +424,48 @@ export const telnyxClient: TelnyxFactory = (env) => {
       // The audio is uploaded, not passed as a link (staging, 2026-11-03: Telnyx answered 400
       // to the recording's link, whose signed query string follows ".mp3").
       const audio = await fetch(url, { signal });
-      if (!audio.ok) throw new TelnyxError(audio.status, 'audio_download');
-      if (Number(audio.headers.get('Content-Length') ?? 0) > TRANSCRIBE_MAX_BYTES) {
-        throw new TelnyxError(413, 'audio_too_large');
+      if (!audio.ok || audio.body === null) {
+        await audio.body?.cancel().catch(() => undefined);
+        throw new TelnyxError(audio.status, 'audio_download');
       }
-      const file = await audio.blob();
-      if (file.size > TRANSCRIBE_MAX_BYTES) throw new TelnyxError(413, 'audio_too_large');
-      const form = new FormData();
-      form.set('model', 'deepgram/nova-3');
-      form.set('file', new Blob([file], { type: 'audio/mpeg' }), 'recording.mp3');
-      form.set('language', 'en');
-      form.set('response_format', 'verbose_json');
-      // Each channel on its own (billed for both), punctuated, numbers and prices written out.
-      form.set(
-        'model_config',
-        JSON.stringify({ multichannel: true, punctuate: true, smart_format: true }),
+      // Streamed through, never held whole in the Worker's memory (Codex's review of 5c72810,
+      // finding 1), so its length must be known and within the limit before it starts.
+      const size = Number(audio.headers.get('Content-Length'));
+      if (!Number.isSafeInteger(size) || size <= 0 || size > TRANSCRIBE_MAX_BYTES) {
+        await audio.body.cancel().catch(() => undefined);
+        throw new TelnyxError(
+          413,
+          size > TRANSCRIBE_MAX_BYTES ? 'audio_too_large' : 'audio_length',
+        );
+      }
+      const upload = multipartUpload(
+        [
+          ['model', 'deepgram/nova-3'],
+          ['language', 'en'],
+          ['response_format', 'verbose_json'],
+          // Each channel on its own (billed for both), punctuated, numbers and prices written
+          // out.
+          [
+            'model_config',
+            JSON.stringify({ multichannel: true, punctuate: true, smart_format: true }),
+          ],
+        ],
+        {
+          name: 'file',
+          filename: 'recording.mp3',
+          type: 'audio/mpeg',
+          size,
+          body: audio.body as ReadableStream<Uint8Array>,
+        },
       );
       const response = await fetch(`${API}/ai/audio/transcriptions`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
-        body: form,
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          Accept: 'application/json',
+          'Content-Type': upload.contentType,
+        },
+        body: upload.body,
         signal,
       });
       if (!response.ok) {
