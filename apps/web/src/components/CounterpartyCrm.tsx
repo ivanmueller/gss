@@ -120,11 +120,9 @@ function Entry({
   const title = contactTitle(current);
   const loggedBy = entry.revisions.at(-1)?.recordedByName ?? current.recordedByName;
   const summary = current.notes?.split('\n').find((line) => line.trim() !== '') ?? null;
-  // Opening shows what the two lines leave out: all the notes, the call, earlier versions.
-  const hasMore =
-    recordings.length > 0 ||
-    earlier.length > 0 ||
-    (current.notes !== null && current.notes.trim() !== summary?.trim());
+  // Opening shows what the two lines leave out: all the notes (the line can cut even a single
+  // paragraph short; Codex's review of ac2d085, finding 1), the call, earlier versions.
+  const hasMore = recordings.length > 0 || earlier.length > 0 || summary !== null;
 
   async function act(run: () => Promise<unknown>, message: string) {
     setBusy(true);
