@@ -868,12 +868,18 @@ test('logs a contact with a follow-up, corrects it, and marks the follow-up done
         legalName: 'Synthetic CRM Buyer',
         country: 'CA',
         types: 'buyer',
-        contactName: 'Synthetic Merchant',
       },
     },
   });
   expect(created.status()).toBe(201);
   const { id } = (await created.json()) as { id: string };
+  // Contacts are added on the counterparty's page, through its own endpoint (owner's request,
+  // 2026-11-03).
+  const contact = await request.post(`/api/v1/counterparties/${id}/contacts`, {
+    headers,
+    data: { values: { contactName: 'Synthetic Merchant' } },
+  });
+  expect(contact.ok()).toBe(true);
 
   await page.goto(`/counterparties/${id}`);
   const history = page.getByRole('region', { name: 'Contact history (0)' });
