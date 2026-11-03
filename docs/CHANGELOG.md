@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #127
+
+- `docs/HANDOFF.md`: no Market for sellers in spreadsheets (ivanmueller/gss#127) with its CI and Deploy staging runs.
+
 ## 2026-11-03 — One company's rows combined
 
 - `docs/DECISIONS.md`: the owner's answers: notes, phones, grain types and markets combined across a company's rows, the highest tier, the first seller kind given.
