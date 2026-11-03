@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Contacts added on the counterparty's page only
+
+- `docs/DECISIONS.md`: the owner's request: no contact in spreadsheets or the add form; the sellers' header row without Contact, Phone and Email.
+- `docs/API.md`: contact fields refused when adding by hand and importing.
+- `docs/PRODUCT.md`: the add form and the import without contacts.
+
 ## 2026-11-03 — Codex's review of the seller's details, and CI run #273
 
 - `docs/DECISIONS.md`: a sellers' Market column kept as Market; tons never taken for tonnes, whatever the header's spelling (Codex's re-review of `eb99697`); a file starting as carriers or sellers from its columns.

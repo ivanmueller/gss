@@ -14,7 +14,6 @@ import {
 } from './CarrierLanes';
 import {
   CompanyFields,
-  ContactFields,
   EquipmentFields,
   equipmentOf,
   FormIssues,
@@ -258,9 +257,6 @@ export function AddCounterpartyForm({
           </Button>
         </Section>
       )}
-      <Section title="Contact" note="Optional. Leave empty to add contacts later.">
-        <ContactFields {...fields} />
-      </Section>
       <Section
         title={carrierOnly ? 'Home yard' : 'Location'}
         note="Optional. Its coordinates are found from the address when you add it."

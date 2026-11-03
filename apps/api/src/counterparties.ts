@@ -908,7 +908,8 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
-  // One counterparty entered by hand, with an optional first contact and location (GT-020).
+  // One counterparty entered by hand, with an optional first location (GT-020); contacts are
+  // added on its page (owner's request, 2026-11-03).
   routes.post('/', async (c) => {
     c.header('Cache-Control', 'no-store');
     const body = await readJson(c, MAX_FORM_BODY_BYTES);

@@ -50,9 +50,7 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   await dialog.getByRole('button', { name: 'Review import' }).click();
   await expect(dialog.getByRole('table', { name: 'Counterparties in this import' })).toBeVisible();
   await dialog.getByRole('button', { name: 'Import 2 new counterparties' }).click();
-  await expect(
-    dialog.getByText('Imported 2 counterparties with 1 contacts and 3 locations.'),
-  ).toBeVisible();
+  await expect(dialog.getByText('Imported 2 counterparties with 3 locations.')).toBeVisible();
   // Coordinates are looked up next; CI has no Geocodio key, so the step says what is
   // missing and lets the import finish.
   await expect(dialog.getByRole('alert')).toContainText('Finding coordinates is not set up');
@@ -71,9 +69,9 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
   // From the spreadsheet's Market and Tier columns.
   await expect(page.getByText('Tier A')).toBeVisible();
   await expect(page.getByRole('list', { name: 'Markets' })).toHaveText('PetBird');
-  await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
-    'ana@example.test',
-  );
+  // The file's Contact and E-mail columns are not imported: contacts are added on the
+  // counterparty's page (owner's request, 2026-11-03).
+  await expect(page.getByRole('region', { name: 'Contacts (0)' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Locations (2)' })).toBeVisible();
   // The logo itself opens Add logo (the owner's request of 2026-11-03).
   await page.getByRole('button', { name: 'Add logo' }).click();
@@ -189,7 +187,8 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await choose(company.getByLabel('Tier'), 'Tier B');
   await choose(company.getByLabel('Country (required)'), 'Canada');
   await company.getByLabel('Company phone').fill('306 555 0100 ext. 7');
-  await dialog.getByRole('region', { name: 'Contact' }).getByLabel('Name').fill('Synthetic Farmer');
+  // No contact in the add form: contacts are added on the counterparty's page.
+  await expect(dialog.getByRole('region', { name: 'Contact' })).toHaveCount(0);
   const location = dialog.getByRole('region', { name: 'Location', exact: true });
   await location.getByLabel('City or town').fill('Synthetic Town');
   await choose(location.getByLabel('Province or territory'), 'Saskatchewan');
@@ -213,6 +212,10 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await expect(page.getByTitle('Seller kind')).toHaveText('Farm');
   await expect(page.getByText('About 4,500 t a year')).toBeVisible();
   await expect(page.getByText('Entered by hand')).toBeVisible();
+  await page.getByRole('button', { name: 'Add contact' }).click();
+  const newContact = page.getByRole('form', { name: 'New contact' });
+  await newContact.getByLabel('Name (required)').fill('Synthetic Farmer');
+  await newContact.getByRole('button', { name: 'Add contact' }).click();
   await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
     'Synthetic Farmer',
   );

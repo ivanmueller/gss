@@ -101,12 +101,9 @@ describe('parseImportRow', () => {
         organicCertifiedUntil: null,
         notes: 'Prefers rail.\nCall mornings.',
       },
-      contact: {
-        name: 'Synthetic Merchandiser',
-        role: 'Grain buyer',
-        email: 'merch@example.test',
-        phone: '(306) 555-0100 x12',
-      },
+      // A row's contact columns are not read: contacts are added on the counterparty's page
+      // (owner's request, 2026-11-03).
+      contact: null,
       facility: {
         name: 'Synthetic Elevator',
         facilityType: 'elevator',
@@ -268,9 +265,6 @@ describe('parseImportRow', () => {
       'country: "Mexico" is not Canada or the United States',
       'types: "buyer, grower" must be buyer, seller, broker or carrier',
       'verificationStatus: "yes" must be unverified, pending or verified',
-      'contactName: is required when other contact details are given',
-      'contactEmail: "not-an-email" is not an email address',
-      'contactPhone: "call me" is not a phone number',
       'facilityType: "silo" is not a known location type (Elevator, Terminal, Processor, Feed mill, Port, Farm, Warehouse, Office, Other)',
       'latitude: "95" is not a latitude between -90 and 90',
       'longitude: latitude and longitude must be given together',
@@ -321,7 +315,7 @@ describe('groupImportRows', () => {
     ]);
   });
 
-  it('merges rows for the same company, keeping each contact and location once', () => {
+  it('merges rows for the same company, keeping each location once and no contact', () => {
     const rows = [
       ok(
         {
@@ -367,7 +361,8 @@ describe('groupImportRows', () => {
         group.facilities.map((f) => f.city),
       ]),
     ).toEqual([
-      ['CA:synthetic mills', [2, 3, 4], ['Ana', 'Ben'], ['Alpha', 'Beta']],
+      // Contact columns are not read (owner's request, 2026-11-03).
+      ['CA:synthetic mills', [2, 3, 4], [], ['Alpha', 'Beta']],
       ['US:synthetic mills', [5], [], ['Gamma']],
     ]);
     expect(groups[0]?.counterparty.legalName).toBe('Synthetic Mills');
@@ -430,9 +425,7 @@ describe('suggestMapping', () => {
       legalName: 'Company Name',
       tradingName: 'DBA',
       country: 'Country',
-      contactName: 'Contact',
-      contactEmail: 'E-mail',
-      contactPhone: 'Phone',
+      // Contact, E-mail and Phone are a contact's, added on the counterparty's page only.
       addressLine: 'Address',
       city: 'City',
       region: 'Prov',
@@ -587,14 +580,15 @@ describe('company phones', () => {
         legalName: 'Synthetic Mill',
         country: 'CA',
         companyPhone: '306-555-0100 extension 2',
+      }),
+    ).toMatchObject({ counterparty: { phone: '(306) 555-0100 x2' } });
+    // "extension" was once read as "ext" and left "ension": a bug fix for contacts too.
+    expect(
+      parseContactFields({
         contactName: 'Synthetic Merchandiser',
-        // "extension" was once read as "ext" and left "ension": a bug fix for contacts too.
         contactPhone: '306 555 0199 extension 3',
       }),
-    ).toMatchObject({
-      counterparty: { phone: '(306) 555-0100 x2' },
-      contact: { phone: '(306) 555-0199 x3' },
-    });
+    ).toMatchObject({ status: 'ok', value: { phone: '(306) 555-0199 x3' } });
     expect(
       parseCounterpartyFields({
         legalName: 'Synthetic Mill',
@@ -608,9 +602,11 @@ describe('company phones', () => {
     });
   });
 
-  it('are matched from company phone columns, while a plain Phone column stays the contact’s', () => {
-    expect(suggestMapping(['Company', 'Country', 'Phone', 'Main phone'])).toMatchObject({
-      contactPhone: 'Phone',
+  it('are matched from company phone columns, while a plain Phone column is not used', () => {
+    // A plain Phone column is a contact's, added on the counterparty's page only.
+    expect(suggestMapping(['Company', 'Country', 'Phone', 'Main phone'])).toEqual({
+      legalName: 'Company',
+      country: 'Country',
       companyPhone: 'Main phone',
     });
     expect(suggestMapping(['Company', 'Company phone'])).toMatchObject({
@@ -881,7 +877,7 @@ describe("a seller's details", () => {
 
   it("recognises every column of the sellers' sheet header row given to the owner", () => {
     const headers =
-      'Company,Country,Company Phone,Grain Type,Seller Kind,Tonnes a year,Organic Certifier,Organic Certified Until,Tier,Grains,Contact,Phone,Email,Address,City,Province/State,Postal Code,Served By,Notes'.split(
+      'Company,Country,Company Phone,Grain Type,Seller Kind,Tonnes a year,Organic Certifier,Organic Certified Until,Tier,Grains,Address,City,Province/State,Postal Code,Served By,Notes'.split(
         ',',
       );
     const mapping = suggestMapping(headers);
@@ -1090,7 +1086,7 @@ describe('the add form (parseDirectoryRecord)', () => {
     });
   });
 
-  it('returns the counterparty with its first contact and location', () => {
+  it('returns the counterparty with its first location, and no contact', () => {
     expect(
       parseDirectoryRecord({
         legalName: 'Synthetic Grower',
@@ -1104,10 +1100,37 @@ describe('the add form (parseDirectoryRecord)', () => {
       status: 'ok',
       record: {
         counterparty: { legalName: 'Synthetic Grower', types: ['seller'], primaryCountry: 'CA' },
-        contact: { name: 'Synthetic Farmer' },
+        // Contacts are added on the counterparty's page (owner's request, 2026-11-03).
+        contact: null,
         facility: { city: 'Synthetic Town', region: 'SK', country: 'CA' },
       },
     });
+  });
+});
+
+describe('contacts, added on the counterparty page only (owner request, 2026-11-03)', () => {
+  it('are not read from a row, nor accepted by the import or the add form', () => {
+    expect(
+      ok({ legalName: 'Synthetic Grower', country: 'CA', contactName: 'Synthetic Farmer' }).contact,
+    ).toBeNull();
+    const organizationId = '00000000-0000-4000-8000-0000000000aa';
+    expect(
+      createCounterpartySchema.safeParse({
+        organizationId,
+        values: { legalName: 'Synthetic Grower', contactName: 'Synthetic Farmer' },
+      }).success,
+    ).toBe(false);
+    expect(
+      importRequestSchema.safeParse({
+        organizationId,
+        fileName: 'synthetic.csv',
+        commit: false,
+        rows: [
+          { line: 2, values: { legalName: 'Synthetic Grower', contactEmail: 'a@example.test' } },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(suggestMapping(['Contact', 'Job title', 'Email', 'Phone'])).toEqual({});
   });
 });
 
@@ -1289,13 +1312,11 @@ describe('formatPhone', () => {
         legalName: 'Synthetic Feeds',
         country: 'CA',
         companyPhone: '306.555.0100',
-        contactName: 'Ana',
-        contactPhone: '1-306-555-0199',
       }),
-    ).toMatchObject({
-      counterparty: { phone: '(306) 555-0100' },
-      contact: { phone: '(306) 555-0199' },
-    });
+    ).toMatchObject({ counterparty: { phone: '(306) 555-0100' } });
+    expect(
+      parseContactFields({ contactName: 'Ana', contactPhone: '1-306-555-0199' }),
+    ).toMatchObject({ status: 'ok', value: { phone: '(306) 555-0199' } });
   });
 });
 

@@ -268,7 +268,12 @@ describe('ImportSpreadsheet', () => {
     expect(await screen.findByText(/3 rows, 6 columns/)).toBeInTheDocument();
     expect(screen.getByLabelText('Legal name (required)')).toHaveTextContent('Company Name');
     expect(screen.getByLabelText('Province or state')).toHaveTextContent('Prov');
-    expect(screen.getByLabelText('Contact email')).toHaveTextContent('E-mail');
+    // Contacts are added on the counterparty's page, so its columns are not used (owner's
+    // request, 2026-11-03).
+    expect(screen.queryByLabelText('Contact email')).not.toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(
+      'ContactE-mail',
+    );
     // The trading name is no longer collected; Market and Tier are (2026-10-30).
     expect(screen.queryByLabelText('Trading name')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Market')).toHaveTextContent('— not in my file —');
@@ -289,8 +294,6 @@ describe('ImportSpreadsheet', () => {
           values: {
             legalName: 'Synthetic Mills',
             country: 'Canada',
-            contactName: 'Ana',
-            contactEmail: 'ana@example.test',
             city: 'Alpha',
             region: 'SK',
           },
@@ -300,8 +303,6 @@ describe('ImportSpreadsheet', () => {
           values: {
             legalName: 'Synthetic Mills',
             country: 'Canada',
-            contactName: '',
-            contactEmail: '',
             city: 'Beta',
             region: 'Manitoba',
           },
@@ -311,8 +312,6 @@ describe('ImportSpreadsheet', () => {
           values: {
             legalName: 'Synthetic Buyer LLC',
             country: 'USA',
-            contactName: '',
-            contactEmail: '',
             city: 'Gamma',
             region: 'ND',
           },
@@ -326,7 +325,7 @@ describe('ImportSpreadsheet', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Import 2 new counterparties' }));
     expect(
-      await screen.findByText('Imported 2 counterparties with 1 contacts and 3 locations.'),
+      await screen.findByText('Imported 2 counterparties with 3 locations.'),
     ).toBeInTheDocument();
     expect(
       calls
