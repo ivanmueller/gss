@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #121
+
+- `docs/HANDOFF.md`: a less cluttered counterparty page (ivanmueller/gss#121) with its CI and Deploy staging runs and Codex's review after the merge.
+
 ## 2026-11-03 — A less cluttered counterparty page
 
 - `docs/DECISIONS.md`: the owner's answers: contact history in short rows with Pin, Edit and Remove (kept), only Log contact at the top, click-to-call numbers with Call and Copy number.
