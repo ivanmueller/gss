@@ -2,7 +2,7 @@
 
 ## 2026-11-03 — Codex's review of the seller's details, and CI run #273
 
-- `docs/DECISIONS.md`: a sellers' Market column kept as Market; tons never taken for tonnes; a file starting as carriers or sellers from its columns.
+- `docs/DECISIONS.md`: a sellers' Market column kept as Market; tons never taken for tonnes, whatever the header's spelling (Codex's re-review of `eb99697`); a file starting as carriers or sellers from its columns.
 - `docs/PRODUCT.md`: the import's starting choice and tons.
 
 ## 2026-11-03 — A seller's own details

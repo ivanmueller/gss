@@ -121,7 +121,14 @@ export function likelySide(mapping: Mapping): FileSide {
  */
 export function tonsColumn(mapping: Mapping): string | null {
   const header = mapping.annualTonnes;
-  return header !== undefined && /\btons?\b/i.test(header) ? header : null;
+  if (header === undefined) return null;
+  // Words however the header joins them: "Annual_tons", "Tons/year", "AnnualTons" (Codex's
+  // re-review of eb99697), so "tons" is found as a word and "tonnes" is not.
+  const words = header
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[^a-z]+/g, ' ');
+  return /\btons?\b/.test(words) ? header : null;
 }
 
 /** A field's name in the column list: a sellers' Market column is read as their grain type. */

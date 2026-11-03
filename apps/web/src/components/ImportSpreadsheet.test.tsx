@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImportResult } from '../lib/api';
 import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
-import { ImportSpreadsheet } from './ImportSpreadsheet';
+import { ImportSpreadsheet, tonsColumn } from './ImportSpreadsheet';
 
 // Synthetic, fictional companies only.
 const CSV = [
@@ -212,6 +212,16 @@ describe('ImportSpreadsheet', () => {
     expect(await screen.findByRole('list', { name: 'Columns found' })).toHaveTextContent(
       'CompanyCountryEquipmentLoads InDelivers To',
     );
+  });
+
+  it('finds tons in a header however its words are joined, and not in tonnes', () => {
+    for (const header of ['Annual_tons', 'Tons/year', 'AnnualTons', 'tons-a-year', 'TONS']) {
+      expect(tonsColumn({ annualTonnes: header })).toBe(header);
+    }
+    for (const header of ['Tonnes_a_year', 'AnnualTonnes', 'MT per year', 'Stones']) {
+      expect(tonsColumn({ annualTonnes: header })).toBeNull();
+    }
+    expect(tonsColumn({})).toBeNull();
   });
 
   it('never takes a column of tons for tonnes', async () => {
