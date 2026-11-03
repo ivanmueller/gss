@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Company name, not Legal name
+
+- `docs/DECISIONS.md`: the field called Company name on screen, the public (DBA) name; nothing stored changed.
+
 ## 2026-11-03 — Handoff record of #127
 
 - `docs/HANDOFF.md`: no Market for sellers in spreadsheets (ivanmueller/gss#127) with its CI and Deploy staging runs.

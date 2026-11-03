@@ -121,7 +121,8 @@ export const MAX_RAW_VALUE_LENGTH = 10_000;
 export const IMPORT_FIELDS = [
   {
     id: 'legalName',
-    label: 'Legal name',
+    // The name the company shows the public (owner's request, 2026-11-03).
+    label: 'Company name',
     required: true,
     headers: [
       'legal name',

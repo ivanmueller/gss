@@ -460,7 +460,7 @@ describe('CounterpartyPage editing', () => {
     await chooseAction('Edit details');
 
     const form = screen.getByRole('form', { name: 'Edit details' });
-    expect(within(form).getByLabelText('Legal name (required)')).toHaveValue(
+    expect(within(form).getByLabelText('Company name (required)')).toHaveValue(
       'Synthetic Prairie Mills',
     );
     expect(within(form).getByRole('checkbox', { name: 'Seller' })).toBeChecked();
@@ -523,13 +523,13 @@ describe('CounterpartyPage editing', () => {
     render(<CounterpartyPage session={SESSION} id={ID} />);
     await chooseAction('Edit details');
     const form = screen.getByRole('form', { name: 'Edit details' });
-    await userEvent.clear(within(form).getByLabelText('Legal name (required)'));
+    await userEvent.clear(within(form).getByLabelText('Company name (required)'));
     await userEvent.click(within(form).getByRole('checkbox', { name: 'Buyer' }));
     await userEvent.click(within(form).getByRole('checkbox', { name: 'Seller' }));
     await userEvent.click(within(form).getByRole('button', { name: 'Save details' }));
 
-    expect(within(form).getByLabelText('Legal name (required)')).toHaveAccessibleDescription(
-      'Legal name is required.',
+    expect(within(form).getByLabelText('Company name (required)')).toHaveAccessibleDescription(
+      'Company name is required.',
     );
     expect(
       within(form).getByText('Choose at least one: buyer, seller, broker or carrier.'),

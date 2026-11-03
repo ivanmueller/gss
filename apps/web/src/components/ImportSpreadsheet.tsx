@@ -518,7 +518,7 @@ export function ImportSpreadsheet({
         <div className="flex flex-col gap-3">
           <p className="text-sm">
             Buyers or sellers, one row per company or per location. In Excel, use File → Save As →
-            “CSV UTF-8 (Comma delimited)”. Rows with the same legal name and country become one
+            “CSV UTF-8 (Comma delimited)”. Rows with the same company name and country become one
             counterparty; companies already in the list are skipped, not changed. Commodities from
             the file are listed as unverified until someone on the team verifies them.
           </p>
