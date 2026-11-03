@@ -1,5 +1,6 @@
 import {
   IMPORT_FIELDS,
+  IMPORTED_FIELDS,
   MAX_IMPORT_ROWS,
   MAX_RAW_VALUE_LENGTH,
   parseImportRow,
@@ -66,8 +67,11 @@ type Step =
     } & Plan)
   | { kind: 'done'; result: ImportResult };
 
-/** The fields a column can fill; the trading name is no longer collected (2026-10-30). */
-const SHOWN_FIELDS = IMPORT_FIELDS.filter((field) => field.id !== 'tradingName');
+/**
+ * The fields a column can fill: not the trading name, no longer collected (2026-10-30), nor a
+ * contact's, added on the counterparty's page only (owner's request, 2026-11-03).
+ */
+const SHOWN_FIELDS = IMPORTED_FIELDS.filter((field) => field.id !== 'tradingName');
 
 const SELLER_FIELDS: readonly ImportFieldId[] = [
   'grainTypes',
@@ -671,8 +675,7 @@ export function ImportSpreadsheet({
             {step.result.summary.newCounterparties > 0 && (
               <p className="font-medium">
                 Imported {step.result.summary.newCounterparties} counterparties with{' '}
-                {step.result.summary.contacts} contacts and {step.result.summary.facilities}{' '}
-                locations
+                {step.result.summary.facilities} locations
                 {step.result.summary.lanes > 0 &&
                   `, and ${plural(step.result.summary.lanes, 'lane', 'lanes')} to verify`}
                 .
@@ -772,8 +775,7 @@ function ReviewSummary({ result }: { result: ImportResult }) {
   return (
     <div className="flex flex-col gap-3">
       <p role="status" className="text-sm">
-        {summary.newCounterparties} new counterparties ({summary.contacts} contacts,{' '}
-        {summary.facilities} locations
+        {summary.newCounterparties} new counterparties ({summary.facilities} locations
         {summary.lanes > 0 && `, ${plural(summary.lanes, 'lane', 'lanes')} (unverified)`})
         {summary.existingCounterparties > 0 &&
           ` · ${String(summary.existingCounterparties)} already in the list`}
@@ -787,7 +789,6 @@ function ReviewSummary({ result }: { result: ImportResult }) {
             <tr>
               <TableHead>Counterparty</TableHead>
               <TableHead>Rows</TableHead>
-              <TableHead>Contacts</TableHead>
               <TableHead>Locations</TableHead>
               <TableHead>Lanes</TableHead>
               <TableHead>Result</TableHead>
@@ -803,7 +804,6 @@ function ReviewSummary({ result }: { result: ImportResult }) {
                   </span>
                 </TableRowHeader>
                 <TableCell className="py-1.5">{item.lines.join(', ')}</TableCell>
-                <TableCell className="py-1.5">{item.contacts}</TableCell>
                 <TableCell className="py-1.5">{item.facilities}</TableCell>
                 <TableCell className="py-1.5">{item.lanes}</TableCell>
                 <TableCell className="py-1.5">

@@ -408,6 +408,18 @@ export const CONTACT_FIELD_IDS = [
   'contactEmail',
   'contactPhone',
 ] as const satisfies readonly ImportFieldId[];
+/**
+ * The fields a spreadsheet row or the add form may give: everything but a contact's. A
+ * contact is added on the counterparty's own page (owner's request, 2026-11-03), so the
+ * import and the add form neither offer nor accept the contact fields.
+ */
+export const RECORD_FIELD_IDS = FIELD_IDS.filter(
+  (field) => !(CONTACT_FIELD_IDS as readonly ImportFieldId[]).includes(field),
+) as [ImportFieldId, ...ImportFieldId[]];
+
+/** The import's columns: every field but a contact's. */
+export const IMPORTED_FIELDS = IMPORT_FIELDS.filter((field) => RECORD_FIELD_IDS.includes(field.id));
+
 export const FACILITY_FIELD_IDS = [
   'facilityName',
   'facilityType',
@@ -454,7 +466,7 @@ export const importRequestSchema = z.object({
     .array(
       z.object({
         line: z.number().int().min(1).max(1_000_000),
-        values: fieldValues(FIELD_IDS),
+        values: fieldValues(RECORD_FIELD_IDS),
       }),
     )
     .min(1)
@@ -471,7 +483,7 @@ const transportAccess = z.enum(TRANSPORT_ACCESS).nullable().optional();
  */
 export const createCounterpartySchema = z.object({
   organizationId: z.uuid(),
-  values: fieldValues(FIELD_IDS),
+  values: fieldValues(RECORD_FIELD_IDS),
   transportAccess,
 });
 
@@ -1337,10 +1349,11 @@ export function parseDirectoryRecord(
   | { status: 'empty' }
   | { status: 'invalid'; issues: FieldIssue[] } {
   const r = new FieldReader(values, options.importing === true);
-  if (FIELD_IDS.every((field) => r.value(field) === null)) return { status: 'empty' };
-  r.checkLengths(FIELD_IDS);
+  if (RECORD_FIELD_IDS.every((field) => r.value(field) === null)) return { status: 'empty' };
+  r.checkLengths(RECORD_FIELD_IDS);
   const counterparty = readCounterparty(r, options.defaultTypes);
-  const contact = readContact(r);
+  // Contacts are added on the counterparty's page only (owner's request, 2026-11-03).
+  const contact = null;
   const countryText = r.value('country');
   const facility = readFacility(r, countryText === null ? null : normalizeCountry(countryText));
   const commodities = readCommodities(r, counterparty?.types ?? []);
@@ -1682,7 +1695,7 @@ function normalizeHeader(header: string): string {
 export function suggestMapping(headers: string[]): Partial<Record<ImportFieldId, string>> {
   const mapping: Partial<Record<ImportFieldId, string>> = {};
   const used = new Set<string>();
-  for (const field of IMPORT_FIELDS) {
+  for (const field of IMPORTED_FIELDS) {
     const match = headers.find(
       (header) =>
         !used.has(header) &&

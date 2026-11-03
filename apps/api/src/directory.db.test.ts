@@ -689,7 +689,7 @@ describe('the counterparty directory as app_api', () => {
 
   // The owner's answer of 2026-10-31: a later file updates a listed company, filled cells
   // winning, while a verified commodity stays as it is.
-  it('updates a listed company, its contact and its location from a file', async () => {
+  it('updates a listed company and its location from a file, leaving its contacts alone', async () => {
     const ctx = as(users.olivia);
     const created = await db.createCounterparty(ctx, orgs.a, {
       counterparty: {
@@ -747,6 +747,8 @@ describe('the counterparty directory as app_api', () => {
             tier: 'A',
             notes: 'Synthetic file note.',
             commodities: 'Canola; Oats',
+            // Not read: contacts are added on the counterparty's page (owner's request,
+            // 2026-11-03).
             contactName: 'synthetic ana',
             contactPhone: '306-555-0111',
             contactRole: 'Buyer',
@@ -783,8 +785,8 @@ describe('the counterparty directory as app_api', () => {
       expect.objectContaining({
         name: 'Synthetic Ana',
         email: 'ana@example.test',
-        phone: '(306) 555-0111',
-        role: 'Buyer',
+        phone: null,
+        role: null,
       }),
     ]);
     expect(after?.facilities).toEqual([

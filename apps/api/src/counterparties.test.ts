@@ -380,7 +380,7 @@ describe('POST /api/v1/counterparties/import', () => {
       line: 2,
       values: { legalName: 'Synthetic Mills', country: 'CA', city: 'Alpha', region: 'SK' },
     },
-    { line: 3, values: { legalName: 'Synthetic Mills', country: 'CA', contactName: 'Ana' } },
+    { line: 3, values: { legalName: 'Synthetic Mills', country: 'CA' } },
     { line: 4, values: { legalName: 'Synthetic Existing Co', country: 'US' } },
     { line: 5, values: { legalName: '', country: '' } },
   ];
@@ -403,7 +403,7 @@ describe('POST /api/v1/counterparties/import', () => {
         counterparties: 2,
         newCounterparties: 1,
         existingCounterparties: 1,
-        contacts: 1,
+        contacts: 0,
         facilities: 1,
         existingWithAdditions: 0,
         addedContacts: 0,
@@ -418,7 +418,7 @@ describe('POST /api/v1/counterparties/import', () => {
           legalName: 'Synthetic Mills',
           country: 'CA',
           lines: [2, 3],
-          contacts: 1,
+          contacts: 0,
           facilities: 1,
           lanes: 0,
           status: 'new',
@@ -484,7 +484,7 @@ describe('POST /api/v1/counterparties/import', () => {
       counterparties: [
         {
           counterparty: { legalName: 'Synthetic Mills', primaryCountry: 'CA', types: ['buyer'] },
-          contacts: [{ name: 'Ana' }],
+          contacts: [],
           facilities: [{ city: 'Alpha', region: 'SK', country: 'CA' }],
         },
       ],
@@ -613,14 +613,6 @@ describe('POST /api/v1/counterparties/import', () => {
           values: { legalName: 'SYNTHETIC MILLS LTD', country: 'CA', city: 'Beta', region: 'MB' },
         },
         {
-          line: 4,
-          values: { legalName: 'Synthetic Mills Ltd.', country: 'CA', contactName: 'Ana' },
-        },
-        {
-          line: 5,
-          values: { legalName: 'Synthetic Mills Ltd.', country: 'CA', contactName: 'Ben' },
-        },
-        {
           line: 6,
           values: { legalName: 'Synthetic Closed Co', country: 'US', city: 'Gamma', region: 'ND' },
         },
@@ -637,11 +629,11 @@ describe('POST /api/v1/counterparties/import', () => {
       existingCounterparties: 2,
       existingWithAdditions: 1,
       addedFacilities: 1,
-      addedContacts: 1,
+      addedContacts: 0,
       addedCommodities: 1,
     });
     expect(answer.counterparties).toMatchObject([
-      { legalName: 'Synthetic Mills Ltd.', status: 'existing', facilities: 1, contacts: 1 },
+      { legalName: 'Synthetic Mills Ltd.', status: 'existing', facilities: 1, contacts: 0 },
       { legalName: 'Synthetic Closed Co', status: 'archived' },
     ]);
     // A spelling that differs from the first row's is said on the check step.
@@ -655,7 +647,7 @@ describe('POST /api/v1/counterparties/import', () => {
           {
             counterpartyId: existing('Synthetic Mills Limited', 'CA').id,
             facilities: [expect.objectContaining({ city: 'Beta', region: 'MB' }) as unknown],
-            contacts: [expect.objectContaining({ name: 'Ben' }) as unknown],
+            contacts: [],
             commodities: [{ commodity: 'oats', direction: 'buys' }],
             lanes: [],
             details: null,
@@ -809,9 +801,6 @@ describe('POST /api/v1/counterparties/import', () => {
             tier: 'A',
             notes: 'Synthetic file note.',
             commodities: 'Canola',
-            contactName: 'ANA',
-            contactRole: 'Buyer',
-            contactPhone: '306-555-0111',
             facilityType: 'Elevator',
             addressLine: '1 Synthetic Road',
             city: 'Alpha',
@@ -845,7 +834,6 @@ describe('POST /api/v1/counterparties/import', () => {
           'Company phone: (306) 555-0100 → (306) 555-0199',
           'Tier: B → A',
           "Notes: the file's notes added below",
-          'Contact Ana: phone: none → (306) 555-0111; role: none → Buyer',
           'Location Alpha, SK: type: none → Elevator; address: none → 1 Synthetic Road; postal code: none → S4P 3Y2',
         ],
       }),
@@ -865,12 +853,8 @@ describe('POST /api/v1/counterparties/import', () => {
         facilities: [],
         commodities: [{ commodity: 'canola', direction: 'buys' }],
         lanes: [],
-        contactUpdates: [
-          {
-            id: '00000000-0000-4000-8000-0000000c0001',
-            changes: { phone: '(306) 555-0111', role: 'Buyer' },
-          },
-        ],
+        // A file no longer changes contacts (owner's request, 2026-11-03).
+        contactUpdates: [],
         facilityUpdates: [
           {
             id: '00000000-0000-4000-8000-000000000f01',
@@ -887,7 +871,7 @@ describe('POST /api/v1/counterparties/import', () => {
 
   // Codex's review of ivanmueller/gss#95: two of the file's records matched one listed record
   // and the second overwrote the first.
-  it('updates a listed contact or location from one row of the file only', async () => {
+  it('updates a listed location from one row of the file only', async () => {
     const listed = [
       existing('Synthetic Mills', 'CA', {
         contacts: [
@@ -917,13 +901,11 @@ describe('POST /api/v1/counterparties/import', () => {
         ],
       }),
     ];
-    const row = (line: number, email: string, address: string) => ({
+    const row = (line: number, address: string) => ({
       line,
       values: {
         legalName: 'Synthetic Mills',
         country: 'CA',
-        contactName: 'Ana',
-        contactEmail: email,
         facilityName: 'Synthetic Depot',
         addressLine: address,
         city: 'Alpha',
@@ -933,30 +915,23 @@ describe('POST /api/v1/counterparties/import', () => {
     db.existingCounterparties.mockResolvedValue(listed);
     const res = await postImport({
       ...body,
-      rows: [
-        row(2, 'ana.one@example.test', '1 First St'),
-        row(3, 'ana.two@example.test', '2 Second St'),
-      ],
+      rows: [row(2, '1 First St'), row(3, '2 Second St')],
     });
     expect(res.status).toBe(200);
     const answer = await res.json<{ counterparties: { changes: string[] }[] }>();
     expect(answer.counterparties[0]?.changes).toEqual([
-      'Contact Ana: email: none → ana.one@example.test',
       'Location Synthetic Depot, Alpha, SK: address: none → 1 First St',
     ]);
 
     await postImport({
       ...body,
       commit: true,
-      rows: [
-        row(2, 'ana.one@example.test', '1 First St'),
-        row(3, 'ana.two@example.test', '2 Second St'),
-      ],
+      rows: [row(2, '1 First St'), row(3, '2 Second St')],
     });
     const plan = planned(listed);
     expect(plan?.additions[0]).toMatchObject({
-      contactUpdates: [{ changes: { email: 'ana.one@example.test' } }],
-      contacts: [expect.objectContaining({ email: 'ana.two@example.test' })],
+      contactUpdates: [],
+      contacts: [],
       facilityUpdates: [{ changes: { addressLine: '1 First St' } }],
       facilities: [expect.objectContaining({ addressLine: '2 Second St' })],
     });
@@ -1469,12 +1444,11 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
     legalName: ' Synthetic  Grower ',
     country: 'Canada',
     types: 'seller',
-    contactName: 'Synthetic Farmer',
     city: 'Synthetic Town',
     region: 'Saskatchewan',
   };
 
-  it('creates the counterparty with its first contact and location, as the verified user', async () => {
+  it('creates the counterparty with its first location, as the verified user', async () => {
     const res = await send('POST', '', { organizationId: ORG, values });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ id: '00000000-0000-4000-8000-00000000c0de' });
@@ -1487,7 +1461,7 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
           primaryCountry: 'CA',
           types: ['seller'],
         }) as unknown,
-        contacts: [expect.objectContaining({ name: 'Synthetic Farmer' }) as unknown],
+        contacts: [],
         facilities: [
           expect.objectContaining({
             city: 'Synthetic Town',
@@ -1500,6 +1474,16 @@ describe('POST /api/v1/counterparties (add by hand)', () => {
         lanes: [],
       },
     );
+  });
+
+  // Contacts are added on the counterparty's page (owner's request, 2026-11-03).
+  it('refuses a contact sent with a new counterparty, without opening the database', async () => {
+    const res = await send('POST', '', {
+      organizationId: ORG,
+      values: { ...values, contactName: 'Synthetic Farmer' },
+    });
+    expect(res.status).toBe(422);
+    expect(db.createCounterparty).not.toHaveBeenCalled();
   });
 
   it('saves a carrier’s equipment and first lanes, each pair of places once', async () => {

@@ -35,7 +35,7 @@ function form() {
 }
 
 describe('AddCounterpartyForm', () => {
-  it('adds a seller with a first contact and a location, finds its coordinates, then opens it', async () => {
+  it('adds a seller with a location, finds its coordinates, then opens it', async () => {
     const calls = mockApi({
       'POST /counterparties': () => Response.json({ id: CREATED }, { status: 201 }),
       'POST /facilities/geocode': () =>
@@ -88,7 +88,8 @@ describe('AddCounterpartyForm', () => {
     );
     await userEvent.type(within(company).getByLabelText('Organic certified until'), '2027-03-31');
     await choose(within(company).getByLabelText('Tier'), 'Tier A');
-    await userEvent.type(within(section('Contact')).getByLabelText('Name'), 'Synthetic Grower');
+    // Contacts are added on the counterparty's page (owner's request, 2026-11-03).
+    expect(screen.queryByRole('region', { name: 'Contact' })).toBeNull();
     const location = section('Location');
     // The location's country follows the company's.
     expect(within(location).getByLabelText('Country')).toHaveTextContent('Canada');
@@ -116,7 +117,6 @@ describe('AddCounterpartyForm', () => {
           organicCertifier: 'Synthetic Certifier',
           organicCertifiedUntil: '2027-03-31',
           tier: 'A',
-          contactName: 'Synthetic Grower',
           facilityCountry: 'CA',
           city: 'Synthetic Town',
           region: 'SK',
@@ -249,7 +249,6 @@ describe('AddCounterpartyForm', () => {
   it('shows each problem by its field before sending anything', async () => {
     const calls = mockApi({});
     form();
-    await userEvent.type(within(section('Contact')).getByLabelText('Email'), 'not-an-email');
     await userEvent.type(within(section('Company')).getByLabelText('Company phone'), 'reception');
     await userEvent.click(screen.getByRole('button', { name: 'Add counterparty' }));
 
@@ -264,9 +263,6 @@ describe('AddCounterpartyForm', () => {
       within(company).getByText('Choose at least one: buyer, seller, broker or carrier.'),
     ).toBeInTheDocument();
     expect(within(company).getByText('"reception" is not a phone number.')).toBeInTheDocument();
-    expect(within(section('Contact')).getByLabelText('Email')).toHaveAccessibleDescription(
-      '"not-an-email" is not an email address.',
-    );
     expect(calls).toHaveLength(0);
   });
 
