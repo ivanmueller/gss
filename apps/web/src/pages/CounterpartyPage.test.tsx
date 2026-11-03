@@ -33,6 +33,11 @@ const DETAIL: CounterpartyDetail = {
   sells: [],
   markets: [],
   tier: null,
+  grainTypes: [],
+  sellerKind: null,
+  annualTonnes: null,
+  organicCertifier: null,
+  organicCertifiedUntil: null,
   equipment: [],
   lanes: [],
   quotedLanes: [],
@@ -249,6 +254,45 @@ describe('CounterpartyPage', () => {
     expect(locations).toHaveTextContent('52.133214, -106.670046 · approximate location');
   });
 
+  // The owner's request of 2026-11-03: a seller's own details instead of a buyer's market.
+  it("shows a seller's kind, grain types, tonnes and organic certificate, not its markets", async () => {
+    mockApi({
+      [`GET /counterparties/${ID}`]: () =>
+        Response.json({
+          ...DETAIL,
+          types: ['seller'],
+          markets: ['pet'],
+          tier: 'A',
+          grainTypes: ['feed', 'organic'],
+          sellerKind: 'farm',
+          annualTonnes: 4500,
+          organicCertifier: 'Synthetic Certifier',
+          // Long past: the certificate shows as expired.
+          organicCertifiedUntil: '2020-03-31',
+        }),
+    });
+    render(<CounterpartyPage session={SESSION} id={ID} />);
+    await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
+    expect(screen.getByRole('list', { name: 'Grain types' })).toHaveTextContent('FeedOrganic');
+    expect(screen.getByTitle('Seller kind')).toHaveTextContent('Farm');
+    expect(screen.getByText('About 4,500 t a year')).toBeInTheDocument();
+    expect(
+      screen.getByText('Organic certified by Synthetic Certifier until 31 Mar 2020'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Expired')).toBeInTheDocument();
+    expect(screen.getByText('Tier A')).toBeInTheDocument();
+    // A seller's saved markets are kept but not shown.
+    expect(screen.queryByRole('list', { name: 'Markets' })).toBeNull();
+
+    // Edit details asks for them, not for a market.
+    await chooseAction('Edit details');
+    const form = screen.getByRole('form', { name: 'Edit details' });
+    expect(within(form).queryByRole('group', { name: /Market/ })).toBeNull();
+    expect(within(form).getByRole('checkbox', { name: 'Organic' })).toBeChecked();
+    expect(within(form).getByLabelText('Tonnes a year')).toHaveValue('4500');
+    expect(within(form).getByLabelText('Organic certified until')).toHaveValue('2020-03-31');
+  });
+
   it('explains a counterparty that is missing or belongs to another organization', async () => {
     mockApi({});
     render(<CounterpartyPage session={SESSION} id={ID} />);
@@ -445,6 +489,12 @@ describe('CounterpartyPage editing', () => {
         companyPhone: '',
         markets: 'pet,bird',
         tier: 'B',
+        // No longer a seller: its details are not asked and the saved ones are kept.
+        grainTypes: '',
+        sellerKind: '',
+        annualTonnes: '',
+        organicCertifier: '',
+        organicCertifiedUntil: '',
         notes: 'Synthetic record.',
       },
     });

@@ -54,6 +54,26 @@ function isCarrier(types: string | undefined): boolean {
   return (types ?? '').split(',').includes('carrier');
 }
 
+/**
+ * The fields the form did not ask for the types ticked, emptied so nothing hidden is saved:
+ * a market without a buyer or broker, a seller's details without a seller, an organic
+ * certificate without organic grain, a tier for a counterparty that is only a carrier.
+ */
+export function unaskedCleared(values: FormValues): FormValues {
+  const types = (values.types ?? '').split(',').filter(Boolean);
+  const cleared: FormValues = { ...values };
+  const clear = (...fields: (keyof FormValues)[]) => {
+    for (const field of fields) if (cleared[field]) cleared[field] = '';
+  };
+  if (!types.some((type) => type === 'buyer' || type === 'broker')) clear('markets');
+  if (!types.includes('seller')) clear('grainTypes', 'sellerKind', 'annualTonnes');
+  if (!(cleared.grainTypes ?? '').split(',').includes('organic')) {
+    clear('organicCertifier', 'organicCertifiedUntil');
+  }
+  if (types.length > 0 && types.every((type) => type === 'carrier')) clear('tier');
+  return cleared;
+}
+
 /** Whether a lane draft was left untouched (and is not sent). */
 function untouched(draft: LaneDraft): boolean {
   return draft.origin === '' && draft.destinations.length === 0;
@@ -136,7 +156,7 @@ export function AddCounterpartyForm({
     event.preventDefault();
     setError(null);
     // The same rules the API applies, so most problems show without a round trip.
-    const checked = parseNewCounterparty(values);
+    const checked = parseNewCounterparty(unaskedCleared(values));
     if (checked.status !== 'ok') {
       setIssues(
         checked.status === 'empty'
@@ -152,9 +172,8 @@ export function AddCounterpartyForm({
     }
     setIssues([]);
     setBusy(true);
-    // Equipment is sent beside the fields; market and tier are not a carrier's.
-    const { equipment, ...fieldValues } = values;
-    const sent = carrierOnly ? { ...fieldValues, markets: '', tier: '' } : fieldValues;
+    // Equipment is sent beside the fields; what the form did not ask for is not sent.
+    const { equipment, ...sent } = unaskedCleared(values);
     const access = asksAccess(values.types)
       ? splitAccess(sent)
       : splitAccess({ ...sent, transportAccess: '' });

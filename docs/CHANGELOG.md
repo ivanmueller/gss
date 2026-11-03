@@ -1,5 +1,21 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Codex's review of the seller's details, and CI run #273
+
+- `docs/DECISIONS.md`: a sellers' Market column kept as Market; tons never taken for tonnes, whatever the header's spelling (Codex's re-review of `eb99697`); a file starting as carriers or sellers from its columns.
+- `docs/PRODUCT.md`: the import's starting choice and tons.
+
+## 2026-11-03 — A seller's own details
+
+- `docs/DECISIONS.md`: the owner's request and answers: a seller's grain types instead of a buyer's market, its kind, tonnes a year and organic certificate; Served by from a spreadsheet; the Grain type filter; each file offered its own columns; the header row for a sellers' sheet.
+- `docs/DATA_MODEL.md`: migration `20261103040000_seller_details.sql` and the new `counterparties` columns.
+- `docs/API.md`: the seller's fields when adding by hand and importing; the Served by column.
+- `docs/PRODUCT.md`: the seller's form, page, filter and import.
+
+## 2026-11-03 — Handoff record of #124
+
+- `docs/HANDOFF.md`: the documents pull request (ivanmueller/gss#124: the handoff record of #123, `AGENTS.md` and README status) with its CI and Deploy staging runs; Dependabot ivanmueller/gss#114 listed with the other open updates.
+
 ## 2026-11-03 — Handoff record of #123, and the status brought up to date
 
 - `docs/HANDOFF.md`: the live call box (ivanmueller/gss#123) with its CI and Deploy staging runs; the status (transcripts by side, the less cluttered page, the call box); the next checks on staging and the next choices (texting and callbacks, notes drafted from transcripts, a Hang up button, the open Dependabot updates).

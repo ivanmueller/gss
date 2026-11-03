@@ -4,11 +4,14 @@ import {
   EQUIPMENT,
   EQUIPMENT_LABELS,
   FACILITY_TYPE_LABELS,
+  GRAIN_TYPE_LABELS,
+  GRAIN_TYPES,
   normalizeCountry,
   formatPhone,
   MARKET_LABELS,
   MARKETS,
   REGIONS,
+  SELLER_KIND_LABELS,
   SUPPORTED_COUNTRIES,
   TIERS,
   TRANSPORT_ACCESS_LABELS,
@@ -150,8 +153,8 @@ function TextField({
   props: FieldsProps;
   required?: boolean | undefined;
   hint?: ReactNode;
-  type?: 'text' | 'email' | 'tel';
-  inputMode?: 'url';
+  type?: 'text' | 'email' | 'tel' | 'date';
+  inputMode?: 'url' | 'numeric';
   autoComplete?: string;
   className?: string | undefined;
 }) {
@@ -216,9 +219,115 @@ function CountrySelect({
   );
 }
 
+/** Checkboxes for a list kept as "a,b" in one field, in the list's order. */
+function ChoiceList<T extends string>({
+  field,
+  legend,
+  choices,
+  labels,
+  props,
+}: {
+  field: 'markets' | 'grainTypes';
+  legend: string;
+  choices: readonly T[];
+  labels: Record<T, string>;
+  props: FieldsProps;
+}) {
+  const f = useFieldHelpers(props);
+  const chosen = new Set(f.value(field).split(',').filter(Boolean));
+  const error = f.error(field, legend);
+  return (
+    <fieldset
+      className="flex flex-col gap-1.5 sm:col-span-2"
+      aria-describedby={error ? `${f.id(field)}-error` : undefined}
+    >
+      <legend className="text-sm font-medium">
+        {legend} <span className="font-normal text-muted-foreground">(any that apply)</span>
+      </legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+        {choices.map((choice) => (
+          <label key={choice} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={chosen.has(choice)}
+              disabled={props.disabled}
+              onChange={(event) => {
+                const next = new Set(chosen);
+                if (event.target.checked) next.add(choice);
+                else next.delete(choice);
+                props.onChange({ [field]: choices.filter((item) => next.has(item)).join(',') });
+              }}
+            />
+            {labels[choice]}
+          </label>
+        ))}
+      </div>
+      {error && (
+        <p id={`${f.id(field)}-error`} className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 /**
- * A counterparty's own details: buyer/seller, its name, markets and tier, country,
- * verification, website, the company phone and notes.
+ * A seller's own details (owner's request and answers, 2026-11-03): its grain types instead
+ * of a buyer's market, what kind of seller it is, about how much it sells a year, and, when
+ * it sells organic grain, who certified it and until when.
+ */
+function SellerFields(props: FieldsProps) {
+  const f = useFieldHelpers(props);
+  const kindError = f.error('sellerKind', 'Seller kind');
+  const organic = f.value('grainTypes').split(',').includes('organic');
+  return (
+    <>
+      <ChoiceList
+        field="grainTypes"
+        legend="Grain type"
+        choices={GRAIN_TYPES}
+        labels={GRAIN_TYPE_LABELS}
+        props={props}
+      />
+      <Field id={f.id('sellerKind')} label="Seller kind" error={kindError}>
+        <Select
+          {...controlProps(f.id('sellerKind'), kindError)}
+          value={f.value('sellerKind')}
+          onValueChange={f.choose('sellerKind')}
+          disabled={props.disabled}
+          options={[
+            { value: '', label: 'Not given' },
+            ...Object.entries(SELLER_KIND_LABELS).map(([value, label]) => ({ value, label })),
+          ]}
+        />
+      </Field>
+      <TextField
+        field="annualTonnes"
+        label="Tonnes a year"
+        props={props}
+        inputMode="numeric"
+        hint="About how much they sell in a year, e.g. 5000."
+      />
+      {organic && (
+        <>
+          <TextField field="organicCertifier" label="Organic certifier" props={props} />
+          <TextField
+            field="organicCertifiedUntil"
+            label="Organic certified until"
+            type="date"
+            props={props}
+            hint="The certificate's last day."
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * A counterparty's own details: its types, its name, a buyer's markets, a seller's details,
+ * the tier, country, verification, website, the company phone and notes.
  */
 export function CompanyFields(props: FieldsProps) {
   const f = useFieldHelpers(props);
@@ -234,11 +343,13 @@ export function CompanyFields(props: FieldsProps) {
   const notesError = f.error('notes', 'Notes');
   const statusError = f.error('verificationStatus', 'Verification');
 
-  // Market and tier describe a buyer's or seller's business, not a carrier's (owner's answer,
-  // 2026-11-01): not asked for a counterparty that is only a carrier; saved values are kept.
+  // Market describes whom a buyer serves (pet, bird, …), so it is asked for a buyer or broker;
+  // a seller has its grain types and other details instead (owner's request, 2026-11-03). The
+  // tier is for buyers and sellers, not carriers (owner's answer, 2026-11-01). What is not
+  // asked keeps its saved value.
   const carrierOnly = chosen.size > 0 && [...chosen].every((type) => type === 'carrier');
-  const markets = new Set(f.value('markets').split(',').filter(Boolean));
-  const marketsError = f.error('markets', 'Market');
+  const buyerSide = chosen.has('buyer') || chosen.has('broker');
+  const seller = chosen.has('seller');
   const tierError = f.error('tier', 'Tier');
 
   // Type first, then the name, then markets and tier (owner's request, 2026-10-30). The
@@ -287,42 +398,18 @@ export function CompanyFields(props: FieldsProps) {
         required
         className="sm:col-span-2"
       />
+      {(buyerSide || chosen.size === 0) && (
+        <ChoiceList
+          field="markets"
+          legend="Market"
+          choices={MARKETS}
+          labels={MARKET_LABELS}
+          props={props}
+        />
+      )}
+      {seller && <SellerFields {...props} />}
       {!carrierOnly && (
         <>
-          <fieldset
-            className="flex flex-col gap-1.5 sm:col-span-2"
-            aria-describedby={marketsError ? `${f.id('markets')}-error` : undefined}
-          >
-            <legend className="text-sm font-medium">
-              Market <span className="font-normal text-muted-foreground">(any that apply)</span>
-            </legend>
-            <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
-              {MARKETS.map((market) => (
-                <label key={market} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    checked={markets.has(market)}
-                    disabled={props.disabled}
-                    onChange={(event) => {
-                      const next = new Set(markets);
-                      if (event.target.checked) next.add(market);
-                      else next.delete(market);
-                      props.onChange({
-                        markets: MARKETS.filter((item) => next.has(item)).join(','),
-                      });
-                    }}
-                  />
-                  {MARKET_LABELS[market]}
-                </label>
-              ))}
-            </div>
-            {marketsError && (
-              <p id={`${f.id('markets')}-error`} className="text-xs text-danger">
-                {marketsError}
-              </p>
-            )}
-          </fieldset>
           <Field id={f.id('tier')} label="Tier" error={tierError}>
             <Select
               {...controlProps(f.id('tier'), tierError)}

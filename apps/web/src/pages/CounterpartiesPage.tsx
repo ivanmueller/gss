@@ -1,6 +1,8 @@
 import {
   COMMODITIES,
   COUNTRY_NAMES,
+  GRAIN_TYPE_LABELS,
+  GRAIN_TYPES,
   LANE_REGIONS,
   laneCountry,
   laneRegionName,
@@ -12,6 +14,7 @@ import {
 import {
   Layers,
   LayoutGrid,
+  Leaf,
   List,
   Map as MapIcon,
   MapPinned,
@@ -234,6 +237,20 @@ export function servesMarket(
   );
 }
 
+/**
+ * Whether it sells any of the chosen grain types (owner's request, 2026-11-03); all chosen:
+ * every counterparty.
+ */
+export function sellsGrainType(
+  counterparty: Pick<CounterpartySummary, 'grainTypes'>,
+  grainTypes: readonly string[],
+): boolean {
+  return (
+    grainTypes.length === GRAIN_TYPES.length ||
+    counterparty.grainTypes.some((type) => grainTypes.includes(type))
+  );
+}
+
 /** Whether its tier is one of those chosen; all chosen: every counterparty, untiered too. */
 export function inTier(counterparty: Pick<CounterpartySummary, 'tier'>, tiers: readonly string[]) {
   return (
@@ -281,6 +298,10 @@ function paramFor(chosen: readonly string[], all: readonly string[]): string | n
 const COMMODITY_CODES = COMMODITIES.map((item) => item.code);
 const COMMODITY_OPTIONS = COMMODITIES.map(({ code, name }) => ({ value: code, label: name }));
 const MARKET_OPTIONS = MARKETS.map((market) => ({ value: market, label: MARKET_LABELS[market] }));
+const GRAIN_TYPE_OPTIONS = GRAIN_TYPES.map((type) => ({
+  value: type,
+  label: GRAIN_TYPE_LABELS[type],
+}));
 const TIER_OPTIONS = TIERS.map((tier) => ({ value: tier, label: `Tier ${tier}` }));
 // Canada's provinces first, then the states, each by name.
 const PLACE_OPTIONS = LANE_REGIONS.map((code) => ({
@@ -313,7 +334,13 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   // Several of each may be chosen (owner's request, 2026-10-30), kept in the address too.
   const commodities = chosenFrom(params.get('commodity'), COMMODITY_CODES);
   const markets = chosenFrom(params.get('market'), MARKETS);
+  const grainTypes = chosenFrom(params.get('grain'), GRAIN_TYPES);
   const tiers = chosenFrom(params.get('tier'), TIERS);
+  // A buyer's Market is not a seller's, which has grain types instead (owner's request,
+  // 2026-11-03): among sellers only Grain type is offered, among buyers only Market, and a
+  // filter not offered does not apply.
+  const offersMarket = side !== 'seller';
+  const offersGrainType = side === 'all' || side === 'seller';
   // Among carriers, where they load and deliver (?from=CA-AB&to=US-MT,US-ND).
   const from = chosenFrom(params.get('from'), PLACE_CODES);
   const to = chosenFrom(params.get('to'), PLACE_CODES);
@@ -327,7 +354,8 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
       (showArchived || counterparty.archivedAt === null) &&
       (side === 'all' || counterparty.types.includes(side)) &&
       tradesCommodity(counterparty, commodities, side) &&
-      servesMarket(counterparty, markets) &&
+      (!offersMarket || servesMarket(counterparty, markets)) &&
+      (!offersGrainType || sellsGrainType(counterparty, grainTypes)) &&
       inTier(counterparty, tiers) &&
       (side !== 'carrier' || onLanes(counterparty, from, to)) &&
       matches(counterparty, query),
@@ -379,16 +407,30 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                   setSearchParams({ commodity: paramFor(next, COMMODITY_CODES) });
                 }}
               />
-              <MultiPicker
-                label="Market"
-                icon={<PawPrint aria-hidden="true" className="text-muted-foreground" />}
-                options={MARKET_OPTIONS}
-                chosen={markets}
-                allLabel="All markets"
-                onChange={(next) => {
-                  setSearchParams({ market: paramFor(next, MARKETS) });
-                }}
-              />
+              {offersMarket && (
+                <MultiPicker
+                  label="Market"
+                  icon={<PawPrint aria-hidden="true" className="text-muted-foreground" />}
+                  options={MARKET_OPTIONS}
+                  chosen={markets}
+                  allLabel="All markets"
+                  onChange={(next) => {
+                    setSearchParams({ market: paramFor(next, MARKETS) });
+                  }}
+                />
+              )}
+              {offersGrainType && (
+                <MultiPicker
+                  label="Grain type"
+                  icon={<Leaf aria-hidden="true" className="text-muted-foreground" />}
+                  options={GRAIN_TYPE_OPTIONS}
+                  chosen={grainTypes}
+                  allLabel="All grain types"
+                  onChange={(next) => {
+                    setSearchParams({ grain: paramFor(next, GRAIN_TYPES) });
+                  }}
+                />
+              )}
               <MultiPicker
                 label="Tier"
                 icon={<Layers aria-hidden="true" className="text-muted-foreground" />}

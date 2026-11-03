@@ -69,6 +69,75 @@ type Step =
 /** The fields a column can fill; the trading name is no longer collected (2026-10-30). */
 const SHOWN_FIELDS = IMPORT_FIELDS.filter((field) => field.id !== 'tradingName');
 
+const SELLER_FIELDS: readonly ImportFieldId[] = [
+  'grainTypes',
+  'sellerKind',
+  'annualTonnes',
+  'organicCertifier',
+  'organicCertifiedUntil',
+];
+const CARRIER_FIELDS: readonly ImportFieldId[] = ['equipment', 'loadsIn', 'deliversTo', 'laneMode'];
+/** What a buyer, seller or carrier file does not have, when the file has no Type column. */
+const NOT_FOR: Record<FileSide, readonly ImportFieldId[]> = {
+  buyer: [...SELLER_FIELDS, ...CARRIER_FIELDS],
+  // A sellers' Market column is kept as Market and read as their grain types where it names
+  // them, Pet, Bird … left out with a warning (packages/domain/src/directory.ts).
+  seller: [...CARRIER_FIELDS],
+  carrier: ['markets', 'tier', 'commodities', 'servedBy', ...SELLER_FIELDS],
+};
+
+/**
+ * The fields offered for a file (owner's request, 2026-11-03): a file of buyers, sellers or
+ * carriers is offered only its own; a file with a Type column, whose rows may be any, all.
+ */
+export function fieldsForFile(side: FileSide, mapping: Mapping) {
+  if (mapping.types !== undefined) return SHOWN_FIELDS;
+  return SHOWN_FIELDS.filter((field) => !NOT_FOR[side].includes(field.id));
+}
+
+/** The mapping of the fields offered only: a column chosen for a field not offered is unused. */
+function offeredMapping(side: FileSide, mapping: Mapping): Mapping {
+  const offered = new Set<ImportFieldId>(fieldsForFile(side, mapping).map((field) => field.id));
+  return Object.fromEntries(
+    Object.entries(mapping).filter(([field]) => offered.has(field as ImportFieldId)),
+  );
+}
+
+/**
+ * Who a file's companies probably are, from its columns, when it has no Type column: carriers
+ * with a carrier's columns, sellers with a seller's, else buyers. The choice can be changed.
+ */
+export function likelySide(mapping: Mapping): FileSide {
+  if (mapping.types === undefined) {
+    if (CARRIER_FIELDS.some((field) => mapping[field] !== undefined)) return 'carrier';
+    if (SELLER_FIELDS.some((field) => mapping[field] !== undefined)) return 'seller';
+  }
+  return 'buyer';
+}
+
+/**
+ * A column chosen for Tonnes a year whose name says tons (short tons): its numbers are not
+ * tonnes, and no unit is converted (Codex's review of cee5d4e), so the file is held back.
+ */
+export function tonsColumn(mapping: Mapping): string | null {
+  const header = mapping.annualTonnes;
+  if (header === undefined) return null;
+  // Words however the header joins them: "Annual_tons", "Tons/year", "AnnualTons" (Codex's
+  // re-review of eb99697), so "tons" is found as a word and "tonnes" is not.
+  const words = header
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[^a-z]+/g, ' ');
+  return /\btons?\b/.test(words) ? header : null;
+}
+
+/** A field's name in the column list: a sellers' Market column is read as their grain type. */
+function fieldLabel(field: (typeof SHOWN_FIELDS)[number], side: FileSide, mapping: Mapping) {
+  return field.id === 'markets' && side === 'seller' && mapping.types === undefined
+    ? 'Market (read as grain type)'
+    : field.label;
+}
+
 /** Columns matched by their names, without the trading name. */
 function suggested(headers: string[]): Mapping {
   const mapping = suggestMapping(headers);
@@ -219,10 +288,14 @@ function UnusedColumns({ sheet, mapping }: { sheet: Sheet; mapping: Mapping }) {
 
 function ColumnMapping({
   sheet,
+  side,
+  fields,
   mapping,
   onChange,
 }: {
   sheet: Sheet;
+  side: FileSide;
+  fields: typeof SHOWN_FIELDS;
   mapping: Mapping;
   onChange: (mapping: Mapping) => void;
 }) {
@@ -240,7 +313,7 @@ function ColumnMapping({
       <fieldset>
         <legend className="sr-only">Match your columns to fields</legend>
         <div className="grid grid-cols-1 divide-y text-sm">
-          {SHOWN_FIELDS.map((field) => {
+          {fields.map((field) => {
             const id = `${baseId}-${field.id}`;
             const header = mapping[field.id];
             // A field filled from the file is green, so what was found shows at a glance
@@ -261,7 +334,7 @@ function ColumnMapping({
                     <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-success" />
                   )}
                   <span>
-                    {field.label}
+                    {fieldLabel(field, side, mapping)}
                     {field.required && <span className="text-danger"> (required)</span>}
                   </span>
                 </label>
@@ -326,7 +399,7 @@ export function ImportSpreadsheet({
     if (step.kind !== 'map') return null;
     const issues: ImportIssue[] = [];
     let valid = 0;
-    for (const row of mappedRows(step.sheet, step.mapping)) {
+    for (const row of mappedRows(step.sheet, offeredMapping(step.side, step.mapping))) {
       const result = parseImportRow(row.line, row.values, { defaultTypes: [step.side] });
       if (result.status === 'invalid') issues.push(...result.issues);
       if (result.status === 'ok') valid += 1;
@@ -344,7 +417,7 @@ export function ImportSpreadsheet({
         kind: 'map',
         sheet,
         mapping: suggested(sheet.headers),
-        side: 'buyer',
+        side: likelySide(suggested(sheet.headers)),
         error: null,
         busy: false,
       });
@@ -403,14 +476,20 @@ export function ImportSpreadsheet({
     }
   }
 
+  /** What is checked and sent: the columns of the fields offered only. */
   function planOf(current: Plan): Plan {
-    return { sheet: current.sheet, mapping: current.mapping, side: current.side };
+    return {
+      sheet: current.sheet,
+      mapping: offeredMapping(current.side, current.mapping),
+      side: current.side,
+    };
   }
 
   const missingRequired =
     step.kind === 'map'
       ? IMPORT_FIELDS.filter((field) => field.required && !step.mapping[field.id])
       : [];
+  const tons = step.kind === 'map' ? tonsColumn(offeredMapping(step.side, step.mapping)) : null;
 
   return (
     <section aria-label="Import spreadsheet" className="flex flex-col gap-4">
@@ -483,21 +562,38 @@ export function ImportSpreadsheet({
               ]}
               value={step.side}
               onChange={(side) => {
-                setStep({ ...step, side, error: null });
+                setStep({
+                  ...step,
+                  side,
+                  error: null,
+                });
               }}
             />
           </div>
           <ColumnMapping
             sheet={step.sheet}
-            mapping={step.mapping}
+            side={step.side}
+            fields={fieldsForFile(step.side, step.mapping)}
+            mapping={offeredMapping(step.side, step.mapping)}
             onChange={(mapping) => {
-              setStep({ ...step, mapping, error: null });
+              // Columns chosen for fields not offered now are kept for when they are again.
+              const offered = offeredMapping(step.side, step.mapping);
+              const kept = Object.fromEntries(
+                Object.entries(step.mapping).filter(([field]) => !(field in offered)),
+              ) as Mapping;
+              setStep({ ...step, mapping: { ...kept, ...mapping }, error: null });
             }}
           />
-          <UnusedColumns sheet={step.sheet} mapping={step.mapping} />
+          <UnusedColumns sheet={step.sheet} mapping={offeredMapping(step.side, step.mapping)} />
           {missingRequired.length > 0 ? (
             <p role="status" className="text-sm text-danger">
               Choose a column for {missingRequired.map((field) => field.label).join(' and ')}.
+            </p>
+          ) : tons !== null ? (
+            <p role="status" className="text-sm text-danger">
+              The column &ldquo;{tons}&rdquo; is in tons, not tonnes. The platform does not convert
+              units: give the amounts in tonnes, or choose &ldquo;— not in my file —&rdquo; for
+              Tonnes a year.
             </p>
           ) : (
             <p role="status" className="text-sm">
@@ -507,7 +603,7 @@ export function ImportSpreadsheet({
               .
             </p>
           )}
-          {missingRequired.length === 0 && (
+          {missingRequired.length === 0 && tons === null && (
             <IssueList title="Problems to fix" issues={local.issues} />
           )}
           {step.error && (
@@ -517,7 +613,7 @@ export function ImportSpreadsheet({
           )}
           <div className="flex flex-wrap gap-2">
             <Button
-              disabled={missingRequired.length > 0 || step.busy}
+              disabled={missingRequired.length > 0 || tons !== null || step.busy}
               onClick={() => void review(planOf(step))}
             >
               {step.busy ? 'Checking…' : 'Review import'}

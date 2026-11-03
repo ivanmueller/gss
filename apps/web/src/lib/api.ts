@@ -31,6 +31,15 @@ export interface CounterpartySummary {
   /** The markets it serves (MARKETS in @grain/domain) and its tier (A, B, C or null). */
   markets: string[];
   tier: string | null;
+  /**
+   * A seller's grain types (GRAIN_TYPES in @grain/domain), kind (SELLER_KINDS), tonnes a
+   * year, and organic certifier and last day (YYYY-MM-DD) (owner's request, 2026-11-03).
+   */
+  grainTypes: string[];
+  sellerKind: string | null;
+  annualTonnes: number | null;
+  organicCertifier: string | null;
+  organicCertifiedUntil: string | null;
   /** A carrier's equipment (EQUIPMENT in @grain/domain). */
   equipment: string[];
   /** A carrier's lanes as entered, verified or not (owner's request, 2026-11-01). */

@@ -180,7 +180,12 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await company.getByRole('checkbox', { name: 'Seller' }).check();
   await company.getByLabel('Legal name (required)').fill('Synthetic Hand Grower');
   await expect(company.getByLabel('Trading name')).toHaveCount(0);
-  await company.getByRole('checkbox', { name: 'Equine' }).check();
+  // A seller has grain types and its own details, not a buyer's market (owner's request,
+  // 2026-11-03).
+  await expect(company.getByRole('group', { name: /Market/ })).toHaveCount(0);
+  await company.getByRole('checkbox', { name: 'Feed' }).check();
+  await choose(company.getByLabel('Seller kind'), 'Farm');
+  await company.getByLabel('Tonnes a year').fill('4,500');
   await choose(company.getByLabel('Tier'), 'Tier B');
   await choose(company.getByLabel('Country (required)'), 'Canada');
   await company.getByLabel('Company phone').fill('306 555 0100 ext. 7');
@@ -204,7 +209,9 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
     'Served by rail and truck',
   );
   await expect(page.getByText('Tier B')).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Markets' })).toHaveText('Equine');
+  await expect(page.getByRole('list', { name: 'Grain types' })).toHaveText('Feed');
+  await expect(page.getByTitle('Seller kind')).toHaveText('Farm');
+  await expect(page.getByText('About 4,500 t a year')).toBeVisible();
   await expect(page.getByText('Entered by hand')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Contacts (1)' })).toContainText(
     'Synthetic Farmer',
@@ -214,11 +221,13 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await page.getByRole('button', { name: 'More actions' }).click();
   await page.getByRole('menuitem', { name: 'Edit details' }).click();
   const details = page.getByRole('form', { name: 'Edit details' });
-  await details.getByRole('checkbox', { name: 'Wildlife' }).check();
+  await details.getByRole('checkbox', { name: 'Organic' }).check();
+  await details.getByLabel('Organic certifier').fill('Synthetic Certifier');
   await details.getByLabel('Website').fill('Example.com/');
   await page.getByRole('button', { name: 'Save details' }).click();
   await expect(page.getByText('Details saved.')).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Markets' })).toHaveText('EquineWildlife');
+  await expect(page.getByRole('list', { name: 'Grain types' })).toHaveText('FeedOrganic');
+  await expect(page.getByText('Organic certified by Synthetic Certifier')).toBeVisible();
   // Saved as https://example.com and opened in a new tab; there is no preview.
   const website = page.getByRole('link', { name: 'example.com (opens in a new tab)' });
   await expect(website).toHaveAttribute('href', 'https://example.com');
@@ -273,15 +282,18 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await pick(page, /^Commodities:/, 'Oats', 'Rye');
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
   await pick(page, /^Commodities:/, 'All commodities');
-  // Its markets and tier narrow the list too.
+  // Its grain types and tier narrow the list too; among sellers there is no Market.
   await pick(page, /^Tier:/, 'All tiers', 'Tier A');
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
   await pick(page, /^Tier:/, 'Tier B');
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
   await pick(page, /^Tier:/, 'All tiers');
-  await pick(page, /^Market:/, 'All markets', 'Wildlife');
+  await expect(page.getByRole('button', { name: /^Market:/ })).toHaveCount(0);
+  await pick(page, /^Grain type:/, 'All grain types', 'Non-GMO / IP');
+  await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toHaveCount(0);
+  await pick(page, /^Grain type:/, 'Organic');
   await expect(table.getByRole('link', { name: 'Synthetic Hand Grower' })).toBeVisible();
-  await pick(page, /^Market:/, 'All markets');
+  await pick(page, /^Grain type:/, 'All grain types');
 
   // Archive: off the list until shown, then restored.
   await table.getByRole('link', { name: 'Synthetic Hand Grower' }).click();

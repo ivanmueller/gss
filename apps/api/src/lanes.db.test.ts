@@ -216,6 +216,11 @@ describe("a carrier's lanes as app_api", () => {
       phone: null,
       markets: [],
       tier: null,
+      grainTypes: [],
+      sellerKind: null,
+      annualTonnes: null,
+      organicCertifier: null,
+      organicCertifiedUntil: null,
       notes: null,
     };
     expect(
@@ -302,6 +307,11 @@ describe('a carrier added by hand (owner’s request, 2026-11-01)', () => {
         phone: null,
         markets: [],
         tier: null,
+        grainTypes: [],
+        sellerKind: null,
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
         notes: null,
       },
       contacts: [],
@@ -350,6 +360,11 @@ describe('lanes from a spreadsheet, verified by a rep (owner’s request, 2026-1
       phone: null,
       markets: [],
       tier: null,
+      grainTypes: [],
+      sellerKind: null,
+      annualTonnes: null,
+      organicCertifier: null,
+      organicCertifiedUntil: null,
       notes: null,
     };
     const batchId = await db.importCounterparties(as(users.olivia), orgs.a, () => ({

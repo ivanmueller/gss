@@ -6,11 +6,15 @@ import {
   parseContactFields,
   parseCounterpartyFields,
   parseFacilityFields,
+  GRAIN_TYPE_LABELS,
   MARKET_LABELS,
+  SELLER_KIND_LABELS,
   TRANSPORT_ACCESS_LABELS,
   type Equipment,
   type FieldIssue,
+  type GrainType,
   type Market,
+  type SellerKind,
   type TransportAccess,
 } from '@grain/domain';
 import {
@@ -21,7 +25,9 @@ import {
   Container,
   Ellipsis,
   ImageUp,
+  Factory,
   Layers,
+  Leaf,
   Mail,
   MapPin,
   MessageSquarePlus,
@@ -30,10 +36,13 @@ import {
   Plus,
   Star,
   StarOff,
+  Tractor,
   TrainFront,
   Trash2,
   Truck,
+  Warehouse,
   Waypoints,
+  Wheat,
 } from 'lucide-react';
 import {
   useMemo,
@@ -105,8 +114,11 @@ import { canEnterFreight } from '../lib/freight';
 import {
   canDeleteCounterparties,
   canEditDirectory,
+  certificateExpired,
   countryName,
   facilityTypeLabel,
+  formatCalendarDate,
+  hasMarkets,
   sourceLabel,
   typeLabel,
 } from '../lib/directory';
@@ -277,6 +289,11 @@ function companyValues(detail: CounterpartyDetail): FormValues {
     companyPhone: detail.phone ?? '',
     markets: detail.markets.join(','),
     tier: detail.tier ?? '',
+    grainTypes: detail.grainTypes.join(','),
+    sellerKind: detail.sellerKind ?? '',
+    annualTonnes: detail.annualTonnes === null ? '' : String(detail.annualTonnes),
+    organicCertifier: detail.organicCertifier ?? '',
+    organicCertifiedUntil: detail.organicCertifiedUntil ?? '',
     notes: detail.notes ?? '',
     equipment: detail.equipment.join(','),
   };
@@ -721,6 +738,7 @@ function CounterpartyView({
             <span className="text-muted-foreground">{places.join(' · ')}</span>
           </div>
           <MarketsAndTier detail={detail} />
+          {detail.types.includes('seller') && <SellerDetails detail={detail} />}
           {carrier && <EquipmentAndBorder detail={detail} />}
           <WebsiteAndPhone detail={detail} />
         </div>
@@ -1570,9 +1588,13 @@ function AccessBadges({ access }: { access: TransportAccess }) {
   );
 }
 
-/** The markets it serves and its tier, under its name; nothing when neither is set. */
+/**
+ * The markets it serves (a buyer's or broker's; a seller's are kept but not shown) and its
+ * tier, under its name; nothing when neither is shown.
+ */
 function MarketsAndTier({ detail }: { detail: CounterpartyDetail }) {
-  if (detail.markets.length === 0 && detail.tier === null) return null;
+  const markets = hasMarkets(detail.types) ? detail.markets : [];
+  if (markets.length === 0 && detail.tier === null) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-sm">
       {detail.tier && (
@@ -1581,9 +1603,9 @@ function MarketsAndTier({ detail }: { detail: CounterpartyDetail }) {
           Tier {detail.tier}
         </Badge>
       )}
-      {detail.markets.length > 0 && (
+      {markets.length > 0 && (
         <ul aria-label="Markets" className="flex flex-wrap gap-1.5">
-          {detail.markets.map((market) => (
+          {markets.map((market) => (
             <li key={market}>
               <Badge variant="neutral">
                 <PawPrint aria-hidden="true" />
@@ -1592,6 +1614,80 @@ function MarketsAndTier({ detail }: { detail: CounterpartyDetail }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+const SELLER_KIND_ICONS: Record<SellerKind, typeof Tractor> = {
+  farm: Tractor,
+  elevator: Warehouse,
+  processor: Factory,
+  other: Wheat,
+};
+
+/**
+ * A seller's details under its name (owner's request, 2026-11-03): what kind of seller, its
+ * grain types, about how much it sells a year, and its organic certificate (shown with organic
+ * grain only, marked Expired once its last day has passed in Alberta). Nothing when none is set.
+ */
+function SellerDetails({ detail }: { detail: CounterpartyDetail }) {
+  const kind = detail.sellerKind as SellerKind | null;
+  const KindIcon = kind ? SELLER_KIND_ICONS[kind] : null;
+  const organic = detail.grainTypes.includes('organic');
+  const until = organic ? detail.organicCertifiedUntil : null;
+  const certifier = organic ? detail.organicCertifier : null;
+  if (
+    !kind &&
+    detail.grainTypes.length === 0 &&
+    detail.annualTonnes === null &&
+    !until &&
+    !certifier
+  ) {
+    return null;
+  }
+  const expired = until !== null && certificateExpired(until);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
+      {kind && KindIcon && (
+        <Badge variant="outline" title="Seller kind">
+          <KindIcon aria-hidden="true" />
+          {SELLER_KIND_LABELS[kind]}
+        </Badge>
+      )}
+      {detail.grainTypes.length > 0 && (
+        <ul aria-label="Grain types" className="flex flex-wrap gap-1.5">
+          {detail.grainTypes.map((type) => (
+            <li key={type}>
+              <Badge variant="neutral">
+                <Wheat aria-hidden="true" />
+                {GRAIN_TYPE_LABELS[type as GrainType]}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+      {detail.annualTonnes !== null && (
+        <span className="text-muted-foreground">
+          About {detail.annualTonnes.toLocaleString('en-CA')} t a year
+        </span>
+      )}
+      {(certifier ?? until) !== null && (
+        <span className="flex w-full items-start gap-1.5 text-muted-foreground">
+          <Leaf aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-success" />
+          <span>
+            <span>
+              Organic certified
+              {certifier && <> by {certifier}</>}
+              {until && <> until {formatCalendarDate(until)}</>}
+            </span>
+            {expired && (
+              <Badge variant="danger" className="ml-1.5">
+                Expired
+              </Badge>
+            )}
+          </span>
+        </span>
       )}
     </div>
   );

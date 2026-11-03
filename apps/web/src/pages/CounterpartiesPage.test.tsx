@@ -9,6 +9,7 @@ import {
   CounterpartiesPage,
   inTier,
   onLanes,
+  sellsGrainType,
   servesMarket,
   tradesCommodity,
 } from './CounterpartiesPage';
@@ -33,6 +34,11 @@ function summary(overrides: Partial<CounterpartySummary>): CounterpartySummary {
     sells: [],
     markets: [],
     tier: null,
+    grainTypes: [],
+    sellerKind: null,
+    annualTonnes: null,
+    organicCertifier: null,
+    organicCertifiedUntil: null,
     equipment: [],
     lanes: [],
     quotedLanes: [],
@@ -380,6 +386,55 @@ describe('CounterpartiesPage', () => {
     await pick(/^Tier:/, 'All tiers');
     expect(window.location.search).toBe('?view=table');
     expect(screen.getByText('3 of 3 shown')).toBeInTheDocument();
+  });
+
+  // The owner's request of 2026-11-03: a seller's grain types instead of a buyer's market.
+  it('narrows sellers by grain type, offering Market among buyers only', async () => {
+    const organic = summary({
+      legalName: 'Synthetic Organic Farms',
+      types: ['seller'],
+      grainTypes: ['organic'],
+      markets: ['pet'],
+    });
+    const feed = summary({
+      id: '00000000-0000-4000-8000-00000000c007',
+      legalName: 'Synthetic Feed Farms',
+      types: ['seller'],
+      grainTypes: ['feed'],
+    });
+    const buyer = summary({
+      id: '00000000-0000-4000-8000-00000000c008',
+      legalName: 'Synthetic Pet Feeds',
+      markets: ['bird'],
+    });
+    mockApi({
+      [LIST]: () => Response.json({ counterparties: [organic, feed, buyer], truncated: false }),
+    });
+    // A market left chosen does not apply among sellers, where it is not offered.
+    window.history.replaceState(
+      null,
+      '',
+      '/counterparties?view=table&type=seller&market=bird&grain=organic',
+    );
+    render(<CounterpartiesPage session={SESSION} />);
+    expect(await screen.findByText('1 of 3 shown')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Synthetic Organic Farms' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Market:/ })).toBeNull();
+    await pick('Grain type: Organic', 'Feed');
+    expect(screen.getByText('2 of 3 shown')).toBeInTheDocument();
+    // Among buyers, Market and not Grain type.
+    await userEvent.click(screen.getByRole('button', { name: 'Buyers' }));
+    expect(screen.queryByRole('button', { name: /^Grain type:/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Market: Bird' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 3 shown')).toBeInTheDocument();
+  });
+
+  it('decides grain types: all of them shows everyone, those unset too', () => {
+    expect(
+      sellsGrainType({ grainTypes: [] }, ['feed', 'human_consumption', 'organic', 'non_gmo_ip']),
+    ).toBe(true);
+    expect(sellsGrainType({ grainTypes: [] }, ['feed'])).toBe(false);
+    expect(sellsGrainType({ grainTypes: ['feed', 'organic'] }, ['organic'])).toBe(true);
   });
 
   it('decides who trades the chosen commodities by the buyers or sellers chosen', () => {

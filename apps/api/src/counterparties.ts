@@ -13,6 +13,10 @@ import {
   facilityKey,
   FACILITY_TYPE_LABELS,
   MARKET_LABELS,
+  GRAIN_TYPE_LABELS,
+  SELLER_KIND_LABELS,
+  TRANSPORT_ACCESS_LABELS,
+  type GrainType,
   createContactSchema,
   createFacilitySchema,
   groupImportRows,
@@ -260,6 +264,47 @@ function changesFor(
     details.tier = file.tier;
     changes.push(changed('Tier', company.tier, file.tier));
   }
+  // A seller's details (owner's request, 2026-11-03): filled cells replace, like the others.
+  if (file.grainTypes.length > 0 && file.grainTypes.join(',') !== company.grainTypes.join(',')) {
+    details.grainTypes = file.grainTypes;
+    const names = (types: readonly GrainType[]) =>
+      types.map((type) => GRAIN_TYPE_LABELS[type]).join(', ') || null;
+    changes.push(changed('Grain type', names(company.grainTypes), names(file.grainTypes) ?? ''));
+  }
+  if (file.sellerKind !== null && file.sellerKind !== company.sellerKind) {
+    details.sellerKind = file.sellerKind;
+    changes.push(
+      changed(
+        'Seller kind',
+        company.sellerKind && SELLER_KIND_LABELS[company.sellerKind],
+        SELLER_KIND_LABELS[file.sellerKind],
+      ),
+    );
+  }
+  if (file.annualTonnes !== null && file.annualTonnes !== company.annualTonnes) {
+    details.annualTonnes = file.annualTonnes;
+    const tonnes = (value: number) => `${value.toLocaleString('en-CA')} t`;
+    changes.push(
+      changed(
+        'Tonnes a year',
+        company.annualTonnes === null ? null : tonnes(company.annualTonnes),
+        tonnes(file.annualTonnes),
+      ),
+    );
+  }
+  if (file.organicCertifier !== null && file.organicCertifier !== company.organicCertifier) {
+    details.organicCertifier = file.organicCertifier;
+    changes.push(changed('Organic certifier', company.organicCertifier, file.organicCertifier));
+  }
+  if (
+    file.organicCertifiedUntil !== null &&
+    file.organicCertifiedUntil !== company.organicCertifiedUntil
+  ) {
+    details.organicCertifiedUntil = file.organicCertifiedUntil;
+    changes.push(
+      changed('Organic certified until', company.organicCertifiedUntil, file.organicCertifiedUntil),
+    );
+  }
   // A carrier's equipment: the file's added, none removed (owner's request, 2026-11-01).
   const equipment = EQUIPMENT.filter(
     (item) => company.equipment.includes(item) || group.equipment.includes(item),
@@ -350,6 +395,22 @@ function changesFor(
     if (listed.postalCode === null && facility.postalCode !== null) {
       update.postalCode = facility.postalCode;
       said.push(changed('postal code', null, facility.postalCode));
+    }
+    // A filled Served by cell replaces the location's rail or truck access (owner's request,
+    // 2026-11-03); an empty one keeps it.
+    if (
+      facility.transportAccess !== undefined &&
+      facility.transportAccess !== null &&
+      facility.transportAccess !== listed.transportAccess
+    ) {
+      update.transportAccess = facility.transportAccess;
+      said.push(
+        changed(
+          'served by',
+          listed.transportAccess && TRANSPORT_ACCESS_LABELS[listed.transportAccess],
+          TRANSPORT_ACCESS_LABELS[facility.transportAccess],
+        ),
+      );
     }
     const at = (value: string | null) => (value === null ? null : Number(value).toFixed(6));
     if (
@@ -669,11 +730,22 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
 
       const contentSha256 = await sha256Hex(
         JSON.stringify(
-          // Without commodities, a company phone, markets, a tier, equipment or lanes, the same
-          // as before they could be imported; with them, they count (Codex's review of 08a3957).
+          // Without commodities, a company phone, markets, a tier, a seller's details, equipment
+          // or lanes, the same as before they could be imported; with them, they count (Codex's
+          // review of 08a3957). A location's Served by is in it only when given.
           plan.groups.map(
             ({
-              counterparty: { phone, markets, tier, ...counterparty },
+              counterparty: {
+                phone,
+                markets,
+                tier,
+                grainTypes,
+                sellerKind,
+                annualTonnes,
+                organicCertifier,
+                organicCertifiedUntil,
+                ...counterparty
+              },
               contacts,
               facilities,
               commodities,
@@ -685,6 +757,11 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
                 ...(phone !== null && { phone }),
                 ...(markets.length > 0 && { markets }),
                 ...(tier !== null && { tier }),
+                ...(grainTypes.length > 0 && { grainTypes }),
+                ...(sellerKind !== null && { sellerKind }),
+                ...(annualTonnes !== null && { annualTonnes }),
+                ...(organicCertifier !== null && { organicCertifier }),
+                ...(organicCertifiedUntil !== null && { organicCertifiedUntil }),
               },
               contacts,
               facilities,

@@ -59,7 +59,38 @@ export const MARKET_LABELS: Record<Market, string> = {
 export const TIERS = ['A', 'B', 'C'] as const;
 export type Tier = (typeof TIERS)[number];
 
-/** How a location is served (owner's request, 2026-10-30); never read from a spreadsheet. */
+/**
+ * A seller's grain types (owner's request and answers, 2026-11-03): what kind of grain it
+ * sells, for the whole company, instead of a buyer's Market; several allowed.
+ */
+export const GRAIN_TYPES = ['feed', 'human_consumption', 'organic', 'non_gmo_ip'] as const;
+export type GrainType = (typeof GRAIN_TYPES)[number];
+
+export const GRAIN_TYPE_LABELS: Record<GrainType, string> = {
+  feed: 'Feed',
+  human_consumption: 'Human consumption',
+  organic: 'Organic',
+  non_gmo_ip: 'Non-GMO / IP',
+};
+
+/** What kind of business a seller is (owner's answer, 2026-11-03); one, or none. */
+export const SELLER_KINDS = ['farm', 'elevator', 'processor', 'other'] as const;
+export type SellerKind = (typeof SELLER_KINDS)[number];
+
+export const SELLER_KIND_LABELS: Record<SellerKind, string> = {
+  farm: 'Farm',
+  elevator: 'Elevator',
+  processor: 'Processor',
+  other: 'Other',
+};
+
+/** The most tonnes a year a seller may be given (the database's check). */
+export const MAX_ANNUAL_TONNES = 10_000_000;
+
+/**
+ * How a location is served (owner's request, 2026-10-30): set by hand on a location, or from
+ * a spreadsheet's Served by column (owner's request, 2026-11-03).
+ */
 export const TRANSPORT_ACCESS = ['rail', 'truck', 'rail_and_truck'] as const;
 export type TransportAccess = (typeof TRANSPORT_ACCESS)[number];
 
@@ -182,6 +213,46 @@ export const IMPORT_FIELDS = [
     required: false,
     headers: ['tier', 'customer tier', 'account tier'],
   },
+  // A seller's details (owner's request and answers, 2026-11-03).
+  {
+    id: 'grainTypes',
+    label: 'Grain type',
+    required: false,
+    headers: ['grain type', 'grain types', 'grade type', 'end use', 'grain use'],
+  },
+  {
+    id: 'sellerKind',
+    label: 'Seller kind',
+    required: false,
+    headers: ['seller kind', 'seller type', 'supplier type', 'kind of seller'],
+  },
+  {
+    id: 'annualTonnes',
+    label: 'Tonnes a year',
+    required: false,
+    // Tonnes only: a column of tons (or of a volume in no stated unit) is never taken for
+    // tonnes (Codex's review of cee5d4e).
+    headers: ['tonnes a year', 'tonnes per year', 'tonnes/year', 'annual tonnes', 'mt per year'],
+  },
+  {
+    id: 'organicCertifier',
+    label: 'Organic certifier',
+    required: false,
+    headers: ['organic certifier', 'certifier', 'certified by', 'certification body'],
+  },
+  {
+    id: 'organicCertifiedUntil',
+    label: 'Organic certified until',
+    required: false,
+    headers: [
+      'organic certified until',
+      'certified until',
+      'organic expiry',
+      'organic certificate expiry',
+      'certificate expiry',
+      'organic expires',
+    ],
+  },
   // A carrier's equipment and lanes (owner's request, 2026-11-01): every Loads in and
   // Delivers to pair on a row is a lane, unverified until someone on the team verifies it.
   {
@@ -293,6 +364,14 @@ export const IMPORT_FIELDS = [
     required: false,
     headers: ['location precision', 'precision', 'geocode precision'],
   },
+  // A location's rail or truck access, from a spreadsheet only; forms send it beside their
+  // values (transportAccess). Not a carrier lane's Mode.
+  {
+    id: 'servedBy',
+    label: 'Served by',
+    required: false,
+    headers: ['served by', 'rail/truck', 'rail or truck access', 'access', 'shipping', 'ships by'],
+  },
 ] as const satisfies readonly {
   id: string;
   label: string;
@@ -316,6 +395,11 @@ export const COUNTERPARTY_FIELD_IDS = [
   'companyPhone',
   'markets',
   'tier',
+  'grainTypes',
+  'sellerKind',
+  'annualTonnes',
+  'organicCertifier',
+  'organicCertifiedUntil',
   'notes',
 ] as const satisfies readonly ImportFieldId[];
 export const CONTACT_FIELD_IDS = [
@@ -432,9 +516,17 @@ export interface CounterpartyInput {
   website: string | null;
   /** The company's main phone number, apart from its contacts' own. */
   phone: string | null;
-  /** The markets it serves, each once, in MARKETS order. */
+  /** The markets it serves, each once, in MARKETS order: a buyer's or broker's. */
   markets: Market[];
   tier: Tier | null;
+  /** A seller's grain types, each once, in GRAIN_TYPES order. */
+  grainTypes: GrainType[];
+  sellerKind: SellerKind | null;
+  /** About how many tonnes it sells a year; a whole number from 1 to MAX_ANNUAL_TONNES. */
+  annualTonnes: number | null;
+  /** Who certified it organic and until when (a calendar date, YYYY-MM-DD). */
+  organicCertifier: string | null;
+  organicCertifiedUntil: string | null;
   notes: string | null;
 }
 
@@ -457,7 +549,10 @@ export interface FacilityInput {
   latitude: string | null;
   longitude: string | null;
   locationPrecision: LocationPrecision | null;
-  /** Rail, truck or both; never from a spreadsheet. Left out (undefined) on a change: kept. */
+  /**
+   * Rail, truck or both, from a form beside its values or a spreadsheet's Served by column.
+   * Left out (undefined) on a change, or an empty cell: kept.
+   */
   transportAccess?: TransportAccess | null | undefined;
 }
 
@@ -728,6 +823,184 @@ function readMarkets(r: FieldReader): Market[] {
   return MARKETS.filter((market) => found.has(market));
 }
 
+/** Words of a grain type ("Human", "Food grade", "Non GMO", "IP"), like marketKey. */
+const GRAIN_TYPE_NAMES = new Map<string, GrainType>([
+  ...GRAIN_TYPES.map((type) => [marketKey(GRAIN_TYPE_LABELS[type]), type] as const),
+  ['human', 'human_consumption'],
+  ['food', 'human_consumption'],
+  ['foodgrade', 'human_consumption'],
+  ['milling', 'human_consumption'],
+  ['feedgrade', 'feed'],
+  ['certifiedorganic', 'organic'],
+  ['nongmo', 'non_gmo_ip'],
+  ['ip', 'non_gmo_ip'],
+  ['identitypreserved', 'non_gmo_ip'],
+  ['nongmoip', 'non_gmo_ip'],
+]);
+
+/** Splits a list cell ("Feed; Organic", "Pet and Bird"), keeping "Non-GMO / IP" whole. */
+function listNames(text: string): string[] {
+  return text
+    .replace(/non[\s-]*gmo\s*\/\s*ip/gi, 'Non-GMO IP')
+    .split(/[;,/|\n]+| and /i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/** Grain type names, each once in GRAIN_TYPES order, and the names that are not one. */
+function grainTypesOf(text: string): { grainTypes: GrainType[]; unknown: string[] } {
+  const found = new Set<GrainType>();
+  const unknown: string[] = [];
+  for (const name of listNames(text)) {
+    const type = GRAIN_TYPE_NAMES.get(marketKey(name));
+    if (type) found.add(type);
+    else unknown.push(name);
+  }
+  return { grainTypes: GRAIN_TYPES.filter((type) => found.has(type)), unknown };
+}
+
+const GRAIN_TYPE_LIST = Object.values(GRAIN_TYPE_LABELS).join(', ');
+
+/** A Grain type column's names ("Feed; Organic"), each once. Others are refused. */
+function readGrainTypes(r: FieldReader): GrainType[] {
+  const text = r.value('grainTypes');
+  if (text === null) return [];
+  const { grainTypes, unknown } = grainTypesOf(text);
+  if (unknown.length > 0) {
+    r.issue(
+      'grainTypes',
+      `${unknown.map((name) => `"${name}"`).join(', ')} must be ${GRAIN_TYPE_LIST}`,
+    );
+  }
+  return grainTypes;
+}
+
+const SELLER_KIND_NAMES: Record<string, SellerKind> = {
+  farm: 'farm',
+  farmer: 'farm',
+  grower: 'farm',
+  producer: 'farm',
+  elevator: 'elevator',
+  'grain elevator': 'elevator',
+  terminal: 'elevator',
+  processor: 'processor',
+  'processing plant': 'processor',
+  other: 'other',
+};
+
+function readSellerKind(r: FieldReader): SellerKind | null {
+  const text = r.value('sellerKind');
+  if (text === null) return null;
+  const kind = SELLER_KIND_NAMES[text.toLowerCase().replace(/s$/, '')] ?? null;
+  if (kind === null) r.issue('sellerKind', `"${text}" must be Farm, Elevator, Processor or Other`);
+  return kind;
+}
+
+/**
+ * About how many tonnes a year: a whole number, with or without thousands separators or a
+ * unit ("4,500", "4 500 t", "4500 MT", "4500 tonnes"). Tons are not tonnes and are refused
+ * rather than converted (no unit conversion is assumed).
+ */
+function readAnnualTonnes(r: FieldReader): number | null {
+  const text = r.value('annualTonnes');
+  if (text === null) return null;
+  const match = /^(\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.0+)?\s*(t|mt|tonnes?|metric tonnes?)?$/i.exec(
+    text,
+  );
+  const tonnes = match ? Number((match[1] ?? '').replace(/[ ,]/g, '')) : NaN;
+  if (!Number.isSafeInteger(tonnes) || tonnes < 1 || tonnes > MAX_ANNUAL_TONNES) {
+    r.issue(
+      'annualTonnes',
+      `"${text}" must be a whole number of tonnes from 1 to ${MAX_ANNUAL_TONNES.toLocaleString('en-CA')}, like 5000`,
+    );
+    return null;
+  }
+  return tonnes;
+}
+
+const MONTHS = [
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'may',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'oct',
+  'nov',
+  'dec',
+] as const;
+
+/** A calendar date as YYYY-MM-DD when it exists and is from 2000 to 2100; else null. */
+function calendarDate(year: number, month: number, day: number): string | null {
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCMonth() !== month - 1) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * A date as written in a form or spreadsheet: 2027-03-31 (or 2027/03/31), March 31, 2027,
+ * 31 March 2027, or 31/03/2027 and 03/31/2027 when only one reading is a date (a day above
+ * 12). A date both ways (04/05/2027) is ambiguous and refused, never guessed.
+ */
+export function parseCalendarDate(
+  text: string,
+): { status: 'ok'; date: string } | { status: 'ambiguous' } | { status: 'invalid' } {
+  const read = (date: string | null) =>
+    date === null ? ({ status: 'invalid' } as const) : ({ status: 'ok', date } as const);
+  const value = text.trim().replace(/\s+/g, ' ');
+  let match = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(value);
+  if (match) return read(calendarDate(Number(match[1]), Number(match[2]), Number(match[3])));
+  const month = (name: string) =>
+    (MONTHS as readonly string[]).indexOf(name.slice(0, 3).toLowerCase()) + 1;
+  match = /^([a-z]{3,9})\.? (\d{1,2}),? (\d{4})$/i.exec(value);
+  if (match) return read(calendarDate(Number(match[3]), month(match[1] ?? ''), Number(match[2])));
+  match = /^(\d{1,2}) ([a-z]{3,9})\.?,? (\d{4})$/i.exec(value);
+  if (match) return read(calendarDate(Number(match[3]), month(match[2] ?? ''), Number(match[1])));
+  match = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(value);
+  if (match) {
+    const [first, second, year] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    const dayFirst = first > 12 ? calendarDate(year, second, first) : null;
+    const monthFirst = second > 12 ? calendarDate(year, first, second) : null;
+    if (dayFirst !== null || monthFirst !== null) return read(dayFirst ?? monthFirst);
+    return first === second ? read(calendarDate(year, first, second)) : { status: 'ambiguous' };
+  }
+  return { status: 'invalid' };
+}
+
+function readOrganicCertificate(r: FieldReader): {
+  organicCertifier: string | null;
+  organicCertifiedUntil: string | null;
+} {
+  const organicCertifier = r.label('organicCertifier');
+  const text = r.value('organicCertifiedUntil');
+  let organicCertifiedUntil: string | null = null;
+  if (text !== null) {
+    const date = parseCalendarDate(text);
+    if (date.status === 'ambiguous') {
+      r.issue(
+        'organicCertifiedUntil',
+        `"${text}" could be read two ways; write it as year-month-day, like 2027-03-31`,
+      );
+    } else if (date.status === 'invalid') {
+      r.issue('organicCertifiedUntil', `"${text}" is not a date like 2027-03-31`);
+    } else organicCertifiedUntil = date.date;
+  }
+  return { organicCertifier, organicCertifiedUntil };
+}
+
+/** The fields of a seller's own details. */
+const SELLER_FIELDS = [
+  'grainTypes',
+  'sellerKind',
+  'annualTonnes',
+  'organicCertifier',
+  'organicCertifiedUntil',
+] as const satisfies readonly ImportFieldId[];
+
 function readCounterparty(
   r: FieldReader,
   defaultTypes: readonly CounterpartyType[] | undefined,
@@ -778,7 +1051,37 @@ function readCounterparty(
   }
 
   const { phone, more } = readCompanyPhone(r);
-  const markets = readMarkets(r);
+  const seller = types.includes('seller');
+  const buysToo = types.some((type) => type === 'buyer' || type === 'broker');
+  const marketText = r.value('markets');
+  // A spreadsheet's Market column on a row that is only a seller (owner's request,
+  // 2026-11-03): a seller's market is its grain types, so names that are all grain types
+  // are read as them; Pet, Bird … are a buyer's, left out with a warning rather than holding
+  // up the file.
+  const sellerMarket = r.importing && seller && !buysToo && marketText !== null;
+  const marketGrainTypes = sellerMarket ? grainTypesOf(marketText) : null;
+  let markets: Market[] = [];
+  if (marketGrainTypes === null) markets = readMarkets(r);
+  else if (marketGrainTypes.unknown.length > 0) {
+    r.notice(
+      'markets',
+      `is a buyer's (${Object.values(MARKET_LABELS).join(', ')}), so it is not imported for a seller; a seller's is its Grain type: ${GRAIN_TYPE_LIST}`,
+    );
+  } else if (r.value('grainTypes') === null) {
+    r.notice('markets', `is read as the seller's Grain type: ${marketText ?? ''}`);
+  }
+  let grainTypes = readGrainTypes(r);
+  if (marketGrainTypes !== null && grainTypes.length === 0 && marketGrainTypes.unknown.length === 0)
+    grainTypes = marketGrainTypes.grainTypes;
+  const sellerKind = readSellerKind(r);
+  const annualTonnes = readAnnualTonnes(r);
+  const { organicCertifier, organicCertifiedUntil } = readOrganicCertificate(r);
+  // In a spreadsheet, a seller's details on a row that is not a seller are a mistake worth
+  // saying; a form only shows them for a seller and keeps saved ones (Edit details).
+  if (r.importing && types.length > 0 && !seller) {
+    const given = SELLER_FIELDS.find((field) => r.value(field) !== null);
+    if (given !== undefined) r.issue(given, 'is for sellers; this row is not a seller');
+  }
   const tierText = r.value('tier');
   const tier =
     tierText === null
@@ -809,6 +1112,11 @@ function readCounterparty(
     phone,
     markets,
     tier,
+    grainTypes,
+    sellerKind,
+    annualTonnes,
+    organicCertifier,
+    organicCertifiedUntil,
     notes,
   };
 }
@@ -917,7 +1225,14 @@ function readContact(r: FieldReader): ContactInput | null {
  * or, when not given, `fallbackCountry` (the counterparty's).
  */
 function readFacility(r: FieldReader, fallbackCountry: CountryCode | null): FacilityInput | null {
-  if (!FACILITY_FIELD_IDS.some((field) => r.value(field) !== null)) return null;
+  const servedByText = r.importing ? r.value('servedBy') : null;
+  if (!FACILITY_FIELD_IDS.some((field) => r.value(field) !== null)) {
+    if (servedByText !== null) r.issue('servedBy', 'is for a location; give its address or city');
+    return null;
+  }
+  const transportAccess = parseLaneMode(servedByText);
+  if (transportAccess === undefined)
+    r.issue('servedBy', `"${servedByText ?? ''}" must be Rail, Truck or Both, or left empty`);
 
   const facilityCountryText = r.value('facilityCountry');
   const facilityCountry =
@@ -1003,6 +1318,8 @@ function readFacility(r: FieldReader, fallbackCountry: CountryCode | null): Faci
     latitude,
     longitude,
     locationPrecision,
+    // Only a spreadsheet's filled Served by cell says it; otherwise the form's or kept.
+    ...(transportAccess !== null && transportAccess !== undefined && { transportAccess }),
   };
 }
 
@@ -1269,6 +1586,19 @@ export function groupImportRows(rows: ParsedImportRow[]): {
         ['companyPhone', first.phone, row.counterparty.phone],
         ['markets', first.markets.join(', '), row.counterparty.markets.join(', ') || null],
         ['tier', first.tier, row.counterparty.tier],
+        ['grainTypes', first.grainTypes.join(', '), row.counterparty.grainTypes.join(', ') || null],
+        ['sellerKind', first.sellerKind, row.counterparty.sellerKind],
+        [
+          'annualTonnes',
+          first.annualTonnes === null ? null : String(first.annualTonnes),
+          row.counterparty.annualTonnes === null ? null : String(row.counterparty.annualTonnes),
+        ],
+        ['organicCertifier', first.organicCertifier, row.counterparty.organicCertifier],
+        [
+          'organicCertifiedUntil',
+          first.organicCertifiedUntil,
+          row.counterparty.organicCertifiedUntil,
+        ],
         ['notes', first.notes, row.counterparty.notes],
       ];
       for (const [field, kept, ignored] of compare) {
