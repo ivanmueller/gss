@@ -472,6 +472,61 @@ describe('a removal committed while another change waits', () => {
 
 // The owner's request of 2026-10-31: admins delete archived counterparties, never one with
 // history. Last, as it archives the counterparty the tests above use.
+describe("pinning and removing entries, as app_api (the owner's request of 2026-11-03)", () => {
+  it('pins to the top for those who log, removes for admins only, and keeps what is removed', async () => {
+    const created = async (minutes: number) => {
+      const result = await db.createContactLog(as(users.tess), {
+        counterpartyId: counterparties.buyer,
+        log: log({
+          occurredAt: minutesFromNow(minutes),
+          notes: `Synthetic note ${String(minutes)}`,
+        }),
+        followUp: null,
+        recordedByName: 'Tess Trader',
+      });
+      if (result.status !== 'created') throw new Error('not created');
+      return result.id;
+    };
+    const older = await created(-600);
+    const newer = await created(-5);
+
+    // A viewer and another organization's admin may not pin.
+    expect(await db.pinContactLog(as(users.victor), older, true)).toEqual({ status: 'forbidden' });
+    expect(await db.pinContactLog(as(users.bob), older, true)).toEqual({ status: 'not_found' });
+
+    expect(await db.pinContactLog(as(users.tess), older, true)).toEqual({ status: 'saved' });
+    // Pinning again changes nothing.
+    expect(await db.pinContactLog(as(users.tess), older, true)).toEqual({ status: 'saved' });
+    let listed = await db.listContactLog(as(users.victor), counterparties.buyer);
+    expect(listed[0]?.id).toBe(older);
+    expect(listed[0]?.pinned).toMatchObject({ byName: 'Tess Trader' });
+    expect(listed.find((entry) => entry.id === newer)?.pinned).toBeNull();
+
+    expect(await db.pinContactLog(as(users.tess), older, false)).toEqual({ status: 'saved' });
+    listed = await db.listContactLog(as(users.tess), counterparties.buyer);
+    expect(listed.findIndex((entry) => entry.id === newer)).toBeLessThan(
+      listed.findIndex((entry) => entry.id === older),
+    );
+
+    // Only an admin of its organization removes; then it leaves the list and can't be changed.
+    expect(await db.removeContactLog(as(users.tess), newer)).toEqual({ status: 'forbidden' });
+    expect(await db.removeContactLog(as(users.bob), newer)).toEqual({ status: 'not_found' });
+    expect(await db.removeContactLog(as(users.ada), newer)).toEqual({ status: 'saved' });
+    listed = await db.listContactLog(as(users.tess), counterparties.buyer);
+    expect(listed.some((entry) => entry.id === newer)).toBe(false);
+    expect(await db.getContactLogEntry(as(users.tess), newer)).toBeNull();
+    expect(await db.removeContactLog(as(users.ada), newer)).toEqual({ status: 'not_found' });
+    expect(await db.pinContactLog(as(users.tess), newer, true)).toEqual({ status: 'not_found' });
+    expect(await db.correctContactLog(as(users.tess), newer, 1, log(), 'Tess Trader')).toEqual({
+      status: 'not_found',
+    });
+    const [kept] = await admin<{ versions: number; removed_by_name: string }[]>`
+      select (select count(*)::int from app.contact_log_revisions where entry_id = ${newer}) as versions,
+             (select removed_by_name from app.contact_log_removals where entry_id = ${newer})`;
+    expect(kept).toEqual({ versions: 1, removed_by_name: 'Ada Admin' });
+  });
+});
+
 describe('deleting a counterparty with a contact history, as app_api', () => {
   it('keeps it, archived, and says why', async () => {
     expect((await db.setArchived(as(users.ada), counterparties.buyer, true)).status).toBe('saved');

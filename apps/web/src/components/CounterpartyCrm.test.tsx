@@ -33,6 +33,7 @@ const ENTRY: ContactLogEntry = {
     recordedAt: '2026-10-29T16:00:00.000Z',
   },
   revisions: [],
+  pinned: null,
 };
 ENTRY.revisions = [
   ENTRY.current,
@@ -120,21 +121,71 @@ describe('CounterpartyCrm', () => {
     );
   });
 
-  it('shows the contact history with earlier versions on request', async () => {
+  it('shows each entry in two short lines, opening for its notes and earlier versions', async () => {
     api();
     show('viewer');
     const history = await screen.findByRole('region', { name: 'Contact history (1)' });
-    expect(history).toHaveTextContent('Call with Pat Q. Buyer · Thu 29 Oct 2026, 8:30 am MT');
-    expect(history).toHaveTextContent('Wants November delivery.');
-    expect(history).toHaveTextContent(
-      'Logged by Tess Trader · corrected by Adam Admin, Thu 29 Oct 2026, 10:00 am MT',
-    );
-    await userEvent.click(
-      within(history).getByRole('button', { name: 'Show earlier versions (1)' }),
-    );
+    const row = within(history).getByRole('button', { expanded: false });
+    expect(row).toHaveTextContent('Call with Pat Q. Buyer· Wants November delivery.');
+    expect(row).toHaveTextContent('Thu 29 Oct 2026, 8:30 am MT by Tess Trader · edited');
+    // A viewer gets no menu.
+    expect(within(history).queryByRole('button', { name: /^Actions:/ })).not.toBeInTheDocument();
+    await userEvent.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(history).toHaveTextContent('Edited by Adam Admin, Thu 29 Oct 2026, 10:00 am MT');
     expect(within(history).getByRole('list', { name: 'Earlier versions' })).toHaveTextContent(
       'Call with Pat Buyer',
     );
+  });
+
+  it('pins an entry to the top from its menu, and offers no Remove to a trader', async () => {
+    const calls = api({
+      [`PUT /contact-log/${ENTRY_ID}/pin`]: () =>
+        Response.json({ ...ENTRY, pinned: { at: '2026-11-03T16:00:00.000Z', byName: 'Tess' } }),
+    });
+    const user = userEvent.setup();
+    show('trader');
+    const history = await screen.findByRole('region', { name: 'Contact history (1)' });
+    await user.click(within(history).getByRole('button', { name: /^Actions: Call with Pat Q/ }));
+    expect(screen.queryByRole('menuitem', { name: 'Remove' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'Pin to the top' }));
+    expect(await screen.findByText('Pinned to the top.')).toBeInTheDocument();
+    expect(calls.some((call) => call.method === 'PUT')).toBe(true);
+  });
+
+  it('lets an admin remove an entry after saying it is kept', async () => {
+    const calls = api({
+      [`POST /contact-log/${ENTRY_ID}/removal`]: () => Response.json({ removed: true }),
+    });
+    const user = userEvent.setup();
+    show('org_admin', ADAM);
+    const history = await screen.findByRole('region', { name: 'Contact history (1)' });
+    await user.click(within(history).getByRole('button', { name: /^Actions: Call with Pat Q/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove' }));
+    const confirm = within(history).getByRole('group', { name: /^Remove: Call with Pat Q/ });
+    expect(confirm).toHaveTextContent('It is kept in the records');
+    await user.click(within(confirm).getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Entry removed.')).toBeInTheDocument();
+    expect(calls.some((call) => call.method === 'POST' && call.path.includes('/removal'))).toBe(
+      true,
+    );
+  });
+
+  it('shows a pinned entry with its pin', async () => {
+    api({
+      [`GET /contact-log?counterparty_id=${ID}`]: () =>
+        Response.json({
+          entries: [{ ...ENTRY, pinned: { at: '2026-11-03T16:00:00.000Z', byName: 'Tess' } }],
+          truncated: false,
+        }),
+    });
+    show('trader');
+    const history = await screen.findByRole('region', { name: 'Contact history (1)' });
+    expect(within(history).getByLabelText('Pinned')).toBeInTheDocument();
+    await userEvent.click(
+      within(history).getByRole('button', { name: /^Actions: Call with Pat Q/ }),
+    );
+    expect(screen.getByRole('menuitem', { name: 'Unpin' })).toBeInTheDocument();
   });
 
   it('logs a contact with a follow-up, its times typed in Alberta time and sent in UTC', async () => {
@@ -191,9 +242,8 @@ describe('CounterpartyCrm', () => {
     const user = userEvent.setup();
     show('trader');
     const history = await screen.findByRole('region', { name: 'Contact history (1)' });
-    await user.click(
-      within(history).getByRole('button', { name: 'Correct: Call with Pat Q. Buyer' }),
-    );
+    await user.click(within(history).getByRole('button', { name: /^Actions: Call with Pat Q/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }));
     expect(within(history).getByLabelText('When')).toHaveValue('2026-10-29T08:30');
     const notes = within(history).getByLabelText('Notes');
     await user.clear(notes);

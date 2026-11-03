@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { mockApi, SESSION } from '../test/api';
-import { CallButton, CallingProvider, CallRecordingDetails, CellPhoneDialog } from './Calling';
+import { CallingProvider, CallRecordingDetails, CellPhoneDialog, PhoneNumber } from './Calling';
 
 // Synthetic names, ids and 555 numbers only.
 const COUNTERPARTY = '00000000-0000-4000-8000-00000000c1aa';
@@ -36,22 +36,61 @@ function page(enabled = true, onLogged = vi.fn()) {
       enabled={enabled}
       onLogged={onLogged}
     >
-      <CallButton contactId={CONTACT} name="Pat Buyer" phone="(403) 555-0100" />
-      <CallButton contactId={null} name="Synthetic Buyer" phone="(403) 555-0110 x12" />
+      <PhoneNumber
+        contactId={CONTACT}
+        name="Pat Buyer"
+        phone="(403) 555-0100"
+        href="tel:+14035550100"
+      />
+      <PhoneNumber
+        contactId={null}
+        name="Synthetic Buyer"
+        phone="(403) 555-0110 x12"
+        href="tel:+14035550110;ext=12"
+      />
     </CallingProvider>,
   );
   return onLogged;
 }
 
-describe('CallButton', () => {
+const PAT_NUMBER = '(403) 555-0100, call or copy';
+
+/** Clicks Pat's number, then Call in its menu (the owner's request of 2026-11-03). */
+async function callPat(user = userEvent.setup()) {
+  await user.click(await screen.findByRole('button', { name: PAT_NUMBER }));
+  await user.click(screen.getByRole('menuitem', { name: 'Call Pat Buyer' }));
+}
+
+describe('PhoneNumber', () => {
   it('appears once the API says calling is set up', async () => {
     mockApi({
       'GET /me/phone': () => Response.json({ phone: '(403) 555-0142', callingAvailable: true }),
     });
     page();
-    expect(await screen.findByRole('button', { name: /Call Pat Buyer/ })).toBeEnabled();
-    // A number with an extension is dialed by hand.
-    expect(screen.queryByRole('button', { name: /Call Synthetic Buyer/ })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    const number = await screen.findByRole('button', { name: PAT_NUMBER });
+    // A number with an extension is dialed by hand: a phone link.
+    expect(screen.getByRole('link', { name: '(403) 555-0110 x12' })).toHaveAttribute(
+      'href',
+      'tel:+14035550110;ext=12',
+    );
+    // Clicking the number asks first: Call, or Copy number.
+    await user.click(number);
+    expect(screen.getByRole('menuitem', { name: 'Call Pat Buyer' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Copy number' })).toBeVisible();
+  });
+
+  it('copies the number', async () => {
+    mockApi({
+      'GET /me/phone': () => Response.json({ phone: '(403) 555-0142', callingAvailable: true }),
+    });
+    page();
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    await user.click(await screen.findByRole('button', { name: PAT_NUMBER }));
+    await user.click(screen.getByRole('menuitem', { name: 'Copy number' }));
+    expect(writeText).toHaveBeenCalledWith('(403) 555-0100');
+    expect(await screen.findByText('Number copied.')).toBeVisible();
   });
 
   it('stays hidden until calling is set up, and for those who may not log contacts', async () => {
@@ -62,7 +101,11 @@ describe('CallButton', () => {
     await vi.waitFor(() => {
       expect(calls).toHaveLength(1);
     });
-    expect(screen.queryByRole('button', { name: /Call/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: PAT_NUMBER })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '(403) 555-0100' })).toHaveAttribute(
+      'href',
+      'tel:+14035550100',
+    );
 
     page(false);
     expect(calls).toHaveLength(1);
@@ -92,14 +135,20 @@ describe('CallButton', () => {
     });
     const onLogged = page();
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: /Call Pat Buyer/ }));
+    await callPat(user);
 
     expect(await screen.findByText('Pat Buyer: Calling your cell…')).toBeInTheDocument();
     expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
       counterpartyId: COUNTERPARTY,
       contactId: CONTACT,
     });
-    expect(screen.getByRole('button', { name: /Call Pat Buyer/ })).toBeDisabled();
+    // While it is under way, Call is unavailable.
+    await user.click(screen.getByRole('button', { name: PAT_NUMBER }));
+    expect(screen.getByRole('menuitem', { name: 'Call Pat Buyer' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await user.keyboard('{Escape}');
 
     expect(await screen.findByText('Pat Buyer: Connected', {}, { timeout: 4000 })).toBeVisible();
     expect(
@@ -110,7 +159,6 @@ describe('CallButton', () => {
       ),
     ).toBeVisible();
     expect(onLogged).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: /Call Pat Buyer/ })).toBeEnabled();
     // The line goes by itself a few seconds after the call ended.
     await vi.waitFor(
       () => {
@@ -130,7 +178,7 @@ describe('CallButton', () => {
         ),
     });
     page();
-    await userEvent.click(await screen.findByRole('button', { name: /Call Pat Buyer/ }));
+    await callPat();
     expect(
       await screen.findByText('Pat Buyer: 1 was not pressed, so they were not called.'),
     ).toBeVisible();
@@ -146,7 +194,7 @@ describe('CallButton', () => {
         ),
     });
     page();
-    await userEvent.click(await screen.findByRole('button', { name: /Call Pat Buyer/ }));
+    await callPat();
     expect(await screen.findByRole('dialog', { name: 'Your cell phone' })).toBeVisible();
     // The page behind the open dialog is hidden from screen readers meanwhile.
     expect(screen.getByRole('alert', { hidden: true })).toHaveTextContent(
@@ -330,7 +378,7 @@ describe('the contact history after a call that connected', () => {
     });
     const onLogged = page();
     const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
-    await user.click(await screen.findByRole('button', { name: /Call Pat Buyer/ }));
+    await callPat(user);
     await screen.findByText(/call ended after/);
     // The line goes after 5 seconds; the reloads at 30 s, 90 s, 3 and 5 min still happen.
     await act(async () => {

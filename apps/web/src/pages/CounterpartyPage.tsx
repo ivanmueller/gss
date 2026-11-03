@@ -27,7 +27,6 @@ import {
   MessageSquarePlus,
   PawPrint,
   Pencil,
-  Phone,
   Plus,
   Star,
   StarOff,
@@ -47,7 +46,7 @@ import {
 
 import { BackLink } from '../components/BackLink';
 import { CarrierLanes, isCrossBorder } from '../components/CarrierLanes';
-import { CallButton, CallingProvider } from '../components/Calling';
+import { CallingProvider, PhoneNumber } from '../components/Calling';
 import {
   ContactHistoryCard,
   CrmMessage,
@@ -455,6 +454,7 @@ type Editing =
   | { kind: 'remove-contact'; id: string }
   | { kind: 'remove-location'; id: string }
   | { kind: 'archive' }
+  | { kind: 'logo' }
   | { kind: 'delete' }
   | { kind: 'coordinates' }
   | null;
@@ -518,9 +518,6 @@ function CounterpartyView({
   const { token, organization } = session;
   const [editing, setEditing] = useState<Editing>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // The first logo's upload button goes away once the logo is saved, so the page keeps its
-  // "Logo saved." in that spot.
-  const [firstLogoSaved, setFirstLogoSaved] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -548,7 +545,6 @@ function CounterpartyView({
 
   function start(next: Editing) {
     setNotice(null);
-    setFirstLogoSaved(false);
     setMainError(null);
     setEditing(next);
   }
@@ -602,26 +598,38 @@ function CounterpartyView({
     }
   }
 
-  const logo = (
-    <>
-      {/* With a logo already, it is changed under Edit details. */}
-      {canChange && detail.logoSha256 === null && (
+  // Changing the logo: from the logo itself or the "…" menu (the owner's request of
+  // 2026-11-03), a file or a copied image.
+  const logoPanel = canChange && editing?.kind === 'logo' && (
+    <div
+      role="group"
+      aria-label="Change logo"
+      className="flex w-full flex-col gap-2 rounded-control border bg-muted/40 p-3 text-sm"
+    >
+      <p>
+        {detail.logoSha256 === null ? 'Add a logo' : 'Change the logo'}: upload a PNG, JPG or WebP
+        file, or on the company's website right-click its logo, choose Copy image, then Paste logo.
+      </p>
+      <div className="flex flex-wrap items-start gap-2">
         <LogoUpload
           counterpartyId={detail.id}
           token={token}
           label="Upload logo"
           onUploaded={() => {
-            setFirstLogoSaved(true);
-            reload();
+            done('Logo saved.');
           }}
         />
-      )}
-      {canChange && detail.logoSha256 !== null && firstLogoSaved && (
-        <p role="status" className="text-xs text-success">
-          Logo saved.
-        </p>
-      )}
-    </>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            setEditing(null);
+          }}
+        >
+          Close
+        </Button>
+      </div>
+    </div>
   );
 
   const archiveConfirm = canChange && editing?.kind === 'archive' && (
@@ -664,19 +672,42 @@ function CounterpartyView({
   const canQuote = canEnterQuotes(organization.role) && !archived;
   const canFreight = carrier && canEnterFreight(organization.role) && !archived;
   const places = [detail.regions.join(', '), countryName(detail.primaryCountry)].filter(Boolean);
+  // Only Log contact stays visible; the rest is in the "…" menu (the owner's request of
+  // 2026-11-03).
+  const menu = canQuote || canFreight || crm.canPlan || canChange;
 
   // Who they are, whom to call, and the day's actions; a carrier's with its equipment and
   // whether it crosses the border.
   const tradingHeader = (
     <Card className="flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-start gap-4">
-        <CounterpartyLogo
-          counterpartyId={detail.id}
-          name={detail.legalName}
-          sha256={detail.logoSha256}
-          token={token}
-          size="lg"
-        />
+        {canChange ? (
+          <button
+            type="button"
+            aria-label={detail.logoSha256 === null ? 'Add logo' : 'Change logo'}
+            title={detail.logoSha256 === null ? 'Add a logo' : 'Change the logo'}
+            className="shrink-0 cursor-pointer rounded-control outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => {
+              start({ kind: 'logo' });
+            }}
+          >
+            <CounterpartyLogo
+              counterpartyId={detail.id}
+              name={detail.legalName}
+              sha256={detail.logoSha256}
+              token={token}
+              size="lg"
+            />
+          </button>
+        ) : (
+          <CounterpartyLogo
+            counterpartyId={detail.id}
+            name={detail.legalName}
+            sha256={detail.logoSha256}
+            token={token}
+            size="lg"
+          />
+        )}
         <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1.5">
           {name}
           <div className="flex flex-wrap items-center gap-1.5 text-sm">
@@ -692,7 +723,6 @@ function CounterpartyView({
           <MarketsAndTier detail={detail} />
           {carrier && <EquipmentAndBorder detail={detail} />}
           <WebsiteAndPhone detail={detail} />
-          {logo}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {crm.writer && crm.adding !== 'contact' && (
@@ -706,36 +736,7 @@ function CounterpartyView({
               Log contact
             </Button>
           )}
-          {canQuote &&
-            sides.map((side) => (
-              <Button key={side} asChild size="sm" variant="outline">
-                <Link href={`/quotes/new?counterparty=${detail.id}&side=${side}`}>
-                  <Plus aria-hidden="true" />
-                  {side === 'bid' ? 'New bid' : 'New offer'}
-                </Link>
-              </Button>
-            ))}
-          {canFreight && (
-            <Button asChild size="sm" variant="outline">
-              <Link href={`/freight/new?carrier=${detail.id}`}>
-                <Plus aria-hidden="true" />
-                New freight rate
-              </Link>
-            </Button>
-          )}
-          {crm.canPlan && crm.adding !== 'follow-up' && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                crm.startAdding('follow-up');
-              }}
-            >
-              <CalendarPlus aria-hidden="true" />
-              Plan follow-up
-            </Button>
-          )}
-          {canChange && (
+          {menu && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="icon-sm" variant="outline" aria-label="More actions">
@@ -743,22 +744,61 @@ function CounterpartyView({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={() => {
-                    start({ kind: 'details' });
-                  }}
-                >
-                  <Pencil aria-hidden="true" />
-                  Edit details
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    start({ kind: 'archive' });
-                  }}
-                >
-                  <Archive aria-hidden="true" />
-                  Archive
-                </DropdownMenuItem>
+                {canQuote &&
+                  sides.map((side) => (
+                    <DropdownMenuItem key={side} asChild>
+                      <Link href={`/quotes/new?counterparty=${detail.id}&side=${side}`}>
+                        <Plus aria-hidden="true" />
+                        {side === 'bid' ? 'New bid' : 'New offer'}
+                      </Link>
+                    </DropdownMenuItem>
+                  ))}
+                {canFreight && (
+                  <DropdownMenuItem asChild>
+                    <Link href={`/freight/new?carrier=${detail.id}`}>
+                      <Plus aria-hidden="true" />
+                      New freight rate
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                {crm.canPlan && (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      crm.startAdding('follow-up');
+                    }}
+                  >
+                    <CalendarPlus aria-hidden="true" />
+                    Plan follow-up
+                  </DropdownMenuItem>
+                )}
+                {canChange && (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        start({ kind: 'details' });
+                      }}
+                    >
+                      <Pencil aria-hidden="true" />
+                      Edit details
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        start({ kind: 'logo' });
+                      }}
+                    >
+                      <ImageUp aria-hidden="true" />
+                      {detail.logoSha256 === null ? 'Add logo' : 'Change logo'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        start({ kind: 'archive' });
+                      }}
+                    >
+                      <Archive aria-hidden="true" />
+                      Archive
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -769,22 +809,13 @@ function CounterpartyView({
         <NextFollowUp crm={crm} />
         <LastContact crm={crm} />
       </div>
+      {logoPanel}
       {archiveConfirm}
     </Card>
   );
 
   const editDetails = editing?.kind === 'details' && (
     <Card className="overflow-hidden">
-      {detail.logoSha256 !== null && (
-        <div className="border-b bg-muted/40 px-4 pt-4 pb-3">
-          <LogoUpload
-            counterpartyId={detail.id}
-            token={token}
-            label="Change logo"
-            onUploaded={reload}
-          />
-        </div>
-      )}
       <EditForm
         label="Edit details"
         initial={companyValues(detail)}
@@ -1349,21 +1380,17 @@ function CounterpartyView({
   );
 }
 
-/** Phone and email as links, so a tap on a phone calls or writes. */
+/** Phone and email: clicking the phone calls it through the platform or copies it; the email writes. */
 function ContactLinks({ contact }: { contact: Contact }) {
   return (
     <>
       {contact.phone && (
-        <span className="flex flex-wrap items-center gap-2">
-          <a
-            href={`tel:${contact.phone.replace(/[^0-9+]/g, '')}`}
-            className="flex w-fit items-center gap-1.5 underline underline-offset-4"
-          >
-            <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
-            {contact.phone}
-          </a>
-          <CallButton contactId={contact.id} name={contact.name} phone={contact.phone} />
-        </span>
+        <PhoneNumber
+          contactId={contact.id}
+          name={contact.name}
+          phone={contact.phone}
+          href={telHref(contact.phone)}
+        />
       )}
       {contact.email && (
         <a
@@ -1511,21 +1538,12 @@ function WebsiteAndPhone({ detail }: { detail: CounterpartyDetail }) {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       {detail.website && <CounterpartyWebsite website={detail.website} />}
       {detail.phone && (
-        <span className="flex flex-wrap items-center gap-2">
-          <a
-            href={telHref(detail.phone)}
-            className="flex w-fit items-center gap-1.5 underline underline-offset-4"
-            aria-label={`Company phone ${detail.phone}`}
-          >
-            <Phone aria-hidden="true" className="size-3.5 text-muted-foreground" />
-            {detail.phone}
-          </a>
-          <CallButton
-            contactId={null}
-            name={detail.tradingName ?? detail.legalName}
-            phone={detail.phone}
-          />
-        </span>
+        <PhoneNumber
+          contactId={null}
+          name={detail.tradingName ?? detail.legalName}
+          phone={detail.phone}
+          href={telHref(detail.phone)}
+        />
       )}
     </div>
   );

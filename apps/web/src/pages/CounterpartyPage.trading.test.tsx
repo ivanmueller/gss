@@ -115,6 +115,7 @@ const ENTRY: ContactLogEntry = {
     recordedAt: '2026-10-29T15:00:00.000Z',
   },
   revisions: [],
+  pinned: null,
 };
 const OLDER: ContactLogEntry = {
   ...ENTRY,
@@ -227,34 +228,38 @@ describe('a buyer’s or seller’s page', () => {
     expect(within(contacts).getAllByRole('listitem')[0]).toHaveTextContent('Main contact');
   });
 
-  it('puts Log contact first, then New bid and Plan follow-up, for a trader', async () => {
+  it('shows only Log contact, with New bid and Plan follow-up in the menu, for a trader', async () => {
     mockApi();
     show('trader');
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     const header = headerCard();
-    // Plan follow-up once the team who can be responsible has loaded.
-    await within(header).findByRole('button', { name: 'Plan follow-up' });
-    const actions = within(header)
-      .getAllByRole('button')
-      .concat(within(header).getAllByRole('link'))
-      .map((element) => element.textContent);
-    expect(actions).toEqual(['Log contact', 'Plan follow-up', 'New bid']);
-    // A buyer bids; it does not offer.
-    expect(within(header).getByRole('link', { name: 'New bid' })).toHaveAttribute(
+    const user = userEvent.setup();
+    expect(within(header).getByRole('button', { name: 'Log contact' })).toBeInTheDocument();
+    expect(within(header).queryByRole('link', { name: 'New bid' })).toBeNull();
+    expect(within(header).queryByRole('button', { name: 'Plan follow-up' })).toBeNull();
+
+    // The menu: New bid, and Plan follow-up once the team who can be responsible has loaded.
+    // A buyer bids; it does not offer. Edit details and Archive are for operations and admins.
+    await user.click(within(header).getByRole('button', { name: 'More actions' }));
+    await screen.findByRole('menuitem', { name: 'Plan follow-up' });
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'New bid',
+      'Plan follow-up',
+    ]);
+    expect(screen.getByRole('menuitem', { name: 'New bid' })).toHaveAttribute(
       'href',
       `/quotes/new?counterparty=${ID}&side=bid`,
     );
-    expect(within(header).queryByRole('link', { name: 'New offer' })).toBeNull();
-    // Edit details and Archive are for operations and admins only.
-    expect(within(header).queryByRole('button', { name: 'More actions' })).toBeNull();
+    await user.keyboard('{Escape}');
 
     // Log contact opens the form in the contact history, with the main way of contact: a call.
-    await userEvent.click(within(header).getByRole('button', { name: 'Log contact' }));
+    await user.click(within(header).getByRole('button', { name: 'Log contact' }));
     const history = screen.getByRole('region', { name: 'Contact history (0)' });
     expect(within(history).getByRole('button', { name: 'Save contact' })).toBeInTheDocument();
     expect(within(header).queryByRole('button', { name: 'Log contact' })).toBeNull();
 
-    await userEvent.click(within(header).getByRole('button', { name: 'Plan follow-up' }));
+    await user.click(within(header).getByRole('button', { name: 'More actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Plan follow-up' }));
     const followUps = screen.getByRole('region', { name: 'Follow-ups (0 open)' });
     expect(within(followUps).getByRole('button', { name: 'Save follow-up' })).toBeInTheDocument();
   });
@@ -458,16 +463,6 @@ describe('a carrier’s page', () => {
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     const header = headerCard();
     expect(within(header).getByRole('button', { name: 'Log contact' })).toBeInTheDocument();
-    expect(within(header).getByRole('link', { name: 'New freight rate' })).toHaveAttribute(
-      'href',
-      `/freight/new?carrier=${ID}`,
-    );
-    expect(within(header).queryByRole('link', { name: /New (bid|offer)/ })).toBeNull();
-    // Shown once the team (whom a follow-up can be for) has loaded.
-    expect(
-      await within(header).findByRole('button', { name: 'Plan follow-up' }),
-    ).toBeInTheDocument();
-    expect(within(header).getByRole('button', { name: 'More actions' })).toBeInTheDocument();
     expect(within(header).getByRole('group', { name: 'Main contact' })).toBeInTheDocument();
     expect(within(header).getByRole('group', { name: 'Next follow-up' })).toBeInTheDocument();
     expect(within(header).getByRole('group', { name: 'Last contact' })).toBeInTheDocument();
@@ -476,6 +471,22 @@ describe('a carrier’s page', () => {
       'Super B hopperDry van',
     );
     expect(within(header).getByText('Cross-border')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(within(header).getByRole('button', { name: 'More actions' }));
+    // Shown once the team (whom a follow-up can be for) has loaded.
+    await screen.findByRole('menuitem', { name: 'Plan follow-up' });
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'New freight rate',
+      'Plan follow-up',
+      'Edit details',
+      'Add logo',
+      'Archive',
+    ]);
+    expect(screen.getByRole('menuitem', { name: 'New freight rate' })).toHaveAttribute(
+      'href',
+      `/freight/new?carrier=${ID}`,
+    );
   });
 
   it('puts its freight rates first and its lanes at the top of the right column', async () => {

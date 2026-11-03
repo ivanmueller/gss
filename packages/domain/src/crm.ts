@@ -208,6 +208,8 @@ export interface ContactLogEntry {
   createdAt: string;
   current: ContactLogRevision;
   revisions: ContactLogRevision[];
+  /** Pinned to the top of the contact history: when and by whom; null when not pinned. */
+  pinned: { at: string; byName: string } | null;
 }
 
 /** A follow-up, open or done. */

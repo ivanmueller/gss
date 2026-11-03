@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-03 — A less cluttered counterparty page
+
+- `docs/DECISIONS.md`: the owner's answers: contact history in short rows with Pin, Edit and Remove (kept), only Log contact at the top, click-to-call numbers with Call and Copy number.
+- `docs/DATA_MODEL.md`: migration `20261103020000_contact_log_pins_removals.sql`.
+- `docs/API.md`: `pinned` on entries; `PUT`/`DELETE /contact-log/{id}/pin` and `POST /contact-log/{id}/removal`.
+- `docs/PRODUCT.md`: the counterparty page's top, contact history and phone numbers.
+
 ## 2026-11-03 — Handoff record of #120
 
 - `docs/HANDOFF.md`: transcripts uploaded instead of linked (ivanmueller/gss#120) with its CI and Deploy staging runs; transcripts by side checked on staging by the owner.

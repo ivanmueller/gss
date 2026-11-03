@@ -156,6 +156,54 @@ export function contactLogRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
+  // Pin to the top, and unpin (the owner's request of 2026-11-03): the entry as it now is.
+  for (const [method, pinned] of [
+    ['put', true],
+    ['delete', false],
+  ] as const) {
+    routes[method]('/:id/pin', async (c) => {
+      c.header('Cache-Control', 'no-store');
+      const id = c.req.param('id');
+      if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', NO_ENTRY);
+      return withDatabase(c, openDatabase, async (db, ctx) => {
+        const result = await db.pinContactLog(ctx, id, pinned);
+        switch (result.status) {
+          case 'saved': {
+            const entry = await db.getContactLogEntry(ctx, id);
+            return entry ? c.json(entry) : apiError(c, 404, 'NOT_FOUND', NO_ENTRY);
+          }
+          case 'not_found':
+            return apiError(c, 404, 'NOT_FOUND', NO_ENTRY);
+          case 'forbidden':
+            return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_LOG);
+        }
+      });
+    });
+  }
+
+  // Remove (admins): left out of every list, kept with its versions, call and transcript.
+  routes.post('/:id/removal', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', NO_ENTRY);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.removeContactLog(ctx, id);
+      switch (result.status) {
+        case 'saved':
+          return c.json({ removed: true });
+        case 'not_found':
+          return apiError(c, 404, 'NOT_FOUND', NO_ENTRY);
+        case 'forbidden':
+          return apiError(
+            c,
+            403,
+            'FORBIDDEN',
+            'Only admins remove entries from the contact history.',
+          );
+      }
+    });
+  });
+
   return routes;
 }
 
