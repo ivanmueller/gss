@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #124
+
+- `docs/HANDOFF.md`: the documents pull request (ivanmueller/gss#124: the handoff record of #123, `AGENTS.md` and README status) with its CI and Deploy staging runs; Dependabot ivanmueller/gss#114 listed with the other open updates.
+
 ## 2026-11-03 — Handoff record of #123, and the status brought up to date
 
 - `docs/HANDOFF.md`: the live call box (ivanmueller/gss#123) with its CI and Deploy staging runs; the status (transcripts by side, the less cluttered page, the call box); the next checks on staging and the next choices (texting and callbacks, notes drafted from transcripts, a Hang up button, the open Dependabot updates).
