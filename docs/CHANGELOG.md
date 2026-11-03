@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #120
+
+- `docs/HANDOFF.md`: transcripts uploaded instead of linked (ivanmueller/gss#120) with its CI and Deploy staging runs; transcripts by side checked on staging by the owner.
+
 ## 2026-11-03 — Transcripts: the audio uploaded, refusals explained
 
 - `docs/DECISIONS.md`: Telnyx's 400 on staging, the audio streamed into the upload instead of linked, what a refusal was about logged as a fixed word, failed recordings tried again; Codex's review of `5c72810`.
