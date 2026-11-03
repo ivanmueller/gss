@@ -887,6 +887,8 @@ describe("a seller's details", () => {
     const mapping = suggestMapping(headers);
     expect(Object.values(mapping).sort()).toEqual([...headers].sort());
     expect(mapping).toMatchObject({ commodities: 'Grains', region: 'Province/State' });
+    // Tons are not tonnes: such a column is never matched to Tonnes a year.
+    expect(suggestMapping(['Tons a year', 'Annual volume'])).toEqual({});
   });
 
   it('refuses what is not one of them, never guessing', () => {

@@ -80,7 +80,9 @@ const CARRIER_FIELDS: readonly ImportFieldId[] = ['equipment', 'loadsIn', 'deliv
 /** What a buyer, seller or carrier file does not have, when the file has no Type column. */
 const NOT_FOR: Record<FileSide, readonly ImportFieldId[]> = {
   buyer: [...SELLER_FIELDS, ...CARRIER_FIELDS],
-  seller: ['markets', ...CARRIER_FIELDS],
+  // A sellers' Market column is kept as Market and read as their grain types where it names
+  // them, Pet, Bird … left out with a warning (packages/domain/src/directory.ts).
+  seller: [...CARRIER_FIELDS],
   carrier: ['markets', 'tier', 'commodities', 'servedBy', ...SELLER_FIELDS],
 };
 
@@ -102,23 +104,31 @@ function offeredMapping(side: FileSide, mapping: Mapping): Mapping {
 }
 
 /**
- * The mapping when the file's companies are said to be `side`: a seller's market is its grain
- * types, so a Market column of a sellers' file fills Grain type, and goes back to Market when
- * the file is said to be buyers' again.
+ * Who a file's companies probably are, from its columns, when it has no Type column: carriers
+ * with a carrier's columns, sellers with a seller's, else buyers. The choice can be changed.
  */
-export function mappingForSide(side: FileSide, mapping: Mapping): Mapping {
-  if (mapping.types !== undefined) return mapping;
-  const { markets, grainTypes, ...rest } = mapping;
-  if (side === 'seller' && markets !== undefined && grainTypes === undefined)
-    return { ...rest, grainTypes: markets };
-  if (
-    side !== 'seller' &&
-    grainTypes !== undefined &&
-    markets === undefined &&
-    suggestMapping([grainTypes]).markets === grainTypes
-  )
-    return { ...rest, markets: grainTypes };
-  return mapping;
+export function likelySide(mapping: Mapping): FileSide {
+  if (mapping.types === undefined) {
+    if (CARRIER_FIELDS.some((field) => mapping[field] !== undefined)) return 'carrier';
+    if (SELLER_FIELDS.some((field) => mapping[field] !== undefined)) return 'seller';
+  }
+  return 'buyer';
+}
+
+/**
+ * A column chosen for Tonnes a year whose name says tons (short tons): its numbers are not
+ * tonnes, and no unit is converted (Codex's review of cee5d4e), so the file is held back.
+ */
+export function tonsColumn(mapping: Mapping): string | null {
+  const header = mapping.annualTonnes;
+  return header !== undefined && /\btons?\b/i.test(header) ? header : null;
+}
+
+/** A field's name in the column list: a sellers' Market column is read as their grain type. */
+function fieldLabel(field: (typeof SHOWN_FIELDS)[number], side: FileSide, mapping: Mapping) {
+  return field.id === 'markets' && side === 'seller' && mapping.types === undefined
+    ? 'Market (read as grain type)'
+    : field.label;
 }
 
 /** Columns matched by their names, without the trading name. */
@@ -271,11 +281,13 @@ function UnusedColumns({ sheet, mapping }: { sheet: Sheet; mapping: Mapping }) {
 
 function ColumnMapping({
   sheet,
+  side,
   fields,
   mapping,
   onChange,
 }: {
   sheet: Sheet;
+  side: FileSide;
   fields: typeof SHOWN_FIELDS;
   mapping: Mapping;
   onChange: (mapping: Mapping) => void;
@@ -315,7 +327,7 @@ function ColumnMapping({
                     <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-success" />
                   )}
                   <span>
-                    {field.label}
+                    {fieldLabel(field, side, mapping)}
                     {field.required && <span className="text-danger"> (required)</span>}
                   </span>
                 </label>
@@ -398,7 +410,7 @@ export function ImportSpreadsheet({
         kind: 'map',
         sheet,
         mapping: suggested(sheet.headers),
-        side: 'buyer',
+        side: likelySide(suggested(sheet.headers)),
         error: null,
         busy: false,
       });
@@ -470,6 +482,7 @@ export function ImportSpreadsheet({
     step.kind === 'map'
       ? IMPORT_FIELDS.filter((field) => field.required && !step.mapping[field.id])
       : [];
+  const tons = step.kind === 'map' ? tonsColumn(offeredMapping(step.side, step.mapping)) : null;
 
   return (
     <section aria-label="Import spreadsheet" className="flex flex-col gap-4">
@@ -545,7 +558,6 @@ export function ImportSpreadsheet({
                 setStep({
                   ...step,
                   side,
-                  mapping: mappingForSide(side, step.mapping),
                   error: null,
                 });
               }}
@@ -553,6 +565,7 @@ export function ImportSpreadsheet({
           </div>
           <ColumnMapping
             sheet={step.sheet}
+            side={step.side}
             fields={fieldsForFile(step.side, step.mapping)}
             mapping={offeredMapping(step.side, step.mapping)}
             onChange={(mapping) => {
@@ -569,6 +582,12 @@ export function ImportSpreadsheet({
             <p role="status" className="text-sm text-danger">
               Choose a column for {missingRequired.map((field) => field.label).join(' and ')}.
             </p>
+          ) : tons !== null ? (
+            <p role="status" className="text-sm text-danger">
+              The column &ldquo;{tons}&rdquo; is in tons, not tonnes. The platform does not convert
+              units: give the amounts in tonnes, or choose &ldquo;— not in my file —&rdquo; for
+              Tonnes a year.
+            </p>
           ) : (
             <p role="status" className="text-sm">
               {local.valid} rows ready
@@ -577,7 +596,7 @@ export function ImportSpreadsheet({
               .
             </p>
           )}
-          {missingRequired.length === 0 && (
+          {missingRequired.length === 0 && tons === null && (
             <IssueList title="Problems to fix" issues={local.issues} />
           )}
           {step.error && (
@@ -587,7 +606,7 @@ export function ImportSpreadsheet({
           )}
           <div className="flex flex-wrap gap-2">
             <Button
-              disabled={missingRequired.length > 0 || step.busy}
+              disabled={missingRequired.length > 0 || tons !== null || step.busy}
               onClick={() => void review(planOf(step))}
             >
               {step.busy ? 'Checking…' : 'Review import'}

@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Codex's review of the seller's details, and CI run #273
+
+- `docs/DECISIONS.md`: a sellers' Market column kept as Market; tons never taken for tonnes; a file starting as carriers or sellers from its columns.
+- `docs/PRODUCT.md`: the import's starting choice and tons.
+
 ## 2026-11-03 — A seller's own details
 
 - `docs/DECISIONS.md`: the owner's request and answers: a seller's grain types instead of a buyer's market, its kind, tonnes a year and organic certificate; Served by from a spreadsheet; the Grain type filter; each file offered its own columns; the header row for a sellers' sheet.

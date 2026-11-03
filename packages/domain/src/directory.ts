@@ -230,16 +230,9 @@ export const IMPORT_FIELDS = [
     id: 'annualTonnes',
     label: 'Tonnes a year',
     required: false,
-    headers: [
-      'tonnes a year',
-      'tonnes per year',
-      'tonnes/year',
-      'annual tonnes',
-      'annual volume',
-      'mt per year',
-      'tons a year',
-      'tons per year',
-    ],
+    // Tonnes only: a column of tons (or of a volume in no stated unit) is never taken for
+    // tonnes (Codex's review of cee5d4e).
+    headers: ['tonnes a year', 'tonnes per year', 'tonnes/year', 'annual tonnes', 'mt per year'],
   },
   {
     id: 'organicCertifier',

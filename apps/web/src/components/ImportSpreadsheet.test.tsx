@@ -149,32 +149,24 @@ describe('ImportSpreadsheet', () => {
   });
 
   // The owner's request of 2026-11-03: the columns offered follow who the file's companies are.
-  it("offers a sellers' file its own columns, its Market column as Grain type", async () => {
+  it("starts a sellers' file on Sellers, its own columns offered, Market kept as Market", async () => {
     const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
     importer();
     await chooseFile(
       [
-        'Company,Country,Market,Seller Kind,Tonnes a year,City,Served by,Equipment',
-        'Synthetic Grower,Canada,Feed; Organic,Farm,4500,Olds,Rail,Super B',
+        'Company,Country,Market,Seller Kind,Tonnes a year,City,Served by',
+        'Synthetic Grower,Canada,Pet,Farm,4500,Olds,Rail',
         '',
       ].join('\n'),
     );
-    // As buyers: Market, and no seller's or carrier's fields.
-    expect(await screen.findByLabelText('Market')).toHaveTextContent('Market');
-    expect(screen.queryByLabelText('Seller kind')).toBeNull();
-    expect(screen.queryByLabelText('Equipment')).toBeNull();
-    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(
-      'Seller KindTonnes a yearEquipment',
-    );
-
-    const side = screen.getByRole('group', { name: 'The companies in this file are' });
-    await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
-    expect(screen.queryByLabelText('Market')).toBeNull();
-    expect(screen.getByLabelText('Grain type')).toHaveTextContent('Market');
-    expect(screen.getByLabelText('Seller kind')).toHaveTextContent('Seller Kind');
+    // Its seller's columns make it a sellers' file to start with.
+    expect(await screen.findByLabelText('Seller kind')).toHaveTextContent('Seller Kind');
     expect(screen.getByLabelText('Tonnes a year')).toHaveTextContent('Tonnes a year');
     expect(screen.getByLabelText('Served by')).toHaveTextContent('Served by');
-    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(/^Equipment$/);
+    // The Market column stays Market, said to be read as the grain type (Codex's review of
+    // cee5d4e): Pet is not a grain type, so it is left out with a warning, not refused.
+    expect(screen.getByLabelText('Market (read as grain type)')).toHaveTextContent('Market');
+    expect(screen.getByText('1 rows ready.')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
     const review = calls.find((call) => call.method === 'POST');
     expect(review?.body).toMatchObject({
@@ -182,19 +174,59 @@ describe('ImportSpreadsheet', () => {
       rows: [
         {
           line: 2,
-          values: {
-            legalName: 'Synthetic Grower',
-            grainTypes: 'Feed; Organic',
-            sellerKind: 'Farm',
-            annualTonnes: '4500',
-            servedBy: 'Rail',
-          },
+          values: { markets: 'Pet', sellerKind: 'Farm', annualTonnes: '4500', servedBy: 'Rail' },
         },
       ],
     });
-    expect(
-      (review?.body as { rows: { values: Record<string, string> }[] }).rows[0]?.values,
-    ).not.toHaveProperty('equipment');
+  });
+
+  it("offers a buyers' file no seller's or carrier's columns", async () => {
+    importer();
+    await chooseFile(
+      [
+        'Company,Country,Market,Seller Kind,Equipment',
+        'Synthetic Mill,Canada,Pet,Farm,Van',
+        '',
+      ].join('\n'),
+    );
+    await screen.findByLabelText('Legal name (required)');
+    const side = screen.getByRole('group', { name: 'The companies in this file are' });
+    await userEvent.click(within(side).getByRole('button', { name: 'Buyers' }));
+    expect(screen.getByLabelText('Market')).toHaveTextContent('Market');
+    expect(screen.queryByLabelText('Seller kind')).toBeNull();
+    expect(screen.queryByLabelText('Equipment')).toBeNull();
+    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(
+      'Seller KindEquipment',
+    );
+  });
+
+  it("starts a carriers' file on Carriers, its lanes' columns found at once", async () => {
+    importer();
+    await chooseFile(
+      [
+        'Company,Country,Equipment,Loads In,Delivers To',
+        'Synthetic Hauling,Canada,Van,AB,MT',
+        '',
+      ].join('\n'),
+    );
+    expect(await screen.findByRole('list', { name: 'Columns found' })).toHaveTextContent(
+      'CompanyCountryEquipmentLoads InDelivers To',
+    );
+  });
+
+  it('never takes a column of tons for tonnes', async () => {
+    importer();
+    await chooseFile(
+      ['Company,Country,Seller Kind,Tons a year', 'Synthetic Grower,Canada,Farm,4500', ''].join(
+        '\n',
+      ),
+    );
+    // Not matched by its name ...
+    expect(await screen.findByLabelText('Tonnes a year')).toHaveTextContent('— not in my file —');
+    // ... and held back when chosen by hand.
+    await choose(screen.getByLabelText('Tonnes a year'), 'Tons a year');
+    expect(screen.getByText(/is in tons, not tonnes/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review import' })).toBeDisabled();
   });
 
   it('matches columns, reviews with the server and imports', async () => {
