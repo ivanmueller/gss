@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(26);
 
 -- Org A: tom (trader), adam (org_admin), victor (viewer). Org B: bob (org_admin).
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -195,6 +195,24 @@ select throws_ok(
 select throws_ok(
   $$update app.contact_log_removals set removed_by_name = 'Someone'$$,
   '42501', null, 'nor changed'
+);
+
+-- A removed entry is not corrected (20261103030000_contact_log_removal_lock.sql) -------------
+select throws_ok(
+  $$select pg_temp.as_user('00000000-0000-4000-8000-0000000044aa',
+    $q$insert into app.contact_log_revisions
+         (organization_id, entry_id, occurred_at, channel, contact_name, recorded_by, recorded_by_name)
+       values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000e1aa2',
+               now(), 'call', 'Pat Buyer', '00000000-0000-4000-8000-0000000044aa', 'Tom Trader')$q$)$$,
+  '23514', null, 'a removed entry gets no new version'
+);
+select lives_ok(
+  $$select pg_temp.as_user('00000000-0000-4000-8000-0000000044aa',
+    $q$insert into app.contact_log_revisions
+         (organization_id, entry_id, occurred_at, channel, contact_name, recorded_by, recorded_by_name)
+       values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000e1aa1',
+               now(), 'call', 'Pat Buyer', '00000000-0000-4000-8000-0000000044aa', 'Tom Trader')$q$)$$,
+  'an entry not removed still gets versions'
 );
 
 -- Audit -------------------------------------------------------------------------------------

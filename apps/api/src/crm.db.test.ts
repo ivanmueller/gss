@@ -527,6 +527,57 @@ describe("pinning and removing entries, as app_api (the owner's request of 2026-
   });
 });
 
+describe('a correction waiting while an entry is removed (Codex, ac2d085, finding 2)', () => {
+  it('is refused once the removal commits, adding no hidden version', async () => {
+    const created = await db.createContactLog(as(users.tess), {
+      counterpartyId: counterparties.buyer,
+      log: log({ notes: 'Synthetic note before removal' }),
+      followUp: null,
+      recordedByName: 'Tess Trader',
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const entry = created.id;
+    // An admin's removal, not yet committed, on a connection of its own.
+    const other = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    let commit: () => void = () => undefined;
+    const committed = new Promise<void>((resolve) => {
+      commit = resolve;
+    });
+    let removing: Promise<unknown> = Promise.resolve();
+    const started = new Promise<void>((ready) => {
+      removing = other.begin(async (tx) => {
+        await tx`select set_config('app.user_id', ${users.ada}, true)`;
+        await tx`insert into app.contact_log_removals (entry_id, organization_id, removed_by)
+                 values (${entry}, ${orgs.a}, ${users.ada})`;
+        ready();
+        await committed;
+      });
+    });
+    try {
+      await started;
+      // The correction saw no removal before the lock, so it waits for the removal's lock.
+      const correcting = db.correctContactLog(
+        as(users.tess),
+        entry,
+        1,
+        log({ notes: 'Synthetic correction after removal' }),
+        'Tess Trader',
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      commit();
+      await removing;
+      expect(await correcting).toEqual({ status: 'not_found' });
+      const [versions] = await admin<{ count: number }[]>`
+        select count(*)::int as count from app.contact_log_revisions where entry_id = ${entry}`;
+      expect(versions?.count).toBe(1);
+    } finally {
+      commit();
+      await removing.catch(() => undefined);
+      await other.end();
+    }
+  });
+});
+
 describe('deleting a counterparty with a contact history, as app_api', () => {
   it('keeps it, archived, and says why', async () => {
     expect((await db.setArchived(as(users.ada), counterparties.buyer, true)).status).toBe('saved');

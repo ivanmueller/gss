@@ -413,6 +413,11 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
         // Take the entry's lock, then read its latest version in a statement of its own, so
         // a correction recorded meanwhile is seen (as reviseQuote does).
         await tx`select app.lock_contact_log_entry(${id})`;
+        // Removed while this waited for the lock (Codex's review of ac2d085, finding 2): the
+        // database refuses the version too (app.refuse_revision_of_removed_entry).
+        const [removed] = await tx<{ removed: boolean }[]>`
+          select exists (select 1 from app.contact_log_removals where entry_id = ${id}) as removed`;
+        if (removed?.removed) return { status: 'not_found' };
         const [latest] = await tx<{ current: number | null }[]>`
           select max(revision_number) as current from app.contact_log_revisions
           where entry_id = ${id}`;

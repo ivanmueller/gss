@@ -138,6 +138,31 @@ describe('CounterpartyCrm', () => {
     );
   });
 
+  it('opens an entry whose only note is one long paragraph (Codex, ac2d085, finding 1)', async () => {
+    const long = `Wants November delivery ${'and more synthetic detail '.repeat(20)}`.trim();
+    api({
+      [`GET /contact-log?counterparty_id=${ID}`]: () =>
+        Response.json({
+          entries: [
+            {
+              ...ENTRY,
+              current: { ...ENTRY.current, notes: long },
+              revisions: [{ ...ENTRY.current, notes: long }],
+            },
+          ],
+          truncated: false,
+        }),
+    });
+    show('viewer');
+    const history = await screen.findByRole('region', { name: 'Contact history (1)' });
+    const row = within(history).getByRole('button', { expanded: false });
+    expect(row).toBeEnabled();
+    await userEvent.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    // The whole note, in a paragraph of its own below the two lines.
+    expect(within(history).getByText(long, { selector: 'p' })).toBeInTheDocument();
+  });
+
   it('pins an entry to the top from its menu, and offers no Remove to a trader', async () => {
     const calls = api({
       [`PUT /contact-log/${ENTRY_ID}/pin`]: () =>
