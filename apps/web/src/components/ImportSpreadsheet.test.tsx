@@ -148,6 +148,55 @@ describe('ImportSpreadsheet', () => {
     expect(review?.body).toMatchObject({ defaultTypes: ['seller'] });
   });
 
+  // The owner's request of 2026-11-03: the columns offered follow who the file's companies are.
+  it("offers a sellers' file its own columns, its Market column as Grain type", async () => {
+    const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
+    importer();
+    await chooseFile(
+      [
+        'Company,Country,Market,Seller Kind,Tonnes a year,City,Served by,Equipment',
+        'Synthetic Grower,Canada,Feed; Organic,Farm,4500,Olds,Rail,Super B',
+        '',
+      ].join('\n'),
+    );
+    // As buyers: Market, and no seller's or carrier's fields.
+    expect(await screen.findByLabelText('Market')).toHaveTextContent('Market');
+    expect(screen.queryByLabelText('Seller kind')).toBeNull();
+    expect(screen.queryByLabelText('Equipment')).toBeNull();
+    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(
+      'Seller KindTonnes a yearEquipment',
+    );
+
+    const side = screen.getByRole('group', { name: 'The companies in this file are' });
+    await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
+    expect(screen.queryByLabelText('Market')).toBeNull();
+    expect(screen.getByLabelText('Grain type')).toHaveTextContent('Market');
+    expect(screen.getByLabelText('Seller kind')).toHaveTextContent('Seller Kind');
+    expect(screen.getByLabelText('Tonnes a year')).toHaveTextContent('Tonnes a year');
+    expect(screen.getByLabelText('Served by')).toHaveTextContent('Served by');
+    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent(/^Equipment$/);
+    await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
+    const review = calls.find((call) => call.method === 'POST');
+    expect(review?.body).toMatchObject({
+      defaultTypes: ['seller'],
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Grower',
+            grainTypes: 'Feed; Organic',
+            sellerKind: 'Farm',
+            annualTonnes: '4500',
+            servedBy: 'Rail',
+          },
+        },
+      ],
+    });
+    expect(
+      (review?.body as { rows: { values: Record<string, string> }[] }).rows[0]?.values,
+    ).not.toHaveProperty('equipment');
+  });
+
   it('matches columns, reviews with the server and imports', async () => {
     const calls = mockApi({
       'POST /counterparties/import': (call) => {

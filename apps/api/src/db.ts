@@ -22,6 +22,8 @@ import type {
   Market,
   Tier,
   TransportAccess,
+  GrainType,
+  SellerKind,
   VerificationStatus,
 } from '@grain/domain';
 import postgres from 'postgres';
@@ -68,6 +70,13 @@ export interface CounterpartySummary {
   /** The markets it serves (pet, bird, …) and its tier (A, B, C or null). */
   markets: string[];
   tier: string | null;
+  /** A seller's grain types (GRAIN_TYPES order), kind, tonnes a year and organic certificate. */
+  grainTypes: string[];
+  sellerKind: string | null;
+  annualTonnes: number | null;
+  organicCertifier: string | null;
+  /** A calendar date, YYYY-MM-DD. */
+  organicCertifiedUntil: string | null;
   /** A carrier's equipment, in EQUIPMENT order (@grain/domain). */
   equipment: string[];
   /** A carrier's lanes as entered, by origin and destination, verified or not. */
@@ -210,16 +219,29 @@ export interface ImportAddition {
 export type CounterpartyChanges = Partial<
   Pick<
     CounterpartyInput,
-    'types' | 'verificationStatus' | 'website' | 'phone' | 'markets' | 'tier' | 'notes'
+    | 'types'
+    | 'verificationStatus'
+    | 'website'
+    | 'phone'
+    | 'markets'
+    | 'tier'
+    | 'grainTypes'
+    | 'sellerKind'
+    | 'annualTonnes'
+    | 'organicCertifier'
+    | 'organicCertifiedUntil'
+    | 'notes'
   > & {
     /** A carrier's equipment with the file's added: never removed by a file. */
     equipment: Equipment[];
   }
 >;
 
-/** A location's type, missing address parts, or coordinates (given together). */
+/** A location's type, missing address parts, rail or truck access, or coordinates (given together). */
 export type FacilityChanges = Partial<
-  Pick<FacilityInput, 'facilityType' | 'addressLine' | 'postalCode'>
+  Pick<FacilityInput, 'facilityType' | 'addressLine' | 'postalCode'> & {
+    transportAccess: TransportAccess;
+  }
 > & {
   coordinates?: Pick<FacilityInput, 'latitude' | 'longitude' | 'locationPrecision'>;
 };
@@ -236,6 +258,11 @@ export interface ExistingCounterparty {
   phone: string | null;
   markets: Market[];
   tier: Tier | null;
+  grainTypes: GrainType[];
+  sellerKind: SellerKind | null;
+  annualTonnes: number | null;
+  organicCertifier: string | null;
+  organicCertifiedUntil: string | null;
   notes: string | null;
   equipment: Equipment[];
   facilities: ExistingFacility[];
@@ -258,7 +285,7 @@ export type ExistingFacility = Pick<
   | 'latitude'
   | 'longitude'
   | 'locationPrecision'
-> & { id: string };
+> & { id: string; transportAccess: TransportAccess | null };
 
 /** A located facility for a map pin, with the counterparty it belongs to. */
 export interface MapFacility {
@@ -518,6 +545,11 @@ interface SummaryRow {
   sells: string[];
   markets: string[];
   tier: string | null;
+  grain_types: string[];
+  seller_kind: string | null;
+  annual_tonnes: number | null;
+  organic_certifier: string | null;
+  organic_certified_until: string | null;
   equipment: string[];
   lanes: ListedLane[];
   quoted_lanes: CarrierLane[];
@@ -548,6 +580,11 @@ function summary(row: SummaryRow): CounterpartySummary {
     sells: row.sells,
     markets: row.markets,
     tier: row.tier,
+    grainTypes: row.grain_types,
+    sellerKind: row.seller_kind,
+    annualTonnes: row.annual_tonnes,
+    organicCertifier: row.organic_certifier,
+    organicCertifiedUntil: row.organic_certified_until,
     equipment: row.equipment,
     lanes: row.lanes,
     quotedLanes: knownLanes(row.quoted_lanes),
@@ -728,7 +765,11 @@ export function createDatabase(sql: postgres.Sql): Database {
       select id, primary_country, legal_name, archived_at is not null as archived,
              to_jsonb(types::text[]) as types,
              verification_status::text as "verificationStatus", website, phone,
-             to_jsonb(markets) as markets, tier, notes, to_jsonb(equipment) as equipment
+             to_jsonb(markets) as markets, tier, to_jsonb(grain_types) as "grainTypes",
+             seller_kind as "sellerKind", annual_tonnes as "annualTonnes",
+             organic_certifier as "organicCertifier",
+             to_char(organic_certified_until, 'YYYY-MM-DD') as "organicCertifiedUntil",
+             notes, to_jsonb(equipment) as equipment
       from app.counterparties where organization_id = ${organizationId}`;
     const facilities = await tx<
       (ExistingCounterparty['facilities'][number] & { counterparty_id: string })[]
@@ -736,7 +777,8 @@ export function createDatabase(sql: postgres.Sql): Database {
       select counterparty_id, id, name, facility_type::text as "facilityType",
              address_line as "addressLine", city, region, postal_code as "postalCode", country,
              latitude::text as latitude, longitude::text as longitude,
-             location_precision::text as "locationPrecision"
+             location_precision::text as "locationPrecision",
+             transport_access as "transportAccess"
       from app.facilities where organization_id = ${organizationId}`;
     const contacts = await tx<
       (ExistingCounterparty['contacts'][number] & { counterparty_id: string })[]
@@ -802,7 +844,10 @@ export function createDatabase(sql: postgres.Sql): Database {
                    join app.commodities m on m.code = k.commodity_code
                    where k.counterparty_id = c.id and k.direction = 'sells'
                    order by m.sort_order)) as sells,
-    to_jsonb(c.markets) as markets, c.tier, to_jsonb(c.equipment) as equipment,
+    to_jsonb(c.markets) as markets, c.tier, to_jsonb(c.grain_types) as grain_types,
+    c.seller_kind, c.annual_tonnes, c.organic_certifier,
+    to_char(c.organic_certified_until, 'YYYY-MM-DD') as organic_certified_until,
+    to_jsonb(c.equipment) as equipment,
     coalesce((select jsonb_agg(jsonb_build_object(
                 'origin', k.origin::text, 'destination', k.destination::text,
                 'transport', k.transport, 'verifiedAt', k.verified_at)
@@ -1123,6 +1168,11 @@ export function createDatabase(sql: postgres.Sql): Database {
             phone: c.phone,
             markets: `{${c.markets.join(',')}}`,
             tier: c.tier,
+            grain_types: `{${c.grainTypes.join(',')}}`,
+            seller_kind: c.sellerKind,
+            annual_tonnes: c.annualTonnes,
+            organic_certifier: c.organicCertifier,
+            organic_certified_until: c.organicCertifiedUntil,
             equipment: `{${(item.equipment ?? []).join(',')}}`,
             notes: c.notes,
             source: 'file_import',
@@ -1216,6 +1266,14 @@ export function createDatabase(sql: postgres.Sql): Database {
                   markets = coalesce(
                     ${details.markets ? `{${details.markets.join(',')}}` : null}::text[], markets),
                   tier = coalesce(${details.tier ?? null}, tier),
+                  grain_types = coalesce(
+                    ${details.grainTypes ? `{${details.grainTypes.join(',')}}` : null}::text[],
+                    grain_types),
+                  seller_kind = coalesce(${details.sellerKind ?? null}, seller_kind),
+                  annual_tonnes = coalesce(${details.annualTonnes ?? null}::integer, annual_tonnes),
+                  organic_certifier = coalesce(${details.organicCertifier ?? null}, organic_certifier),
+                  organic_certified_until = coalesce(
+                    ${details.organicCertifiedUntil ?? null}::date, organic_certified_until),
                   equipment = coalesce(
                     ${details.equipment ? `{${details.equipment.join(',')}}` : null}::text[],
                     equipment),
@@ -1243,7 +1301,8 @@ export function createDatabase(sql: postgres.Sql): Database {
               set facility_type = coalesce(
                     ${changes.facilityType ?? null}::app.facility_type, facility_type),
                   address_line = coalesce(${changes.addressLine ?? null}, address_line),
-                  postal_code = coalesce(${changes.postalCode ?? null}, postal_code)
+                  postal_code = coalesce(${changes.postalCode ?? null}, postal_code),
+                  transport_access = coalesce(${changes.transportAccess ?? null}, transport_access)
                   ${
                     at
                       ? tx`, latitude = ${at.latitude}::numeric, longitude = ${at.longitude}::numeric,
@@ -1376,12 +1435,15 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.counterparties
             (organization_id, legal_name, trading_name, types, primary_country,
-             verification_status, website, phone, markets, tier, equipment, notes, source,
+             verification_status, website, phone, markets, tier, grain_types, seller_kind,
+             annual_tonnes, organic_certifier, organic_certified_until, equipment, notes, source,
              created_by)
           values (${organizationId}, ${c.legalName}, ${c.tradingName},
                   ${enumArray(c.types)}::app.counterparty_type[], ${c.primaryCountry},
                   ${c.verificationStatus}::app.verification_status, ${c.website}, ${c.phone},
                   ${`{${c.markets.join(',')}}`}::text[], ${c.tier},
+                  ${`{${c.grainTypes.join(',')}}`}::text[], ${c.sellerKind}, ${c.annualTonnes},
+                  ${c.organicCertifier}, ${c.organicCertifiedUntil}::date,
                   ${`{${(record.equipment ?? []).join(',')}}`}::text[],
                   ${c.notes}, 'manual', app.current_user_id())
           returning id
@@ -1428,6 +1490,10 @@ export function createDatabase(sql: postgres.Sql): Database {
               verification_status = ${input.verificationStatus}::app.verification_status,
               website = ${input.website}, phone = ${input.phone},
               markets = ${`{${input.markets.join(',')}}`}::text[], tier = ${input.tier},
+              grain_types = ${`{${input.grainTypes.join(',')}}`}::text[],
+              seller_kind = ${input.sellerKind}, annual_tonnes = ${input.annualTonnes},
+              organic_certifier = ${input.organicCertifier},
+              organic_certified_until = ${input.organicCertifiedUntil}::date,
               equipment = ${
                 equipment === undefined ? tx`equipment` : tx`${`{${equipment.join(',')}}`}::text[]`
               },

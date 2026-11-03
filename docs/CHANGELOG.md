@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-03 — A seller's own details
+
+- `docs/DECISIONS.md`: the owner's request and answers: a seller's grain types instead of a buyer's market, its kind, tonnes a year and organic certificate; Served by from a spreadsheet; the Grain type filter; each file offered its own columns; the header row for a sellers' sheet.
+- `docs/DATA_MODEL.md`: migration `20261103040000_seller_details.sql` and the new `counterparties` columns.
+- `docs/API.md`: the seller's fields when adding by hand and importing; the Served by column.
+- `docs/PRODUCT.md`: the seller's form, page, filter and import.
+
 ## 2026-11-03 — Handoff record of #124
 
 - `docs/HANDOFF.md`: the documents pull request (ivanmueller/gss#124: the handoff record of #123, `AGENTS.md` and README status) with its CI and Deploy staging runs; Dependabot ivanmueller/gss#114 listed with the other open updates.

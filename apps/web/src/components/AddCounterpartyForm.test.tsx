@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { choose } from '../test/select';
 import { mockApi, ORG, SESSION } from '../test/api';
-import { AddCounterpartyForm } from './AddCounterpartyForm';
+import { AddCounterpartyForm, unaskedCleared } from './AddCounterpartyForm';
 
 const CREATED = '00000000-0000-4000-8000-00000000c0de';
 
@@ -74,7 +74,19 @@ describe('AddCounterpartyForm', () => {
     // Formatted once the box is left (owner's choice, 2026-10-31).
     await userEvent.tab();
     expect(within(company).getByLabelText('Company phone')).toHaveValue('(306) 555-0100');
-    await userEvent.click(within(company).getByRole('checkbox', { name: 'Small Animal' }));
+    // A seller has grain types, not a buyer's market (owner's request, 2026-11-03).
+    expect(within(company).queryByRole('group', { name: /Market/ })).toBeNull();
+    await userEvent.click(within(company).getByRole('checkbox', { name: 'Feed' }));
+    // The organic certificate is asked only with organic grain.
+    expect(within(company).queryByLabelText('Organic certifier')).toBeNull();
+    await userEvent.click(within(company).getByRole('checkbox', { name: 'Organic' }));
+    await choose(within(company).getByLabelText('Seller kind'), 'Farm');
+    await userEvent.type(within(company).getByLabelText('Tonnes a year'), '4500');
+    await userEvent.type(
+      within(company).getByLabelText('Organic certifier'),
+      'Synthetic Certifier',
+    );
+    await userEvent.type(within(company).getByLabelText('Organic certified until'), '2027-03-31');
     await choose(within(company).getByLabelText('Tier'), 'Tier A');
     await userEvent.type(within(section('Contact')).getByLabelText('Name'), 'Synthetic Grower');
     const location = section('Location');
@@ -98,7 +110,11 @@ describe('AddCounterpartyForm', () => {
           country: 'CA',
           verificationStatus: 'unverified',
           companyPhone: '(306) 555-0100',
-          markets: 'small_animal',
+          grainTypes: 'feed,organic',
+          sellerKind: 'farm',
+          annualTonnes: '4500',
+          organicCertifier: 'Synthetic Certifier',
+          organicCertifiedUntil: '2027-03-31',
           tier: 'A',
           contactName: 'Synthetic Grower',
           facilityCountry: 'CA',
@@ -282,5 +298,40 @@ describe('AddCounterpartyForm', () => {
       'A counterparty with this legal name is already in the list for this country.',
     );
     expect(screen.getByRole('button', { name: 'Add counterparty' })).toBeEnabled();
+  });
+});
+
+describe('unaskedCleared', () => {
+  it('empties what the form did not ask for the types ticked, and nothing else', () => {
+    // Seller ticked, filled in, then unticked: its details are not sent.
+    expect(
+      unaskedCleared({
+        types: 'buyer',
+        markets: 'pet',
+        grainTypes: 'organic',
+        sellerKind: 'farm',
+        annualTonnes: '4500',
+        organicCertifier: 'Synthetic Certifier',
+        organicCertifiedUntil: '2027-03-31',
+      }),
+    ).toEqual({
+      types: 'buyer',
+      markets: 'pet',
+      grainTypes: '',
+      sellerKind: '',
+      annualTonnes: '',
+      organicCertifier: '',
+      organicCertifiedUntil: '',
+    });
+    // A seller without organic grain sends no certificate, and no market.
+    expect(
+      unaskedCleared({
+        types: 'seller',
+        markets: 'pet',
+        grainTypes: 'feed',
+        organicCertifier: 'Synthetic Certifier',
+      }),
+    ).toEqual({ types: 'seller', markets: '', grainTypes: 'feed', organicCertifier: '' });
+    expect(unaskedCleared({ types: 'carrier', tier: 'A' })).toEqual({ types: 'carrier', tier: '' });
   });
 });

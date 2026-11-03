@@ -58,6 +58,11 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           phone: '+1 306 555 0100',
           markets: ['pet', 'bird'],
           tier: 'A',
+          grainTypes: [],
+          sellerKind: null,
+          annualTonnes: null,
+          organicCertifier: null,
+          organicCertifiedUntil: null,
           notes: 'Synthetic record.',
         },
         contacts: [
@@ -110,6 +115,11 @@ function batch(overrides: Partial<ImportBatchInput> = {}): ImportBatchInput {
           phone: null,
           markets: [],
           tier: null,
+          grainTypes: [],
+          sellerKind: null,
+          annualTonnes: null,
+          organicCertifier: null,
+          organicCertifiedUntil: null,
           notes: null,
         },
         contacts: [],
@@ -289,6 +299,11 @@ describe('the counterparty directory as app_api', () => {
       phone: '+1 306 555 0100',
       markets: ['pet', 'bird'],
       tier: 'A',
+      grainTypes: [],
+      sellerKind: null,
+      annualTonnes: null,
+      organicCertifier: null,
+      organicCertifiedUntil: null,
       notes: 'Synthetic record.',
       // Buys first, each in the commodity list's order, with its name; from a spreadsheet,
       // so unverified.
@@ -687,6 +702,11 @@ describe('the counterparty directory as app_api', () => {
         phone: '(306) 555-0100',
         markets: ['pet'],
         tier: 'B',
+        grainTypes: [],
+        sellerKind: null,
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
         notes: 'Synthetic own note.',
       },
       contacts: [{ name: 'Synthetic Ana', role: null, email: 'ana@example.test', phone: null }],
@@ -752,6 +772,11 @@ describe('the counterparty directory as app_api', () => {
       phone: '(306) 555-0199',
       markets: ['pet'],
       tier: 'A',
+      grainTypes: [],
+      sellerKind: null,
+      annualTonnes: null,
+      organicCertifier: null,
+      organicCertifiedUntil: null,
       notes: 'Synthetic own note.\n\nSynthetic file note.',
     });
     expect(after?.contacts).toEqual([
@@ -783,6 +808,120 @@ describe('the counterparty directory as app_api', () => {
       where entity = 'counterparties' and entity_id = ${target} and action = 'update'
         and actor_id = ${users.olivia} and 'phone' = any (changed_fields)`;
     expect(audit?.count).toBe(1);
+  });
+
+  // The owner's request of 2026-11-03: a seller's grain types, kind, tonnes a year and
+  // organic certificate, saved by hand, listed, edited, and updated from a file with its
+  // location's rail or truck access.
+  it("saves, lists, edits and imports a seller's details", async () => {
+    const ctx = as(users.olivia);
+    const seller = {
+      legalName: 'Synthetic Seller Farms',
+      tradingName: null,
+      types: ['seller' as const],
+      primaryCountry: 'CA' as const,
+      verificationStatus: 'unverified' as const,
+      website: null,
+      phone: null,
+      markets: [],
+      tier: 'B' as const,
+      grainTypes: ['feed' as const, 'organic' as const],
+      sellerKind: 'farm' as const,
+      annualTonnes: 3000,
+      organicCertifier: 'Synthetic Certifier',
+      organicCertifiedUntil: '2027-03-31',
+      notes: null,
+    };
+    const created = await db.createCounterparty(ctx, orgs.a, {
+      counterparty: seller,
+      contacts: [],
+      facilities: [
+        {
+          name: null,
+          facilityType: null,
+          addressLine: null,
+          city: 'Synthetic Siding',
+          region: 'AB',
+          postalCode: null,
+          country: 'CA',
+          latitude: null,
+          longitude: null,
+          locationPrecision: null,
+          transportAccess: 'truck',
+        },
+      ],
+      commodities: [],
+    });
+    if (created.status !== 'created') throw new Error('not created');
+    const fields = {
+      grainTypes: ['feed', 'organic'],
+      sellerKind: 'farm',
+      annualTonnes: 3000,
+      organicCertifier: 'Synthetic Certifier',
+      organicCertifiedUntil: '2027-03-31',
+    };
+    expect(await db.getCounterparty(ctx, created.id)).toMatchObject(fields);
+    expect(
+      (await db.listCounterparties(as(users.victor), orgs.a)).find((c) => c.id === created.id),
+    ).toMatchObject(fields);
+
+    // Edit details replaces them all.
+    const before = await db.getCounterparty(ctx, created.id);
+    expect(
+      await db.updateCounterparty(ctx, created.id, before?.version ?? '', {
+        ...seller,
+        grainTypes: ['human_consumption'],
+        sellerKind: 'elevator',
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
+      }),
+    ).toEqual({ status: 'saved' });
+    expect(await db.getCounterparty(ctx, created.id)).toMatchObject({
+      grainTypes: ['human_consumption'],
+      sellerKind: 'elevator',
+      annualTonnes: null,
+      organicCertifier: null,
+      organicCertifiedUntil: null,
+    });
+
+    // A file's filled cells replace them, and its Served by the location's access.
+    expect(
+      await importRows(
+        ctx,
+        [
+          {
+            line: 2,
+            values: {
+              legalName: 'Synthetic Seller Farms',
+              country: 'CA',
+              types: 'seller',
+              markets: 'Non-GMO; Organic',
+              annualTonnes: '4,500',
+              organicCertifiedUntil: '2028-01-15',
+              city: 'Synthetic Siding',
+              region: 'AB',
+              servedBy: 'Both',
+            },
+          },
+        ],
+        '6'.repeat(64),
+      ),
+    ).toMatch(/^[0-9a-f-]{36}$/);
+    const after = await db.getCounterparty(ctx, created.id);
+    expect(after).toMatchObject({
+      markets: [],
+      grainTypes: ['organic', 'non_gmo_ip'],
+      sellerKind: 'elevator',
+      annualTonnes: 4500,
+      organicCertifier: null,
+      organicCertifiedUntil: '2028-01-15',
+    });
+    expect(after?.facilities).toEqual([
+      expect.objectContaining({ city: 'Synthetic Siding', transportAccess: 'rail_and_truck' }),
+    ]);
+    // Another organization sees none of it.
+    expect(await db.getCounterparty(as(users.bob), created.id)).toBeNull();
   });
 
   // Codex's review of ivanmueller/gss#95: an importer demoted while the import ran had its

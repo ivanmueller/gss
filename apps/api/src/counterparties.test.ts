@@ -48,6 +48,11 @@ function summary(name: string): CounterpartySummary {
     sells: [],
     markets: [],
     tier: null,
+    grainTypes: [],
+    sellerKind: null,
+    annualTonnes: null,
+    organicCertifier: null,
+    organicCertifiedUntil: null,
     equipment: [],
     lanes: [],
     quotedLanes: [],
@@ -347,6 +352,11 @@ function existing(
     phone: null,
     markets: [],
     tier: null,
+    grainTypes: [],
+    sellerKind: null,
+    annualTonnes: null,
+    organicCertifier: null,
+    organicCertifiedUntil: null,
     notes: null,
     equipment: [],
     facilities: [],
@@ -555,6 +565,7 @@ describe('POST /api/v1/counterparties/import', () => {
         facilities: [
           {
             id: '00000000-0000-4000-8000-000000000f01',
+            transportAccess: null,
             facilityType: null,
             locationPrecision: null,
             name: null,
@@ -746,6 +757,11 @@ describe('POST /api/v1/counterparties/import', () => {
         phone: '(306) 555-0100',
         markets: ['pet'],
         tier: 'B',
+        grainTypes: [],
+        sellerKind: null,
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
         notes: 'Synthetic own note.',
         contacts: [
           {
@@ -759,6 +775,7 @@ describe('POST /api/v1/counterparties/import', () => {
         facilities: [
           {
             id: '00000000-0000-4000-8000-000000000f01',
+            transportAccess: null,
             name: null,
             facilityType: null,
             addressLine: null,
@@ -885,6 +902,7 @@ describe('POST /api/v1/counterparties/import', () => {
         facilities: [
           {
             id: '00000000-0000-4000-8000-000000000f01',
+            transportAccess: null,
             name: 'Synthetic Depot',
             facilityType: null,
             addressLine: null,
@@ -1006,6 +1024,7 @@ describe('POST /api/v1/counterparties/import', () => {
         facilities: [
           {
             id: '00000000-0000-4000-8000-000000000f01',
+            transportAccess: null,
             facilityType: null,
             locationPrecision: null,
             name: null,
@@ -1266,6 +1285,160 @@ describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
       ['seller'],
       ['buyer'],
     ]);
+  });
+
+  // The owner's request of 2026-11-03: a seller's grain types instead of a buyer's markets.
+  it("imports a new seller's details and its location's rail or truck access", async () => {
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'sellers.csv',
+      commit: true,
+      defaultTypes: ['seller'],
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Grower',
+            country: 'CA',
+            markets: 'Feed; Organic',
+            sellerKind: 'Farm',
+            annualTonnes: '3,000',
+            organicCertifier: 'Synthetic Certifier',
+            organicCertifiedUntil: '2027-03-31',
+            city: 'Synthetic Town',
+            region: 'AB',
+            servedBy: 'Both',
+          },
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const [item] = planned()?.counterparties ?? [];
+    expect(item?.counterparty).toMatchObject({
+      markets: [],
+      grainTypes: ['feed', 'organic'],
+      sellerKind: 'farm',
+      annualTonnes: 3000,
+      organicCertifier: 'Synthetic Certifier',
+      organicCertifiedUntil: '2027-03-31',
+    });
+    expect(item?.facilities).toEqual([
+      expect.objectContaining({ city: 'Synthetic Town', transportAccess: 'rail_and_truck' }),
+    ]);
+  });
+
+  it("updates a listed seller's details and a location's access from filled cells", async () => {
+    const listed = [
+      existing('Synthetic Grower', 'CA', {
+        types: ['seller'],
+        grainTypes: ['feed'],
+        sellerKind: 'farm',
+        annualTonnes: 3000,
+        facilities: [
+          {
+            id: '00000000-0000-4000-8000-000000000f01',
+            transportAccess: 'truck',
+            name: null,
+            facilityType: null,
+            addressLine: null,
+            city: 'Synthetic Town',
+            region: 'AB',
+            postalCode: null,
+            country: 'CA',
+            latitude: null,
+            longitude: null,
+            locationPrecision: null,
+          },
+        ],
+      }),
+    ];
+    db.existingCounterparties.mockResolvedValue(listed);
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'sellers.csv',
+      commit: true,
+      defaultTypes: ['seller'],
+      rows: [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Grower',
+            country: 'CA',
+            grainTypes: 'Feed, Non-GMO',
+            sellerKind: 'Farm',
+            annualTonnes: '4500',
+            organicCertifiedUntil: '2028-01-15',
+            city: 'Synthetic Town',
+            region: 'AB',
+            servedBy: 'Rail and truck',
+          },
+        },
+      ],
+    });
+    expect(res.status).toBe(201);
+    const answer = await res.json<{ counterparties: { changes: string[] }[] }>();
+    expect(answer.counterparties[0]?.changes).toEqual([
+      'Grain type: Feed → Feed, Non-GMO / IP',
+      'Tonnes a year: 3,000 t → 4,500 t',
+      'Organic certified until: none → 2028-01-15',
+      'Location Synthetic Town, AB: served by: Truck → Rail and truck',
+    ]);
+    expect(planned(listed)?.additions).toEqual([
+      expect.objectContaining({
+        details: {
+          grainTypes: ['feed', 'non_gmo_ip'],
+          annualTonnes: 4500,
+          organicCertifiedUntil: '2028-01-15',
+        },
+        facilityUpdates: [
+          {
+            id: '00000000-0000-4000-8000-000000000f01',
+            changes: { transportAccess: 'rail_and_truck' },
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it("records a different content checksum when only a seller's detail or Served by differs", async () => {
+    const checksum = async (values: Record<string, string>, call: number) => {
+      await postImport({
+        organizationId: ORG,
+        fileName: 'sellers.csv',
+        commit: true,
+        reviewed: null,
+        defaultTypes: ['seller'],
+        rows: [{ line: 2, values }],
+      });
+      return planned([], call)?.contentSha256;
+    };
+    const base = { legalName: 'Synthetic Grower', country: 'CA', city: 'Olds', region: 'AB' };
+    const sums = [
+      await checksum(base, 0),
+      await checksum({ ...base, grainTypes: 'Feed' }, 1),
+      await checksum({ ...base, sellerKind: 'Farm' }, 2),
+      await checksum({ ...base, annualTonnes: '4500' }, 3),
+      await checksum({ ...base, servedBy: 'Rail' }, 4),
+    ];
+    expect(new Set(sums).size).toBe(5);
+  });
+
+  it("refuses a seller's details on a row that is a buyer", async () => {
+    const res = await postImport({
+      organizationId: ORG,
+      fileName: 'buyers.csv',
+      commit: false,
+      defaultTypes: ['buyer'],
+      rows: [
+        { line: 2, values: { legalName: 'Synthetic Mill', country: 'CA', sellerKind: 'Farm' } },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      issues: [
+        { line: 2, field: 'sellerKind', message: 'is for sellers; this row is not a seller' },
+      ],
+    });
   });
 });
 

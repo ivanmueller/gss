@@ -28,6 +28,11 @@ const DETAIL: CounterpartyDetail = {
   sells: [],
   markets: [],
   tier: null,
+  grainTypes: [],
+  sellerKind: null,
+  annualTonnes: null,
+  organicCertifier: null,
+  organicCertifiedUntil: null,
   equipment: [],
   lanes: [
     {

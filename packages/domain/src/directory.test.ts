@@ -94,6 +94,11 @@ describe('parseImportRow', () => {
         phone: null,
         markets: [],
         tier: null,
+        grainTypes: [],
+        sellerKind: null,
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
         notes: 'Prefers rail.\nCall mornings.',
       },
       contact: {
@@ -142,6 +147,11 @@ describe('parseImportRow', () => {
         phone: null,
         markets: [],
         tier: null,
+        grainTypes: [],
+        sellerKind: null,
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
         notes: null,
       },
       contact: null,
@@ -829,6 +839,184 @@ describe('markets and tier', () => {
   });
 });
 
+describe("a seller's details", () => {
+  const seller = { legalName: 'Synthetic Grain Farms', country: 'CA', types: 'seller' };
+
+  it('are read from their columns, each grain type once in a fixed order', () => {
+    expect(
+      ok({
+        ...seller,
+        grainTypes: 'organic; Food grade, feed / Non-GMO / IP; Organic',
+        sellerKind: 'Farmer',
+        annualTonnes: '4,500 t',
+        organicCertifier: 'Synthetic Organic Certifier',
+        organicCertifiedUntil: 'March 31, 2027',
+      }).counterparty,
+    ).toMatchObject({
+      grainTypes: ['feed', 'human_consumption', 'organic', 'non_gmo_ip'],
+      sellerKind: 'farm',
+      annualTonnes: 4500,
+      organicCertifier: 'Synthetic Organic Certifier',
+      organicCertifiedUntil: '2027-03-31',
+    });
+    expect(
+      suggestMapping([
+        'Company',
+        'Grain Type',
+        'Seller Kind',
+        'Tonnes a year',
+        'Organic Certifier',
+        'Organic Certified Until',
+        'Served By',
+      ]),
+    ).toMatchObject({
+      grainTypes: 'Grain Type',
+      sellerKind: 'Seller Kind',
+      annualTonnes: 'Tonnes a year',
+      organicCertifier: 'Organic Certifier',
+      organicCertifiedUntil: 'Organic Certified Until',
+      servedBy: 'Served By',
+    });
+  });
+
+  it("recognises every column of the sellers' sheet header row given to the owner", () => {
+    const headers =
+      'Company,Country,Company Phone,Grain Type,Seller Kind,Tonnes a year,Organic Certifier,Organic Certified Until,Tier,Grains,Contact,Phone,Email,Address,City,Province/State,Postal Code,Served By,Notes'.split(
+        ',',
+      );
+    const mapping = suggestMapping(headers);
+    expect(Object.values(mapping).sort()).toEqual([...headers].sort());
+    expect(mapping).toMatchObject({ commodities: 'Grains', region: 'Province/State' });
+  });
+
+  it('refuses what is not one of them, never guessing', () => {
+    expect(
+      issues({
+        ...seller,
+        grainTypes: 'Feed; Malting',
+        sellerKind: 'Broker',
+        annualTonnes: '4500 tons',
+        organicCertifiedUntil: '04/05/2027',
+      }),
+    ).toEqual([
+      'grainTypes: "Malting" must be Feed, Human consumption, Organic, Non-GMO / IP',
+      'sellerKind: "Broker" must be Farm, Elevator, Processor or Other',
+      'annualTonnes: "4500 tons" must be a whole number of tonnes from 1 to 10,000,000, like 5000',
+      'organicCertifiedUntil: "04/05/2027" could be read two ways; write it as year-month-day, like 2027-03-31',
+    ]);
+    expect(issues({ ...seller, annualTonnes: '0', organicCertifiedUntil: '2027-02-30' })).toEqual([
+      'annualTonnes: "0" must be a whole number of tonnes from 1 to 10,000,000, like 5000',
+      'organicCertifiedUntil: "2027-02-30" is not a date like 2027-03-31',
+    ]);
+    expect(issues({ ...seller, annualTonnes: '4500.5' })).toHaveLength(1);
+  });
+
+  it('reads dates written several ways when only one reading is possible', () => {
+    const until = (text: string) =>
+      ok({ ...seller, organicCertifiedUntil: text }).counterparty.organicCertifiedUntil;
+    expect(
+      ['2027-03-31', '2027/3/31', '31 March 2027', 'Mar. 31, 2027', '31/03/2027', '03/31/2027'].map(
+        until,
+      ),
+    ).toEqual(Array(6).fill('2027-03-31'));
+    expect(until('05/05/2027')).toBe('2027-05-05');
+  });
+
+  it('are for sellers: on a buyer row in a spreadsheet they are refused', () => {
+    expect(
+      issues({ legalName: 'Synthetic Feeds', country: 'CA', types: 'buyer', grainTypes: 'Feed' }),
+    ).toEqual(['grainTypes: is for sellers; this row is not a seller']);
+    expect(
+      ok({
+        legalName: 'Synthetic Mills',
+        country: 'CA',
+        types: 'buyer, seller',
+        grainTypes: 'Feed',
+      }).counterparty,
+    ).toMatchObject({ grainTypes: ['feed'], markets: [] });
+  });
+
+  it("read a seller-only row's Market column as its grain types, with a notice", () => {
+    const row = ok({ ...seller, markets: 'Feed; Human' });
+    expect(row.counterparty).toMatchObject({
+      markets: [],
+      grainTypes: ['feed', 'human_consumption'],
+    });
+    expect(row.notices.map((notice) => `${notice.field ?? '-'}: ${notice.message}`)).toEqual([
+      "markets: is read as the seller's Grain type: Feed; Human",
+    ]);
+    // A buyer's markets on a seller's row are left out, with a warning, not a problem.
+    const pet = ok({ ...seller, markets: 'Pet; Bird' });
+    expect(pet.counterparty).toMatchObject({ markets: [], grainTypes: [] });
+    expect(pet.notices.map((notice) => `${notice.field ?? '-'}: ${notice.message}`)).toEqual([
+      "markets: is a buyer's (Pet, Bird, Equine, Specialty, Small Animal, Exotic, Wildlife, Aqua), so it is not imported for a seller; a seller's is its Grain type: Feed, Human consumption, Organic, Non-GMO / IP",
+    ]);
+    // A buyer and seller keeps its Market; its grain types come from Grain type.
+    expect(
+      ok({ legalName: 'Synthetic Mills', country: 'CA', types: 'buyer;seller', markets: 'Pet' })
+        .counterparty,
+    ).toMatchObject({ markets: ['pet'], grainTypes: [] });
+  });
+
+  it('are kept in a form for a counterparty that is no longer a seller (Edit details)', () => {
+    expect(
+      parseCounterpartyFields({
+        legalName: 'Synthetic Feeds',
+        country: 'CA',
+        types: 'buyer',
+        grainTypes: 'organic',
+        sellerKind: 'elevator',
+        annualTonnes: '12000',
+        organicCertifiedUntil: '2027-03-31',
+      }),
+    ).toMatchObject({
+      status: 'ok',
+      value: { grainTypes: ['organic'], sellerKind: 'elevator', annualTonnes: 12000 },
+    });
+  });
+});
+
+describe("a location's Served by column", () => {
+  const place = {
+    legalName: 'Synthetic Grain Farms',
+    country: 'CA',
+    types: 'seller',
+    city: 'Olds',
+  };
+
+  it('gives its rail or truck access', () => {
+    expect(ok({ ...place, servedBy: 'Rail & truck' }).facility).toMatchObject({
+      transportAccess: 'rail_and_truck',
+    });
+    expect(ok({ ...place, servedBy: 'truck' }).facility).toMatchObject({
+      transportAccess: 'truck',
+    });
+    // Empty: not stated, so a listed location keeps its own.
+    expect(ok(place).facility).not.toHaveProperty('transportAccess');
+  });
+
+  it('refuses other words, and needs a location', () => {
+    expect(issues({ ...place, servedBy: 'Barge' })).toEqual([
+      'servedBy: "Barge" must be Rail, Truck or Both, or left empty',
+    ]);
+    expect(
+      issues({
+        legalName: 'Synthetic Grain Farms',
+        country: 'CA',
+        types: 'seller',
+        servedBy: 'Rail',
+      }),
+    ).toEqual(['servedBy: is for a location; give its address or city']);
+  });
+
+  it('is not read from a form, which sends the access beside its values', () => {
+    expect(parseFacilityFields({ city: 'Olds', servedBy: 'rail' }, 'CA')).toMatchObject({
+      status: 'ok',
+      value: { city: 'Olds' },
+    });
+  });
+});
+
 describe('a Grains column', () => {
   it('fills what a buyer buys, like a Commodities column', () => {
     const mapping = suggestMapping(['Company', 'Country', 'Grains']);
@@ -941,6 +1129,11 @@ describe('edit forms', () => {
         phone: null,
         markets: [],
         tier: null,
+        grainTypes: [],
+        sellerKind: null,
+        annualTonnes: null,
+        organicCertifier: null,
+        organicCertifiedUntil: null,
         notes: null,
       },
     });

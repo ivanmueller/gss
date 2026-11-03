@@ -69,6 +69,58 @@ type Step =
 /** The fields a column can fill; the trading name is no longer collected (2026-10-30). */
 const SHOWN_FIELDS = IMPORT_FIELDS.filter((field) => field.id !== 'tradingName');
 
+const SELLER_FIELDS: readonly ImportFieldId[] = [
+  'grainTypes',
+  'sellerKind',
+  'annualTonnes',
+  'organicCertifier',
+  'organicCertifiedUntil',
+];
+const CARRIER_FIELDS: readonly ImportFieldId[] = ['equipment', 'loadsIn', 'deliversTo', 'laneMode'];
+/** What a buyer, seller or carrier file does not have, when the file has no Type column. */
+const NOT_FOR: Record<FileSide, readonly ImportFieldId[]> = {
+  buyer: [...SELLER_FIELDS, ...CARRIER_FIELDS],
+  seller: ['markets', ...CARRIER_FIELDS],
+  carrier: ['markets', 'tier', 'commodities', 'servedBy', ...SELLER_FIELDS],
+};
+
+/**
+ * The fields offered for a file (owner's request, 2026-11-03): a file of buyers, sellers or
+ * carriers is offered only its own; a file with a Type column, whose rows may be any, all.
+ */
+export function fieldsForFile(side: FileSide, mapping: Mapping) {
+  if (mapping.types !== undefined) return SHOWN_FIELDS;
+  return SHOWN_FIELDS.filter((field) => !NOT_FOR[side].includes(field.id));
+}
+
+/** The mapping of the fields offered only: a column chosen for a field not offered is unused. */
+function offeredMapping(side: FileSide, mapping: Mapping): Mapping {
+  const offered = new Set<ImportFieldId>(fieldsForFile(side, mapping).map((field) => field.id));
+  return Object.fromEntries(
+    Object.entries(mapping).filter(([field]) => offered.has(field as ImportFieldId)),
+  );
+}
+
+/**
+ * The mapping when the file's companies are said to be `side`: a seller's market is its grain
+ * types, so a Market column of a sellers' file fills Grain type, and goes back to Market when
+ * the file is said to be buyers' again.
+ */
+export function mappingForSide(side: FileSide, mapping: Mapping): Mapping {
+  if (mapping.types !== undefined) return mapping;
+  const { markets, grainTypes, ...rest } = mapping;
+  if (side === 'seller' && markets !== undefined && grainTypes === undefined)
+    return { ...rest, grainTypes: markets };
+  if (
+    side !== 'seller' &&
+    grainTypes !== undefined &&
+    markets === undefined &&
+    suggestMapping([grainTypes]).markets === grainTypes
+  )
+    return { ...rest, markets: grainTypes };
+  return mapping;
+}
+
 /** Columns matched by their names, without the trading name. */
 function suggested(headers: string[]): Mapping {
   const mapping = suggestMapping(headers);
@@ -219,10 +271,12 @@ function UnusedColumns({ sheet, mapping }: { sheet: Sheet; mapping: Mapping }) {
 
 function ColumnMapping({
   sheet,
+  fields,
   mapping,
   onChange,
 }: {
   sheet: Sheet;
+  fields: typeof SHOWN_FIELDS;
   mapping: Mapping;
   onChange: (mapping: Mapping) => void;
 }) {
@@ -240,7 +294,7 @@ function ColumnMapping({
       <fieldset>
         <legend className="sr-only">Match your columns to fields</legend>
         <div className="grid grid-cols-1 divide-y text-sm">
-          {SHOWN_FIELDS.map((field) => {
+          {fields.map((field) => {
             const id = `${baseId}-${field.id}`;
             const header = mapping[field.id];
             // A field filled from the file is green, so what was found shows at a glance
@@ -326,7 +380,7 @@ export function ImportSpreadsheet({
     if (step.kind !== 'map') return null;
     const issues: ImportIssue[] = [];
     let valid = 0;
-    for (const row of mappedRows(step.sheet, step.mapping)) {
+    for (const row of mappedRows(step.sheet, offeredMapping(step.side, step.mapping))) {
       const result = parseImportRow(row.line, row.values, { defaultTypes: [step.side] });
       if (result.status === 'invalid') issues.push(...result.issues);
       if (result.status === 'ok') valid += 1;
@@ -403,8 +457,13 @@ export function ImportSpreadsheet({
     }
   }
 
+  /** What is checked and sent: the columns of the fields offered only. */
   function planOf(current: Plan): Plan {
-    return { sheet: current.sheet, mapping: current.mapping, side: current.side };
+    return {
+      sheet: current.sheet,
+      mapping: offeredMapping(current.side, current.mapping),
+      side: current.side,
+    };
   }
 
   const missingRequired =
@@ -483,18 +542,29 @@ export function ImportSpreadsheet({
               ]}
               value={step.side}
               onChange={(side) => {
-                setStep({ ...step, side, error: null });
+                setStep({
+                  ...step,
+                  side,
+                  mapping: mappingForSide(side, step.mapping),
+                  error: null,
+                });
               }}
             />
           </div>
           <ColumnMapping
             sheet={step.sheet}
-            mapping={step.mapping}
+            fields={fieldsForFile(step.side, step.mapping)}
+            mapping={offeredMapping(step.side, step.mapping)}
             onChange={(mapping) => {
-              setStep({ ...step, mapping, error: null });
+              // Columns chosen for fields not offered now are kept for when they are again.
+              const offered = offeredMapping(step.side, step.mapping);
+              const kept = Object.fromEntries(
+                Object.entries(step.mapping).filter(([field]) => !(field in offered)),
+              ) as Mapping;
+              setStep({ ...step, mapping: { ...kept, ...mapping }, error: null });
             }}
           />
-          <UnusedColumns sheet={step.sheet} mapping={step.mapping} />
+          <UnusedColumns sheet={step.sheet} mapping={offeredMapping(step.side, step.mapping)} />
           {missingRequired.length > 0 ? (
             <p role="status" className="text-sm text-danger">
               Choose a column for {missingRequired.map((field) => field.label).join(' and ')}.
