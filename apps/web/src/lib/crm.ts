@@ -17,6 +17,11 @@ export function canRemoveFollowUps(role: string): boolean {
   return role === 'org_admin';
 }
 
+/** Admins remove contact history entries, kept in the records (owner's answer, 2026-11-03). */
+export function canRemoveContactLog(role: string): boolean {
+  return role === 'org_admin';
+}
+
 /** 9:00 am tomorrow in Alberta, as a datetime-local input shows it: a follow-up's first due time. */
 export function defaultDueInput(now = new Date()): string {
   const tomorrow = new Date(`${albertaDay(now)}T12:00:00Z`);

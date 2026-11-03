@@ -46,6 +46,9 @@ export type CreateContactLogResult =
   /** The person named responsible is not an active member of the team. */
   | { status: 'not_a_member' };
 
+export type EntryMarkResult =
+  { status: 'saved' } | { status: 'not_found' } | { status: 'forbidden' };
+
 export type CorrectContactLogResult =
   | { status: 'saved' }
   | { status: 'not_found' }
@@ -123,6 +126,10 @@ export interface CrmDatabase {
    * database with who removed it and when, and left out of every list and count.
    */
   removeFollowUp: (ctx: RequestContext, id: string) => Promise<FollowUpWriteResult>;
+  /** Pins an entry to the top of its contact history, or unpins it; traders, operations, admins. */
+  pinContactLog: (ctx: RequestContext, id: string, pinned: boolean) => Promise<EntryMarkResult>;
+  /** Removes an entry from every list, kept with its versions; admins only. */
+  removeContactLog: (ctx: RequestContext, id: string) => Promise<EntryMarkResult>;
 }
 
 type AsUser = <T>(
@@ -149,6 +156,8 @@ interface EntryRow {
   id: string;
   counterparty_id: string;
   created_at: Date;
+  pinned_at: Date | null;
+  pinned_by_name: string | null;
 }
 
 interface FollowUpRow {
@@ -223,12 +232,19 @@ function entries(rows: EntryRow[], revisions: RevisionRow[]): ContactLogEntry[] 
               createdAt: row.created_at.toISOString(),
               current,
               revisions: versions,
+              pinned:
+                row.pinned_at === null
+                  ? null
+                  : { at: row.pinned_at.toISOString(), byName: row.pinned_by_name ?? '' },
             },
           ]
         : [];
     })
     .sort(
       (a, b) =>
+        // Pinned entries first, the latest pinned on top (the owner's request of 2026-11-03).
+        (b.pinned === null ? 0 : Date.parse(b.pinned.at)) -
+          (a.pinned === null ? 0 : Date.parse(a.pinned.at)) ||
         Date.parse(b.current.occurredAt) - Date.parse(a.current.occurredAt) ||
         b.createdAt.localeCompare(a.createdAt),
     );
@@ -310,6 +326,14 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
     order by r.entry_id, r.revision_number desc
   `;
 
+  // Entries not removed, with their pin.
+  const entrySelect = (tx: postgres.TransactionSql) => tx`
+    select e.id, e.counterparty_id, e.created_at, p.pinned_at, p.pinned_by_name
+    from app.contact_log_entries e
+    left join app.contact_log_pins p on p.entry_id = e.id
+    where not exists (select 1 from app.contact_log_removals r where r.entry_id = e.id)
+  `;
+
   const followUpSelect = (tx: postgres.TransactionSql) => tx`
     select f.id, f.counterparty_id, c.legal_name, c.trading_name,
            c.archived_at is not null as archived, f.contact_log_entry_id, f.task, f.due_at,
@@ -322,11 +346,11 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
   return {
     listContactLog(ctx, counterpartyId) {
       return asUser(ctx, async (tx) => {
+        // Removed entries are kept but left out (the owner's request of 2026-11-03).
         const rows = await tx<EntryRow[]>`
-          select e.id, e.counterparty_id, e.created_at
-          from app.contact_log_entries e
-          where e.counterparty_id = ${counterpartyId}
-          order by e.created_at desc
+          ${entrySelect(tx)}
+            and e.counterparty_id = ${counterpartyId}
+          order by p.pinned_at is null, e.created_at desc
           limit ${CRM_LIST_LIMIT}`;
         if (rows.length === 0) return [];
         return entries(
@@ -342,7 +366,8 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
     getContactLogEntry(ctx, id) {
       return asUser(ctx, async (tx) => {
         const rows = await tx<EntryRow[]>`
-          select id, counterparty_id, created_at from app.contact_log_entries where id = ${id}`;
+          ${entrySelect(tx)}
+            and e.id = ${id}`;
         if (rows.length === 0) return null;
         return entries(rows, await revisionsOf(tx, [id]))[0] ?? null;
       });
@@ -379,7 +404,9 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
     correctContactLog(ctx, id, basedOnRevision, log, recordedByName) {
       return asUser(ctx, async (tx): Promise<CorrectContactLogResult> => {
         const [entry] = await tx<{ organization_id: string; counterparty_id: string }[]>`
-          select organization_id, counterparty_id from app.contact_log_entries where id = ${id}`;
+          select organization_id, counterparty_id from app.contact_log_entries e
+          where id = ${id}
+            and not exists (select 1 from app.contact_log_removals r where r.entry_id = e.id)`;
         if (!entry) return { status: 'not_found' };
         const found = await target(tx, entry.counterparty_id);
         if (found.status !== 'ok') return found;
@@ -539,6 +566,46 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
           returning id`;
         // Another admin's removal committed while this one waited: already gone.
         return removed.length === 1 ? { status: 'saved' } : { status: 'not_found' };
+      });
+    },
+
+    pinContactLog(ctx, id, pinned) {
+      return asUser(ctx, async (tx): Promise<EntryMarkResult> => {
+        const [row] = await tx<{ organization_id: string; allowed: boolean }[]>`
+          select e.organization_id, app.can_log_contacts(e.organization_id) as allowed
+          from app.contact_log_entries e
+          where e.id = ${id}
+            and not exists (select 1 from app.contact_log_removals r where r.entry_id = e.id)`;
+        if (!row) return { status: 'not_found' };
+        if (!row.allowed) return { status: 'forbidden' };
+        // The database fills in when and the name, and checks who pins.
+        if (pinned) {
+          await tx`
+            insert into app.contact_log_pins (entry_id, organization_id, pinned_by)
+            values (${id}, ${row.organization_id}, app.current_user_id())
+            on conflict (entry_id) do nothing`;
+        } else {
+          await tx`delete from app.contact_log_pins where entry_id = ${id}`;
+        }
+        return { status: 'saved' };
+      });
+    },
+
+    removeContactLog(ctx, id) {
+      return asUser(ctx, async (tx): Promise<EntryMarkResult> => {
+        const [row] = await tx<{ organization_id: string; allowed: boolean }[]>`
+          select e.organization_id, app.is_org_admin(e.organization_id) as allowed
+          from app.contact_log_entries e
+          where e.id = ${id}
+            and not exists (select 1 from app.contact_log_removals r where r.entry_id = e.id)`;
+        if (!row) return { status: 'not_found' };
+        if (!row.allowed) return { status: 'forbidden' };
+        // Another admin's removal committed meanwhile: already removed, the same outcome.
+        await tx`
+          insert into app.contact_log_removals (entry_id, organization_id, removed_by)
+          values (${id}, ${row.organization_id}, app.current_user_id())
+          on conflict (entry_id) do nothing`;
+        return { status: 'saved' };
       });
     },
   };

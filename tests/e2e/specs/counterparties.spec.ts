@@ -75,6 +75,8 @@ test('imports a spreadsheet, adds a logo and skips companies already listed', as
     'ana@example.test',
   );
   await expect(page.getByRole('region', { name: 'Locations (2)' })).toBeVisible();
+  // The logo itself opens Add logo (the owner's request of 2026-11-03).
+  await page.getByRole('button', { name: 'Add logo' }).click();
   await page
     .getByLabel('Upload logo')
     .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: PNG });
@@ -193,7 +195,8 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await dialog.getByRole('button', { name: 'Open Synthetic Hand Grower' }).click();
 
   await expect(page.getByRole('heading', { name: 'Synthetic Hand Grower' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Company phone (306) 555-0100 x7' })).toHaveAttribute(
+  // With an extension, the platform cannot dial it: a phone link.
+  await expect(page.getByRole('link', { name: '(306) 555-0100 x7' })).toHaveAttribute(
     'href',
     'tel:3065550100;ext=7',
   );
@@ -700,8 +703,9 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
 
   const section = page.getByRole('region', { name: 'Freight rates (0)' });
   await expect(section).toContainText('No live freight rates.');
-  // New freight rate is at the top of a carrier's page, like New bid on a buyer's.
-  await page.getByRole('link', { name: 'New freight rate' }).click();
+  // New freight rate is in the menu at the top of a carrier's page, like New bid on a buyer's.
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'New freight rate' }).click();
 
   await expect(page.getByRole('heading', { name: 'New freight rate' })).toBeVisible();
   await expect(page.getByLabel('Carrier (required)')).toContainText('Synthetic Hauling');
@@ -870,7 +874,7 @@ test('logs a contact with a follow-up, corrects it, and marks the follow-up done
 
   const logged = page.getByRole('region', { name: 'Contact history (1)' });
   await expect(logged).toContainText('Call with Synthetic Merchant');
-  await expect(logged).toContainText('Logged by Synthetic Trader');
+  await expect(logged).toContainText('by Synthetic Trader');
   const followUps = page.getByRole('region', { name: 'Follow-ups (1 open)' });
   await expect(followUps).toContainText('OverdueSend the synthetic bid sheet');
   await expect(followUps).toContainText('9:00 am MT · Synthetic Trader');
@@ -878,12 +882,14 @@ test('logs a contact with a follow-up, corrects it, and marks the follow-up done
   await expect(nav.getByRole('link', { name: 'Follow-ups, 1 overdue or due today' })).toBeVisible();
 
   // A correction is a new version; the first stays in the history.
-  await logged.getByRole('button', { name: 'Correct: Call with Synthetic Merchant' }).click();
+  await logged.getByRole('button', { name: /^Actions: Call with Synthetic Merchant/ }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
   await logged.getByLabel('Notes').fill('Asked about synthetic November and December delivery.');
   await logged.getByRole('button', { name: 'Save correction' }).click();
   await expect(page.getByText('Correction saved.')).toBeVisible();
   await expect(logged).toContainText('November and December');
-  await logged.getByRole('button', { name: 'Show earlier versions (1)' }).click();
+  // Clicking the entry opens its notes and earlier versions.
+  await logged.getByRole('button', { name: /^Call with Synthetic Merchant/ }).click();
   await expect(logged.getByRole('list', { name: 'Earlier versions' })).toContainText(
     'Asked about synthetic November delivery.',
   );

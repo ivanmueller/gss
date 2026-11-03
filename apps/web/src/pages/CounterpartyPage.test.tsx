@@ -93,7 +93,14 @@ afterEach(() => {
 });
 
 /** Edit details and Archive, under the "More actions" menu of a buyer's or seller's page. */
-async function chooseAction(name: 'Edit details' | 'Archive') {
+/** Opens the logo panel by clicking the logo itself (the owner's request of 2026-11-03). */
+async function openLogo(name: 'Add logo' | 'Change logo' = 'Add logo') {
+  await userEvent.click(await screen.findByRole('button', { name }));
+}
+
+async function chooseAction(
+  name: 'Edit details' | 'Archive' | 'Add logo' | 'Change logo' | 'New freight rate',
+) {
   await userEvent.click(await screen.findByRole('button', { name: 'More actions' }));
   await userEvent.click(await screen.findByRole('menuitem', { name }));
 }
@@ -173,12 +180,13 @@ describe('CounterpartyPage', () => {
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('CAD 105.00/MT');
     // The carrier is the page itself, so the table leaves it out.
     expect(within(table).queryByRole('columnheader', { name: 'Carrier' })).toBeNull();
-    // New freight rate is at the top of a carrier's page, not again in its rates.
-    expect(screen.getByRole('link', { name: 'New freight rate' })).toHaveAttribute(
+    // New freight rate is in the menu at the top of a carrier's page, not again in its rates.
+    expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menuitem', { name: 'New freight rate' })).toHaveAttribute(
       'href',
       `/freight/new?carrier=${ID}`,
     );
-    expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
   });
 
   it('lists freight to and from the locations of a counterparty that is not a carrier', async () => {
@@ -258,6 +266,7 @@ describe('CounterpartyPage', () => {
     });
     render(<CounterpartyPage session={SESSION} id={ID} />);
 
+    await openLogo();
     const input = await screen.findByLabelText('Upload logo');
     await userEvent.upload(input, new File([PNG], 'logo.png', { type: 'image/png' }));
 
@@ -275,7 +284,7 @@ describe('CounterpartyPage', () => {
         calls.filter((call) => call.method === 'GET' && call.path === `/counterparties/${ID}`),
       ).toHaveLength(2);
     });
-    // With the logo saved, the upload button gives way to the logo, and the note stays.
+    // With the logo saved, its panel closes, and the note stays.
     await waitFor(() => {
       expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
     });
@@ -314,6 +323,7 @@ describe('CounterpartyPage', () => {
       const calls = withLogoPut();
       clipboardHolding([{ type: 'image/png', data: PNG }]);
       render(<CounterpartyPage session={SESSION} id={ID} />);
+      await openLogo();
       await userEvent.click(await screen.findByRole('button', { name: 'Paste logo' }));
       await waitFor(() => {
         expect(calls.find((call) => call.method === 'PUT')?.body).toEqual(PNG);
@@ -324,6 +334,7 @@ describe('CounterpartyPage', () => {
       const calls = withLogoPut();
       clipboardHolding([{ type: 'text/plain', data: new TextEncoder().encode('Synthetic') }]);
       render(<CounterpartyPage session={SESSION} id={ID} />);
+      await openLogo();
       await userEvent.click(await screen.findByRole('button', { name: 'Paste logo' }));
       expect(await screen.findByRole('alert')).toHaveTextContent('No copied image found');
       expect(calls.some((call) => call.method === 'PUT')).toBe(false);
@@ -333,6 +344,7 @@ describe('CounterpartyPage', () => {
       const calls = withLogoPut();
       vi.stubGlobal('navigator', withClipboard(undefined));
       render(<CounterpartyPage session={SESSION} id={ID} />);
+      await openLogo();
       const paste = await screen.findByRole('button', { name: 'Paste logo' });
       await userEvent.click(paste);
       expect(await screen.findByRole('alert')).toHaveTextContent('press Ctrl+V');
@@ -349,6 +361,7 @@ describe('CounterpartyPage', () => {
     const calls = mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
 
+    await openLogo();
     const input = await screen.findByLabelText('Upload logo');
     await userEvent.upload(
       input,
@@ -373,6 +386,7 @@ describe('CounterpartyPage', () => {
     );
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add logo' })).not.toBeInTheDocument();
   });
 
   it('shows a location’s coordinates and precision only, and when it was added without the weekday', async () => {
@@ -702,17 +716,21 @@ describe('CounterpartyPage editing', () => {
     expect(screen.getByRole('button', { name: 'Edit commodities' })).toBeInTheDocument();
   });
 
-  it('changes an existing logo under Edit details, not at the top', async () => {
+  it('changes an existing logo from the logo itself or the menu, not under Edit details', async () => {
     mockApi({ [`GET ${PATH}`]: () => Response.json({ ...DETAIL, logoSha256: 'b'.repeat(64) }) });
     render(<CounterpartyPage session={SESSION} id={ID} />);
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
-    expect(screen.queryByText(/PNG only/)).not.toBeInTheDocument();
+    await chooseAction('Change logo');
+    expect(
+      within(screen.getByRole('group', { name: 'Change logo' })).getByLabelText('Upload logo'),
+    ).toHaveAttribute('accept', 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp');
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
+    await openLogo('Change logo');
+    expect(screen.getByLabelText('Upload logo')).toBeInTheDocument();
     await chooseAction('Edit details');
-    expect(screen.getByLabelText('Change logo')).toHaveAttribute(
-      'accept',
-      'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp',
-    );
+    expect(screen.queryByLabelText('Upload logo')).not.toBeInTheDocument();
   });
 });
 
@@ -794,9 +812,11 @@ describe('company phone, rail or truck, and coordinates', () => {
         }),
     });
     render(<CounterpartyPage session={SESSION} id={ID} />);
-    expect(
-      await screen.findByRole('link', { name: 'Company phone +1 (306) 555-0100 x12' }),
-    ).toHaveAttribute('href', 'tel:+13065550100;ext=12');
+    // With an extension, the platform cannot dial it: a phone link.
+    expect(await screen.findByRole('link', { name: '+1 (306) 555-0100 x12' })).toHaveAttribute(
+      'href',
+      'tel:+13065550100;ext=12',
+    );
     const locations = screen.getByRole('region', { name: /^Locations/ });
     expect(within(locations).getByText('Served by rail and truck')).toBeInTheDocument();
     // Every location has coordinates: nothing to find.

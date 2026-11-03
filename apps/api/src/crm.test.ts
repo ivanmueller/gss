@@ -33,6 +33,7 @@ const ENTRY_DETAIL: ContactLogEntry = {
     recordedAt: '2026-10-29T14:00:00.000Z',
   },
   revisions: [],
+  pinned: null,
 };
 
 const FOLLOW_UP_DETAIL: FollowUp = {
@@ -228,6 +229,42 @@ describe('/api/v1/contact-log', () => {
       error: { code: 'ENTRY_CHANGED' },
       currentRevision: 3,
     });
+  });
+
+  it('pins and unpins an entry, answering it as it now is', async () => {
+    db.getContactLogEntry.mockResolvedValue({
+      ...ENTRY_DETAIL,
+      pinned: { at: '2026-11-03T16:00:00.000Z', byName: 'Tess Trader' },
+    });
+    const pinned = await request('PUT', `/contact-log/${ENTRY}/pin`);
+    expect(pinned.status).toBe(200);
+    expect(await pinned.json()).toMatchObject({ pinned: { byName: 'Tess Trader' } });
+    expect(db.pinContactLog).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      ENTRY,
+      true,
+    );
+    expect((await request('DELETE', `/contact-log/${ENTRY}/pin`)).status).toBe(200);
+    expect(db.pinContactLog).toHaveBeenLastCalledWith(expect.anything(), ENTRY, false);
+    db.pinContactLog.mockResolvedValue({ status: 'forbidden' });
+    expect((await request('PUT', `/contact-log/${ENTRY}/pin`)).status).toBe(403);
+    db.pinContactLog.mockResolvedValue({ status: 'not_found' });
+    expect((await request('PUT', `/contact-log/${ENTRY}/pin`)).status).toBe(404);
+    expect((await request('PUT', '/contact-log/not-a-uuid/pin')).status).toBe(404);
+  });
+
+  it('removes an entry for an admin, and says when someone else may not', async () => {
+    const removed = await request('POST', `/contact-log/${ENTRY}/removal`);
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ removed: true });
+    db.removeContactLog.mockResolvedValue({ status: 'forbidden' });
+    const refused = await request('POST', `/contact-log/${ENTRY}/removal`);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({
+      error: { message: 'Only admins remove entries from the contact history.' },
+    });
+    db.removeContactLog.mockResolvedValue({ status: 'not_found' });
+    expect((await request('POST', `/contact-log/${ENTRY}/removal`)).status).toBe(404);
   });
 
   it('needs the version a correction is based on', async () => {

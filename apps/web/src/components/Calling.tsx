@@ -8,7 +8,7 @@ import {
   type CallView,
   type TranscriptLine,
 } from '@grain/domain';
-import { PhoneCall, PhoneOff, Play, X } from 'lucide-react';
+import { Copy, Phone, PhoneCall, PhoneOff, Play, X } from 'lucide-react';
 import {
   createContext,
   useCallback,
@@ -21,8 +21,15 @@ import {
 } from 'react';
 
 import { ApiError, apiFetch, apiJson, sendJson } from '../lib/api';
+import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { Input } from './ui/input';
 
 // Calling counterparties through Telnyx (the owner's request of 2026-11-02). A Call button
@@ -397,36 +404,96 @@ function CallNoticeLine({
 }
 
 /**
- * "Call" beside a phone number, on a counterparty's page where calling is set up and the
- * person may log contacts; nothing elsewhere, and nothing beside a number the platform cannot
- * dial (one with an extension, for instance). Disabled while a call is under way.
+ * A phone number on a counterparty's page (the owner's request of 2026-11-03): clicking it
+ * opens a small menu, "Call …" through the platform (the person's cell rings first) and
+ * "Copy number", so a stray click never starts a call. Where calling is not set up, or the
+ * number cannot be dialed by the platform (one with an extension, for instance), it is a
+ * plain phone link as before. Call is disabled while a call is under way.
  */
-export function CallButton({
+export function PhoneNumber({
   contactId,
   name,
   phone,
+  href,
 }: {
+  /** The contact called, or null for the company phone. */
   contactId: string | null;
+  /** Whom the call is with, as the menu and the call's line show it. */
   name: string;
   phone: string;
+  /** The tel: link used where the platform cannot call. */
+  href: string;
 }) {
   const calling = useContext(CallingContext);
-  if (calling === null || dialablePhone(phone) === null) return null;
+  const [copied, setCopied] = useState<'copied' | 'failed' | null>(null);
+  useEffect(() => {
+    if (copied === null) return;
+    const timer = setTimeout(() => {
+      setCopied(null);
+    }, 2500);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [copied]);
+
+  const icon = <Phone aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />;
+  if (calling === null || dialablePhone(phone) === null) {
+    return (
+      <a href={href} className="flex w-fit items-center gap-1.5 underline underline-offset-4">
+        {icon}
+        {phone}
+      </a>
+    );
+  }
   const busy = calling.active !== null && calling.active.call.status !== 'ended';
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(phone);
+      setCopied('copied');
+    } catch {
+      setCopied('failed');
+    }
+  }
+
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      className="h-7 px-2"
-      disabled={busy}
-      aria-label={`Call ${name}`}
-      onClick={() => {
-        calling.start(contactId, name);
-      }}
-    >
-      <PhoneCall aria-hidden="true" />
-      Call
-    </Button>
+    <span className="flex flex-wrap items-center gap-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${phone}, call or copy`}
+            className="flex w-fit cursor-pointer items-center gap-1.5 rounded-inset underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {icon}
+            {phone}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-48">
+          <DropdownMenuItem
+            disabled={busy}
+            onSelect={() => {
+              calling.start(contactId, name);
+            }}
+          >
+            <PhoneCall aria-hidden="true" />
+            Call {name}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void copy()}>
+            <Copy aria-hidden="true" />
+            Copy number
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {copied !== null && (
+        <span
+          role="status"
+          className={cn('text-xs', copied === 'copied' ? 'text-success' : 'text-danger')}
+        >
+          {copied === 'copied' ? 'Number copied.' : 'Could not copy; select the number instead.'}
+        </span>
+      )}
+    </span>
   );
 }
 

@@ -7,11 +7,29 @@ import {
   type TeamMemberName,
   type CallRecordingView,
 } from '@grain/domain';
-import { History, Mail, MapPin, MessageSquarePlus, Pencil, Phone, Plus, Users } from 'lucide-react';
+import {
+  Ellipsis,
+  History,
+  Mail,
+  MapPin,
+  MessageSquarePlus,
+  Pencil,
+  Phone,
+  Pin,
+  PinOff,
+  Plus,
+  Trash2,
+  Users,
+} from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { sendJson } from '../lib/api';
-import { canLogContacts, defaultDueInput, noteFollowUpsChanged } from '../lib/crm';
+import {
+  canLogContacts,
+  canRemoveContactLog,
+  defaultDueInput,
+  noteFollowUpsChanged,
+} from '../lib/crm';
 import { albertaNowInput } from '../lib/time';
 import { useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
@@ -20,6 +38,12 @@ import { CallRecordingDetails } from './Calling';
 import { FollowUpItem } from './FollowUpItem';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 
 export interface ContactLogResponse {
   entries: ContactLogEntry[];
@@ -71,27 +95,55 @@ function Entry({
   entry,
   contactNames,
   canCorrect,
+  canRemove,
   onChanged,
   recordings,
 }: {
   session: DirectorySession;
   entry: ContactLogEntry;
   contactNames: readonly string[];
+  /** Edit (a correction) and pin: traders, operations and admins, while not archived. */
   canCorrect: boolean;
+  /** Remove: admins (the owner's answer of 2026-11-03). */
+  canRemove: boolean;
   onChanged: (message: string) => void;
   /** Recordings of the call this entry was written for (a call placed from the platform). */
   recordings: readonly CallRecordingView[];
 }) {
-  const [correcting, setCorrecting] = useState(false);
-  const [history, setHistory] = useState(false);
+  const [mode, setMode] = useState<'view' | 'correct' | 'remove'>('view');
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { current } = entry;
   const Icon = CHANNEL_ICONS[current.channel];
   const earlier = entry.revisions.slice(1);
+  const title = contactTitle(current);
+  const loggedBy = entry.revisions.at(-1)?.recordedByName ?? current.recordedByName;
+  const summary = current.notes?.split('\n').find((line) => line.trim() !== '') ?? null;
+  // Opening shows what the two lines leave out: all the notes, the call, earlier versions.
+  const hasMore =
+    recordings.length > 0 ||
+    earlier.length > 0 ||
+    (current.notes !== null && current.notes.trim() !== summary?.trim());
 
-  if (correcting) {
+  async function act(run: () => Promise<unknown>, message: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await run();
+      setMode('view');
+      onChanged(message);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (mode === 'correct') {
     return (
       <li className="px-4 py-3">
-        <p className="mb-3 text-sm font-medium">Correct this entry</p>
+        <p className="mb-3 text-sm font-medium">Edit this entry</p>
         <p className="mb-3 text-xs text-muted-foreground">
           The entry as it was stays in its history.
         </p>
@@ -110,14 +162,14 @@ function Entry({
               basedOnRevision: current.revisionNumber,
               values,
             });
-            setCorrecting(false);
+            setMode('view');
             onChanged('Correction saved.');
           }}
           onCancel={() => {
-            setCorrecting(false);
+            setMode('view');
           }}
           onReload={() => {
-            setCorrecting(false);
+            setMode('view');
             onChanged('');
           }}
         />
@@ -125,64 +177,158 @@ function Entry({
     );
   }
 
+  const menu = canCorrect || canRemove;
   return (
-    <li className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-      <div className="flex min-w-0 flex-1 gap-3">
+    <li className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex items-start gap-3">
         <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="flex min-w-0 flex-col gap-1">
-          <Revision revision={current} />
-          <p className="text-xs text-muted-foreground">
-            Logged by {entry.revisions.at(-1)?.recordedByName ?? current.recordedByName}
-            {earlier.length > 0 &&
-              ` · corrected by ${current.recordedByName}, ${formatAlberta(current.recordedAt)}`}
+        <button
+          type="button"
+          disabled={!hasMore}
+          aria-expanded={hasMore ? open : undefined}
+          className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-inset text-left outline-none focus-visible:ring-2 focus-visible:ring-ring enabled:cursor-pointer"
+          onClick={() => {
+            setOpen((value) => !value);
+          }}
+        >
+          <span className="flex min-w-0 items-center gap-1.5 text-sm">
+            {entry.pinned && (
+              <Pin aria-label="Pinned" className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="shrink-0 font-medium">{title}</span>
+            {summary !== null && (
+              <span className="min-w-0 truncate text-muted-foreground">· {summary}</span>
+            )}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {formatAlberta(current.occurredAt)} by {loggedBy}
+            {earlier.length > 0 && ' · edited'}
+          </span>
+        </button>
+        {menu && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Actions: ${title}, ${formatAlberta(current.occurredAt)}`}
+                disabled={busy}
+              >
+                <Ellipsis aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              {canCorrect && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void act(
+                      () =>
+                        sendJson(
+                          `/contact-log/${entry.id}/pin`,
+                          session.token,
+                          entry.pinned ? 'DELETE' : 'PUT',
+                        ),
+                      entry.pinned ? 'Unpinned.' : 'Pinned to the top.',
+                    )
+                  }
+                >
+                  {entry.pinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}
+                  {entry.pinned ? 'Unpin' : 'Pin to the top'}
+                </DropdownMenuItem>
+              )}
+              {canCorrect && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setMode('correct');
+                  }}
+                >
+                  <Pencil aria-hidden="true" />
+                  Edit
+                </DropdownMenuItem>
+              )}
+              {canRemove && (
+                <DropdownMenuItem
+                  className="text-danger data-highlighted:text-danger"
+                  onSelect={() => {
+                    setMode('remove');
+                  }}
+                >
+                  <Trash2 aria-hidden="true" />
+                  Remove
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+      {mode === 'remove' && (
+        <div
+          role="group"
+          aria-label={`Remove: ${title}`}
+          className="ml-7 flex flex-col gap-2 rounded-control border bg-muted/40 p-3 text-sm"
+        >
+          <p>
+            Remove <strong>{title}</strong> from the contact history? It is kept in the records with
+            its call and transcript, but nobody sees it here again.
           </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy}
+              onClick={() =>
+                void act(
+                  () => sendJson(`/contact-log/${entry.id}/removal`, session.token, 'POST'),
+                  'Entry removed.',
+                )
+              }
+            >
+              {busy ? 'Removing…' : 'Remove'}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setMode('view');
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {error !== null && (
+        <p role="alert" className="ml-7 text-xs text-danger">
+          {error}
+        </p>
+      )}
+      {open && hasMore && (
+        <div className="ml-7 flex flex-col gap-2">
+          {current.notes && <p className="text-sm whitespace-pre-line">{current.notes}</p>}
           {recordings.map((recording) => (
             <CallRecordingDetails key={recording.id} token={session.token} recording={recording} />
           ))}
           {earlier.length > 0 && (
             <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                aria-expanded={history}
-                className="flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground underline-offset-4 hover:underline"
-                onClick={() => {
-                  setHistory((open) => !open);
-                }}
-              >
+              <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
                 <History aria-hidden="true" className="size-3.5" />
-                {history
-                  ? 'Hide earlier versions'
-                  : `Show earlier versions (${String(earlier.length)})`}
-              </button>
-              {history && (
-                <ol className="flex flex-col gap-2 border-l-2 pl-3" aria-label="Earlier versions">
-                  {earlier.map((revision) => (
-                    <li key={revision.id} className="flex flex-col gap-0.5 text-muted-foreground">
-                      <Revision revision={revision} />
-                      <p className="text-xs">
-                        Version {revision.revisionNumber}, recorded by {revision.recordedByName},{' '}
-                        {formatAlberta(revision.recordedAt)}
-                      </p>
-                    </li>
-                  ))}
-                </ol>
-              )}
+                Edited by {current.recordedByName}, {formatAlberta(current.recordedAt)}. Earlier
+                versions:
+              </p>
+              <ol className="flex flex-col gap-2 border-l-2 pl-3" aria-label="Earlier versions">
+                {earlier.map((revision) => (
+                  <li key={revision.id} className="flex flex-col gap-0.5 text-muted-foreground">
+                    <Revision revision={revision} />
+                    <p className="text-xs">
+                      Version {revision.revisionNumber}, recorded by {revision.recordedByName},{' '}
+                      {formatAlberta(revision.recordedAt)}
+                    </p>
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
         </div>
-      </div>
-      {canCorrect && (
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`Correct: ${contactTitle(current)}`}
-          onClick={() => {
-            setCorrecting(true);
-          }}
-        >
-          <Pencil aria-hidden="true" />
-          Correct
-        </Button>
       )}
     </li>
   );
@@ -419,7 +565,7 @@ export function FollowUpsCard({ crm }: { crm: CounterpartyCrmState }) {
   );
 }
 
-/** A counterparty's contact history, latest contact first, with Log contact. */
+/** A counterparty's contact history, pinned entries first, then latest contact first. */
 export function ContactHistoryCard({ crm }: { crm: CounterpartyCrmState }) {
   const { session, counterparty, team, log, adding, writer, changed } = crm;
   const formRef = useShowWhenOpened(adding === 'contact');
@@ -487,6 +633,7 @@ export function ContactHistoryCard({ crm }: { crm: CounterpartyCrmState }) {
                 entry={entry}
                 contactNames={counterparty.contactNames}
                 canCorrect={writer}
+                canRemove={canRemoveContactLog(session.organization.role)}
                 onChanged={changed}
                 recordings={
                   crm.recordings.status === 'ok'
