@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Transcripts: the audio uploaded, refusals explained
+
+- `docs/DECISIONS.md`: Telnyx's 400 on staging, the audio uploaded instead of linked, Telnyx's reason logged, failed recordings tried again.
+- `docs/DATA_MODEL.md`: migration `20261103010000_retry_transcripts.sql`.
+
 ## 2026-11-03 — Handoff record of #119
 
 - `docs/HANDOFF.md`: the recordings job logging a part that stopped (ivanmueller/gss#119) with its CI and Deploy staging runs; the transcript not coming on staging, open.

@@ -65,6 +65,8 @@ export class TelnyxError extends Error {
   constructor(
     readonly status: number,
     readonly codes: string,
+    /** Telnyx's own short explanation, made safe to log (safeReason); empty when none. */
+    readonly reason = '',
   ) {
     super(`Telnyx answered ${String(status)}`);
     this.name = 'TelnyxError';
@@ -130,28 +132,76 @@ export const AUDIO_TIMEOUT_MS = 5 * 60_000;
  * the 10-minute claim of a recording, and Cloudflare's 15 minutes for a scheduled run.
  */
 export const TRANSCRIBE_TIMEOUT_MS = 3 * 60_000;
+/**
+ * The largest recording uploaded for transcription (Telnyx takes up to 100 MB; this leaves room
+ * in the Worker's memory). A dual-channel MP3 this size is several hours of call.
+ */
+export const TRANSCRIBE_MAX_BYTES = 80 * 1024 * 1024;
 
 /** The words the caller hears when their cell answers; no counterparty details are sent. */
 export const CONFIRM_PROMPT = 'This is your G S S call. Press 1 to connect.';
 
 /** Error codes from a Telnyx error body ({ errors: [{ code }] }), never its text. */
 async function errorCodes(response: Response): Promise<string> {
+  return (await errorDetails(response)).codes;
+}
+
+/**
+ * Telnyx's explanation made safe for the Worker's log: links and anything long enough to be a
+ * key or a signature removed, printable characters only, 160 at most. Telnyx's errors name the
+ * request's problem (a field or a format), never call content.
+ */
+export function safeReason(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/gi, '<link>')
+    .replace(/[A-Za-z0-9_\-+/=]{24,}/g, '<redacted>')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/"/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
+/** The codes of a Telnyx error body, and its first explanation (made safe to log). */
+async function errorDetails(response: Response): Promise<{ codes: string; reason: string }> {
+  let body: unknown;
   try {
-    const body: unknown = await response.json();
-    const errors =
-      typeof body === 'object' && body !== null ? (body as { errors?: unknown }).errors : null;
-    if (!Array.isArray(errors)) return 'none';
-    const codes = errors
-      .map((error: unknown) =>
-        typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : null,
-      )
-      .filter(
-        (code): code is string => typeof code === 'string' && /^[0-9A-Za-z_]{1,20}$/.test(code),
-      );
-    return codes.length > 0 ? codes.slice(0, 5).join(',') : 'none';
+    body = await response.json();
   } catch {
-    return 'none';
+    return { codes: 'none', reason: '' };
   }
+  if (typeof body !== 'object' || body === null) return { codes: 'none', reason: '' };
+  const { errors, error, detail, message } = body as Record<string, unknown>;
+  const list: unknown[] = Array.isArray(errors) ? errors : [];
+  const codes = list
+    .map((item) =>
+      typeof item === 'object' && item !== null ? (item as { code?: unknown }).code : null,
+    )
+    .map((code) => (typeof code === 'number' ? String(code) : code))
+    .filter(
+      (code): code is string => typeof code === 'string' && /^[0-9A-Za-z_]{1,20}$/.test(code),
+    );
+  // Telnyx's { errors: [{ title, detail }] }, or the OpenAI-like { error: { message } },
+  // { detail }, { detail: [{ msg }] } or { message } of its AI endpoints.
+  const first = list[0] as { detail?: unknown; title?: unknown } | undefined;
+  const nested =
+    typeof error === 'object' && error !== null ? (error as { message?: unknown }) : {};
+  const detailItem = Array.isArray(detail)
+    ? (detail[0] as { msg?: unknown } | undefined)
+    : undefined;
+  const reason = [
+    first?.detail,
+    first?.title,
+    nested.message,
+    error,
+    detail,
+    detailItem?.msg,
+    message,
+  ].find((value): value is string => typeof value === 'string' && value.trim() !== '');
+  return {
+    codes: codes.length > 0 ? codes.slice(0, 5).join(',') : 'none',
+    reason: reason === undefined ? '' : safeReason(reason),
+  };
 }
 
 /** The client that talks to api.telnyx.com, or null until calling is set up. */
@@ -283,9 +333,20 @@ export const telnyxClient: TelnyxFactory = (env) => {
     async transcribeRecording(recordingId) {
       const url = await recordingUrl(recordingId);
       if (url === null) return null;
+      // One limit for the download and the transcription together (the job's time budget).
+      const signal = AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS);
+      // The audio is uploaded, not passed as a link (staging, 2026-11-03: Telnyx answered 400
+      // to the recording's link, whose signed query string follows ".mp3").
+      const audio = await fetch(url, { signal });
+      if (!audio.ok) throw new TelnyxError(audio.status, 'audio_download');
+      if (Number(audio.headers.get('Content-Length') ?? 0) > TRANSCRIBE_MAX_BYTES) {
+        throw new TelnyxError(413, 'audio_too_large');
+      }
+      const file = await audio.blob();
+      if (file.size > TRANSCRIBE_MAX_BYTES) throw new TelnyxError(413, 'audio_too_large');
       const form = new FormData();
       form.set('model', 'deepgram/nova-3');
-      form.set('file_url', url);
+      form.set('file', new Blob([file], { type: 'audio/mpeg' }), 'recording.mp3');
       form.set('language', 'en');
       form.set('response_format', 'verbose_json');
       // Each channel on its own (billed for both), punctuated, numbers and prices written out.
@@ -297,9 +358,12 @@ export const telnyxClient: TelnyxFactory = (env) => {
         method: 'POST',
         headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
         body: form,
-        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+        signal,
       });
-      if (!response.ok) throw new TelnyxError(response.status, await errorCodes(response));
+      if (!response.ok) {
+        const { codes, reason } = await errorDetails(response);
+        throw new TelnyxError(response.status, codes, reason);
+      }
       const body: unknown = await response.json();
       const { segments, text } =
         typeof body === 'object' && body !== null
