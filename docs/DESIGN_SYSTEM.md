@@ -50,7 +50,7 @@ Severity rises from info to danger. Colour never carries meaning alone: statuses
 - **Rounding:** every radius is a multiple of `--radius-base` (8 px): `xs` 2, `sm` 4, `md` 6, `lg` 8, `xl` 12, `2xl` 16, `full`. Components use `rounded-control` (6), `rounded-badge` (4), `rounded-card` (12), `rounded-popover` (8), `rounded-dialog` (12).
 - **Motion:** `animate-dialog-in` (220 ms, rising 12 px and growing from 97%) for a window that replaces another; nothing moves under the system's reduced-motion setting.
 - **Shadows:** `shadow-xs` cards, inputs, outline buttons; `shadow-sm` raised on hover; `shadow-md` menus; `shadow-lg` drawers and dialogs. Opacity light theme 5 / 8 / 12 / 16 %, night theme 20 / 28 / 36 / 45 %.
-- **Layers:** `--z-topbar`, `--z-sidebar`, `--z-overlay`, `--z-popover`, used as `z-(--z-popover)`.
+- **Layers:** `--z-topbar`, `--z-sidebar`, `--z-floating` (the live call box, bottom right), `--z-overlay`, `--z-popover`, used as `z-(--z-popover)`.
 
 ## Light and night themes
 

@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-03 — A live call box
+
+- `docs/DECISIONS.md`: the call's progress in a box in the bottom right corner, with its steps and a running clock.
+- `docs/PRODUCT.md`: the live call box on the counterparty page.
+- `docs/DESIGN_SYSTEM.md`: the `--z-floating` layer.
+
 ## 2026-11-03 — Handoff record of #122
 
 - `docs/HANDOFF.md`: Codex's review of the contact history rows fixed (ivanmueller/gss#122) with its CI and Deploy staging runs.

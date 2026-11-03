@@ -186,8 +186,9 @@ type CallNotice =
   | { kind: 'error'; message: string; needsCell: boolean };
 
 /**
- * Calling on a counterparty's page, for those who may log contacts there: the Call buttons
- * (CallButton) appear only inside it, and only once the API says calling is set up.
+ * Calling on a counterparty's page, for those who may log contacts there: its phone numbers
+ * (PhoneNumber) offer Call only inside it, and only once the API says calling is set up; the
+ * call's progress shows in a box in the bottom right corner (CallBox).
  */
 export function CallingProvider({
   token,
@@ -247,7 +248,7 @@ export function CallingProvider({
     };
   }, [refreshFor]);
 
-  // Once the call has ended, its line stays a few seconds, then goes (the owner's request of
+  // Once the call has ended, its box stays a few seconds, then goes (the owner's request of
   // 2026-11-02); a call that connected is in the contact history by then.
   useEffect(() => {
     if (callId === null || !ended) return;
@@ -324,7 +325,7 @@ export function CallingProvider({
   return (
     <CallingContext.Provider value={value}>
       {notice !== null && (
-        <CallNoticeLine
+        <CallBox
           notice={notice}
           onDismiss={() => {
             setNotice(null);
@@ -340,7 +341,51 @@ export function CallingProvider({
   );
 }
 
-function CallNoticeLine({
+/** The steps of a call, as the box's progress shows them. */
+const CALL_STEPS = ['calling_you', 'confirming', 'calling_them', 'connected'] as const;
+
+/** What to do now, under the call's status. */
+const CALL_HINTS: Record<(typeof CALL_STEPS)[number], (name: string) => string> = {
+  calling_you: () => 'Answer your cell phone.',
+  confirming: () => 'Press 1 on your cell to connect.',
+  calling_them: (name) => `Ringing ${name}. Stay on the line.`,
+  connected: () => 'Hang up on your phone to end the call.',
+};
+
+/** Seconds as m:ss (h:mm:ss past an hour). */
+function clockTime(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = String(whole % 60).padStart(2, '0');
+  return hours > 0
+    ? `${String(hours)}:${String(minutes).padStart(2, '0')}:${rest}`
+    : `${String(minutes)}:${rest}`;
+}
+
+/** The time now, once a second while `on`. */
+function useTicking(on: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return;
+    // The first tick comes within a second; until then the clock reads from the last tick
+    // (never below 0:00).
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [on]);
+  return now;
+}
+
+/**
+ * The live call box in the bottom right corner (the owner's request of 2026-11-03): whom the
+ * call is with, a ringing phone while it connects, each step, and once connected a running
+ * clock; then how it ended, for a few seconds. Why a call could not be placed shows here too.
+ */
+function CallBox({
   notice,
   onDismiss,
   onAddCell,
@@ -349,57 +394,124 @@ function CallNoticeLine({
   onDismiss: () => void;
   onAddCell: () => void;
 }) {
-  let text: ReactNode;
-  let done = true;
+  const call = notice.kind === 'call' ? notice.call : null;
+  const connected = call?.status === 'connected';
+  const now = useTicking(connected);
+  const frame =
+    'fixed right-4 bottom-4 left-4 z-(--z-floating) flex flex-col gap-3 rounded-card border bg-card p-4 text-card-foreground shadow-lg sm:left-auto sm:w-80';
+
   if (notice.kind === 'error') {
-    text = (
-      <>
-        {notice.message}{' '}
+    return (
+      <div role="alert" className={frame}>
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-danger-subtle text-danger">
+            <PhoneOff aria-hidden="true" className="size-5" />
+          </span>
+          <p className="min-w-0 flex-1 text-sm">{notice.message}</p>
+          <DismissButton onDismiss={onDismiss} />
+        </div>
         {notice.needsCell && (
-          <Button variant="outline" size="sm" onClick={onAddCell}>
+          <Button variant="outline" size="sm" className="self-start" onClick={onAddCell}>
             Add your cell phone
           </Button>
         )}
-      </>
+      </div>
     );
-  } else {
-    const { call, name } = notice;
-    done = call.status === 'ended';
-    if (!done) {
-      text = `${name}: ${CALL_STATUS_LABELS[call.status]}`;
-    } else if (call.outcome === 'talked') {
-      const length =
-        call.connectedAt !== null && call.endedAt !== null
-          ? formatCallLength((Date.parse(call.endedAt) - Date.parse(call.connectedAt)) / 1000)
-          : null;
-      text = `${name}: call ended${length === null ? '' : ` after ${length}`}${
-        call.contactLogEntryId === null ? '.' : '. It is in the contact history.'
-      }`;
-    } else {
-      text = `${name}: ${call.outcome === null ? 'call ended' : CALL_OUTCOME_LABELS[call.outcome]}.`;
-    }
   }
-  const failed = notice.kind === 'error';
+
+  const { name } = notice;
+  const status = notice.call.status;
+  const done = status === 'ended';
+  const ringing = !done && !connected;
+  let headline: string;
+  if (!done) {
+    headline = CALL_STATUS_LABELS[status];
+  } else if (notice.call.outcome === 'talked') {
+    const { connectedAt, endedAt } = notice.call;
+    const length =
+      connectedAt !== null && endedAt !== null
+        ? formatCallLength((Date.parse(endedAt) - Date.parse(connectedAt)) / 1000)
+        : null;
+    headline = `Call ended${length === null ? '' : ` after ${length}`}${
+      notice.call.contactLogEntryId === null ? '.' : '. It is in the contact history.'
+    }`;
+  } else {
+    headline = `${notice.call.outcome === null ? 'Call ended' : CALL_OUTCOME_LABELS[notice.call.outcome]}.`;
+  }
+  const step = done ? -1 : CALL_STEPS.indexOf(status);
+  const elapsed =
+    connected && notice.call.connectedAt !== null
+      ? clockTime((now - Date.parse(notice.call.connectedAt)) / 1000)
+      : null;
+
   return (
-    <div
-      role={failed ? 'alert' : 'status'}
-      className={`flex flex-wrap items-center gap-2 rounded-card border px-4 py-2 text-sm ${
-        failed ? 'text-danger' : ''
-      }`}
-    >
-      {done ? (
-        <PhoneOff aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-      ) : (
-        <PhoneCall aria-hidden="true" className="size-4 shrink-0 animate-pulse text-success" />
-      )}
-      <span className="min-w-0 flex-1">{text}</span>
-      {done && (
-        <Button variant="ghost" size="icon-sm" onClick={onDismiss}>
-          <X aria-hidden="true" />
-          <span className="sr-only">Dismiss</span>
-        </Button>
+    <div role="status" aria-label={`Call with ${name}`} className={frame}>
+      <div className="flex items-center gap-3">
+        <span className="relative flex size-10 shrink-0 items-center justify-center">
+          {ringing && (
+            <span
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full bg-success/40 motion-safe:animate-ping"
+            />
+          )}
+          <span
+            className={cn(
+              'relative flex size-10 items-center justify-center rounded-full',
+              connected && 'bg-success-solid text-success-solid-foreground',
+              ringing && 'bg-success-subtle text-success',
+              done && 'bg-muted text-muted-foreground',
+            )}
+          >
+            {done ? (
+              <PhoneOff aria-hidden="true" className="size-5" />
+            ) : (
+              <PhoneCall
+                aria-hidden="true"
+                className={cn('size-5', ringing && 'motion-safe:animate-pulse')}
+              />
+            )}
+          </span>
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <p className="truncate text-sm font-semibold">{name}</p>
+          <p className="text-sm text-muted-foreground">{headline}</p>
+        </div>
+        {elapsed !== null && (
+          // The running clock is for the eye; screen readers hear "Connected" once.
+          <span aria-hidden="true" className="font-medium text-success tabular-nums">
+            {elapsed}
+          </span>
+        )}
+        {done && <DismissButton onDismiss={onDismiss} />}
+      </div>
+      {!done && (
+        <>
+          <ol aria-label="Progress" className="flex gap-1">
+            {CALL_STEPS.map((stepName, index) => (
+              <li
+                key={stepName}
+                aria-current={index === step ? 'step' : undefined}
+                className={cn('h-1 flex-1 rounded-full', index <= step ? 'bg-success' : 'bg-muted')}
+              >
+                <span className="sr-only">{CALL_STATUS_LABELS[stepName]}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="text-xs text-muted-foreground">
+            {CALL_HINTS[CALL_STEPS[step] ?? 'calling_you'](name)}
+          </p>
+        </>
       )}
     </div>
+  );
+}
+
+function DismissButton({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <Button variant="ghost" size="icon-sm" className="-mt-1 -mr-1" onClick={onDismiss}>
+      <X aria-hidden="true" />
+      <span className="sr-only">Dismiss</span>
+    </Button>
   );
 }
 

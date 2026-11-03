@@ -137,7 +137,13 @@ describe('PhoneNumber', () => {
     const user = userEvent.setup();
     await callPat(user);
 
-    expect(await screen.findByText('Pat Buyer: Calling your cell…')).toBeInTheDocument();
+    // The live call box in the bottom right corner: whom, the step, what to do now.
+    const box = await screen.findByRole('status', { name: 'Call with Pat Buyer' });
+    expect(box).toHaveTextContent('Pat BuyerCalling your cell…');
+    expect(box).toHaveTextContent('Answer your cell phone.');
+    expect(
+      within(box).getByRole('list', { name: 'Progress' }).querySelector('[aria-current]'),
+    ).toHaveTextContent('Calling your cell…');
     expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
       counterpartyId: COUNTERPARTY,
       contactId: CONTACT,
@@ -150,19 +156,26 @@ describe('PhoneNumber', () => {
     );
     await user.keyboard('{Escape}');
 
-    expect(await screen.findByText('Pat Buyer: Connected', {}, { timeout: 4000 })).toBeVisible();
+    // Connected: the last step, and a running clock.
     expect(
-      await screen.findByText(
-        'Pat Buyer: call ended after 6 min 12 s. It is in the contact history.',
+      await within(box).findByText('Hang up on your phone to end the call.', {}, { timeout: 4000 }),
+    ).toBeVisible();
+    expect(box).toHaveTextContent('Pat BuyerConnected');
+    expect(box).toHaveTextContent(/\d+:\d{2}/);
+    expect(
+      await within(box).findByText(
+        'Call ended after 6 min 12 s. It is in the contact history.',
         {},
         { timeout: 4000 },
       ),
     ).toBeVisible();
+    // Ended: no more steps.
+    expect(within(box).queryByRole('list', { name: 'Progress' })).not.toBeInTheDocument();
     expect(onLogged).toHaveBeenCalledTimes(1);
-    // The line goes by itself a few seconds after the call ended.
+    // The box goes by itself a few seconds after the call ended.
     await vi.waitFor(
       () => {
-        expect(screen.queryByText(/call ended after/)).not.toBeInTheDocument();
+        expect(screen.queryByRole('status', { name: 'Call with Pat Buyer' })).toBeNull();
       },
       { timeout: 7000 },
     );
@@ -179,9 +192,7 @@ describe('PhoneNumber', () => {
     });
     page();
     await callPat();
-    expect(
-      await screen.findByText('Pat Buyer: 1 was not pressed, so they were not called.'),
-    ).toBeVisible();
+    expect(await screen.findByText('1 was not pressed, so they were not called.')).toBeVisible();
   });
 
   it('asks for the cell phone when none is saved', async () => {
@@ -379,12 +390,12 @@ describe('the contact history after a call that connected', () => {
     const onLogged = page();
     const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
     await callPat(user);
-    await screen.findByText(/call ended after/);
+    await screen.findByText(/Call ended after/);
     // The line goes after 5 seconds; the reloads at 30 s, 90 s, 3 and 5 min still happen.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
-    expect(screen.queryByText(/call ended after/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Call ended after/)).not.toBeInTheDocument();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300_000);
     });
