@@ -532,7 +532,7 @@ export async function transcribeNewRecordings(
         await db.keepTranscriptLines(recordingId, lines, transcriptText(lines));
       } catch (error) {
         console.error(
-          `Recording not transcribed: ${error instanceof TelnyxError ? `status=${String(error.status)} codes=${error.codes}` : failureSummary(error)}`,
+          `Recording not transcribed: ${error instanceof TelnyxError ? `status=${String(error.status)} codes=${error.codes}${error.reason === '' ? '' : ` reason=${error.reason}`}` : failureSummary(error)}`,
         );
       }
     }

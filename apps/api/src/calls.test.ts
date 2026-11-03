@@ -15,6 +15,8 @@ import {
   TELNYX_TIMEOUT_MS,
   decodeClientState,
   encodeClientState,
+  multipartUpload,
+  reasonCategory,
   telnyxClient,
   telnyxConfig,
   TelnyxError,
@@ -985,6 +987,16 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
     );
     // The one that failed is tried again once its claim lapses; only the status is logged.
     expect(errors).toHaveBeenCalledWith('Recording not transcribed: status=503 codes=90001');
+  });
+
+  it("logs Telnyx's reason for a refusal with its status", async () => {
+    queue('synthetic-rec-1');
+    telnyx.transcribeRecording.mockRejectedValueOnce(new TelnyxError(400, 'none', 'file_format'));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await transcribeNewRecordings(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(errors).toHaveBeenCalledWith(
+      'Recording not transcribed: status=400 codes=none reason=file_format',
+    );
     expect(db.close).toHaveBeenCalled();
   });
 
@@ -1128,6 +1140,11 @@ describe('the Telnyx client for transcripts by side', () => {
           Response.json({ data: { download_urls: { mp3: 'https://files.example.test/rec.mp3' } } }),
         );
       }
+      if (url === 'https://files.example.test/rec.mp3') {
+        return Promise.resolve(
+          new Response('ID3-synthetic-audio', { headers: { 'Content-Length': '19' } }),
+        );
+      }
       if (url.endsWith('/ai/audio/transcriptions')) return Promise.resolve(transcription.clone());
       return Promise.resolve(Response.json({ errors: [{ code: '10005' }] }, { status: 404 }));
     });
@@ -1153,13 +1170,23 @@ describe('the Telnyx client for transcripts by side', () => {
       { side: 'caller', start: 0.4, text: 'Morning Pat.' },
       { side: 'counterparty', start: 2.1, text: 'Two loads at the posted price.' },
     ]);
-    const [url, init] = fetchMock.mock.calls[1] ?? [];
+    // The audio is downloaded from Telnyx's link, then uploaded (staging's 400 to the link).
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://files.example.test/rec.mp3');
+    const [url, init] = fetchMock.mock.calls[2] ?? [];
     expect(url).toBe('https://api.telnyx.com/v2/ai/audio/transcriptions');
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer KEY_synthetic_test_only');
-    const form = init?.body as FormData;
+    // Streamed, not a FormData held in memory (Codex's review of 5c72810, finding 1).
+    expect(init?.body).toBeInstanceOf(ReadableStream);
+    const form = await new Response(init?.body as ReadableStream<Uint8Array>, {
+      headers: { 'Content-Type': new Headers(init?.headers).get('Content-Type') ?? '' },
+    }).formData();
     expect(form.get('model')).toBe('deepgram/nova-3');
-    expect(form.get('file_url')).toBe('https://files.example.test/rec.mp3');
+    expect(form.has('file_url')).toBe(false);
+    const file = form.get('file') as File;
+    expect(file.name).toBe('recording.mp3');
+    expect(file.type).toBe('audio/mpeg');
+    expect(await file.text()).toBe('ID3-synthetic-audio');
     expect(form.get('response_format')).toBe('verbose_json');
     expect(JSON.parse(form.get('model_config') as string)).toMatchObject({ multichannel: true });
   });
@@ -1180,6 +1207,118 @@ describe('the Telnyx client for transcripts by side', () => {
     }
     serve(Response.json({ text: ' ', segments: [] }));
     expect(await telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1')).toEqual([]);
+  });
+
+  it("keeps what a refusal was about as a fixed word, never Telnyx's text (Codex, 5c72810, 2)", async () => {
+    serve(
+      Response.json(
+        { detail: 'Unsupported file format: Two loads at the posted price. Basic dXNlcjpwYXNz' },
+        { status: 400 },
+      ),
+    );
+    const refused = await telnyxClient(TELNYX_ENV)
+      ?.transcribeRecording('synthetic-rec-1')
+      .catch((error: unknown) => error);
+    expect(refused).toMatchObject({ status: 400, codes: 'none', reason: 'file_format' });
+    expect(JSON.stringify(refused)).not.toMatch(/posted|dXNlcjpwYXNz/);
+    serve(Response.json({ errors: [{ code: 10015, title: 'Bad Request' }] }, { status: 400 }));
+    await expect(
+      telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1'),
+    ).rejects.toMatchObject({ codes: '10015', reason: 'other' });
+    serve(Response.json({ error: { message: 'model_config: invalid' } }, { status: 400 }));
+    await expect(
+      telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1'),
+    ).rejects.toMatchObject({ reason: 'model_config' });
+    serve(
+      Response.json(
+        { detail: [{ msg: 'field required', loc: ['body', 'model'] }] },
+        { status: 422 },
+      ),
+    );
+    await expect(
+      telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1'),
+    ).rejects.toMatchObject({ status: 422, reason: 'missing_field' });
+  });
+
+  it('names a refusal by the first category its words match', () => {
+    expect(reasonCategory('Invalid model')).toBe('model');
+    expect(reasonCategory('Could not download file_url')).toBe('file_url');
+    expect(reasonCategory('File too large')).toBe('file_size');
+    expect(reasonCategory('Insufficient balance')).toBe('balance');
+    expect(reasonCategory('Something else entirely')).toBe('other');
+    expect(reasonCategory('  ')).toBe('');
+  });
+
+  it('does not upload a recording too large to transcribe', async () => {
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/recordings/synthetic-rec-1')) {
+        return Promise.resolve(
+          Response.json({ data: { download_urls: { mp3: 'https://files.example.test/rec.mp3' } } }),
+        );
+      }
+      return Promise.resolve(
+        new Response('ID3', { headers: { 'Content-Length': String(81 * 1024 * 1024) } }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1'),
+    ).rejects.toMatchObject({ status: 413, codes: 'audio_too_large' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('uploads nothing when the length of the audio is not known', async () => {
+    const fetchMock = vi.fn<typeof fetch>((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/recordings/synthetic-rec-1')) {
+        return Promise.resolve(
+          Response.json({ data: { download_urls: { mp3: 'https://files.example.test/rec.mp3' } } }),
+        );
+      }
+      return Promise.resolve(new Response('ID3'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1'),
+    ).rejects.toMatchObject({ status: 413, codes: 'audio_length' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops an upload whose audio runs past its stated length', async () => {
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/recordings/synthetic-rec-1')) {
+        return Promise.resolve(
+          Response.json({ data: { download_urls: { mp3: 'https://files.example.test/rec.mp3' } } }),
+        );
+      }
+      if (url === 'https://files.example.test/rec.mp3') {
+        return Promise.resolve(
+          new Response('ID3-longer-than-stated', { headers: { 'Content-Length': '3' } }),
+        );
+      }
+      // Telnyx reads the whole upload before answering.
+      return new Response(init?.body as ReadableStream<Uint8Array>)
+        .arrayBuffer()
+        .then(() => Response.json({ text: 'never' }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      telnyxClient(TELNYX_ENV)?.transcribeRecording('synthetic-rec-1'),
+    ).rejects.toMatchObject({ status: 413, codes: 'audio_too_large' });
+  });
+
+  it('builds a multipart body of exactly its stated length', async () => {
+    const upload = multipartUpload([['model', 'deepgram/nova-3']], {
+      name: 'file',
+      filename: 'recording.mp3',
+      type: 'audio/mpeg',
+      size: 3,
+      body: new Response('ID3').body as ReadableStream<Uint8Array>,
+    });
+    const bytes = new Uint8Array(await new Response(upload.body).arrayBuffer());
+    expect(bytes.byteLength).toBe(upload.length);
   });
 
   it('gives null when Telnyx no longer has the recording, and fails on an error', async () => {
