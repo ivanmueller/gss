@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #122
+
+- `docs/HANDOFF.md`: Codex's review of the contact history rows fixed (ivanmueller/gss#122) with its CI and Deploy staging runs.
+
 ## 2026-11-03 — Codex's review of the less cluttered page
 
 - `docs/DECISIONS.md`: every entry with notes opens; a removal and a correction serialized.
