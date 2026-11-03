@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — No Market for sellers in spreadsheets
+
+- `docs/DECISIONS.md`, `docs/API.md`, `docs/PRODUCT.md`: a sellers' file offered no Market; a seller-only row's Market left out with a warning.
+
 ## 2026-11-03 — Handoff record of #125 and #126
 
 - `docs/HANDOFF.md`: a seller's own details (ivanmueller/gss#125) and contacts added on the counterparty's page only (ivanmueller/gss#126), with their CI and Deploy staging runs; the checks on staging.

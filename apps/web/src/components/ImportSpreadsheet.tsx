@@ -84,9 +84,8 @@ const CARRIER_FIELDS: readonly ImportFieldId[] = ['equipment', 'loadsIn', 'deliv
 /** What a buyer, seller or carrier file does not have, when the file has no Type column. */
 const NOT_FOR: Record<FileSide, readonly ImportFieldId[]> = {
   buyer: [...SELLER_FIELDS, ...CARRIER_FIELDS],
-  // A sellers' Market column is kept as Market and read as their grain types where it names
-  // them, Pet, Bird … left out with a warning (packages/domain/src/directory.ts).
-  seller: [...CARRIER_FIELDS],
+  // Market is a buyer's; a seller has Grain type (owner's request, 2026-11-03).
+  seller: ['markets', ...CARRIER_FIELDS],
   carrier: ['markets', 'tier', 'commodities', 'servedBy', ...SELLER_FIELDS],
 };
 
@@ -133,13 +132,6 @@ export function tonsColumn(mapping: Mapping): string | null {
     .toLowerCase()
     .replace(/[^a-z]+/g, ' ');
   return /\btons?\b/.test(words) ? header : null;
-}
-
-/** A field's name in the column list: a sellers' Market column is read as their grain type. */
-function fieldLabel(field: (typeof SHOWN_FIELDS)[number], side: FileSide, mapping: Mapping) {
-  return field.id === 'markets' && side === 'seller' && mapping.types === undefined
-    ? 'Market (read as grain type)'
-    : field.label;
 }
 
 /** Columns matched by their names, without the trading name. */
@@ -292,13 +284,11 @@ function UnusedColumns({ sheet, mapping }: { sheet: Sheet; mapping: Mapping }) {
 
 function ColumnMapping({
   sheet,
-  side,
   fields,
   mapping,
   onChange,
 }: {
   sheet: Sheet;
-  side: FileSide;
   fields: typeof SHOWN_FIELDS;
   mapping: Mapping;
   onChange: (mapping: Mapping) => void;
@@ -338,7 +328,7 @@ function ColumnMapping({
                     <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-success" />
                   )}
                   <span>
-                    {fieldLabel(field, side, mapping)}
+                    {field.label}
                     {field.required && <span className="text-danger"> (required)</span>}
                   </span>
                 </label>
@@ -576,7 +566,6 @@ export function ImportSpreadsheet({
           </div>
           <ColumnMapping
             sheet={step.sheet}
-            side={step.side}
             fields={fieldsForFile(step.side, step.mapping)}
             mapping={offeredMapping(step.side, step.mapping)}
             onChange={(mapping) => {

@@ -1065,26 +1065,15 @@ function readCounterparty(
   const { phone, more } = readCompanyPhone(r);
   const seller = types.includes('seller');
   const buysToo = types.some((type) => type === 'buyer' || type === 'broker');
-  const marketText = r.value('markets');
-  // A spreadsheet's Market column on a row that is only a seller (owner's request,
-  // 2026-11-03): a seller's market is its grain types, so names that are all grain types
-  // are read as them; Pet, Bird … are a buyer's, left out with a warning rather than holding
-  // up the file.
-  const sellerMarket = r.importing && seller && !buysToo && marketText !== null;
-  const marketGrainTypes = sellerMarket ? grainTypesOf(marketText) : null;
+  // A Market column is a buyer's (Pet, Bird …): on a spreadsheet row that is only a seller it
+  // is left out with a warning, never read as grain types (owner's request, 2026-11-03).
   let markets: Market[] = [];
-  if (marketGrainTypes === null) markets = readMarkets(r);
-  else if (marketGrainTypes.unknown.length > 0) {
-    r.notice(
-      'markets',
-      `is a buyer's (${Object.values(MARKET_LABELS).join(', ')}), so it is not imported for a seller; a seller's is its Grain type: ${GRAIN_TYPE_LIST}`,
-    );
-  } else if (r.value('grainTypes') === null) {
-    r.notice('markets', `is read as the seller's Grain type: ${marketText ?? ''}`);
-  }
-  let grainTypes = readGrainTypes(r);
-  if (marketGrainTypes !== null && grainTypes.length === 0 && marketGrainTypes.unknown.length === 0)
-    grainTypes = marketGrainTypes.grainTypes;
+  if (r.importing && seller && !buysToo) {
+    if (r.value('markets') !== null) {
+      r.notice('markets', `is a buyer's, so it is not imported for a seller; use Grain type`);
+    }
+  } else markets = readMarkets(r);
+  const grainTypes = readGrainTypes(r);
   const sellerKind = readSellerKind(r);
   const annualTonnes = readAnnualTonnes(r);
   const { organicCertifier, organicCertifiedUntil } = readOrganicCertificate(r);
