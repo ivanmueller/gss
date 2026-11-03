@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #125 and #126
+
+- `docs/HANDOFF.md`: a seller's own details (ivanmueller/gss#125) and contacts added on the counterparty's page only (ivanmueller/gss#126), with their CI and Deploy staging runs; the checks on staging.
+
 ## 2026-11-03 — Contacts added on the counterparty's page only
 
 - `docs/DECISIONS.md`: the owner's request: no contact in spreadsheets or the add form; the sellers' header row without Contact, Phone and Email.
