@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-03 — Handoff record of #119
+
+- `docs/HANDOFF.md`: the recordings job logging a part that stopped (ivanmueller/gss#119) with its CI and Deploy staging runs; the transcript not coming on staging, open.
+
 ## 2026-11-02 — Handoff record of #118
 
 - `docs/HANDOFF.md`: Codex's review of the transcript by side (ivanmueller/gss#118) with its CI and Deploy staging runs and Codex's re-review.
