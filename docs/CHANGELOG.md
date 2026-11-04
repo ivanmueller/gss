@@ -1,5 +1,26 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Codex's re-review of Undo an import
+
+- `docs/DECISIONS.md`: additions taken off only while the company is unchanged, its version read under its lock; older imports always flagged.
+- `docs/DATA_MODEL.md`: `import_additions.row_version`.
+
+## 2026-11-04 — Codex's review of Undo an import
+
+- `docs/DECISIONS.md`: what an import adds recorded with it; retypes found without times; older imports left to check by hand.
+- `docs/DATA_MODEL.md`, `docs/API.md`: the migration and the plan as now.
+
+## 2026-11-04 — Handoff record of #132
+
+- `docs/HANDOFF.md`: Select all among the coordinates results and Back keeping the list as it was (ivanmueller/gss#132) with its CI and Deploy staging runs.
+
+## 2026-11-04 — Undo an import
+
+- `docs/DECISIONS.md`: the owner's request and answers; what is removed, kept and listed to check.
+- `docs/DATA_MODEL.md`: migration `20261104010000_undo_import.sql`.
+- `docs/API.md`: `GET /counterparties/imports` and `POST /counterparties/imports/{id}/undo`.
+- `docs/PRODUCT.md`: Undo an import in the + window.
+
 ## 2026-11-04 — Back returns to the list as it was
 
 - `docs/DECISIONS.md`: the search and Show archived in the address; the back arrow as the browser's Back; the scroll position kept.

@@ -1813,3 +1813,47 @@ export function suggestMapping(headers: string[]): Partial<Record<ImportFieldId,
   }
   return mapping;
 }
+
+/** One spreadsheet import, as Undo an import lists it. */
+export interface ImportSummary {
+  id: string;
+  fileName: string;
+  createdAt: string;
+  /** Companies it created that are still in the list. */
+  companies: number;
+  undoneAt: string | null;
+}
+
+/** What undoing an import removes, or removed (owner's request, 2026-11-04). */
+export interface UndoImportPlan {
+  fileName: string;
+  createdAt: string;
+  /**
+   * False for an import made before imports recorded what they add to companies already
+   * listed: undoing it cannot find every such change, so the person is told to check.
+   */
+  recordsAdditions: boolean;
+  /** Companies it created that are deleted, with their locations. */
+  companies: number;
+  locations: number;
+  /** Companies it created that are kept: with a history, or retyped since. */
+  kept: { id: string; name: string; reason: 'history' | 'retyped' }[];
+  /** Companies already listed that it changed: what is taken off, and what to check. */
+  listed: {
+    id: string;
+    name: string;
+    locations: number;
+    grains: number;
+    removedTypes: string[];
+    sellerDetails: boolean;
+    /** Changed fields that cannot be put back, to check by hand (e.g. tier, notes). */
+    check: string[];
+  }[];
+}
+
+/** POST /api/v1/counterparties/imports/{id}/undo: preview (commit false) or undo. */
+export const undoImportRequestSchema = z.object({
+  commit: z.boolean(),
+  /** With commit: how many companies the preview said it deletes; nothing is written otherwise. */
+  expected: z.number().int().min(0).max(100_000).optional(),
+});

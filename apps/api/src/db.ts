@@ -23,7 +23,9 @@ import type {
   Tier,
   TransportAccess,
   GrainType,
+  ImportSummary,
   SellerKind,
+  UndoImportPlan,
   VerificationStatus,
 } from '@grain/domain';
 import postgres from 'postgres';
@@ -148,6 +150,14 @@ export type DeleteResult =
   | { status: 'not_archived' }
   | { status: 'has_history'; history: CounterpartyHistory[] };
 
+export type UndoImportResult =
+  | { status: 'ok'; committed: boolean; plan: UndoImportPlan }
+  | { status: 'not_found' }
+  | { status: 'forbidden' }
+  | { status: 'undone' }
+  /** It no longer removes what was previewed: the new plan, nothing written. */
+  | { status: 'changed'; plan: UndoImportPlan };
+
 export type WriteResult =
   | { status: 'saved' }
   /** The counterparty (or its contact or location) does not exist or is not visible. */
@@ -208,6 +218,12 @@ export interface ImportAddition {
   /** Its contacts the file changes: only the fields given. */
   /** A carrier's lanes the file adds, unverified; listed ones are left as they are. */
   lanes?: CarrierLane[];
+  /**
+   * What undoing the import takes off again, recorded with it (app.import_additions): the
+   * types it adds, whether it fills in seller details the company has none of, and what else
+   * it replaces, to check by hand (Codex's review of a62e00a).
+   */
+  provenance?: { addedTypes: CounterpartyType[]; sellerDetails: boolean; replaced: string[] };
   contactUpdates: {
     id: string;
     changes: Partial<Pick<ContactInput, 'role' | 'email' | 'phone'>>;
@@ -448,6 +464,18 @@ export interface Database
    * freight rates, a contact history or follow-ups is kept.
    */
   deleteCounterparty: (ctx: RequestContext, id: string) => Promise<DeleteResult>;
+  /** The organization's spreadsheet imports, latest first; admins only. */
+  listImports: (ctx: RequestContext, organizationId: string) => Promise<ImportSummary[] | null>;
+  /**
+   * What undoing an import removes (`commit` false), or removes it (`commit` true, only when it
+   * still deletes `expected` companies), under the import lock and the admin's membership lock.
+   */
+  undoImport: (
+    ctx: RequestContext,
+    batchId: string,
+    commit: boolean,
+    expected?: number,
+  ) => Promise<UndoImportResult>;
   addContact: (
     ctx: RequestContext,
     counterpartyId: string,
@@ -1148,10 +1176,10 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.import_batches
             (organization_id, kind, file_name, content_sha256, row_count, created_count,
-             skipped_count, created_by)
+             skipped_count, created_by, records_additions)
           values (${org}, 'counterparties', ${batch.fileName}, ${batch.contentSha256},
                   ${batch.rowCount}, ${batch.counterparties.length}, ${batch.skippedCount},
-                  app.current_user_id())
+                  app.current_user_id(), true)
           returning id
         `;
         if (!created) throw new Error('import batch was not created');
@@ -1239,6 +1267,8 @@ export function createDatabase(sql: postgres.Sql): Database {
             commodity_code: k.commodity,
             direction: k.direction,
             created_by: ctx.userId,
+            // Which import added it, to undo it (2026-11-04).
+            import_batch_id: batchId,
           })),
         );
         for (const part of chunks(commodities)) {
@@ -1318,6 +1348,34 @@ export function createDatabase(sql: postgres.Sql): Database {
               returning id`,
             );
           }
+        }
+        // What it adds to companies already listed, for undoing it exactly (2026-11-04).
+        // Each company row's version as this import leaves it, to know later whether anything
+        // changed it since (Codex's re-review of c4d4808).
+        const versions = new Map(
+          (
+            await tx<{ id: string; version: string }[]>`
+              select id, xmin::text as version from app.counterparties
+              where id = any (${`{${batch.additions.map((a) => a.counterpartyId).join(',')}}`}::uuid[])`
+          ).map((row) => [row.id, row.version]),
+        );
+        const provenance = batch.additions.flatMap(({ counterpartyId, provenance: p }) =>
+          p && (p.addedTypes.length > 0 || p.sellerDetails || p.replaced.length > 0)
+            ? [
+                {
+                  organization_id: org,
+                  import_batch_id: batchId,
+                  counterparty_id: counterpartyId,
+                  added_types: enumArray(p.addedTypes),
+                  seller_details: p.sellerDetails,
+                  replaced: `{${p.replaced.map((r) => JSON.stringify(r)).join(',')}}`,
+                  row_version: versions.get(counterpartyId) ?? null,
+                },
+              ]
+            : [],
+        );
+        for (const part of chunks(provenance)) {
+          await tx`insert into app.import_additions ${tx(part)}`;
         }
         // A carrier's lanes, unverified until someone on the team verifies them (owner's
         // request, 2026-11-01); one a carrier already lists stays as it is. Written after the
@@ -1519,6 +1577,256 @@ export function createDatabase(sql: postgres.Sql): Database {
           where id = ${id} and (archived_at is null) = ${archived}
         `;
         return SAVED;
+      });
+    },
+
+    listImports(ctx, organizationId) {
+      return asUser(ctx, async (tx): Promise<ImportSummary[] | null> => {
+        const [check] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${organizationId}) as allowed`;
+        if (check?.allowed !== true) return null;
+        const rows = await tx<
+          {
+            id: string;
+            fileName: string;
+            createdAt: Date;
+            undoneAt: Date | null;
+            companies: number;
+          }[]
+        >`
+          select b.id, b.file_name as "fileName", b.created_at as "createdAt",
+                 b.undone_at as "undoneAt",
+                 (select count(*)::int from app.counterparties c
+                   where c.organization_id = b.organization_id and c.import_batch_id = b.id)
+                   as companies
+          from app.import_batches b
+          where b.organization_id = ${organizationId}
+          order by b.created_at desc
+          limit 50`;
+        return rows.map((row) => ({
+          id: row.id,
+          fileName: row.fileName,
+          createdAt: row.createdAt.toISOString(),
+          undoneAt: row.undoneAt?.toISOString() ?? null,
+          companies: row.companies,
+        }));
+      });
+    },
+
+    undoImport(ctx, batchId, commit, expected) {
+      return asUser(ctx, async (tx): Promise<UndoImportResult> => {
+        const [batch] = await tx<
+          {
+            org: string;
+            fileName: string;
+            createdAt: Date;
+            undone: boolean;
+            recordsAdditions: boolean;
+          }[]
+        >`
+          select organization_id as org, file_name as "fileName", created_at as "createdAt",
+                 undone_at is not null as undone, records_additions as "recordsAdditions"
+          from app.import_batches where id = ${batchId}`;
+        if (!batch) return { status: 'not_found' };
+        const [allowed] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${batch.org}) as allowed`;
+        if (allowed?.allowed !== true) return { status: 'forbidden' };
+        // No import runs while it is undone, and the admin stays an admin until it is done
+        // (as for deleting a counterparty, Codex's review of ivanmueller/gss#93).
+        await tx`select app.lock_counterparty_import(${batch.org})`;
+        const [admin] = await tx`
+          select m.id from app.organization_members m
+          where m.organization_id = ${batch.org}
+            and m.user_id = app.current_user_id()
+            and m.role = 'org_admin' and m.status = 'active'
+            and app.is_org_admin(m.organization_id)
+          for share of m`;
+        if (!admin) return { status: 'forbidden' };
+        // Locked, and refused by the update policy once undone.
+        const [open] = await tx`
+          select id from app.import_batches where id = ${batchId} and undone_at is null
+          for update`;
+        if (!open) return { status: 'undone' };
+
+        const ids = (list: readonly string[]) => `{${list.join(',')}}`;
+        const created = await tx<{ id: string; name: string; types: string[] }[]>`
+          select id, legal_name as name, to_jsonb(types::text[]) as types
+          from app.counterparties
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}
+          order by id
+          for update`;
+        const createdIds = new Set(created.map((row) => row.id));
+        const retyped = new Set(
+          (await tx<{ id: string }[]>`select app.import_retyped(${batchId}) as id`).map(
+            (row) => row.id,
+          ),
+        );
+        const withHistory = new Set(
+          (
+            await tx<{ id: string }[]>`
+              select c.id from app.counterparties c
+              where c.id = any (${ids([...createdIds])}::uuid[])
+                and (exists (select from app.quotes q where q.counterparty_id = c.id)
+                  or exists (select from app.freight_quotes q
+                             where q.carrier_id = c.id
+                                or exists (select from app.facilities f
+                                           where f.counterparty_id = c.id
+                                             and f.id in (q.origin_facility_id,
+                                                          q.destination_facility_id)))
+                  or exists (select from app.contact_log_entries e where e.counterparty_id = c.id)
+                  or exists (select from app.follow_ups u where u.counterparty_id = c.id)
+                  or exists (select from app.calls k where k.counterparty_id = c.id))`
+          ).map((row) => row.id),
+        );
+        const kept = created.flatMap((row): UndoImportPlan['kept'] =>
+          withHistory.has(row.id)
+            ? [{ id: row.id, name: row.name, reason: 'history' as const }]
+            : retyped.has(row.id)
+              ? [{ id: row.id, name: row.name, reason: 'retyped' as const }]
+              : [],
+        );
+        const keptIds = new Set(kept.map((row) => row.id));
+        const removing = created.filter((row) => !keptIds.has(row.id)).map((row) => row.id);
+        const [located] = await tx<{ count: number }[]>`
+          select count(*)::int as count from app.facilities
+          where counterparty_id = any (${ids(removing)}::uuid[])`;
+
+        // Companies already listed that it added to: what it recorded (2026-11-04), never
+        // guessed from timestamps (Codex's review of a62e00a).
+        const notCreated = ids([...createdIds]);
+        const addedFacilities = await tx<{ id: string; counterpartyId: string; used: boolean }[]>`
+          select f.id, f.counterparty_id as "counterpartyId",
+                 (exists (select from app.quotes q where q.facility_id = f.id)
+                  or exists (select from app.freight_quotes q
+                             where f.id in (q.origin_facility_id, q.destination_facility_id)))
+                   as used
+          from app.facilities f
+          where f.organization_id = ${batch.org} and f.import_batch_id = ${batchId}
+            and not (f.counterparty_id = any (${notCreated}::uuid[]))`;
+        const addedGrains = await tx<{ id: string; counterpartyId: string }[]>`
+          select id, counterparty_id as "counterpartyId" from app.counterparty_commodities
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}
+            and not (counterparty_id = any (${notCreated}::uuid[]))`;
+        const recorded = await tx<
+          {
+            counterpartyId: string;
+            addedTypes: string[];
+            sellerDetails: boolean;
+            replaced: string[];
+            rowVersion: string | null;
+          }[]
+        >`
+          select counterparty_id as "counterpartyId",
+                 to_jsonb(added_types::text[]) as "addedTypes",
+                 seller_details as "sellerDetails", to_jsonb(replaced) as replaced,
+                 row_version as "rowVersion"
+          from app.import_additions
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}`;
+        const touched = new Set<string>([
+          ...addedFacilities.map((f) => f.counterpartyId),
+          ...addedGrains.map((g) => g.counterpartyId),
+          ...recorded.map((r) => r.counterpartyId),
+        ]);
+        // Locked, with each row's version as locked: an edit committed while this waited for
+        // the lock is the version compared (Codex's re-review of 439d845).
+        const listedRows = await tx<
+          { id: string; name: string; types: string[]; version: string }[]
+        >`
+          select id, legal_name as name, to_jsonb(types::text[]) as types, xmin::text as version
+          from app.counterparties
+          where id = any (${ids([...touched])}::uuid[])
+          order by lower(legal_name), id
+          for update`;
+        const listed = listedRows.map((row) => {
+          const found = recorded.find((r) => r.counterpartyId === row.id);
+          // Unchanged since the import wrote it: what it added is still its own.
+          const record = found && { ...found, current: found.rowVersion === row.version };
+          // A type it added is taken off while another one remains, and only while nothing
+          // changed the company since (a later import may have added it again).
+          const added = (record?.addedTypes ?? []).filter((type) => row.types.includes(type));
+          const removedTypes =
+            record?.current === true && row.types.some((type) => !added.includes(type))
+              ? added
+              : [];
+          const sellerDetails = record?.sellerDetails === true && removedTypes.includes('seller');
+          const check = [...(record?.replaced ?? [])];
+          if (added.length > 0 && removedTypes.length === 0) {
+            check.push(
+              record?.current === true
+                ? 'Type'
+                : 'Type (changed since this import, so left as it is)',
+            );
+          }
+          if (record?.sellerDetails === true && !sellerDetails) check.push('Seller details');
+          if (!batch.recordsAdditions) {
+            check.push(
+              'Type, seller details, grains, tier and notes (not recorded by this import)',
+            );
+          }
+          if (addedFacilities.some((f) => f.counterpartyId === row.id && f.used))
+            check.push('A location it added that a bid, offer or freight rate uses (kept)');
+          return {
+            id: row.id,
+            name: row.name,
+            locations: addedFacilities.filter((f) => f.counterpartyId === row.id && !f.used).length,
+            grains: addedGrains.filter((g) => g.counterpartyId === row.id).length,
+            removedTypes,
+            sellerDetails,
+            check,
+          };
+        });
+        const plan: UndoImportPlan = {
+          fileName: batch.fileName,
+          createdAt: batch.createdAt.toISOString(),
+          // Made before imports recorded what they add: some of its changes to companies
+          // already listed may not be found at all (Codex's re-review of c4d4808).
+          recordsAdditions: batch.recordsAdditions,
+          companies: removing.length,
+          locations: located?.count ?? 0,
+          kept,
+          listed,
+        };
+        if (!commit) return { status: 'ok', committed: false, plan };
+        if (expected !== removing.length) return { status: 'changed', plan };
+
+        // The companies it created: archived, then deleted with what they have.
+        const gone = ids(removing);
+        await tx`update app.counterparties set archived_at = now()
+                 where id = any (${gone}::uuid[]) and archived_at is null`;
+        await tx`select id from app.facilities where counterparty_id = any (${gone}::uuid[])
+                 order by id for update`;
+        await tx`delete from app.counterparty_commodities where counterparty_id = any (${gone}::uuid[])`;
+        await tx`delete from app.carrier_lanes where carrier_id = any (${gone}::uuid[])`;
+        await tx`delete from app.counterparty_contacts where counterparty_id = any (${gone}::uuid[])`;
+        await tx`delete from app.facilities where counterparty_id = any (${gone}::uuid[])`;
+        await tx`delete from app.counterparty_logos where counterparty_id = any (${gone}::uuid[])`;
+        const deleted = await tx`delete from app.counterparties where id = any (${gone}::uuid[])
+                                 returning id`;
+        if (deleted.length !== removing.length) throw new Error('not every company was deleted');
+        // What it added to companies already listed.
+        await tx`delete from app.facilities
+                 where id = any (${ids(addedFacilities.filter((f) => !f.used).map((f) => f.id))}::uuid[])`;
+        await tx`delete from app.counterparty_commodities
+                 where id = any (${ids(addedGrains.map((g) => g.id))}::uuid[])`;
+        for (const company of listed) {
+          if (company.removedTypes.length === 0) continue;
+          const row = listedRows.find((r) => r.id === company.id);
+          const types = (row?.types ?? []).filter((type) => !company.removedTypes.includes(type));
+          await tx`
+            update app.counterparties
+            set types = ${enumArray(types)}::app.counterparty_type[]
+                ${
+                  company.sellerDetails
+                    ? tx`, grain_types = '{}', seller_kind = null, annual_tonnes = null,
+                         organic_certifier = null, organic_certified_until = null`
+                    : tx``
+                }
+            where id = ${company.id}`;
+        }
+        await tx`update app.import_batches
+                 set undone_at = now(), undone_by = app.current_user_id()
+                 where id = ${batchId}`;
+        return { status: 'ok', committed: true, plan };
       });
     },
 
