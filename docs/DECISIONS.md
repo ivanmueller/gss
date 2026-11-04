@@ -501,7 +501,7 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Notes:** every row's, each labelled with its location ("Olds, AB: …", or "row 7: …" without one) when the rows' notes differ; the same notes on every row are kept once as they are. What would pass 2,000 characters is left out with a warning.
 - **Company phone:** the first given; each other number goes to the notes as "Company phone also: (403) 555-0101 (Didsbury, AB)".
 - **Grain types and markets:** all of the rows', each once.
-- **Tier:** the highest (A, then B, then C), with a warning where rows differ.
+- **Tier:** the highest (A, then B, then C). At first with a warning where rows differed; the owner's sheet then gave hundreds of them, and the owner asked to stop them (2026-11-04), so the highest tier is kept without a warning.
 - **Website, seller kind, tonnes a year and organic certificate:** the first given, a later row filling one left empty; a warning only when two given values differ.
 - **Name spelling, types and verification:** the first row's, with a warning, as before.
 - The import window no longer says "Fix these and choose the file again" under warnings, which do not stop the import.

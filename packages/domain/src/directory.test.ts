@@ -682,18 +682,8 @@ describe("one company's rows combined (owner's answers, 2026-11-03)", () => {
       ok({ ...mill, tier: 'C' }, 4),
     ]);
     expect(groups[0]?.counterparty).toMatchObject({ grainTypes: ['feed', 'organic'], tier: 'A' });
-    expect(warnings).toEqual([
-      {
-        line: 3,
-        field: 'tier',
-        message: 'differs from line 2 for the same company; the highest tier, A, is used',
-      },
-      {
-        line: 4,
-        field: 'tier',
-        message: 'differs from line 3 for the same company; the highest tier, A, is used',
-      },
-    ]);
+    // The highest tier wins without a warning (owner's request, 2026-11-04).
+    expect(warnings).toEqual([]);
     const buyer = { legalName: 'Synthetic Feeds', country: 'CA', types: 'buyer' };
     expect(
       groupImportRows([ok({ ...buyer, markets: 'Pet' }, 2), ok({ ...buyer, markets: 'Bird' }, 3)])
