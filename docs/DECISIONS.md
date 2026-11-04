@@ -513,6 +513,10 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - P2: the types taken off a listed company were guessed from the types of the companies the import created, so a buyer could lose Buyer, and nothing was taken off when it created none. The types an import adds are now recorded with it.
 - P2: what an import changed was read from audit events at the import's time by the same person, which another transaction could share. Additions are now recorded with the import; the audit trail is no longer read for it (`app.import_changes` dropped before reaching `main`).
 
+**2026-11-04 — Codex's re-review of Undo an import (`c4d4808`, before its merge): two P2, fixed with tests.**
+- P2: undoing an earlier import read its recorded additions even after the company changed, so a Seller type (and seller details) a later import added again could be taken off. The record now keeps the company row's version as the import left it (`import_additions.row_version`, its xmin, no time compared); a type or seller details are taken off only while the row is still that version, and otherwise listed: "Type (changed since this import, so left as it is)".
+- P2: an import made before the record that changed a listed company without adding a location named no company to check. Undoing such an import now always says so, above what it removes.
+
 **2026-11-04 — Back returns to the list as it was (owner's request).** After opening a counterparty from a filtered, scrolled list, the back arrow opened plain Counterparties at the top. Now:
 - **Every filter is in the address:** the search (`?q=`) and Show archived (`?archived=1`) joined the type, view, commodities, market, grain type, tier and lane places already there.
 - **The back arrow is the browser's Back** when the page was opened from the page it names (each history entry keeps the address it was opened from); otherwise it opens that page afresh, as before.

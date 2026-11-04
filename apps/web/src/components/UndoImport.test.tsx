@@ -18,6 +18,7 @@ const BATCH: ImportSummary = {
 const PLAN: UndoImportPlan = {
   fileName: 'synthetic-sellers.csv',
   createdAt: '2026-11-04T01:00:00.000Z',
+  recordsAdditions: true,
   companies: 2,
   locations: 3,
   kept: [],
@@ -106,6 +107,22 @@ describe('UndoImport', () => {
     expect(screen.getByText(/Deletes 1 company this import created/)).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveValue('');
     expect(previews).toBe(1);
+  });
+
+  // Codex's re-review of c4d4808: an older import's unrecorded changes are always mentioned.
+  it('warns that an import made before the record may leave changes on listed companies', async () => {
+    mockApi({
+      [LIST]: () => Response.json({ imports: [BATCH] }),
+      [UNDO]: () =>
+        Response.json({ committed: false, plan: { ...PLAN, recordsAdditions: false, listed: [] } }),
+    });
+    render(<UndoImport session={SESSION} onUndone={vi.fn()} onClose={vi.fn()} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Undo synthetic-sellers.csv' }),
+    );
+    expect(
+      await screen.findByText(/made before imports kept a record of what they add/),
+    ).toBeInTheDocument();
   });
 
   it('marks an import already undone', async () => {

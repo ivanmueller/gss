@@ -435,7 +435,7 @@ describe('undoing an import as app_api', () => {
             id: older.id,
             locations: 1,
             removedTypes: [],
-            check: [expect.stringContaining('check its type, seller details, grains') as unknown],
+            check: [expect.stringContaining('not recorded by this import') as unknown],
           },
         ],
       },
@@ -445,5 +445,138 @@ describe('undoing an import as app_api', () => {
     // Only what is recorded is taken off: the location it added. The type stays to check.
     expect(after?.facilities.map((f) => f.city)).toEqual(['Olds']);
     expect(after?.types).toEqual(['buyer', 'seller']);
+  });
+
+  // Codex's re-review of c4d4808, finding 1: what an earlier import added is not taken off
+  // once the company changed since, as a later import may have added it again.
+  it('leaves a type that a later import added again', async () => {
+    await importRows(
+      users.olivia,
+      'buyer',
+      [
+        {
+          line: 2,
+          values: { legalName: 'Synthetic Twice Buyer', country: 'CA', city: 'Olds', region: 'AB' },
+        },
+      ],
+      'a'.repeat(64),
+    );
+    const first = await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Twice Buyer',
+            country: 'CA',
+            grainTypes: 'Feed',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      'b'.repeat(64),
+    );
+    const [twice] = await admin<{ id: string }[]>`
+      select id from app.counterparties where organization_id = ${orgs.a} and legal_name = 'Synthetic Twice Buyer'`;
+    if (!twice) throw new Error('no buyer');
+    // Seller taken off by hand, then a later import adds it again.
+    const detail = await db.getCounterparty(as(users.adam), twice.id);
+    if (!detail) throw new Error('no detail');
+    await db.updateCounterparty(as(users.adam), twice.id, detail.version, {
+      legalName: detail.legalName,
+      tradingName: null,
+      types: ['buyer'],
+      primaryCountry: 'CA',
+      verificationStatus: 'unverified',
+      website: null,
+      phone: null,
+      markets: [],
+      tier: null,
+      grainTypes: [],
+      sellerKind: null,
+      annualTonnes: null,
+      organicCertifier: null,
+      organicCertifiedUntil: null,
+      notes: null,
+    });
+    await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Twice Buyer',
+            country: 'CA',
+            grainTypes: 'Organic',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      'c'.repeat(64),
+    );
+    const preview = await db.undoImport(as(users.adam), first, false);
+    expect(preview).toMatchObject({
+      status: 'ok',
+      plan: {
+        listed: [
+          {
+            id: twice.id,
+            removedTypes: [],
+            sellerDetails: false,
+            check: expect.arrayContaining([
+              'Type (changed since this import, so left as it is)',
+            ]) as unknown,
+          },
+        ],
+      },
+    });
+    expect(await db.undoImport(as(users.adam), first, true, 0)).toMatchObject({ status: 'ok' });
+    expect(await db.getCounterparty(as(users.adam), twice.id)).toMatchObject({
+      types: ['buyer', 'seller'],
+      grainTypes: ['organic'],
+    });
+  });
+
+  // Finding 2: an older import that changed a listed company without adding a location still
+  // says that it may have left changes.
+  it('says an older import may have left changes, even when no company can be named', async () => {
+    await importRows(
+      users.olivia,
+      'buyer',
+      [
+        {
+          line: 2,
+          values: { legalName: 'Synthetic Quiet Buyer', country: 'CA', city: 'Olds', region: 'AB' },
+        },
+      ],
+      'd'.repeat(64),
+    );
+    const sellers = await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Quiet Buyer',
+            country: 'CA',
+            tier: 'A',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      'e'.repeat(64),
+    );
+    await admin`update app.import_batches set records_additions = false where id = ${sellers}`;
+    await admin`delete from app.import_additions where import_batch_id = ${sellers}`;
+    expect(await db.undoImport(as(users.adam), sellers, false)).toMatchObject({
+      status: 'ok',
+      plan: { recordsAdditions: false, companies: 0, listed: [] },
+    });
   });
 });

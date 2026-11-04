@@ -1350,6 +1350,15 @@ export function createDatabase(sql: postgres.Sql): Database {
           }
         }
         // What it adds to companies already listed, for undoing it exactly (2026-11-04).
+        // Each company row's version as this import leaves it, to know later whether anything
+        // changed it since (Codex's re-review of c4d4808).
+        const versions = new Map(
+          (
+            await tx<{ id: string; version: string }[]>`
+              select id, xmin::text as version from app.counterparties
+              where id = any (${`{${batch.additions.map((a) => a.counterpartyId).join(',')}}`}::uuid[])`
+          ).map((row) => [row.id, row.version]),
+        );
         const provenance = batch.additions.flatMap(({ counterpartyId, provenance: p }) =>
           p && (p.addedTypes.length > 0 || p.sellerDetails || p.replaced.length > 0)
             ? [
@@ -1360,6 +1369,7 @@ export function createDatabase(sql: postgres.Sql): Database {
                   added_types: enumArray(p.addedTypes),
                   seller_details: p.sellerDetails,
                   replaced: `{${p.replaced.map((r) => JSON.stringify(r)).join(',')}}`,
+                  row_version: versions.get(counterpartyId) ?? null,
                 },
               ]
             : [],
@@ -1703,12 +1713,17 @@ export function createDatabase(sql: postgres.Sql): Database {
             addedTypes: string[];
             sellerDetails: boolean;
             replaced: string[];
+            current: boolean;
           }[]
         >`
-          select counterparty_id as "counterpartyId", to_jsonb(added_types::text[]) as "addedTypes",
-                 seller_details as "sellerDetails", to_jsonb(replaced) as replaced
-          from app.import_additions
-          where organization_id = ${batch.org} and import_batch_id = ${batchId}`;
+          select a.counterparty_id as "counterpartyId",
+                 to_jsonb(a.added_types::text[]) as "addedTypes",
+                 a.seller_details as "sellerDetails", to_jsonb(a.replaced) as replaced,
+                 -- Unchanged since the import wrote it: what it added is still its own.
+                 coalesce(c.xmin::text = a.row_version, false) as current
+          from app.import_additions a
+          join app.counterparties c on c.id = a.counterparty_id
+          where a.organization_id = ${batch.org} and a.import_batch_id = ${batchId}`;
         const touched = new Set<string>([
           ...addedFacilities.map((f) => f.counterpartyId),
           ...addedGrains.map((g) => g.counterpartyId),
@@ -1722,16 +1737,26 @@ export function createDatabase(sql: postgres.Sql): Database {
           for update`;
         const listed = listedRows.map((row) => {
           const record = recorded.find((r) => r.counterpartyId === row.id);
-          // A type it added is taken off while another one remains.
+          // A type it added is taken off while another one remains, and only while nothing
+          // changed the company since (a later import may have added it again).
           const added = (record?.addedTypes ?? []).filter((type) => row.types.includes(type));
-          const removedTypes = row.types.some((type) => !added.includes(type)) ? added : [];
+          const removedTypes =
+            record?.current === true && row.types.some((type) => !added.includes(type))
+              ? added
+              : [];
           const sellerDetails = record?.sellerDetails === true && removedTypes.includes('seller');
           const check = [...(record?.replaced ?? [])];
-          if (added.length > 0 && removedTypes.length === 0) check.push('Type');
+          if (added.length > 0 && removedTypes.length === 0) {
+            check.push(
+              record?.current === true
+                ? 'Type'
+                : 'Type (changed since this import, so left as it is)',
+            );
+          }
           if (record?.sellerDetails === true && !sellerDetails) check.push('Seller details');
           if (!batch.recordsAdditions) {
             check.push(
-              'it was imported before Undo recorded what an import adds, so check its type, seller details, grains, tier and notes',
+              'Type, seller details, grains, tier and notes (not recorded by this import)',
             );
           }
           if (addedFacilities.some((f) => f.counterpartyId === row.id && f.used))
@@ -1749,6 +1774,9 @@ export function createDatabase(sql: postgres.Sql): Database {
         const plan: UndoImportPlan = {
           fileName: batch.fileName,
           createdAt: batch.createdAt.toISOString(),
+          // Made before imports recorded what they add: some of its changes to companies
+          // already listed may not be found at all (Codex's re-review of c4d4808).
+          recordsAdditions: batch.recordsAdditions,
           companies: removing.length,
           locations: located?.count ?? 0,
           kept,

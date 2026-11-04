@@ -42,6 +42,14 @@ function PlanText({ plan }: { plan: UndoImportPlan }) {
         </strong>
         , their contacts, grains and logos.
       </p>
+      {!plan.recordsAdditions && (
+        <p className="rounded-control border border-warning-border bg-warning-subtle px-3 py-2 text-warning">
+          This import was made before imports kept a record of what they add to companies already in
+          the list. Undoing it removes the companies it created and the locations it added, but a
+          type, seller details, grains or a tier it gave a company already listed are left as they
+          are. Check those companies by hand.
+        </p>
+      )}
       {plan.kept.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <p>

@@ -60,6 +60,11 @@ create table app.import_additions (
   -- What else it replaced, which cannot be put back ("tier", "notes", "a location's address"),
   -- for the admin to check by hand.
   replaced text[] not null default '{}' check (array_position(replaced, null) is null),
+  -- The company row's version (its xmin) once the import wrote it. Undoing takes its types
+  -- and seller details off only while the row is still that version: any later change (a
+  -- later import adding Seller again, an edit) leaves them to check by hand (Codex's
+  -- re-review of c4d4808). No time is compared.
+  row_version text check (row_version ~ '^[0-9]{1,20}$'),
   primary key (import_batch_id, counterparty_id),
   foreign key (organization_id, import_batch_id) references app.import_batches (organization_id, id),
   foreign key (organization_id, counterparty_id)
@@ -85,7 +90,8 @@ create policy import_additions_select_for_admins on app.import_additions
 
 revoke all on table app.import_additions from public, anon, authenticated, service_role;
 grant select,
-  insert (organization_id, import_batch_id, counterparty_id, added_types, seller_details, replaced)
+  insert (organization_id, import_batch_id, counterparty_id, added_types, seller_details, replaced,
+          row_version)
   on app.import_additions to app_api;
 
 create function app.import_retyped(batch uuid)

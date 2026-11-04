@@ -1459,6 +1459,7 @@ describe('undoing an import', () => {
   const plan = {
     fileName: 'sellers.csv',
     createdAt: '2026-11-04T01:00:00.000Z',
+    recordsAdditions: true,
     companies: 2,
     locations: 3,
     kept: [],

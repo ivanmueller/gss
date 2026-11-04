@@ -1828,6 +1828,11 @@ export interface ImportSummary {
 export interface UndoImportPlan {
   fileName: string;
   createdAt: string;
+  /**
+   * False for an import made before imports recorded what they add to companies already
+   * listed: undoing it cannot find every such change, so the person is told to check.
+   */
+  recordsAdditions: boolean;
   /** Companies it created that are deleted, with their locations. */
   companies: number;
   locations: number;

@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Codex's re-review of Undo an import
+
+- `docs/DECISIONS.md`: additions taken off only while the company is unchanged; older imports always flagged.
+- `docs/DATA_MODEL.md`: `import_additions.row_version`.
+
 ## 2026-11-04 — Codex's review of Undo an import
 
 - `docs/DECISIONS.md`: what an import adds recorded with it; retypes found without times; older imports left to check by hand.
