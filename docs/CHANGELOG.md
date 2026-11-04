@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Handoff record of #134
+
+- `docs/HANDOFF.md`: the documents pull request ivanmueller/gss#134 (the handoff record of #133, `AGENTS.md` and `README.md` brought up to date) with its CI and Deploy staging runs.
+
 ## 2026-11-04 — AGENTS.md and README brought up to date
 
 - `AGENTS.md`: the status line with the sellers' details, contacts on the page only, combined rows, coordinates page by page, filters kept on Back and Undo an import.
