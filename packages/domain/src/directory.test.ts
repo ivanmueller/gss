@@ -691,20 +691,36 @@ describe("one company's rows combined (owner's answers, 2026-11-03)", () => {
     ).toEqual(['pet', 'bird']);
   });
 
-  it('takes the first seller kind given, warning when a later row differs', () => {
+  // The owner's choice of 2026-11-04: a company's rows are its elevators, plants and farms.
+  it("takes the first seller kind given for the company, and each row's as its location type", () => {
     const { groups, warnings } = groupImportRows([
-      ok({ ...mill }, 2),
-      ok({ ...mill, sellerKind: 'Farm', annualTonnes: '4500' }, 3),
-      ok({ ...mill, sellerKind: 'Elevator' }, 4),
+      ok({ ...mill, city: 'Olds' }, 2),
+      ok({ ...mill, sellerKind: 'Farm', annualTonnes: '4500', city: 'Didsbury' }, 3),
+      ok({ ...mill, sellerKind: 'Elevator', city: 'Carstairs' }, 4),
+      ok({ ...mill, sellerKind: 'Processor', facilityType: 'Terminal', city: 'Airdrie' }, 5),
     ]);
     expect(groups[0]?.counterparty).toMatchObject({ sellerKind: 'farm', annualTonnes: 4500 });
-    expect(warnings).toEqual([
-      {
-        line: 4,
-        field: 'sellerKind',
-        message: "differs from line 3 for the same company; line 3's value is used",
-      },
+    expect(groups[0]?.facilities.map((f) => [f.city, f.facilityType])).toEqual([
+      ['Olds', null],
+      ['Didsbury', 'farm'],
+      ['Carstairs', 'elevator'],
+      // A location type the row gives is kept.
+      ['Airdrie', 'terminal'],
     ]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("keeps a later row's different website in the notes, with its place", () => {
+    const { groups, warnings } = groupImportRows([
+      ok({ ...mill, website: 'mill.example.com', city: 'Olds' }, 2),
+      ok({ ...mill, website: 'olds.mill.example.com', city: 'Didsbury' }, 3),
+      ok({ ...mill, website: 'mill.example.com', city: 'Carstairs' }, 4),
+    ]);
+    expect(warnings).toEqual([]);
+    expect(groups[0]?.counterparty).toMatchObject({
+      website: 'https://mill.example.com',
+      notes: 'Website also: https://olds.mill.example.com (Didsbury)',
+    });
   });
 });
 

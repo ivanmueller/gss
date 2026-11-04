@@ -1551,8 +1551,6 @@ function rowPlace(row: ParsedImportRow): string {
 
 /** A company's details that take the first value given, warned about when another differs. */
 const FIRST_GIVEN = [
-  ['website', 'website'],
-  ['sellerKind', 'sellerKind'],
   ['annualTonnes', 'annualTonnes'],
   ['organicCertifier', 'organicCertifier'],
   ['organicCertifiedUntil', 'organicCertifiedUntil'],
@@ -1566,8 +1564,10 @@ const FIRST_GIVEN = [
  * - company phone: the first given; the others go to the notes with their location;
  * - markets and grain types: all of the rows', each once;
  * - tier: the highest (A, then B, then C), without a warning (owner's request, 2026-11-04);
- * - website, seller kind, tonnes a year and organic certificate: the first given, with a
- *   warning when a later row differs;
+ * - website: the first given; the others go to the notes with their location;
+ * - seller kind: the first given, and each row's as its location's type when it has none;
+ * - tonnes a year and organic certificate: the first given, with a warning when a later row
+ *   differs;
  * - name spelling, types and verification: the first row's, with a warning.
  * Combined notes longer than MAX_IMPORT_VALUE_LENGTH keep what fits, with a warning. Repeated
  * contacts and locations are kept once; every row's commodities are kept, each once.
@@ -1586,6 +1586,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
   // Per company: each row's notes and phone, combined once every row is read.
   const notesOf = new Map<string, { line: number; place: string; text: string }[]>();
   const phonesOf = new Map<string, { line: number; place: string; phone: string }[]>();
+  const websitesOf = new Map<string, { line: number; place: string; website: string }[]>();
   // Per company: the line that gave each first-given detail and the tier.
   const fromLine = new Map<string, Partial<Record<keyof CounterpartyInput, number>>>();
 
@@ -1610,6 +1611,7 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       facilityKeys.set(key, new Set());
       notesOf.set(key, []);
       phonesOf.set(key, []);
+      websitesOf.set(key, []);
       const from: Partial<Record<keyof CounterpartyInput, number>> = {};
       for (const [detail] of FIRST_GIVEN) {
         if (row.counterparty[detail] !== null) from[detail] = row.line;
@@ -1666,6 +1668,20 @@ export function groupImportRows(rows: ParsedImportRow[]): {
     if (row.counterparty.phone !== null) {
       group.counterparty.phone ??= row.counterparty.phone;
       phonesOf.get(key)?.push({ line: row.line, place, phone: row.counterparty.phone });
+    }
+    // A location's own web page: the first is the company's, others go to its notes
+    // (2026-11-04).
+    if (row.counterparty.website !== null) {
+      group.counterparty.website ??= row.counterparty.website;
+      websitesOf.get(key)?.push({ line: row.line, place, website: row.counterparty.website });
+    }
+    // A big company's rows are its elevators, plants and farms: the company keeps the first
+    // seller kind given, and each row's also says what its location is, when the row gives no
+    // location type (2026-11-04).
+    group.counterparty.sellerKind ??= row.counterparty.sellerKind;
+    const sellerKind = row.counterparty.sellerKind;
+    if (row.facility?.facilityType === null && sellerKind !== null) {
+      row.facility.facilityType = sellerKind;
     }
     group.lines.push(row.line);
     warnings.push(...row.notices);
@@ -1742,13 +1758,25 @@ export function groupImportRows(rows: ParsedImportRow[]): {
     for (const entry of phones) {
       parts.push({ line: entry.line, text: `Company phone also: ${entry.phone} (${entry.place})` });
     }
+    const websites = (websitesOf.get(group.key) ?? []).filter(
+      (entry, index, all) =>
+        entry.website !== group.counterparty.website &&
+        all.findIndex((other) => other.website === entry.website) === index,
+    );
+    for (const entry of websites) {
+      parts.push({ line: entry.line, text: `Website also: ${entry.website} (${entry.place})` });
+    }
     let combined: string | null = null;
     for (const part of parts) {
       const next: string = combined === null ? part.text : `${combined}\n${part.text}`;
       if (next.length > MAX_IMPORT_VALUE_LENGTH) {
         warnings.push({
           line: part.line,
-          field: part.text.startsWith('Company phone also:') ? 'companyPhone' : 'notes',
+          field: part.text.startsWith('Company phone also:')
+            ? 'companyPhone'
+            : part.text.startsWith('Website also:')
+              ? 'website'
+              : 'notes',
           message: `not added to the company's notes: together they would be longer than ${String(MAX_IMPORT_VALUE_LENGTH)} characters`,
         });
         continue;

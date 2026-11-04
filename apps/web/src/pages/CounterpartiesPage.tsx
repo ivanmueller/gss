@@ -29,6 +29,7 @@ import { useMemo, useState } from 'react';
 import { ADD_TABS, AddCounterpartiesDialog } from '../components/AddCounterpartiesDialog';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyMap } from '../components/CounterpartyMap';
+import { FindMissingCoordinates } from '../components/FindMissingCoordinates';
 import { MultiPicker } from '../components/MultiPicker';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
@@ -323,6 +324,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const editor = canEditDirectory(organization.role);
+  const [mapVersion, setMapVersion] = useState(0);
   const wide = useMediaQuery(WIDE_QUERY, true);
 
   // The view and the type filter live in the address (?view=map&type=seller), so a
@@ -563,8 +565,17 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
             <TabsContent value="logos">
               <LogoGrid items={shown} token={token} />
             </TabsContent>
-            <TabsContent value="map">
-              <CounterpartyMap session={session} only={shownIds} />
+            <TabsContent value="map" className="flex flex-col gap-3">
+              {editor && (
+                <FindMissingCoordinates
+                  session={session}
+                  onDone={() => {
+                    setMapVersion((version) => version + 1);
+                  }}
+                />
+              )}
+              {/* Loaded again after coordinates are found, so the new places show. */}
+              <CounterpartyMap key={mapVersion} session={session} only={shownIds} />
             </TabsContent>
           </>
         )}

@@ -366,6 +366,8 @@ export interface Database
     organizationId: string,
     limit: number,
     scope?: GeocodeScope,
+    /** Only facilities whose id comes after this one: pages in id order. */
+    after?: string,
   ) => Promise<FacilityAddress[]>;
   /**
    * Saves geocoded coordinates for facilities of the organization that still have none;
@@ -1008,7 +1010,7 @@ export function createDatabase(sql: postgres.Sql): Database {
       });
     },
 
-    facilitiesWithoutCoordinates(ctx, organizationId, limit, scope = null) {
+    facilitiesWithoutCoordinates(ctx, organizationId, limit, scope = null, after) {
       return asUser(ctx, async (tx) => {
         const rows = await tx<FacilityAddress[]>`
           select f.id as "facilityId", f.counterparty_id as "counterpartyId",
@@ -1027,7 +1029,8 @@ export function createDatabase(sql: postgres.Sql): Database {
                   ? tx`c.id = ${scope.counterpartyId}`
                   : tx`(f.import_batch_id = ${scope.importBatchId} or c.import_batch_id = ${scope.importBatchId})`
             }
-          order by lower(c.legal_name), c.id, lower(f.name), f.id
+            and ${after === undefined ? tx`true` : tx`f.id > ${after}`}
+          order by f.id
           limit ${limit + 1}
         `;
         return [...rows];

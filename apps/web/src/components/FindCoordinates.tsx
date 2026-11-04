@@ -29,20 +29,32 @@ const MISSES: Record<GeocodeMiss, string> = {
   OTHER_COUNTRY: 'Found only in another country',
 };
 
+/** What the lookup has done so far, page by page. */
+interface Progress {
+  /** The next page's start (the last page's `next`); undefined for the first page. */
+  after: string | undefined;
+  looked: number;
+  saved: number;
+  doubtful: GeocodeProposal[];
+  missed: GeocodeProposal[];
+}
+
+const START: Progress = { after: undefined, looked: 0, saved: 0, doubtful: [], missed: [] };
+
 type Step =
-  | { kind: 'looking' }
+  | { kind: 'looking'; looked: number }
   | {
       kind: 'review';
       saved: number;
       doubtful: GeocodeProposal[];
       missed: GeocodeProposal[];
-      truncated: boolean;
       chosen: ReadonlySet<string>;
       busy: boolean;
       error: string | null;
     }
-  | { kind: 'finished'; saved: number; missed: GeocodeProposal[]; truncated: boolean }
-  | { kind: 'failed'; message: string };
+  | { kind: 'finished'; saved: number; missed: GeocodeProposal[] }
+  // A page failed: what came before is kept and saved, and Try again carries on from it.
+  | { kind: 'failed'; message: string; progress: Progress };
 
 function count(n: number, one: string, many: string): string {
   return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
@@ -107,9 +119,11 @@ function Missed({ proposals }: { proposals: GeocodeProposal[] }) {
 }
 
 /**
- * Finds coordinates for the locations without any of one counterparty, of one import, and
- * saves the sure ones (in the right province or state, 80% confidence or more). The rest are
- * shown to be saved or skipped. `onDone` continues, with the button labelled `doneLabel`.
+ * Finds coordinates for the locations without any of one counterparty, of one import, or of
+ * the whole list (scope null), and saves the sure ones (in the right province or state, 80%
+ * confidence or more). The rest are shown to be saved or skipped. Locations are looked up a
+ * page at a time until none are left (2026-11-04). `onDone` continues, with the button
+ * labelled `doneLabel`.
  */
 export function FindCoordinates({
   session,
@@ -118,12 +132,12 @@ export function FindCoordinates({
   onDone,
 }: {
   session: DirectorySession;
-  scope: Exclude<GeocodeScope, null>;
+  scope: GeocodeScope;
   doneLabel: string;
   onDone: () => void;
 }) {
   const { token, organization } = session;
-  const [step, setStep] = useState<Step>({ kind: 'looking' });
+  const [step, setStep] = useState<Step>({ kind: 'looking', looked: 0 });
   // Each lookup counts toward Geocodio's daily allowance: once per time this step is shown.
   const started = useRef(false);
 
@@ -137,39 +151,55 @@ export function FindCoordinates({
     return result.saved;
   }
 
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    void (async () => {
+  /** Looks up page after page from `from`, saving the sure matches of each as it goes. */
+  async function run(from: Progress) {
+    let progress = from;
+    setStep({ kind: 'looking', looked: progress.looked });
+    for (;;) {
       try {
         const lookup = await apiJson<GeocodeLookup>('/facilities/geocode', token, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ organizationId: organization.id, ...scope }),
+          body: JSON.stringify({
+            organizationId: organization.id,
+            ...scope,
+            ...(progress.after !== undefined && { after: progress.after }),
+          }),
         });
         const found = lookup.proposals.filter((proposal) => proposal.match !== null);
         const sure = found.filter((proposal) => proposal.match && isConfidentMatch(proposal.match));
-        const doubtful = found.filter((proposal) => !sure.includes(proposal));
-        const missed = lookup.proposals.filter((proposal) => proposal.match === null);
         const saved = await save(signed(sure));
-        setStep(
-          doubtful.length === 0
-            ? { kind: 'finished', saved, missed, truncated: lookup.truncated }
-            : {
-                kind: 'review',
-                saved,
-                doubtful,
-                missed,
-                truncated: lookup.truncated,
-                chosen: new Set(),
-                busy: false,
-                error: null,
-              },
-        );
+        const previous = progress.after;
+        progress = {
+          after: lookup.next ?? undefined,
+          looked: progress.looked + lookup.proposals.length,
+          saved: progress.saved + saved,
+          doubtful: [...progress.doubtful, ...found.filter((proposal) => !sure.includes(proposal))],
+          missed: [
+            ...progress.missed,
+            ...lookup.proposals.filter((proposal) => proposal.match === null),
+          ],
+        };
+        // No next page (or an older answer without one): done. Never the same page twice.
+        if (!lookup.next || lookup.next === previous) break;
+        setStep({ kind: 'looking', looked: progress.looked });
       } catch (error) {
-        setStep({ kind: 'failed', message: messageOf(error) });
+        setStep({ kind: 'failed', message: messageOf(error), progress });
+        return;
       }
-    })();
+    }
+    const { saved, doubtful, missed } = progress;
+    setStep(
+      doubtful.length === 0
+        ? { kind: 'finished', saved, missed }
+        : { kind: 'review', saved, doubtful, missed, chosen: new Set(), busy: false, error: null },
+    );
+  }
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void run(START);
     // The lookup runs once, for the scope this step was opened with.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -179,20 +209,34 @@ export function FindCoordinates({
       <p role="status" className="flex items-center gap-2 text-sm">
         <MapPin aria-hidden="true" className="size-4 text-muted-foreground" />
         Finding coordinates from the addresses…
+        {step.looked > 0 && ` ${count(step.looked, 'location', 'locations')} looked up so far.`}
       </p>
     );
   }
 
   if (step.kind === 'failed') {
+    const { progress } = step;
     return (
       <div className="flex flex-col gap-3">
         <p role="alert" className="text-sm text-danger">
-          Coordinates could not be found: {step.message} Nothing else is affected; use Find
-          coordinates on the counterparty’s page later.
+          Coordinates could not be found: {step.message} Nothing else is affected.
         </p>
-        <Button className="w-fit" onClick={onDone}>
-          {doneLabel}
-        </Button>
+        {progress.looked > 0 && (
+          <p className="text-sm">
+            {count(progress.looked, 'location was', 'locations were')} looked up before this
+            {progress.saved > 0 &&
+              `, and coordinates were saved for ${count(progress.saved, 'location', 'locations')}`}
+            . Try again carries on from there.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button className="w-fit" onClick={() => void run(progress)}>
+            Try again
+          </Button>
+          <Button variant="outline" className="w-fit" onClick={onDone}>
+            {doneLabel}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -206,8 +250,6 @@ export function FindCoordinates({
             : step.missed.length === 0
               ? 'No location is waiting for coordinates.'
               : 'No coordinates were saved.'}
-          {step.truncated &&
-            ' Only the first 1,000 locations were looked up; use Find coordinates on the counterparties’ pages for the rest.'}
         </p>
         <Missed proposals={step.missed} />
         <Button className="w-fit" onClick={onDone}>
@@ -226,7 +268,6 @@ export function FindCoordinates({
         kind: 'finished',
         saved: step.saved + saved,
         missed: [...step.missed, ...doubtful.filter((p) => !chosen.has(p.facilityId))],
-        truncated: step.truncated,
       });
     } catch (error) {
       setStep({ ...step, busy: false, error: messageOf(error) });

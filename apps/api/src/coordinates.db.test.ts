@@ -109,7 +109,14 @@ async function location(facilityId: string) {
 
 describe('geocoding as app_api', () => {
   it('lists the organization’s facilities without coordinates, with their addresses', async () => {
-    expect(await db.facilitiesWithoutCoordinates(as(users.victor), orgs.a, 10)).toEqual([
+    // In id order, for paging (2026-11-04), so the order of the two is not fixed here.
+    const listed = await db.facilitiesWithoutCoordinates(as(users.victor), orgs.a, 10);
+    expect(listed.map((row) => row.facilityId)).toEqual(
+      [facilities.street, facilities.town].sort(),
+    );
+    expect(
+      [...listed].sort((a, b) => (a.city ?? '').localeCompare(b.city ?? '')).reverse(),
+    ).toEqual([
       {
         facilityId: facilities.street,
         counterpartyId: counterparties.a,
@@ -145,16 +152,25 @@ describe('geocoding as app_api', () => {
       values (${importedFacility}, ${orgs.a}, ${imported}, 'Synthetic Spur', 'SK', 'CA', ${users.olivia})`;
     const ids = (rows: { facilityId: string }[]) => rows.map((row) => row.facilityId);
 
-    expect(ids(await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10))).toHaveLength(
-      3,
-    );
+    const all = ids(await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10));
+    expect(all).toHaveLength(3);
+    // In id order, page after page (2026-11-04): each page starts after the last one's end.
+    expect(all).toEqual([...all].sort());
+    const first = ids(await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 1));
+    expect(first).toEqual(all.slice(0, 2));
+    expect(
+      ids(await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 1, null, all[0])),
+    ).toEqual(all.slice(1, 3));
+    expect(
+      await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 1, null, all[2]),
+    ).toEqual([]);
     expect(
       ids(
         await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10, {
           counterpartyId: counterparties.a,
         }),
       ),
-    ).toEqual([facilities.street, facilities.town]);
+    ).toEqual([facilities.street, facilities.town].sort());
     expect(
       ids(
         await db.facilitiesWithoutCoordinates(as(users.olivia), orgs.a, 10, {
