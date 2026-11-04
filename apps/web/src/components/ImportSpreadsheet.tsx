@@ -65,7 +65,9 @@ type Step =
       error: string | null;
       busy: boolean;
     } & Plan)
-  | { kind: 'done'; result: ImportResult };
+  | { kind: 'done'; result: ImportResult }
+  // Nothing new to import, but locations of the list still without coordinates (2026-11-04).
+  | { kind: 'coordinates' };
 
 /**
  * The fields a column can fill: not the trading name, no longer collected (2026-10-30), nor a
@@ -141,7 +143,13 @@ function suggested(headers: string[]): Mapping {
   return mapping;
 }
 
-const STEP_INDEX: Record<Step['kind'], number> = { choose: 0, map: 1, review: 2, done: 3 };
+const STEP_INDEX: Record<Step['kind'], number> = {
+  choose: 0,
+  map: 1,
+  review: 2,
+  done: 3,
+  coordinates: 3,
+};
 
 const FIELD_LABELS = Object.fromEntries(
   IMPORT_FIELDS.map((field) => [field.id, field.label]),
@@ -677,7 +685,29 @@ export function ImportSpreadsheet({
               Back to columns
             </Button>
           </div>
+          {step.result.summary.newCounterparties === 0 &&
+            step.result.summary.existingWithAdditions === 0 && (
+              <div className="flex flex-col gap-2 text-sm">
+                <p>
+                  Nothing in this file is new. Locations still without coordinates can be looked up
+                  from their addresses now.
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-fit"
+                  onClick={() => {
+                    setStep({ kind: 'coordinates' });
+                  }}
+                >
+                  Find missing coordinates
+                </Button>
+              </div>
+            )}
         </>
+      )}
+
+      {step.kind === 'coordinates' && (
+        <FindCoordinates session={session} scope={null} doneLabel="Done" onDone={onClose} />
       )}
 
       {step.kind === 'done' && (
@@ -709,14 +739,11 @@ export function ImportSpreadsheet({
               </p>
             )}
           </Card>
-          {step.result.importBatchId !== null &&
-          step.result.summary.facilities + step.result.summary.addedFacilities > 0 ? (
-            <FindCoordinates
-              session={session}
-              scope={{ importBatchId: step.result.importBatchId }}
-              doneLabel="Done"
-              onDone={onClose}
-            />
+          {/* Every location of the list without coordinates, not only this import's new ones:
+              a file that fills in addresses of companies already listed needs them looked up
+              too (owner's report, 2026-11-04). */}
+          {step.result.importBatchId !== null ? (
+            <FindCoordinates session={session} scope={null} doneLabel="Done" onDone={onClose} />
           ) : (
             <Button className="w-fit" onClick={onClose}>
               Done
