@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Handoff record of #133, and the status brought up to date
+
+- `docs/HANDOFF.md`: Undo an import (ivanmueller/gss#133) with its CI and Deploy staging runs and Codex's four reviews; the status (sellers' details, coordinates page by page, Back keeping the list, Undo an import); the checks on staging for #125 to #133.
+
 ## 2026-11-04 — Codex's re-review of Undo an import
 
 - `docs/DECISIONS.md`: additions taken off only while the company is unchanged, its version read under its lock; older imports always flagged.
