@@ -82,6 +82,8 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     updateCounterparty: vi.fn<Database['updateCounterparty']>(() => saved()),
     setArchived: vi.fn<Database['setArchived']>(() => saved()),
+    listImports: vi.fn<Database['listImports']>(() => Promise.resolve([])),
+    undoImport: vi.fn<Database['undoImport']>(() => Promise.resolve({ status: 'not_found' })),
     deleteCounterparty: vi.fn<Database['deleteCounterparty']>(() =>
       Promise.resolve({ status: 'deleted' as const }),
     ),

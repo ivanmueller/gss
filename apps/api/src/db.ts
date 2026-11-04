@@ -23,7 +23,9 @@ import type {
   Tier,
   TransportAccess,
   GrainType,
+  ImportSummary,
   SellerKind,
+  UndoImportPlan,
   VerificationStatus,
 } from '@grain/domain';
 import postgres from 'postgres';
@@ -147,6 +149,14 @@ export type DeleteResult =
   | { status: 'forbidden' }
   | { status: 'not_archived' }
   | { status: 'has_history'; history: CounterpartyHistory[] };
+
+export type UndoImportResult =
+  | { status: 'ok'; committed: boolean; plan: UndoImportPlan }
+  | { status: 'not_found' }
+  | { status: 'forbidden' }
+  | { status: 'undone' }
+  /** It no longer removes what was previewed: the new plan, nothing written. */
+  | { status: 'changed'; plan: UndoImportPlan };
 
 export type WriteResult =
   | { status: 'saved' }
@@ -448,6 +458,18 @@ export interface Database
    * freight rates, a contact history or follow-ups is kept.
    */
   deleteCounterparty: (ctx: RequestContext, id: string) => Promise<DeleteResult>;
+  /** The organization's spreadsheet imports, latest first; admins only. */
+  listImports: (ctx: RequestContext, organizationId: string) => Promise<ImportSummary[] | null>;
+  /**
+   * What undoing an import removes (`commit` false), or removes it (`commit` true, only when it
+   * still deletes `expected` companies), under the import lock and the admin's membership lock.
+   */
+  undoImport: (
+    ctx: RequestContext,
+    batchId: string,
+    commit: boolean,
+    expected?: number,
+  ) => Promise<UndoImportResult>;
   addContact: (
     ctx: RequestContext,
     counterpartyId: string,
@@ -1519,6 +1541,277 @@ export function createDatabase(sql: postgres.Sql): Database {
           where id = ${id} and (archived_at is null) = ${archived}
         `;
         return SAVED;
+      });
+    },
+
+    listImports(ctx, organizationId) {
+      return asUser(ctx, async (tx): Promise<ImportSummary[] | null> => {
+        const [check] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${organizationId}) as allowed`;
+        if (check?.allowed !== true) return null;
+        const rows = await tx<
+          {
+            id: string;
+            fileName: string;
+            createdAt: Date;
+            undoneAt: Date | null;
+            companies: number;
+          }[]
+        >`
+          select b.id, b.file_name as "fileName", b.created_at as "createdAt",
+                 b.undone_at as "undoneAt",
+                 (select count(*)::int from app.counterparties c
+                   where c.organization_id = b.organization_id and c.import_batch_id = b.id)
+                   as companies
+          from app.import_batches b
+          where b.organization_id = ${organizationId}
+          order by b.created_at desc
+          limit 50`;
+        return rows.map((row) => ({
+          id: row.id,
+          fileName: row.fileName,
+          createdAt: row.createdAt.toISOString(),
+          undoneAt: row.undoneAt?.toISOString() ?? null,
+          companies: row.companies,
+        }));
+      });
+    },
+
+    undoImport(ctx, batchId, commit, expected) {
+      return asUser(ctx, async (tx): Promise<UndoImportResult> => {
+        const [batch] = await tx<
+          { org: string; fileName: string; createdAt: Date; createdBy: string; undone: boolean }[]
+        >`
+          select organization_id as org, file_name as "fileName", created_at as "createdAt",
+                 created_by as "createdBy", undone_at is not null as undone
+          from app.import_batches where id = ${batchId}`;
+        if (!batch) return { status: 'not_found' };
+        const [allowed] = await tx<{ allowed: boolean }[]>`
+          select app.is_org_admin(${batch.org}) as allowed`;
+        if (allowed?.allowed !== true) return { status: 'forbidden' };
+        // No import runs while it is undone, and the admin stays an admin until it is done
+        // (as for deleting a counterparty, Codex's review of ivanmueller/gss#93).
+        await tx`select app.lock_counterparty_import(${batch.org})`;
+        const [admin] = await tx`
+          select m.id from app.organization_members m
+          where m.organization_id = ${batch.org}
+            and m.user_id = app.current_user_id()
+            and m.role = 'org_admin' and m.status = 'active'
+            and app.is_org_admin(m.organization_id)
+          for share of m`;
+        if (!admin) return { status: 'forbidden' };
+        // Locked, and refused by the update policy once undone.
+        const [open] = await tx`
+          select id from app.import_batches where id = ${batchId} and undone_at is null
+          for update`;
+        if (!open) return { status: 'undone' };
+
+        const ids = (list: readonly string[]) => `{${list.join(',')}}`;
+        const created = await tx<{ id: string; name: string; types: string[] }[]>`
+          select id, legal_name as name, to_jsonb(types::text[]) as types
+          from app.counterparties
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}
+          order by id
+          for update`;
+        const createdIds = new Set(created.map((row) => row.id));
+        const retyped = new Set(
+          (await tx<{ id: string }[]>`select app.import_retyped(${batchId}) as id`).map(
+            (row) => row.id,
+          ),
+        );
+        const withHistory = new Set(
+          (
+            await tx<{ id: string }[]>`
+              select c.id from app.counterparties c
+              where c.id = any (${ids([...createdIds])}::uuid[])
+                and (exists (select from app.quotes q where q.counterparty_id = c.id)
+                  or exists (select from app.freight_quotes q
+                             where q.carrier_id = c.id
+                                or exists (select from app.facilities f
+                                           where f.counterparty_id = c.id
+                                             and f.id in (q.origin_facility_id,
+                                                          q.destination_facility_id)))
+                  or exists (select from app.contact_log_entries e where e.counterparty_id = c.id)
+                  or exists (select from app.follow_ups u where u.counterparty_id = c.id)
+                  or exists (select from app.calls k where k.counterparty_id = c.id))`
+          ).map((row) => row.id),
+        );
+        const kept = created.flatMap((row): UndoImportPlan['kept'] =>
+          withHistory.has(row.id)
+            ? [{ id: row.id, name: row.name, reason: 'history' as const }]
+            : retyped.has(row.id)
+              ? [{ id: row.id, name: row.name, reason: 'retyped' as const }]
+              : [],
+        );
+        const keptIds = new Set(kept.map((row) => row.id));
+        const removing = created.filter((row) => !keptIds.has(row.id)).map((row) => row.id);
+        const [located] = await tx<{ count: number }[]>`
+          select count(*)::int as count from app.facilities
+          where counterparty_id = any (${ids(removing)}::uuid[])`;
+
+        // Companies already listed that the import changed, from its own transaction.
+        const changes = await tx<{ entity: string; entityId: string; fields: string[] }[]>`
+          select entity, entity_id as "entityId", to_jsonb(changed_fields) as fields
+          from app.import_changes(${batchId})`;
+        const addedFacilities = await tx<{ id: string; counterpartyId: string; used: boolean }[]>`
+          select f.id, f.counterparty_id as "counterpartyId",
+                 (exists (select from app.quotes q where q.facility_id = f.id)
+                  or exists (select from app.freight_quotes q
+                             where f.id in (q.origin_facility_id, q.destination_facility_id)))
+                   as used
+          from app.facilities f
+          where f.organization_id = ${batch.org} and f.import_batch_id = ${batchId}
+            and not (f.counterparty_id = any (${ids([...createdIds])}::uuid[]))`;
+        const addedGrains = await tx<{ id: string; counterpartyId: string }[]>`
+          select k.id, k.counterparty_id as "counterpartyId"
+          from app.counterparty_commodities k
+          where k.organization_id = ${batch.org}
+            -- The import's own transaction: the batch's exact time, to the microsecond.
+            and (k.created_at, k.created_by) = (
+              select b.created_at, b.created_by from app.import_batches b where b.id = ${batchId})
+            and not (k.counterparty_id = any (${ids([...createdIds])}::uuid[]))`;
+        const facilityOwners = new Map(
+          (
+            await tx<{ id: string; counterpartyId: string }[]>`
+              select id, counterparty_id as "counterpartyId" from app.facilities
+              where id = any (${ids(changes.filter((c) => c.entity === 'facilities').map((c) => c.entityId))}::uuid[])`
+          ).map((row) => [row.id, row.counterpartyId]),
+        );
+        const touched = new Set<string>([
+          ...changes
+            .filter((c) => c.entity === 'counterparties' && !createdIds.has(c.entityId))
+            .map((c) => c.entityId),
+          ...[...facilityOwners.values()].filter((id) => !createdIds.has(id)),
+          ...addedFacilities.map((f) => f.counterpartyId),
+          ...addedGrains.map((g) => g.counterpartyId),
+        ]);
+        const listedRows = await tx<{ id: string; name: string; types: string[] }[]>`
+          select id, legal_name as name, to_jsonb(types::text[]) as types
+          from app.counterparties
+          where id = any (${ids([...touched])}::uuid[])
+          order by lower(legal_name), id
+          for update`;
+        // The types the import's companies were made: a type it added to a listed company is
+        // one of them (types are only ever added by an import).
+        const fileTypes =
+          created
+            .filter((row) => !retyped.has(row.id))
+            .reduce<string[] | null>(
+              (common, row) =>
+                common === null ? row.types : common.filter((t) => row.types.includes(t)),
+              null,
+            ) ?? [];
+        const SELLER_COLUMNS = [
+          'grain_types',
+          'seller_kind',
+          'annual_tonnes',
+          'organic_certifier',
+          'organic_certified_until',
+        ];
+        const LABELS: Record<string, string> = {
+          verification_status: 'Verification',
+          website: 'Website',
+          phone: 'Company phone',
+          markets: 'Market',
+          tier: 'Tier',
+          notes: 'Notes',
+          equipment: 'Equipment',
+          grain_types: 'Grain type',
+          seller_kind: 'Seller kind',
+          annual_tonnes: 'Tonnes a year',
+          organic_certifier: 'Organic certifier',
+          organic_certified_until: 'Organic certified until',
+        };
+        const listed = listedRows.map((row) => {
+          const fields = new Set(
+            changes
+              .filter((c) => c.entity === 'counterparties' && c.entityId === row.id)
+              .flatMap((c) => c.fields)
+              .filter((field) => field !== 'updated_at'),
+          );
+          const removable = fields.has('types')
+            ? fileTypes.filter((type) => row.types.includes(type))
+            : [];
+          const removedTypes =
+            removable.length > 0 && row.types.some((type) => !removable.includes(type))
+              ? removable
+              : [];
+          const sellerDetails =
+            removedTypes.includes('seller') && SELLER_COLUMNS.some((field) => fields.has(field));
+          const check = [...fields]
+            .filter(
+              (field) =>
+                !(field === 'types' && removedTypes.length > 0) &&
+                !(sellerDetails && SELLER_COLUMNS.includes(field)),
+            )
+            .map((field) => (field === 'types' ? 'Type' : (LABELS[field] ?? field)));
+          if (
+            changes.some(
+              (c) => c.entity === 'facilities' && facilityOwners.get(c.entityId) === row.id,
+            )
+          )
+            check.push('A location’s address, type or coordinates');
+          if (addedFacilities.some((f) => f.counterpartyId === row.id && f.used))
+            check.push('A location it added that a bid, offer or freight rate uses (kept)');
+          return {
+            id: row.id,
+            name: row.name,
+            locations: addedFacilities.filter((f) => f.counterpartyId === row.id && !f.used).length,
+            grains: addedGrains.filter((g) => g.counterpartyId === row.id).length,
+            removedTypes,
+            sellerDetails,
+            check,
+          };
+        });
+        const plan: UndoImportPlan = {
+          fileName: batch.fileName,
+          createdAt: batch.createdAt.toISOString(),
+          companies: removing.length,
+          locations: located?.count ?? 0,
+          kept,
+          listed,
+        };
+        if (!commit) return { status: 'ok', committed: false, plan };
+        if (expected !== removing.length) return { status: 'changed', plan };
+
+        // The companies it created: archived, then deleted with what they have.
+        const gone = ids(removing);
+        await tx`update app.counterparties set archived_at = now()
+                 where id = any (${gone}::uuid[]) and archived_at is null`;
+        await tx`select id from app.facilities where counterparty_id = any (${gone}::uuid[])
+                 order by id for update`;
+        await tx`delete from app.counterparty_commodities where counterparty_id = any (${gone}::uuid[])`;
+        await tx`delete from app.carrier_lanes where carrier_id = any (${gone}::uuid[])`;
+        await tx`delete from app.counterparty_contacts where counterparty_id = any (${gone}::uuid[])`;
+        await tx`delete from app.facilities where counterparty_id = any (${gone}::uuid[])`;
+        await tx`delete from app.counterparty_logos where counterparty_id = any (${gone}::uuid[])`;
+        const deleted = await tx`delete from app.counterparties where id = any (${gone}::uuid[])
+                                 returning id`;
+        if (deleted.length !== removing.length) throw new Error('not every company was deleted');
+        // What it added to companies already listed.
+        await tx`delete from app.facilities
+                 where id = any (${ids(addedFacilities.filter((f) => !f.used).map((f) => f.id))}::uuid[])`;
+        await tx`delete from app.counterparty_commodities
+                 where id = any (${ids(addedGrains.map((g) => g.id))}::uuid[])`;
+        for (const company of listed) {
+          if (company.removedTypes.length === 0) continue;
+          const row = listedRows.find((r) => r.id === company.id);
+          const types = (row?.types ?? []).filter((type) => !company.removedTypes.includes(type));
+          await tx`
+            update app.counterparties
+            set types = ${enumArray(types)}::app.counterparty_type[]
+                ${
+                  company.sellerDetails
+                    ? tx`, grain_types = '{}', seller_kind = null, annual_tonnes = null,
+                         organic_certifier = null, organic_certified_until = null`
+                    : tx``
+                }
+            where id = ${company.id}`;
+        }
+        await tx`update app.import_batches
+                 set undone_at = now(), undone_by = app.current_user_id()
+                 where id = ${batchId}`;
+        return { status: 'ok', committed: true, plan };
       });
     },
 

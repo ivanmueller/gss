@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Undo an import
+
+- `docs/DECISIONS.md`: the owner's request and answers; what is removed, kept and listed to check.
+- `docs/DATA_MODEL.md`: migration `20261104010000_undo_import.sql`.
+- `docs/API.md`: `GET /counterparties/imports` and `POST /counterparties/imports/{id}/undo`.
+- `docs/PRODUCT.md`: Undo an import in the + window.
+
 ## 2026-11-04 — Back returns to the list as it was
 
 - `docs/DECISIONS.md`: the search and Show archived in the address; the back arrow as the browser's Back; the scroll position kept.

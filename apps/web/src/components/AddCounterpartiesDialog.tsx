@@ -1,17 +1,19 @@
-import { ArrowLeft, FileUp, PencilLine, Plus } from 'lucide-react';
+import { ArrowLeft, FileUp, PencilLine, Plus, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 
+import { canDeleteCounterparties } from '../lib/directory';
 import { setSearchParams } from '../lib/router';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { AddCounterpartyForm } from './AddCounterpartyForm';
 import { ImportSpreadsheet } from './ImportSpreadsheet';
+import { UndoImport } from './UndoImport';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 
 export const ADD_TABS = ['one', 'import'] as const;
 export type AddTab = (typeof ADD_TABS)[number];
 
-type Step = 'choose' | AddTab;
+type Step = 'choose' | AddTab | 'undo';
 
 const CHOICE =
   'flex items-start gap-3 rounded-card border bg-card p-4 text-left transition-colors hover:bg-accent focus-visible:bg-accent';
@@ -113,17 +115,47 @@ export function AddCounterpartiesDialog({
                 </span>
               </span>
             </button>
+            {/* Admins undo an import to start it again (owner's request, 2026-11-04). */}
+            {canDeleteCounterparties(session.organization.role) && (
+              <button
+                type="button"
+                className={CHOICE}
+                onClick={() => {
+                  setStep('undo');
+                }}
+              >
+                <Undo2
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="font-medium">Undo an import</span>
+                  <span className="text-sm text-muted-foreground">
+                    Remove the companies a spreadsheet import added, to import it again. Admins
+                    only.
+                  </span>
+                </span>
+              </button>
+            )}
           </nav>
         </DialogContent>
       ) : (
         <DialogContent
           // A new window for each choice, so it rises in each time.
           key={step}
-          title={step === 'one' ? 'Add a counterparty' : 'Import counterparties'}
+          title={
+            step === 'one'
+              ? 'Add a counterparty'
+              : step === 'import'
+                ? 'Import counterparties'
+                : 'Undo an import'
+          }
           description={
             step === 'one'
-              ? 'One company, with its first contact and location if you have them.'
-              : 'Buyers, sellers or carriers from a spreadsheet, checked before anything is saved.'
+              ? 'One company, with its first location if you have it.'
+              : step === 'import'
+                ? 'Buyers, sellers or carriers from a spreadsheet, checked before anything is saved.'
+                : 'Choose an import to see what undoing it removes. Nothing is removed until you confirm.'
           }
           className="max-w-3xl animate-dialog-in"
           // A half-filled form or a matched spreadsheet is not lost to a stray click outside;
@@ -135,8 +167,10 @@ export function AddCounterpartiesDialog({
           {back}
           {step === 'one' ? (
             <AddCounterpartyForm session={session} onCancel={close} />
-          ) : (
+          ) : step === 'import' ? (
             <ImportSpreadsheet session={session} onImported={onImported} onClose={close} />
+          ) : (
+            <UndoImport session={session} onUndone={onImported} onClose={close} />
           )}
         </DialogContent>
       )}

@@ -1440,6 +1440,61 @@ function send(method: string, path: string, body?: unknown) {
   });
 }
 
+// The owner's request of 2026-11-04: an admin undoes a spreadsheet import.
+describe('undoing an import', () => {
+  const BATCH = '00000000-0000-4000-8000-00000000ba7c';
+  const plan = {
+    fileName: 'sellers.csv',
+    createdAt: '2026-11-04T01:00:00.000Z',
+    companies: 2,
+    locations: 3,
+    kept: [],
+    listed: [],
+  };
+
+  it('lists the imports for admins only', async () => {
+    db.listImports.mockResolvedValueOnce(null);
+    expect((await send('GET', `/imports?organization_id=${ORG}`)).status).toBe(403);
+    db.listImports.mockResolvedValueOnce([]);
+    const res = await send('GET', `/imports?organization_id=${ORG}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ imports: [] });
+    expect((await send('GET', '/imports?organization_id=nope')).status).toBe(422);
+  });
+
+  it('previews, then undoes only with the count previewed', async () => {
+    db.undoImport.mockResolvedValueOnce({ status: 'ok', committed: false, plan });
+    const preview = await send('POST', `/imports/${BATCH}/undo`, { commit: false });
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toEqual({ committed: false, plan });
+    expect(db.undoImport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      BATCH,
+      false,
+      undefined,
+    );
+    // Undoing needs the count the preview showed.
+    expect((await send('POST', `/imports/${BATCH}/undo`, { commit: true })).status).toBe(422);
+    db.undoImport.mockResolvedValueOnce({ status: 'changed', plan });
+    const changed = await send('POST', `/imports/${BATCH}/undo`, { commit: true, expected: 5 });
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toMatchObject({ error: { code: 'PLAN_CHANGED' }, plan });
+    db.undoImport.mockResolvedValueOnce({ status: 'ok', committed: true, plan });
+    const done = await send('POST', `/imports/${BATCH}/undo`, { commit: true, expected: 2 });
+    expect(await done.json()).toEqual({ committed: true, plan });
+  });
+
+  it('says why it cannot', async () => {
+    db.undoImport.mockResolvedValueOnce({ status: 'forbidden' });
+    expect((await send('POST', `/imports/${BATCH}/undo`, { commit: false })).status).toBe(403);
+    db.undoImport.mockResolvedValueOnce({ status: 'undone' });
+    expect((await send('POST', `/imports/${BATCH}/undo`, { commit: false })).status).toBe(409);
+    db.undoImport.mockResolvedValueOnce({ status: 'not_found' });
+    expect((await send('POST', `/imports/${BATCH}/undo`, { commit: false })).status).toBe(404);
+    expect((await send('POST', '/imports/nope/undo', { commit: false })).status).toBe(404);
+  });
+});
+
 describe('POST /api/v1/counterparties (add by hand)', () => {
   const values = {
     legalName: ' Synthetic  Grower ',

@@ -21,6 +21,7 @@ import {
   createFacilitySchema,
   groupImportRows,
   importRequestSchema,
+  undoImportRequestSchema,
   inspectPng,
   mainContactSchema,
   MAX_LOGO_BYTES,
@@ -821,6 +822,58 @@ export function counterpartyRoutes(openDatabase: DatabaseFactory) {
         );
       }
       return c.json({ ...result, fingerprint: reviewed, committed: true, importBatchId }, 201);
+    });
+  });
+
+  // An admin's spreadsheet imports, to undo one (owner's request, 2026-11-04).
+  routes.get('/imports', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const organizationId = c.req.query('organization_id') ?? '';
+    if (!isUuid(organizationId)) {
+      return apiError(c, 422, 'VALIDATION_FAILED', 'organization_id must be a UUID.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const imports = await db.listImports(ctx, organizationId);
+      return imports === null
+        ? apiError(c, 403, 'FORBIDDEN', 'Only admins can undo an import.')
+        : c.json({ imports });
+    });
+  });
+
+  // What undoing an import removes (commit false), or removes it: the companies it created,
+  // and what it added to companies already listed (owner's request and answers, 2026-11-04).
+  routes.post('/imports/:id/undo', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such import.');
+    const body = await readJson(c, MAX_FORM_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const request = undoImportRequestSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    const { commit, expected } = request.data;
+    if (commit && expected === undefined) {
+      return apiError(c, 422, 'VALIDATION_FAILED', 'Preview the undo before undoing it.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.undoImport(ctx, id, commit, expected);
+      switch (result.status) {
+        case 'ok':
+          return c.json({ committed: result.committed, plan: result.plan });
+        case 'not_found':
+          return apiError(c, 404, 'NOT_FOUND', 'No such import.');
+        case 'forbidden':
+          return apiError(c, 403, 'FORBIDDEN', 'Only admins can undo an import.');
+        case 'undone':
+          return apiError(c, 409, 'ALREADY_UNDONE', 'This import has already been undone.');
+        case 'changed':
+          return apiError(
+            c,
+            409,
+            'PLAN_CHANGED',
+            'The list changed since the preview. Look over what will be removed again, then undo.',
+            { plan: result.plan },
+          );
+      }
     });
   });
 
