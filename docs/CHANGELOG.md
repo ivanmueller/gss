@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Handoff record of #128
+
+- `docs/HANDOFF.md`: one company's rows combined and Company name (ivanmueller/gss#128) with its CI and Deploy staging runs.
+
 ## 2026-11-03 — Company name, not Legal name
 
 - `docs/DECISIONS.md`: the field called Company name on screen, the public (DBA) name; nothing stored changed.
