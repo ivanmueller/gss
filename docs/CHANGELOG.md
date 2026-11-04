@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-04 — AGENTS.md and README brought up to date
+
+- `AGENTS.md`: the status line with the sellers' details, contacts on the page only, combined rows, coordinates page by page, filters kept on Back and Undo an import.
+- `README.md`: Counterparties' filters kept in the address; Add by hand with Company name and a seller's details, no contact; the import's columns, combined rows and warnings; Undo an import; Find missing coordinates, pages of 100, Try again, Select all.
+
 ## 2026-11-04 — Handoff record of #133, and the status brought up to date
 
 - `docs/HANDOFF.md`: Undo an import (ivanmueller/gss#133) with its CI and Deploy staging runs and Codex's four reviews; the status (sellers' details, coordinates page by page, Back keeping the list, Undo an import); the checks on staging for #125 to #133.
