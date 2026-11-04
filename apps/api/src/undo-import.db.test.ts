@@ -579,4 +579,72 @@ describe('undoing an import as app_api', () => {
       plan: { recordsAdditions: false, companies: 0, listed: [] },
     });
   });
+
+  // Codex's re-review of 439d845: an edit saved while the undo waits for the company's lock is
+  // the version compared, so its seller details stay.
+  it('keeps an edit saved while the undo waits for the company', async () => {
+    await importRows(
+      users.olivia,
+      'buyer',
+      [
+        {
+          line: 2,
+          values: { legalName: 'Synthetic Busy Buyer', country: 'CA', city: 'Olds', region: 'AB' },
+        },
+      ],
+      'f'.repeat(64),
+    );
+    const sellers = await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Busy Buyer',
+            country: 'CA',
+            grainTypes: 'Feed',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      '0'.repeat(63) + '1',
+    );
+    const [busy] = await admin<{ id: string }[]>`
+      select id from app.counterparties where organization_id = ${orgs.a} and legal_name = 'Synthetic Busy Buyer'`;
+    if (!busy) throw new Error('no buyer');
+
+    const undone = await admin
+      .begin(async (tx) => {
+        await tx`select set_config('app.user_id', ${users.adam}, true)`;
+        // The edit, not yet committed: Feed becomes Organic.
+        await tx`update app.counterparties set grain_types = '{organic}' where id = ${busy.id}`;
+        const running = db.undoImport(as(users.adam), sellers, true, 0);
+        void running.catch(() => undefined);
+        // Committed only once the undo waits to lock the company.
+        for (let waited = 0; ; waited += 1) {
+          await tx`select pg_stat_clear_snapshot()`;
+          const [row] = await tx<{ count: number }[]>`
+            select count(*)::int as count from pg_stat_activity
+            where usename = 'app_api' and wait_event_type = 'Lock'
+              and query like '%xmin::text as version%for update%'`;
+          if (row?.count === 1) break;
+          if (waited > 60) throw new Error('the undo never waited for the company');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return { running };
+      })
+      .then(({ running }) => running);
+
+    expect(undone).toMatchObject({
+      status: 'ok',
+      committed: true,
+      plan: { listed: [{ id: busy.id, removedTypes: [], sellerDetails: false }] },
+    });
+    expect(await db.getCounterparty(as(users.adam), busy.id)).toMatchObject({
+      types: ['buyer', 'seller'],
+      grainTypes: ['organic'],
+    });
+  });
 });

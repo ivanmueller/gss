@@ -2,7 +2,7 @@
 
 ## 2026-11-04 — Codex's re-review of Undo an import
 
-- `docs/DECISIONS.md`: additions taken off only while the company is unchanged; older imports always flagged.
+- `docs/DECISIONS.md`: additions taken off only while the company is unchanged, its version read under its lock; older imports always flagged.
 - `docs/DATA_MODEL.md`: `import_additions.row_version`.
 
 ## 2026-11-04 — Codex's review of Undo an import

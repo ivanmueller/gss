@@ -1713,30 +1713,34 @@ export function createDatabase(sql: postgres.Sql): Database {
             addedTypes: string[];
             sellerDetails: boolean;
             replaced: string[];
-            current: boolean;
+            rowVersion: string | null;
           }[]
         >`
-          select a.counterparty_id as "counterpartyId",
-                 to_jsonb(a.added_types::text[]) as "addedTypes",
-                 a.seller_details as "sellerDetails", to_jsonb(a.replaced) as replaced,
-                 -- Unchanged since the import wrote it: what it added is still its own.
-                 coalesce(c.xmin::text = a.row_version, false) as current
-          from app.import_additions a
-          join app.counterparties c on c.id = a.counterparty_id
-          where a.organization_id = ${batch.org} and a.import_batch_id = ${batchId}`;
+          select counterparty_id as "counterpartyId",
+                 to_jsonb(added_types::text[]) as "addedTypes",
+                 seller_details as "sellerDetails", to_jsonb(replaced) as replaced,
+                 row_version as "rowVersion"
+          from app.import_additions
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}`;
         const touched = new Set<string>([
           ...addedFacilities.map((f) => f.counterpartyId),
           ...addedGrains.map((g) => g.counterpartyId),
           ...recorded.map((r) => r.counterpartyId),
         ]);
-        const listedRows = await tx<{ id: string; name: string; types: string[] }[]>`
-          select id, legal_name as name, to_jsonb(types::text[]) as types
+        // Locked, with each row's version as locked: an edit committed while this waited for
+        // the lock is the version compared (Codex's re-review of 439d845).
+        const listedRows = await tx<
+          { id: string; name: string; types: string[]; version: string }[]
+        >`
+          select id, legal_name as name, to_jsonb(types::text[]) as types, xmin::text as version
           from app.counterparties
           where id = any (${ids([...touched])}::uuid[])
           order by lower(legal_name), id
           for update`;
         const listed = listedRows.map((row) => {
-          const record = recorded.find((r) => r.counterpartyId === row.id);
+          const found = recorded.find((r) => r.counterpartyId === row.id);
+          // Unchanged since the import wrote it: what it added is still its own.
+          const record = found && { ...found, current: found.rowVersion === row.version };
           // A type it added is taken off while another one remains, and only while nothing
           // changed the company since (a later import may have added it again).
           const added = (record?.addedTypes ?? []).filter((type) => row.types.includes(type));
