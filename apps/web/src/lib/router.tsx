@@ -1,4 +1,10 @@
-import { useSyncExternalStore, type ComponentProps, type MouseEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+  type ComponentProps,
+  type MouseEvent,
+} from 'react';
 
 // A minimal client-side router: the Worker serves index.html for every non-API path,
 // and these helpers keep the address bar and the rendered page in step.
@@ -14,14 +20,64 @@ function subscribe(onChange: () => void) {
   };
 }
 
+/**
+ * What each history entry remembers (owner's request, 2026-11-04): where the page was scrolled
+ * when it was left, and the address the new page was opened from, so Back returns to the same
+ * place with the same filters.
+ */
+interface EntryState {
+  scrollY?: number;
+  from?: string;
+}
+
+function entryState(): EntryState {
+  const state: unknown = window.history.state;
+  return typeof state === 'object' && state !== null ? state : {};
+}
+
+function here(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
 export function navigate(to: string) {
-  window.history.pushState(null, '', to);
+  // The page being left keeps its scroll position, for when Back returns to it.
+  window.history.replaceState({ ...entryState(), scrollY: window.scrollY }, '', here());
+  window.history.pushState({ from: here() } satisfies EntryState, '', to);
   window.dispatchEvent(new Event(NAVIGATE));
+}
+
+/**
+ * Back to `path` (e.g. "/counterparties"): when this page was opened from it, the browser's own
+ * Back, which returns to it as it was (its filters in the address, its scroll position);
+ * otherwise opens `path`.
+ */
+export function goBackTo(path: string) {
+  const from = entryState().from;
+  if (from !== undefined && new URL(from, window.location.origin).pathname === path) {
+    window.history.back();
+  } else {
+    navigate(path);
+  }
+}
+
+/**
+ * Once the page's content is shown (`ready`), scrolls back to where it was when it was left,
+ * when Back returned to it; a page opened afresh starts at the top.
+ */
+export function useRestoredScroll(ready: boolean) {
+  const done = useRef(false);
+  useEffect(() => {
+    if (!ready || done.current) return;
+    done.current = true;
+    const y = entryState().scrollY;
+    if (y !== undefined) window.scrollTo(0, y);
+  }, [ready]);
 }
 
 /** Like navigate, but replaces the current entry, so Back skips it (old addresses, view options). */
 export function redirect(to: string) {
-  window.history.replaceState(null, '', to);
+  // The entry keeps what it remembers (where it was opened from).
+  window.history.replaceState({ from: entryState().from }, '', to);
   window.dispatchEvent(new Event(NAVIGATE));
 }
 

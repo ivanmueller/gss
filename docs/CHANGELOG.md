@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Back returns to the list as it was
+
+- `docs/DECISIONS.md`: the search and Show archived in the address; the back arrow as the browser's Back; the scroll position kept.
+
 ## 2026-11-04 — Select all among the results to check
 
 - `docs/DECISIONS.md`: Select all and Select none when finding coordinates.

@@ -114,6 +114,18 @@ describe('CounterpartiesPage', () => {
     expect(screen.getByText('1 of 2 shown')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Synthetic Prairie Mills' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Synthetic Buyer LLC' }).length).toBeGreaterThan(0);
+    // Kept in the address, so Back from a counterparty returns to it (2026-11-04).
+    expect(window.location.search).toBe('?view=table&q=nd');
+  });
+
+  it('opens with the search and Show archived given in the address', async () => {
+    window.history.replaceState(null, '', '/counterparties?view=table&q=nd&archived=1');
+    mockApi({ [LIST]: () => Response.json({ counterparties: items, truncated: false }) });
+    render(<CounterpartiesPage session={SESSION} />);
+    expect(await screen.findByRole('searchbox', { name: 'Search counterparties' })).toHaveValue(
+      'nd',
+    );
+    expect(screen.getByText('1 of 2 shown')).toBeInTheDocument();
   });
 
   it('opens on the logos, with the views in the order Logos, Table, Map', async () => {
@@ -474,6 +486,7 @@ describe('CounterpartiesPage', () => {
     expect(await screen.findByText('2 of 3 shown')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Synthetic Closed Mill' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('checkbox', { name: 'Show archived (1)' }));
+    expect(window.location.search).toBe('?view=table&archived=1');
     const row = screen.getByRole('link', { name: 'Synthetic Closed Mill' }).closest('tr');
     expect(row).toHaveTextContent('Archived');
   });

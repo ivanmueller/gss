@@ -1,8 +1,18 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { Link, matchRoute, setSearchParams, usePath, useSearch } from './router';
+import {
+  goBackTo,
+  Link,
+  matchRoute,
+  navigate,
+  setSearchParams,
+  usePath,
+  useRestoredScroll,
+  useSearch,
+} from './router';
+import { BackLink } from '../components/BackLink';
 
 afterEach(() => {
   window.history.replaceState(null, '', '/');
@@ -93,5 +103,66 @@ describe('setSearchParams', () => {
     expect(screen.getByText('query ?view=map&type=seller')).toBeInTheDocument();
     expect(window.location.pathname).toBe('/counterparties');
     expect(window.history.length).toBe(entries);
+  });
+});
+
+// The owner's request of 2026-11-04: Back from a counterparty returns to the list as it was.
+describe('going back', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('remembers where a page was scrolled and where the next one was opened from', () => {
+    window.history.replaceState(null, '', '/counterparties?type=seller&q=oat');
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(1234);
+    const replace = vi.spyOn(window.history, 'replaceState');
+    navigate('/counterparties/00000000-0000-4000-8000-00000000c001');
+    expect(replace).toHaveBeenCalledWith(
+      { scrollY: 1234 },
+      '',
+      '/counterparties?type=seller&q=oat',
+    );
+    expect(window.history.state).toEqual({ from: '/counterparties?type=seller&q=oat' });
+  });
+
+  it('uses the browser’s Back when the page was opened from the one asked for', () => {
+    window.history.replaceState({ from: '/counterparties?type=seller' }, '', '/counterparties/x');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+    goBackTo('/counterparties');
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the page afresh when it was not opened from it', () => {
+    window.history.replaceState({ from: '/follow-ups' }, '', '/counterparties/x');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+    goBackTo('/counterparties');
+    expect(back).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/counterparties');
+  });
+
+  it('is what the back arrow does', async () => {
+    window.history.replaceState({ from: '/counterparties?tier=A' }, '', '/counterparties/x');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+    render(<BackLink href="/counterparties">All counterparties</BackLink>);
+    await userEvent.click(screen.getByRole('link', { name: 'All counterparties' }));
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it('scrolls back once the content shows, and only when returning', () => {
+    const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    function Page({ ready }: { ready: boolean }) {
+      useRestoredScroll(ready);
+      return null;
+    }
+    window.history.replaceState({ scrollY: 900 }, '', '/counterparties');
+    const { rerender, unmount } = render(<Page ready={false} />);
+    expect(scroll).not.toHaveBeenCalled();
+    rerender(<Page ready />);
+    expect(scroll).toHaveBeenCalledWith(0, 900);
+    unmount();
+    scroll.mockClear();
+    window.history.replaceState(null, '', '/counterparties');
+    render(<Page ready />);
+    expect(scroll).not.toHaveBeenCalled();
   });
 });

@@ -49,7 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { VerificationBadge } from '../components/VerificationBadge';
 import type { CounterpartyList, CounterpartySummary } from '../lib/api';
 import { canEditDirectory, countryName, typeLabel } from '../lib/directory';
-import { Link, setSearchParams, useSearch } from '../lib/router';
+import { Link, setSearchParams, useRestoredScroll, useSearch } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import type { MeOrganization } from '../lib/useMe';
@@ -321,8 +321,6 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
     `/counterparties?organization_id=${organization.id}`,
     token,
   );
-  const [query, setQuery] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
   const editor = canEditDirectory(organization.role);
   const [mapVersion, setMapVersion] = useState(0);
   const wide = useMediaQuery(WIDE_QUERY, true);
@@ -330,6 +328,10 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   // The view and the type filter live in the address (?view=map&type=seller), so a
   // reload or a shared link keeps them.
   const params = new URLSearchParams(useSearch());
+  // The search and Show archived are kept in the address too (?q=…&archived=1), so Back from
+  // a counterparty returns to the same list (owner's request, 2026-11-04).
+  const query = params.get('q') ?? '';
+  const showArchived = params.get('archived') === '1';
   const view: View = VIEWS.find((item) => item === params.get('view')) ?? 'logos';
   const typeParam = params.get('type');
   const side: Side = SIDES.find((item) => item === typeParam) ?? 'all';
@@ -350,6 +352,8 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
   const addTab = ADD_TABS.find((tab) => tab === params.get('add')) ?? null;
 
   const all = useMemo(() => (list.status === 'ok' ? list.data.counterparties : []), [list]);
+  // Back from a counterparty: where the list was scrolled, once it shows.
+  useRestoredScroll(list.status === 'ok');
   const archivedCount = all.filter((counterparty) => counterparty.archivedAt !== null).length;
   const shown = all.filter(
     (counterparty) =>
@@ -393,7 +397,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                   type="search"
                   value={query}
                   onChange={(event) => {
-                    setQuery(event.target.value);
+                    setSearchParams({ q: event.target.value === '' ? null : event.target.value });
                   }}
                   placeholder="Search by name, province or state"
                   className="pl-9"
@@ -512,7 +516,7 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
                     className="size-4 accent-primary"
                     checked={showArchived}
                     onChange={(event) => {
-                      setShowArchived(event.target.checked);
+                      setSearchParams({ archived: event.target.checked ? '1' : null });
                     }}
                   />
                   Show archived ({archivedCount})
