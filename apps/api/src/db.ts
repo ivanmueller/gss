@@ -218,6 +218,12 @@ export interface ImportAddition {
   /** Its contacts the file changes: only the fields given. */
   /** A carrier's lanes the file adds, unverified; listed ones are left as they are. */
   lanes?: CarrierLane[];
+  /**
+   * What undoing the import takes off again, recorded with it (app.import_additions): the
+   * types it adds, whether it fills in seller details the company has none of, and what else
+   * it replaces, to check by hand (Codex's review of a62e00a).
+   */
+  provenance?: { addedTypes: CounterpartyType[]; sellerDetails: boolean; replaced: string[] };
   contactUpdates: {
     id: string;
     changes: Partial<Pick<ContactInput, 'role' | 'email' | 'phone'>>;
@@ -1170,10 +1176,10 @@ export function createDatabase(sql: postgres.Sql): Database {
         const [created] = await tx<{ id: string }[]>`
           insert into app.import_batches
             (organization_id, kind, file_name, content_sha256, row_count, created_count,
-             skipped_count, created_by)
+             skipped_count, created_by, records_additions)
           values (${org}, 'counterparties', ${batch.fileName}, ${batch.contentSha256},
                   ${batch.rowCount}, ${batch.counterparties.length}, ${batch.skippedCount},
-                  app.current_user_id())
+                  app.current_user_id(), true)
           returning id
         `;
         if (!created) throw new Error('import batch was not created');
@@ -1261,6 +1267,8 @@ export function createDatabase(sql: postgres.Sql): Database {
             commodity_code: k.commodity,
             direction: k.direction,
             created_by: ctx.userId,
+            // Which import added it, to undo it (2026-11-04).
+            import_batch_id: batchId,
           })),
         );
         for (const part of chunks(commodities)) {
@@ -1340,6 +1348,24 @@ export function createDatabase(sql: postgres.Sql): Database {
               returning id`,
             );
           }
+        }
+        // What it adds to companies already listed, for undoing it exactly (2026-11-04).
+        const provenance = batch.additions.flatMap(({ counterpartyId, provenance: p }) =>
+          p && (p.addedTypes.length > 0 || p.sellerDetails || p.replaced.length > 0)
+            ? [
+                {
+                  organization_id: org,
+                  import_batch_id: batchId,
+                  counterparty_id: counterpartyId,
+                  added_types: enumArray(p.addedTypes),
+                  seller_details: p.sellerDetails,
+                  replaced: `{${p.replaced.map((r) => JSON.stringify(r)).join(',')}}`,
+                },
+              ]
+            : [],
+        );
+        for (const part of chunks(provenance)) {
+          await tx`insert into app.import_additions ${tx(part)}`;
         }
         // A carrier's lanes, unverified until someone on the team verifies them (owner's
         // request, 2026-11-01); one a carrier already lists stays as it is. Written after the
@@ -1580,10 +1606,16 @@ export function createDatabase(sql: postgres.Sql): Database {
     undoImport(ctx, batchId, commit, expected) {
       return asUser(ctx, async (tx): Promise<UndoImportResult> => {
         const [batch] = await tx<
-          { org: string; fileName: string; createdAt: Date; createdBy: string; undone: boolean }[]
+          {
+            org: string;
+            fileName: string;
+            createdAt: Date;
+            undone: boolean;
+            recordsAdditions: boolean;
+          }[]
         >`
           select organization_id as org, file_name as "fileName", created_at as "createdAt",
-                 created_by as "createdBy", undone_at is not null as undone
+                 undone_at is not null as undone, records_additions as "recordsAdditions"
           from app.import_batches where id = ${batchId}`;
         if (!batch) return { status: 'not_found' };
         const [allowed] = await tx<{ allowed: boolean }[]>`
@@ -1649,10 +1681,9 @@ export function createDatabase(sql: postgres.Sql): Database {
           select count(*)::int as count from app.facilities
           where counterparty_id = any (${ids(removing)}::uuid[])`;
 
-        // Companies already listed that the import changed, from its own transaction.
-        const changes = await tx<{ entity: string; entityId: string; fields: string[] }[]>`
-          select entity, entity_id as "entityId", to_jsonb(changed_fields) as fields
-          from app.import_changes(${batchId})`;
+        // Companies already listed that it added to: what it recorded (2026-11-04), never
+        // guessed from timestamps (Codex's review of a62e00a).
+        const notCreated = ids([...createdIds]);
         const addedFacilities = await tx<{ id: string; counterpartyId: string; used: boolean }[]>`
           select f.id, f.counterparty_id as "counterpartyId",
                  (exists (select from app.quotes q where q.facility_id = f.id)
@@ -1661,29 +1692,27 @@ export function createDatabase(sql: postgres.Sql): Database {
                    as used
           from app.facilities f
           where f.organization_id = ${batch.org} and f.import_batch_id = ${batchId}
-            and not (f.counterparty_id = any (${ids([...createdIds])}::uuid[]))`;
+            and not (f.counterparty_id = any (${notCreated}::uuid[]))`;
         const addedGrains = await tx<{ id: string; counterpartyId: string }[]>`
-          select k.id, k.counterparty_id as "counterpartyId"
-          from app.counterparty_commodities k
-          where k.organization_id = ${batch.org}
-            -- The import's own transaction: the batch's exact time, to the microsecond.
-            and (k.created_at, k.created_by) = (
-              select b.created_at, b.created_by from app.import_batches b where b.id = ${batchId})
-            and not (k.counterparty_id = any (${ids([...createdIds])}::uuid[]))`;
-        const facilityOwners = new Map(
-          (
-            await tx<{ id: string; counterpartyId: string }[]>`
-              select id, counterparty_id as "counterpartyId" from app.facilities
-              where id = any (${ids(changes.filter((c) => c.entity === 'facilities').map((c) => c.entityId))}::uuid[])`
-          ).map((row) => [row.id, row.counterpartyId]),
-        );
+          select id, counterparty_id as "counterpartyId" from app.counterparty_commodities
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}
+            and not (counterparty_id = any (${notCreated}::uuid[]))`;
+        const recorded = await tx<
+          {
+            counterpartyId: string;
+            addedTypes: string[];
+            sellerDetails: boolean;
+            replaced: string[];
+          }[]
+        >`
+          select counterparty_id as "counterpartyId", to_jsonb(added_types::text[]) as "addedTypes",
+                 seller_details as "sellerDetails", to_jsonb(replaced) as replaced
+          from app.import_additions
+          where organization_id = ${batch.org} and import_batch_id = ${batchId}`;
         const touched = new Set<string>([
-          ...changes
-            .filter((c) => c.entity === 'counterparties' && !createdIds.has(c.entityId))
-            .map((c) => c.entityId),
-          ...[...facilityOwners.values()].filter((id) => !createdIds.has(id)),
           ...addedFacilities.map((f) => f.counterpartyId),
           ...addedGrains.map((g) => g.counterpartyId),
+          ...recorded.map((r) => r.counterpartyId),
         ]);
         const listedRows = await tx<{ id: string; name: string; types: string[] }[]>`
           select id, legal_name as name, to_jsonb(types::text[]) as types
@@ -1691,66 +1720,20 @@ export function createDatabase(sql: postgres.Sql): Database {
           where id = any (${ids([...touched])}::uuid[])
           order by lower(legal_name), id
           for update`;
-        // The types the import's companies were made: a type it added to a listed company is
-        // one of them (types are only ever added by an import).
-        const fileTypes =
-          created
-            .filter((row) => !retyped.has(row.id))
-            .reduce<string[] | null>(
-              (common, row) =>
-                common === null ? row.types : common.filter((t) => row.types.includes(t)),
-              null,
-            ) ?? [];
-        const SELLER_COLUMNS = [
-          'grain_types',
-          'seller_kind',
-          'annual_tonnes',
-          'organic_certifier',
-          'organic_certified_until',
-        ];
-        const LABELS: Record<string, string> = {
-          verification_status: 'Verification',
-          website: 'Website',
-          phone: 'Company phone',
-          markets: 'Market',
-          tier: 'Tier',
-          notes: 'Notes',
-          equipment: 'Equipment',
-          grain_types: 'Grain type',
-          seller_kind: 'Seller kind',
-          annual_tonnes: 'Tonnes a year',
-          organic_certifier: 'Organic certifier',
-          organic_certified_until: 'Organic certified until',
-        };
         const listed = listedRows.map((row) => {
-          const fields = new Set(
-            changes
-              .filter((c) => c.entity === 'counterparties' && c.entityId === row.id)
-              .flatMap((c) => c.fields)
-              .filter((field) => field !== 'updated_at'),
-          );
-          const removable = fields.has('types')
-            ? fileTypes.filter((type) => row.types.includes(type))
-            : [];
-          const removedTypes =
-            removable.length > 0 && row.types.some((type) => !removable.includes(type))
-              ? removable
-              : [];
-          const sellerDetails =
-            removedTypes.includes('seller') && SELLER_COLUMNS.some((field) => fields.has(field));
-          const check = [...fields]
-            .filter(
-              (field) =>
-                !(field === 'types' && removedTypes.length > 0) &&
-                !(sellerDetails && SELLER_COLUMNS.includes(field)),
-            )
-            .map((field) => (field === 'types' ? 'Type' : (LABELS[field] ?? field)));
-          if (
-            changes.some(
-              (c) => c.entity === 'facilities' && facilityOwners.get(c.entityId) === row.id,
-            )
-          )
-            check.push('A location’s address, type or coordinates');
+          const record = recorded.find((r) => r.counterpartyId === row.id);
+          // A type it added is taken off while another one remains.
+          const added = (record?.addedTypes ?? []).filter((type) => row.types.includes(type));
+          const removedTypes = row.types.some((type) => !added.includes(type)) ? added : [];
+          const sellerDetails = record?.sellerDetails === true && removedTypes.includes('seller');
+          const check = [...(record?.replaced ?? [])];
+          if (added.length > 0 && removedTypes.length === 0) check.push('Type');
+          if (record?.sellerDetails === true && !sellerDetails) check.push('Seller details');
+          if (!batch.recordsAdditions) {
+            check.push(
+              'it was imported before Undo recorded what an import adds, so check its type, seller details, grains, tier and notes',
+            );
+          }
           if (addedFacilities.some((f) => f.counterpartyId === row.id && f.used))
             check.push('A location it added that a bid, offer or freight rate uses (kept)');
           return {

@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Codex's review of Undo an import
+
+- `docs/DECISIONS.md`: what an import adds recorded with it; retypes found without times; older imports left to check by hand.
+- `docs/DATA_MODEL.md`, `docs/API.md`: the migration and the plan as now.
+
 ## 2026-11-04 — Handoff record of #132
 
 - `docs/HANDOFF.md`: Select all among the coordinates results and Back keeping the list as it was (ivanmueller/gss#132) with its CI and Deploy staging runs.

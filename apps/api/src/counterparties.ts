@@ -450,10 +450,49 @@ function changesFor(
   if (lanes.length > 0) changes.push(`Lanes added (unverified): ${laneWords(lanes)}`);
 
   const commodities = new Set(company.commodities.map((k) => `${k.direction}:${k.commodity}`));
+  // What undoing the import takes off again (Codex's review of a62e00a): recorded, not
+  // guessed later.
+  const addedTypes = (details.types ?? []).filter((type) => !company.types.includes(type));
+  const sellerColumns = [
+    'grainTypes',
+    'sellerKind',
+    'annualTonnes',
+    'organicCertifier',
+    'organicCertifiedUntil',
+  ] as const;
+  const hadSellerDetails =
+    company.grainTypes.length > 0 ||
+    company.sellerKind !== null ||
+    company.annualTonnes !== null ||
+    company.organicCertifier !== null ||
+    company.organicCertifiedUntil !== null;
+  const sellerDetails = !hadSellerDetails && sellerColumns.some((field) => field in details);
+  const REPLACED: Partial<Record<keyof CounterpartyChanges, string>> = {
+    verificationStatus: 'Verification',
+    website: 'Website',
+    phone: 'Company phone',
+    markets: 'Market',
+    tier: 'Tier',
+    notes: 'Notes',
+    equipment: 'Equipment',
+    grainTypes: 'Grain type',
+    sellerKind: 'Seller kind',
+    annualTonnes: 'Tonnes a year',
+    organicCertifier: 'Organic certifier',
+    organicCertifiedUntil: 'Organic certified until',
+  };
+  const replaced = (Object.keys(details) as (keyof CounterpartyChanges)[])
+    .filter((field) => field !== 'types')
+    .filter((field) => !(sellerDetails && (sellerColumns as readonly string[]).includes(field)))
+    .flatMap((field) => (REPLACED[field] ? [REPLACED[field]] : []));
+  if (facilityUpdates.length > 0)
+    replaced.push('A location’s address, type, access or coordinates');
+
   return {
     addition: {
       counterpartyId: company.id,
       details: Object.keys(details).length > 0 ? details : null,
+      provenance: { addedTypes, sellerDetails, replaced },
       contacts,
       facilities,
       lanes,

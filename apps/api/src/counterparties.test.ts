@@ -651,6 +651,7 @@ describe('POST /api/v1/counterparties/import', () => {
             commodities: [{ commodity: 'oats', direction: 'buys' }],
             lanes: [],
             details: null,
+            provenance: { addedTypes: [], sellerDetails: false, replaced: [] },
             contactUpdates: [],
             facilityUpdates: [],
           },
@@ -848,6 +849,18 @@ describe('POST /api/v1/counterparties/import', () => {
           phone: '(306) 555-0199',
           tier: 'A',
           notes: 'Synthetic own note.\n\nSynthetic file note.',
+        },
+        // What undoing the import takes off again, and what it lists to check by hand.
+        provenance: {
+          addedTypes: ['buyer'],
+          sellerDetails: false,
+          replaced: [
+            'Website',
+            'Company phone',
+            'Tier',
+            'Notes',
+            'A location’s address, type, access or coordinates',
+          ],
         },
         contacts: [],
         facilities: [],

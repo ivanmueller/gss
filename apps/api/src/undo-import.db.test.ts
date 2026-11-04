@@ -287,4 +287,163 @@ describe('undoing an import as app_api', () => {
     );
     expect(names).not.toContain('Synthetic Plain Farm');
   });
+
+  // Codex's review of a62e00a, finding 2: the types taken off are those the import recorded
+  // adding, not guessed from the companies it created.
+  it('takes off only the type the import added, whatever types its own companies have', async () => {
+    await importRows(
+      users.olivia,
+      'buyer',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Hauling Mill',
+            country: 'CA',
+            types: 'buyer, carrier',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      '4'.repeat(64),
+    );
+    const sellers = await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Hauling Mill',
+            country: 'CA',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+        {
+          line: 3,
+          values: {
+            legalName: 'Synthetic Both Ways',
+            country: 'CA',
+            types: 'buyer, seller',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      '5'.repeat(64),
+    );
+    const [mill] = await admin<{ id: string }[]>`
+      select id from app.counterparties where organization_id = ${orgs.a} and legal_name = 'Synthetic Hauling Mill'`;
+    if (!mill) throw new Error('no mill');
+    expect((await db.getCounterparty(as(users.adam), mill.id))?.types).toEqual([
+      'buyer',
+      'seller',
+      'carrier',
+    ]);
+    expect(await db.undoImport(as(users.adam), sellers, true, 1)).toMatchObject({
+      status: 'ok',
+      plan: { listed: [{ id: mill.id, removedTypes: ['seller'] }] },
+    });
+    expect((await db.getCounterparty(as(users.adam), mill.id))?.types).toEqual([
+      'buyer',
+      'carrier',
+    ]);
+  });
+
+  it('takes off a type the import added when it created no company', async () => {
+    await importRows(
+      users.olivia,
+      'buyer',
+      [
+        {
+          line: 2,
+          values: { legalName: 'Synthetic Lone Buyer', country: 'CA', city: 'Olds', region: 'AB' },
+        },
+      ],
+      '6'.repeat(64),
+    );
+    const sellers = await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Lone Buyer',
+            country: 'CA',
+            commodities: 'Oats',
+            city: 'Olds',
+            region: 'AB',
+          },
+        },
+      ],
+      '7'.repeat(64),
+    );
+    const [lone] = await admin<{ id: string }[]>`
+      select id from app.counterparties where organization_id = ${orgs.a} and legal_name = 'Synthetic Lone Buyer'`;
+    if (!lone) throw new Error('no buyer');
+    expect(await db.undoImport(as(users.adam), sellers, true, 0)).toMatchObject({ status: 'ok' });
+    const after = await db.getCounterparty(as(users.adam), lone.id);
+    expect(after?.types).toEqual(['buyer']);
+    // The grain it added (oats it sells) is gone too.
+    expect(after?.commodities).toEqual([]);
+  });
+
+  it('leaves to check by hand what an import made before the record did not keep', async () => {
+    await importRows(
+      users.olivia,
+      'buyer',
+      [
+        {
+          line: 2,
+          values: { legalName: 'Synthetic Older Buyer', country: 'CA', city: 'Olds', region: 'AB' },
+        },
+      ],
+      '8'.repeat(64),
+    );
+    const sellers = await importRows(
+      users.olivia,
+      'seller',
+      [
+        {
+          line: 2,
+          values: {
+            legalName: 'Synthetic Older Buyer',
+            country: 'CA',
+            city: 'Didsbury',
+            region: 'AB',
+          },
+        },
+      ],
+      '9'.repeat(64),
+    );
+    // As an import made before this record existed.
+    await admin`update app.import_batches set records_additions = false where id = ${sellers}`;
+    await admin`delete from app.import_additions where import_batch_id = ${sellers}`;
+    await admin`update app.counterparty_commodities set import_batch_id = null where import_batch_id = ${sellers}`;
+    const [older] = await admin<{ id: string }[]>`
+      select id from app.counterparties where organization_id = ${orgs.a} and legal_name = 'Synthetic Older Buyer'`;
+    if (!older) throw new Error('no buyer');
+    const preview = await db.undoImport(as(users.adam), sellers, false);
+    expect(preview).toMatchObject({
+      status: 'ok',
+      plan: {
+        listed: [
+          {
+            id: older.id,
+            locations: 1,
+            removedTypes: [],
+            check: [expect.stringContaining('check its type, seller details, grains') as unknown],
+          },
+        ],
+      },
+    });
+    expect(await db.undoImport(as(users.adam), sellers, true, 0)).toMatchObject({ status: 'ok' });
+    const after = await db.getCounterparty(as(users.adam), older.id);
+    // Only what is recorded is taken off: the location it added. The type stays to check.
+    expect(after?.facilities.map((f) => f.city)).toEqual(['Olds']);
+    expect(after?.types).toEqual(['buyer', 'seller']);
+  });
 });

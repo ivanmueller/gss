@@ -1,10 +1,10 @@
--- Undoing an import (the owner's request of 2026-11-04): who may read what an import changed
--- (app.import_changes, app.import_retyped) and who may mark it undone, with cross-
--- organization denials. Runs in one transaction that is rolled back. Fixtures are synthetic.
+-- Undoing an import (the owner's request of 2026-11-04): who may read which of an import's
+-- companies were retyped (app.import_retyped), who may write and read what an import added
+-- (app.import_additions), and who may mark it undone, with cross-organization denials. Runs in one transaction that is rolled back. Fixtures are synthetic.
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(16);
+select plan(20);
 
 -- Org A: adam (org_admin), olivia (operations). Org B: bob (org_admin).
 insert into auth.users (id, email) values
@@ -72,32 +72,43 @@ select pg_temp.as_api('00000000-0000-4000-8000-0000000022aa',
      where id in ('00000000-0000-4000-8000-00000000c1aa', '00000000-0000-4000-8000-00000000c2aa')$$);
 
 -- Privileges -------------------------------------------------------------------------------
-select ok(has_function_privilege('app_api', 'app.import_changes(uuid)', 'EXECUTE')
-  and has_function_privilege('app_api', 'app.import_retyped(uuid)', 'EXECUTE'),
-  'app_api may ask what an import changed');
-select ok(not has_function_privilege('authenticated', 'app.import_changes(uuid)', 'EXECUTE')
+select ok(has_function_privilege('app_api', 'app.import_retyped(uuid)', 'EXECUTE'),
+  'app_api may ask which companies were retyped');
+select ok(not has_function_privilege('authenticated', 'app.import_retyped(uuid)', 'EXECUTE')
   and not has_function_privilege('anon', 'app.import_retyped(uuid)', 'EXECUTE'),
   'nobody else may');
 select ok(has_column_privilege('app_api', 'app.import_batches', 'undone_at', 'UPDATE')
   and not has_column_privilege('app_api', 'app.import_batches', 'file_name', 'UPDATE'),
   'app_api marks an import undone, and changes nothing else of it');
 
--- What an import changed ----------------------------------------------------------------------
-select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011aa',
-  $$select * from app.import_changes('00000000-0000-4000-8000-00000000ba01')
-     where entity = 'counterparties' and 'tier' = any (changed_fields)$$), 2,
-  'an admin reads the companies the import changed, with their fields');
+-- What an import added ------------------------------------------------------------------------
+select is(pg_temp.as_api('00000000-0000-4000-8000-0000000022aa',
+  $$insert into app.import_additions (organization_id, import_batch_id, counterparty_id, added_types,
+      seller_details, replaced)
+    values ('00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000ba01',
+      '00000000-0000-4000-8000-00000000c1aa', '{seller}', true, '{Tier}')$$), 1,
+  'the person who made the import records what it added');
 select throws_ok(
-  $$select pg_temp.api_count('00000000-0000-4000-8000-0000000022aa',
-    'select * from app.import_changes(''00000000-0000-4000-8000-00000000ba01'')')$$,
-  '42501', null, 'operations may not');
+  $$select pg_temp.as_api('00000000-0000-4000-8000-0000000011aa',
+    'insert into app.import_additions (organization_id, import_batch_id, counterparty_id)
+       values (''00000000-0000-4000-8000-0000000000aa'', ''00000000-0000-4000-8000-00000000ba02'',
+               ''00000000-0000-4000-8000-00000000c2aa'')')$$,
+  '42501', null, 'nobody else, for an import they did not make');
 select throws_ok(
-  $$select pg_temp.api_count('00000000-0000-4000-8000-0000000011bb',
-    'select * from app.import_changes(''00000000-0000-4000-8000-00000000ba01'')')$$,
-  '42501', null, 'nor another organization''s admin');
+  $$select pg_temp.as_api('00000000-0000-4000-8000-0000000011bb',
+    'insert into app.import_additions (organization_id, import_batch_id, counterparty_id)
+       values (''00000000-0000-4000-8000-0000000000aa'', ''00000000-0000-4000-8000-00000000ba01'',
+               ''00000000-0000-4000-8000-00000000c2aa'')')$$,
+  '42501', null, 'nor another organization');
 select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011aa',
-  $$select * from app.import_changes('00000000-0000-4000-8000-00000000ba02')$$), 0,
-  'the older import changed nothing at its own time');
+  $$select 1 from app.import_additions$$), 1, 'an admin reads it, to undo the import');
+select is(pg_temp.api_count('00000000-0000-4000-8000-0000000022aa',
+  $$select 1 from app.import_additions$$), 0, 'operations do not');
+select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011bb',
+  $$select 1 from app.import_additions$$), 0, 'nor another organization''s admin');
+select ok(not has_table_privilege('app_api', 'app.import_additions', 'UPDATE')
+  and not has_table_privilege('app_api', 'app.import_additions', 'DELETE'),
+  'what an import added is never changed');
 
 -- Companies retyped since -------------------------------------------------------------------------
 select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011aa',
@@ -107,6 +118,14 @@ select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011aa',
 select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011aa',
   $$select * from app.import_retyped('00000000-0000-4000-8000-00000000ba01')$$), 0,
   'the listed buyer is not one the newer import created');
+-- A retype whose transaction started before the import still counts (Codex's review of
+-- a62e00a): no timestamp is compared.
+update app.audit_events set occurred_at = now() - interval '2 hours'
+ where entity = 'counterparties' and entity_id = '00000000-0000-4000-8000-00000000c2aa'
+   and action = 'update';
+select is(pg_temp.api_count('00000000-0000-4000-8000-0000000011aa',
+  $$select * from app.import_retyped('00000000-0000-4000-8000-00000000ba02')$$), 1,
+  'a retype dated before the import is still found');
 select throws_ok(
   $$select pg_temp.api_count('00000000-0000-4000-8000-0000000011bb',
     'select * from app.import_retyped(''00000000-0000-4000-8000-00000000ba02'')')$$,
