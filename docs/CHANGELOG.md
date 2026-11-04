@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Handoff record of #132
+
+- `docs/HANDOFF.md`: Select all among the coordinates results and Back keeping the list as it was (ivanmueller/gss#132) with its CI and Deploy staging runs.
+
 ## 2026-11-04 — Undo an import
 
 - `docs/DECISIONS.md`: the owner's request and answers; what is removed, kept and listed to check.
