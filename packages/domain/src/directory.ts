@@ -1565,7 +1565,7 @@ const FIRST_GIVEN = [
  * - notes: every row's, each labelled with its location when the rows' notes differ;
  * - company phone: the first given; the others go to the notes with their location;
  * - markets and grain types: all of the rows', each once;
- * - tier: the highest (A, then B, then C), with a warning when rows differ;
+ * - tier: the highest (A, then B, then C), without a warning (owner's request, 2026-11-04);
  * - website, seller kind, tonnes a year and organic certificate: the first given, with a
  *   warning when a later row differs;
  * - name spelling, types and verification: the first row's, with a warning.
@@ -1614,7 +1614,6 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       for (const [detail] of FIRST_GIVEN) {
         if (row.counterparty[detail] !== null) from[detail] = row.line;
       }
-      if (row.counterparty.tier !== null) from.tier = row.line;
       fromLine.set(key, from);
     } else {
       const kept = group.counterparty;
@@ -1655,17 +1654,10 @@ export function groupImportRows(rows: ParsedImportRow[]): {
       kept.grainTypes = GRAIN_TYPES.filter(
         (type) => kept.grainTypes.includes(type) || row.counterparty.grainTypes.includes(type),
       );
+      // The highest tier, without a warning: the rule is the owner's (2026-11-04).
       const tier = row.counterparty.tier;
-      if (tier !== null && tier !== kept.tier) {
-        if (kept.tier === null || TIERS.indexOf(tier) < TIERS.indexOf(kept.tier)) {
-          if (kept.tier !== null) {
-            differs('tier', from.tier ?? firstLine, `the highest tier, ${tier}, is used`);
-          }
-          kept.tier = tier;
-          from.tier = row.line;
-        } else {
-          differs('tier', from.tier ?? firstLine, `the highest tier, ${kept.tier}, is used`);
-        }
+      if (tier !== null && (kept.tier === null || TIERS.indexOf(tier) < TIERS.indexOf(kept.tier))) {
+        kept.tier = tier;
       }
     }
     if (row.counterparty.notes !== null) {

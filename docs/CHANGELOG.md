@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — No tier warnings when a company's rows differ
+
+- `docs/DECISIONS.md`: the highest tier kept without a warning (owner's request).
+
 ## 2026-11-04 — Handoff record of #128
 
 - `docs/HANDOFF.md`: one company's rows combined and Company name (ivanmueller/gss#128) with its CI and Deploy staging runs.
