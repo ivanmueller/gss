@@ -1,5 +1,17 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Back returns to the list as it was
+
+- `docs/DECISIONS.md`: the search and Show archived in the address; the back arrow as the browser's Back; the scroll position kept.
+
+## 2026-11-04 — Select all among the results to check
+
+- `docs/DECISIONS.md`: Select all and Select none when finding coordinates.
+
+## 2026-11-04 — Handoff record of #131
+
+- `docs/HANDOFF.md`: every location without coordinates looked up after an import (ivanmueller/gss#131) with its CI and Deploy staging runs.
+
 ## 2026-11-04 — Every location without coordinates looked up after an import
 
 - `docs/DECISIONS.md`: the owner's report; the lookup after an import and Find missing coordinates when nothing is new.

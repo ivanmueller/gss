@@ -1,4 +1,5 @@
 import {
+  GEOCODE_LIMIT,
   isConfidentMatch,
   signedMatchOf,
   type GeocodeLookup,
@@ -141,14 +142,21 @@ export function FindCoordinates({
   // Each lookup counts toward Geocodio's daily allowance: once per time this step is shown.
   const started = useRef(false);
 
+  /** Saves the matches, at most GEOCODE_LIMIT per request; returns how many were saved. */
   async function save(matches: SignedMatch[]): Promise<number> {
-    if (matches.length === 0) return 0;
-    const result = await apiJson<SaveCoordinatesResult>('/facilities/coordinates', token, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ organizationId: organization.id, matches }),
-    });
-    return result.saved;
+    let saved = 0;
+    for (let start = 0; start < matches.length; start += GEOCODE_LIMIT) {
+      const result = await apiJson<SaveCoordinatesResult>('/facilities/coordinates', token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: organization.id,
+          matches: matches.slice(start, start + GEOCODE_LIMIT),
+        }),
+      });
+      saved += result.saved;
+    }
+    return saved;
   }
 
   /** Looks up page after page from `from`, saving the sure matches of each as it goes. */
@@ -283,6 +291,35 @@ export function FindCoordinates({
           ? 'One result needs a look before it is saved:'
           : `${count(doubtful.length, 'result needs', 'results need')} a look before they are saved:`}
       </p>
+      {doubtful.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {/* Choosing many at once (owner's request, 2026-11-04). */}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || chosen.size === doubtful.length}
+            onClick={() => {
+              setStep({
+                ...step,
+                chosen: new Set(doubtful.map((proposal) => proposal.facilityId)),
+                error: null,
+              });
+            }}
+          >
+            Select all
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || chosen.size === 0}
+            onClick={() => {
+              setStep({ ...step, chosen: new Set(), error: null });
+            }}
+          >
+            Select none
+          </Button>
+        </div>
+      )}
       <Card asChild>
         <ul aria-label="Results to check" className="divide-y">
           {doubtful.map((proposal) => {

@@ -500,6 +500,13 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Try again:** if a page fails, what came before stays saved, and Try again carries on from that page, so no lookup is asked twice.
 - **Find missing coordinates:** on Counterparties → Map, for operations and admins, looks up every location of the list without coordinates in one go (each lookup counts toward Geocodio's free 2,500 a day).
 
+**2026-11-04 — Back returns to the list as it was (owner's request).** After opening a counterparty from a filtered, scrolled list, the back arrow opened plain Counterparties at the top. Now:
+- **Every filter is in the address:** the search (`?q=`) and Show archived (`?archived=1`) joined the type, view, commodities, market, grain type, tier and lane places already there.
+- **The back arrow is the browser's Back** when the page was opened from the page it names (each history entry keeps the address it was opened from); otherwise it opens that page afresh, as before.
+- **Scroll position:** each history entry keeps where its page was scrolled when it was left, and Counterparties scrolls back there once its list shows, whether by the back arrow or the browser's Back. A page opened afresh starts at the top.
+
+**2026-11-04 — Select all among the results to check (owner's request).** Finding coordinates for the sellers' import saved 818 and left 156 to check, ticked one by one. The list now has **Select all** and **Select none**; chosen results are saved in requests of at most 1,000.
+
 **2026-11-04 — After an import, every location without coordinates is looked up (owner's report).** Uploading the sellers' file again did not find coordinates: the lookup after an import covered only the locations that import created (`importBatchId`), so a file that only filled in addresses of companies already listed looked up nothing, and a file with nothing new stopped at the Check step with no lookup at all. Now the lookup after an import covers every location of the list without coordinates, and when nothing in a file is new, the Check step offers **Find missing coordinates**. A location Geocodio cannot find is asked again at the next lookup.
 
 **2026-11-04 — A company's locations keep their own seller kind and website (Claude's choice, the owner's delegation).** The sellers' sheet still gave 519 warnings, nearly all Seller kind and Website differing between one company's rows: a grain company's rows are its elevators, plants and farms, each with its own kind and sometimes its own web page. Asked, the owner left it to Claude ("whatever you think is smartest going forward"):
