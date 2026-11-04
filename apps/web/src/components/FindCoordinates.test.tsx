@@ -130,6 +130,23 @@ describe('FindCoordinates', () => {
     expect(onDone).toHaveBeenCalled();
   });
 
+  it('selects every result to check at once, or none (owner request, 2026-11-04)', async () => {
+    const { calls } = find();
+    const list = await screen.findByRole('list', { name: 'Results to check' });
+    const boxes = within(list).getAllByRole('checkbox');
+    await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    expect(boxes.every((box) => (box as HTMLInputElement).checked)).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Select none' }));
+    expect(boxes.some((box) => (box as HTMLInputElement).checked)).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save 2 chosen results' }));
+    expect(
+      await screen.findByText('Coordinates found and saved for 3 locations.'),
+    ).toBeInTheDocument();
+    const saves = calls.filter((call) => call.path === '/facilities/coordinates');
+    expect((saves.at(-1)?.body as { matches: unknown[] }).matches).toEqual([match(2), match(3)]);
+  });
+
   it('asks nothing when every result is sure', async () => {
     const { calls } = find({ truncated: false, next: null, proposals: [proposal(1, {})] });
     expect(

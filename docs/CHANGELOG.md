@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Select all among the results to check
+
+- `docs/DECISIONS.md`: Select all and Select none when finding coordinates.
+
 ## 2026-11-04 — Handoff record of #131
 
 - `docs/HANDOFF.md`: every location without coordinates looked up after an import (ivanmueller/gss#131) with its CI and Deploy staging runs.
