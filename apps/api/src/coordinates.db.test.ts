@@ -109,7 +109,14 @@ async function location(facilityId: string) {
 
 describe('geocoding as app_api', () => {
   it('lists the organization’s facilities without coordinates, with their addresses', async () => {
-    expect(await db.facilitiesWithoutCoordinates(as(users.victor), orgs.a, 10)).toEqual([
+    // In id order, for paging (2026-11-04), so the order of the two is not fixed here.
+    const listed = await db.facilitiesWithoutCoordinates(as(users.victor), orgs.a, 10);
+    expect(listed.map((row) => row.facilityId)).toEqual(
+      [facilities.street, facilities.town].sort(),
+    );
+    expect(
+      [...listed].sort((a, b) => (a.city ?? '').localeCompare(b.city ?? '')).reverse(),
+    ).toEqual([
       {
         facilityId: facilities.street,
         counterpartyId: counterparties.a,
