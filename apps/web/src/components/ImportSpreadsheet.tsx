@@ -200,12 +200,24 @@ function IssueList({
   warnings?: boolean;
 }) {
   if (issues.length === 0) return null;
+  // How many of each, most first, as only the first SHOWN_ISSUES are listed (2026-11-04).
+  const counts = new Map<string, number>();
+  for (const issue of issues) {
+    const label = issue.field ? FIELD_LABELS[issue.field] : 'Other';
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  const byKind = [...counts].sort((a, b) => b[1] - a[1]);
   return (
     <Card className="overflow-hidden">
       <CardHeader>
         <CardTitle>
           {title} ({issues.length})
         </CardTitle>
+        {byKind.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            {byKind.map(([label, n]) => `${label} ${n.toLocaleString('en-US')}`).join(' · ')}
+          </p>
+        )}
       </CardHeader>
       <ul className="max-h-72 divide-y overflow-y-auto text-sm">
         {issues.slice(0, SHOWN_ISSUES).map((issue, index) => (

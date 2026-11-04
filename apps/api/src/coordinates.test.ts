@@ -1,4 +1,4 @@
-import { GEOCODE_LIMIT, signedMatchOf, type GeocodeLookup, type SignedMatch } from '@grain/domain';
+import { GEOCODE_PAGE, signedMatchOf, type GeocodeLookup, type SignedMatch } from '@grain/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
@@ -117,10 +117,12 @@ describe('POST /api/v1/facilities/geocode', () => {
     expect(db.facilitiesWithoutCoordinates).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID }),
       ORG,
-      GEOCODE_LIMIT,
+      GEOCODE_PAGE,
       null,
+      undefined,
     );
     expect(lookup.truncated).toBe(false);
+    expect(lookup.next).toBeNull();
     expect(lookup.proposals).toMatchObject([
       {
         facilityId: MILLS.facilityId,
@@ -144,16 +146,28 @@ describe('POST /api/v1/facilities/geocode', () => {
     expect(db.saveCoordinates).not.toHaveBeenCalled();
   });
 
-  it('says when more facilities wait than one lookup covers', async () => {
+  // A whole import at once took Geocodio too long (2026-11-04): one page per request.
+  it('looks up one page, and says where the next one starts', async () => {
+    const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
     db.facilitiesWithoutCoordinates.mockResolvedValueOnce(
-      Array.from({ length: GEOCODE_LIMIT + 1 }, (_, index) => ({
+      Array.from({ length: GEOCODE_PAGE + 1 }, (_, index) => ({
         ...NO_ADDRESS,
-        facilityId: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        facilityId: id(index),
       })),
     );
-    const lookup: GeocodeLookup = await (await post('geocode', { organizationId: ORG })).json();
-    expect(lookup.proposals).toHaveLength(GEOCODE_LIMIT);
+    const lookup: GeocodeLookup = await (
+      await post('geocode', { organizationId: ORG, after: id(999) })
+    ).json();
+    expect(db.facilitiesWithoutCoordinates).toHaveBeenLastCalledWith(
+      expect.anything(),
+      ORG,
+      GEOCODE_PAGE,
+      null,
+      id(999),
+    );
+    expect(lookup.proposals).toHaveLength(GEOCODE_PAGE);
     expect(lookup.truncated).toBe(true);
+    expect(lookup.next).toBe(id(GEOCODE_PAGE - 1));
   });
 
   it('is only for operations and admin members', async () => {
@@ -178,15 +192,17 @@ describe('POST /api/v1/facilities/geocode', () => {
     expect(db.facilitiesWithoutCoordinates).toHaveBeenLastCalledWith(
       expect.anything(),
       ORG,
-      GEOCODE_LIMIT,
+      GEOCODE_PAGE,
       { counterpartyId },
+      undefined,
     );
     expect((await post('geocode', { organizationId: ORG, importBatchId })).status).toBe(200);
     expect(db.facilitiesWithoutCoordinates).toHaveBeenLastCalledWith(
       expect.anything(),
       ORG,
-      GEOCODE_LIMIT,
+      GEOCODE_PAGE,
       { importBatchId },
+      undefined,
     );
     expect(db.saveCoordinates).not.toHaveBeenCalled();
   });

@@ -6,8 +6,15 @@ import { LOCATION_PRECISIONS, VERSION, type LocationPrecision } from './director
 // with Geocodio). Shared by the API, which looks addresses up and saves the chosen
 // results, and the web app, which shows them for review.
 
-/** Most facilities looked up, or saved, in one request. */
+/** Most facilities saved in one request. */
 export const GEOCODE_LIMIT = 1000;
+
+/**
+ * Facilities looked up in one request, in one Geocodio batch. A whole import's locations at
+ * once (1,024 on staging, 2026-11-04) took Geocodio longer than the wait allowed, so the app
+ * asks page by page, each page continuing after the last (`after`), until none are left.
+ */
+export const GEOCODE_PAGE = 100;
 
 /** Below this confidence a result is shown for review but not selected by default. */
 export const LOW_CONFIDENCE = 0.8;
@@ -61,6 +68,8 @@ export interface GeocodeLookup {
   proposals: GeocodeProposal[];
   /** More facilities without coordinates are waiting than one lookup covers. */
   truncated: boolean;
+  /** When more are waiting: the `after` that asks for the next page; null when none are. */
+  next: string | null;
 }
 
 const decimal = (integerDigits: number, decimals: number) =>
@@ -100,6 +109,8 @@ export const geocodeRequestSchema = z
     organizationId: z.uuid(),
     counterpartyId: z.uuid().optional(),
     importBatchId: z.uuid().optional(),
+    /** Only facilities after this one (by id): the previous page's `next`. */
+    after: z.uuid().optional(),
   })
   .refine((request) => !(request.counterpartyId && request.importBatchId), {
     message: 'one counterparty or one import, not both',

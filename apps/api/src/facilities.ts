@@ -1,6 +1,6 @@
 import {
   COUNTERPARTY_TYPES,
-  GEOCODE_LIMIT,
+  GEOCODE_PAGE,
   geocodeRequestSchema,
   parseBbox,
   saveCoordinatesRequestSchema,
@@ -114,7 +114,7 @@ export function facilityRoutes(openDatabase: DatabaseFactory) {
         'organizationId, and counterpartyId or importBatchId when given, must be UUIDs.',
       );
     }
-    const { organizationId, counterpartyId, importBatchId } = request.data;
+    const { organizationId, counterpartyId, importBatchId, after } = request.data;
     const scope: GeocodeScope = counterpartyId
       ? { counterpartyId }
       : importBatchId
@@ -126,20 +126,23 @@ export function facilityRoutes(openDatabase: DatabaseFactory) {
         return apiError(c, 403, 'FORBIDDEN', FORBIDDEN_MESSAGE);
       }
       if (!apiKey) return notConfigured(c);
+      // One page at a time, so each Geocodio batch answers well within its wait (2026-11-04).
       const facilities = await db.facilitiesWithoutCoordinates(
         ctx,
         organizationId,
-        GEOCODE_LIMIT,
+        GEOCODE_PAGE,
         scope,
+        after,
       );
+      const page = facilities.slice(0, GEOCODE_PAGE);
+      const more = facilities.length > GEOCODE_PAGE;
       try {
-        const proposals = await proposeCoordinates(
-          apiKey,
-          organizationId,
-          facilities.slice(0, GEOCODE_LIMIT),
-          new Date(),
-        );
-        const lookup: GeocodeLookup = { proposals, truncated: facilities.length > GEOCODE_LIMIT };
+        const proposals = await proposeCoordinates(apiKey, organizationId, page, new Date());
+        const lookup: GeocodeLookup = {
+          proposals,
+          truncated: more,
+          next: more ? (page.at(-1)?.facilityId ?? null) : null,
+        };
         return c.json(lookup);
       } catch (error) {
         if (error instanceof GeocoderError) return geocoderFailure(c, error);

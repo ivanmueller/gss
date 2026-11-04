@@ -47,6 +47,7 @@ function proposal(
 
 const LOOKUP: GeocodeLookup = {
   truncated: false,
+  next: null,
   proposals: [
     proposal(1, {}),
     proposal(2, { precision: 'approximate', accuracyType: 'place', regionMatches: false }),
@@ -130,7 +131,7 @@ describe('FindCoordinates', () => {
   });
 
   it('asks nothing when every result is sure', async () => {
-    const { calls } = find({ truncated: false, proposals: [proposal(1, {})] });
+    const { calls } = find({ truncated: false, next: null, proposals: [proposal(1, {})] });
     expect(
       await screen.findByText('Coordinates found and saved for 1 location.'),
     ).toBeInTheDocument();
@@ -139,11 +140,83 @@ describe('FindCoordinates', () => {
   });
 
   it('saves nothing and says so when nothing was found', async () => {
-    const { calls } = find({ truncated: true, proposals: [proposal(3, null)] });
-    expect(await screen.findByText(/No coordinates were saved\./)).toHaveTextContent(
-      'Only the first 1,000 locations were looked up',
-    );
+    const { calls } = find({ truncated: false, next: null, proposals: [proposal(3, null)] });
+    expect(await screen.findByText(/No coordinates were saved\./)).toBeInTheDocument();
     expect(calls.map((call) => call.path)).toEqual(['/facilities/geocode']);
+  });
+
+  // A whole import at once took Geocodio too long (2026-11-04): page after page instead.
+  it('looks up page after page until none are left, saving as it goes', async () => {
+    const pages: GeocodeLookup[] = [
+      { truncated: true, next: proposal(1, {}).facilityId, proposals: [proposal(1, {})] },
+      { truncated: false, next: null, proposals: [proposal(2, {}), proposal(3, null)] },
+    ];
+    const calls = mockApi({
+      [GEOCODE]: (call) =>
+        Response.json(pages[(call.body as { after?: string }).after === undefined ? 0 : 1]),
+      [SAVE]: (call) =>
+        Response.json({ saved: (call.body as { matches: unknown[] }).matches.length, skipped: 0 }),
+    });
+    render(<FindCoordinates session={SESSION} scope={null} doneLabel="Done" onDone={vi.fn()} />);
+    expect(
+      await screen.findByText('Coordinates found and saved for 2 locations.'),
+    ).toBeInTheDocument();
+    expect(
+      calls.filter((call) => call.path === '/facilities/geocode').map((call) => call.body),
+    ).toEqual([
+      { organizationId: ORG.id },
+      { organizationId: ORG.id, after: proposal(1, {}).facilityId },
+    ]);
+    expect(screen.getByRole('list', { name: 'Locations without coordinates' })).toHaveTextContent(
+      'Synthetic Buyer 3',
+    );
+  });
+
+  it('keeps what was saved when a page fails, and Try again carries on from it', async () => {
+    let failing = true;
+    const calls = mockApi({
+      [GEOCODE]: (call) => {
+        if ((call.body as { after?: string }).after === undefined) {
+          return Response.json({
+            truncated: true,
+            next: proposal(1, {}).facilityId,
+            proposals: [proposal(1, {})],
+          });
+        }
+        if (failing) {
+          failing = false;
+          return Response.json(
+            {
+              error: {
+                code: 'GEOCODER_UNAVAILABLE',
+                message: 'Geocodio could not be reached or failed. Try again later.',
+              },
+            },
+            { status: 502 },
+          );
+        }
+        return Response.json({ truncated: false, next: null, proposals: [proposal(2, {})] });
+      },
+      [SAVE]: (call) =>
+        Response.json({ saved: (call.body as { matches: unknown[] }).matches.length, skipped: 0 }),
+    });
+    render(<FindCoordinates session={SESSION} scope={null} doneLabel="Done" onDone={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Geocodio could not be reached');
+    expect(
+      screen.getByText(
+        /1 location was looked up before this, and coordinates were saved for 1 location/,
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(
+      await screen.findByText('Coordinates found and saved for 2 locations.'),
+    ).toBeInTheDocument();
+    // Carried on from the page that failed, not from the start.
+    expect(
+      calls
+        .filter((call) => call.path === '/facilities/geocode')
+        .map((call) => (call.body as { after?: string }).after ?? null),
+    ).toEqual([null, proposal(1, {}).facilityId, proposal(1, {}).facilityId]);
   });
 
   it('lets the user carry on when coordinates cannot be found', async () => {

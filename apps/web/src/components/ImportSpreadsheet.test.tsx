@@ -227,6 +227,25 @@ describe('ImportSpreadsheet', () => {
     expect(tonsColumn({})).toBeNull();
   });
 
+  it('counts the warnings by kind above the list', async () => {
+    mockApi({
+      'POST /counterparties/import': () =>
+        Response.json(
+          result({
+            warnings: [
+              { line: 3, field: 'sellerKind', message: 'differs' },
+              { line: 4, field: 'notes', message: 'not added' },
+              { line: 5, field: 'notes', message: 'not added' },
+            ],
+          }),
+        ),
+    });
+    importer();
+    await chooseFile(['Company,Country', 'Synthetic Mill,Canada', ''].join('\n'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    expect(await screen.findByText('Notes 2 · Seller kind 1')).toBeInTheDocument();
+  });
+
   it('never takes a column of tons for tonnes', async () => {
     importer();
     await chooseFile(

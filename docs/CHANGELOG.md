@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Coordinates page by page; a company's locations keep their seller kind and website
+
+- `docs/DECISIONS.md`: Geocodio failing on a 1,024-location import; pages of 100, Try again, Find missing coordinates; seller kind as each location's type, extra websites in the notes, warnings counted by kind.
+- `docs/API.md`: `after` and `next` on `POST /facilities/geocode`.
+- `docs/PRODUCT.md`: the import and the map view.
+
 ## 2026-11-04 — No tier warnings when a company's rows differ
 
 - `docs/DECISIONS.md`: the highest tier kept without a warning (owner's request).

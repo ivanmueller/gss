@@ -1356,7 +1356,8 @@ describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
       'Grain type: Feed → Feed, Non-GMO / IP',
       'Tonnes a year: 3,000 t → 4,500 t',
       'Organic certified until: none → 2028-01-15',
-      'Location Synthetic Town, AB: served by: Truck → Rail and truck',
+      // The row's seller kind is its location's type when it has none (2026-11-04).
+      'Location Synthetic Town, AB: type: none → Farm; served by: Truck → Rail and truck',
     ]);
     expect(planned(listed)?.additions).toEqual([
       expect.objectContaining({
@@ -1368,7 +1369,7 @@ describe('POST /api/v1/counterparties/import with buyers or sellers', () => {
         facilityUpdates: [
           {
             id: '00000000-0000-4000-8000-000000000f01',
-            changes: { transportAccess: 'rail_and_truck' },
+            changes: { facilityType: 'farm', transportAccess: 'rail_and_truck' },
           },
         ],
       }),
