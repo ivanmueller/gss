@@ -1,5 +1,13 @@
 # Documentation pack changelog
 
+## 2026-11-04 — Every location without coordinates looked up after an import
+
+- `docs/DECISIONS.md`: the owner's report; the lookup after an import and Find missing coordinates when nothing is new.
+
+## 2026-11-04 — Handoff record of #130
+
+- `docs/HANDOFF.md`: coordinates page by page and the import's seller kind and websites (ivanmueller/gss#130) with their CI and Deploy staging runs; the owner's report on uploading the file again.
+
 ## 2026-11-04 — Handoff record of #129
 
 - `docs/HANDOFF.md`: the highest tier kept without a warning (ivanmueller/gss#129) with its CI and Deploy staging runs; the sellers' import on staging.

@@ -246,6 +246,29 @@ describe('ImportSpreadsheet', () => {
     expect(await screen.findByText('Notes 2 · Seller kind 1')).toBeInTheDocument();
   });
 
+  // The owner's report of 2026-11-04: a file whose companies are all listed, with nothing
+  // new, still lets the locations without coordinates be looked up.
+  it('offers Find missing coordinates when nothing in the file is new', async () => {
+    const calls = mockApi({
+      'POST /counterparties/import': () =>
+        Response.json(
+          result({
+            summary: { ...result().summary, newCounterparties: 0, existingWithAdditions: 0 },
+          }),
+        ),
+      'POST /facilities/geocode': () =>
+        Response.json({ proposals: [], truncated: false, next: null }),
+    });
+    importer();
+    await chooseFile(['Company,Country', 'Synthetic Mill,Canada', ''].join('\n'));
+    await userEvent.click(await screen.findByRole('button', { name: 'Review import' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Find missing coordinates' }));
+    expect(await screen.findByText('No location is waiting for coordinates.')).toBeInTheDocument();
+    expect(calls.find((call) => call.path === '/facilities/geocode')?.body).toEqual({
+      organizationId: ORG.id,
+    });
+  });
+
   it('never takes a column of tons for tonnes', async () => {
     importer();
     await chooseFile(
@@ -367,7 +390,8 @@ describe('ImportSpreadsheet', () => {
       '/facilities/geocode',
       '/facilities/coordinates',
     ]);
-    expect(lookups[0]?.body).toEqual({ organizationId: ORG.id, importBatchId: BATCH });
+    // Every location of the list without coordinates, not only this import's (2026-11-04).
+    expect(lookups[0]?.body).toEqual({ organizationId: ORG.id });
     expect(
       (lookups[1]?.body as { matches: { facilityId: string }[] }).matches.map((m) => m.facilityId),
     ).toEqual(['00000000-0000-4000-8000-00000000fac1']);
