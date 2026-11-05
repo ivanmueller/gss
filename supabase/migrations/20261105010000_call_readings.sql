@@ -5,9 +5,8 @@
 -- dismissed. Missing details stay blank, never guessed. Calls already transcribed are read too.
 --
 -- - call_recordings: Claude's reading of the transcript (claimed by the Worker's job every 2
---   minutes, at most 5 attempts, a claim lapsing after 10 minutes, each claim with its own token
---   so that a run whose claim lapsed can neither give back nor complete a newer one; given back
---   without counting when Anthropic did not take the request): when it was read, by which
+--   minutes, at most 5 attempts, a claim lapsing after 10 minutes, given back without counting
+--   when Anthropic did not take the request): when it was read, by which
 --   model, whether it was a voicemail, the notes, and the tokens it took; and a person's
 --   correction of "voicemail", with who made it and when (audited).
 -- - call_drafts: the drafts of a reading, each with the transcript lines it came from, open
@@ -19,7 +18,6 @@ alter table app.call_recordings
   add constraint call_recordings_organization_key unique (organization_id, id),
   add column reading_attempts integer not null default 0 check (reading_attempts between 0 and 5),
   add column reading_claimed_at timestamptz,
-  add column reading_claim_token uuid,
   add column read_at timestamptz,
   -- The model that read it, e.g. claude-opus-5-5 (or the one Anthropic fell back to).
   add column read_model text check (read_model ~ '^[a-z0-9][a-z0-9.-]{0,79}$'),
@@ -39,8 +37,6 @@ alter table app.call_recordings
     and (read_at is not null
          or (read_summary is null and read_input_tokens is null and read_output_tokens is null))
   ),
-  add constraint call_recordings_reading_claim
-    check ((reading_claimed_at is null) = (reading_claim_token is null)),
   add constraint call_recordings_read_after_transcript
     check (read_at is null or transcript is not null),
   add constraint call_recordings_voicemail_correction check (
@@ -125,18 +121,16 @@ create policy call_drafts_select_for_members on app.call_drafts
 
 -- Claims up to `most` recordings for Claude to read now, newest first (so a new call is not held
 -- behind the calls read for the first time): a transcript with words, not read yet, fewer than
--- 5 attempts, and no claim in the last 10 minutes. Rows another claim holds are skipped. Each
--- claim has a new token, which giving it back, reading the context and keeping the reading need.
+-- 5 attempts, and no claim in the last 10 minutes. Rows another claim holds are skipped.
 create function app.claim_call_readings(most integer)
-returns table (recording_id uuid, claim_token uuid)
+returns table (recording_id uuid)
 language sql
 security definer
 set search_path = ''
 as $$
   update app.call_recordings r
      set reading_attempts = r.reading_attempts + 1,
-         reading_claimed_at = pg_catalog.clock_timestamp(),
-         reading_claim_token = gen_random_uuid()
+         reading_claimed_at = pg_catalog.clock_timestamp()
    where r.id in (
      select q.id from app.call_recordings q
       where q.read_at is null and q.transcript is not null and pg_catalog.btrim(q.transcript) <> ''
@@ -147,29 +141,26 @@ as $$
       limit greatest(least(most, 10), 0)
       for update skip locked
    )
-  returning r.id, r.reading_claim_token
+  returning r.id
 $$;
 
 -- Gives a claim back without counting its attempt: for a request Anthropic did not take (a wrong
 -- key, the spend limit reached, an overload, no connection), so such failures never use up a
--- recording's 5 attempts and it is read once the problem is fixed. Only the claim given
--- (Codex's review of c9222d3, finding 5): a run whose claim lapsed and was taken again releases
--- nothing.
-create function app.release_call_reading(recording uuid, claim uuid)
+-- recording's 5 attempts and it is read once the problem is fixed.
+create function app.release_call_reading(recording uuid)
 returns void
 language sql
 security definer
 set search_path = ''
 as $$
   update app.call_recordings
-     set reading_attempts = greatest(reading_attempts - 1, 0), reading_claimed_at = null,
-         reading_claim_token = null
-   where id = recording and read_at is null and reading_claim_token = claim
+     set reading_attempts = greatest(reading_attempts - 1, 0), reading_claimed_at = null
+   where id = recording and read_at is null and reading_claimed_at is not null
 $$;
 
 -- What Claude is given to read a claimed recording: the transcript, who called whom and when,
--- and the company's name, kinds and contacts. Only for the recording's current claim, not read.
-create function app.call_reading_context(recording uuid, claim uuid)
+-- and the company's name, kinds and contacts. Only for a recording claimed and not yet read.
+create function app.call_reading_context(recording uuid)
 returns jsonb
 language sql
 stable
@@ -199,16 +190,14 @@ as $$
   from app.call_recordings r
   join app.calls c on c.id = r.call_id and c.organization_id = r.organization_id
   join app.counterparties cp on cp.organization_id = c.organization_id and cp.id = c.counterparty_id
-  where r.id = recording and r.read_at is null and r.reading_claim_token = claim
+  where r.id = recording and r.read_at is null and r.reading_claimed_at is not null
     and r.transcript is not null
 $$;
 
--- Keeps Claude's reading of a recording and its drafts, once, under its current claim: false
--- when it was read already or the claim is no longer this one (it lapsed and was taken again).
+-- Keeps Claude's reading of a recording and its drafts, once: false when it was read already.
 -- A contact draft naming a contact not of the call's company becomes a new contact.
 create function app.keep_call_reading(
   recording uuid,
-  claim uuid,
   model text,
   voicemail boolean,
   summary text,
@@ -233,15 +222,13 @@ begin
     from app.call_recordings cr
     join app.calls c on c.id = cr.call_id and c.organization_id = cr.organization_id
    where cr.id = recording and cr.read_at is null and cr.transcript is not null
-     and cr.reading_claim_token = claim
    for update of cr;
   if not found then
     return false;
   end if;
   update app.call_recordings
      set read_at = now(), read_model = model, read_voicemail = voicemail, read_summary = summary,
-         read_input_tokens = input_tokens, read_output_tokens = output_tokens,
-         reading_claimed_at = null, reading_claim_token = null
+         read_input_tokens = input_tokens, read_output_tokens = output_tokens
    where id = r.id;
   for d in select value, ordinality - 1 as position from jsonb_array_elements(drafts) with ordinality
   loop
@@ -263,8 +250,7 @@ $$;
 
 -- A person accepts a draft (naming what they saved from it) or dismisses it. Answers 'decided',
 -- 'not_found', 'forbidden' (their role cannot save that kind), 'already_decided', or
--- 'result_not_found' (no such bid or offer, follow-up or new contact of theirs, or listed contact
--- the draft is about, of the company).
+-- 'result_not_found' (no such bid or offer or follow-up of theirs, or contact, of the company).
 create function app.decide_call_draft(draft uuid, decision text, result uuid)
 returns text
 language plpgsql
@@ -307,9 +293,7 @@ begin
         select 1 from app.counterparty_contacts k
          where k.id = result and k.organization_id = d.organization_id
            and k.counterparty_id = d.counterparty_id
-           -- A listed contact's new details: that contact. A new person: a contact the person
-           -- added themselves (Codex's review of c9222d3, finding 3).
-           and (k.id = d.contact_id or (d.contact_id is null and k.created_by = uid)))
+           and (d.contact_id is null or k.id = d.contact_id))
     end) then
     return 'result_not_found';
   elsif d.kind in ('quote', 'follow_up') and exists (
@@ -362,13 +346,13 @@ $$;
 
 revoke all on app.call_drafts from public, anon, authenticated, service_role;
 grant select on app.call_drafts to app_api;
-revoke all on function app.claim_call_readings(integer), app.release_call_reading(uuid, uuid),
-  app.call_reading_context(uuid, uuid),
-  app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer),
+revoke all on function app.claim_call_readings(integer), app.release_call_reading(uuid),
+  app.call_reading_context(uuid),
+  app.keep_call_reading(uuid, text, boolean, text, jsonb, integer, integer),
   app.decide_call_draft(uuid, text, uuid), app.correct_call_voicemail(uuid, boolean)
   from public, anon, authenticated, service_role;
-grant execute on function app.claim_call_readings(integer), app.release_call_reading(uuid, uuid),
-  app.call_reading_context(uuid, uuid),
-  app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer),
+grant execute on function app.claim_call_readings(integer), app.release_call_reading(uuid),
+  app.call_reading_context(uuid),
+  app.keep_call_reading(uuid, text, boolean, text, jsonb, integer, integer),
   app.decide_call_draft(uuid, text, uuid), app.correct_call_voicemail(uuid, boolean)
   to app_api;

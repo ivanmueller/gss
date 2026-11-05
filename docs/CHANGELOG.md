@@ -4,10 +4,10 @@
 
 - `docs/HANDOFF.md`: Claude reads each call (ivanmueller/gss#140) with its CI and Deploy staging runs; Codex's findings after the merge, fixed in ivanmueller/gss#141.
 
-## 2026-11-05 — Codex's review of the call readings
+## 2026-11-05 — Codex's reviews of the call readings
 
-- `docs/DECISIONS.md`: the five findings and their fixes (a price only when said as a price, a quantity only in tonnes, an extension only when said, a new contact accepted only with one's own, a deadline for each reading, a token for each claim).
-- `docs/DATA_MODEL.md`: `reading_claim_token`.
+- `docs/DECISIONS.md`: the five findings on `c9222d3` and the four on `1485b23`, and their fixes (a price only when said as a price, its currency from its own clause, leading decimals read whole, a quantity only in tonnes, an extension only when said with its number, a new contact accepted only with one's own, a deadline for each reading, no retries inside a run, a token for each claim).
+- `docs/DATA_MODEL.md`: migration `20261105020000_call_reading_claims.sql`; the row of `20261105010000` as it reached main.
 
 ## 2026-11-05 — Claude reads each call
 

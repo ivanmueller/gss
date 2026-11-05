@@ -14,16 +14,17 @@ export interface AnthropicBindings {
 /** The model that reads calls: the owner's choice of 2026-11-05. */
 export const READING_MODEL = 'claude-opus-5-5';
 
-/**
- * How long one request may take, and how many times the SDK tries again after a rate limit,
- * an overload or a lost connection.
- */
+/** How long the request may take. */
 export const READING_TIMEOUT_MS = 150_000;
-const READING_RETRIES = 1;
 /**
- * How long reading one call may take in all, retries and their waits included (the SDK waits
- * as long as Anthropic's Retry-After says), well within the 10-minute claim on a recording
- * (Codex's review of c9222d3, finding 4).
+ * The SDK never tries again by itself (Codex's review of 1485b23, finding 4): a retry could
+ * hide that an earlier try timed out after Anthropic had it, and the call's attempt would be
+ * given back as if nothing had been charged. The job's next run, 2 minutes later, is the retry.
+ */
+const READING_RETRIES = 0;
+/**
+ * How long reading one call may take in all, the answer's body included, well within the
+ * 10-minute claim on a recording (Codex's review of c9222d3, finding 4).
  */
 export const READING_DEADLINE_MS = 5 * 60_000;
 
@@ -85,7 +86,10 @@ async function withDeadline<T>(ms: number, run: (signal: AbortSignal) => Promise
 /** Claude over Anthropic's API, or null when the key is not set. */
 export const claudeClient = (
   env: AnthropicBindings,
-  { deadlineMs = READING_DEADLINE_MS }: { deadlineMs?: number } = {},
+  {
+    deadlineMs = READING_DEADLINE_MS,
+    timeoutMs = READING_TIMEOUT_MS,
+  }: { deadlineMs?: number; timeoutMs?: number } = {},
 ): ClaudeClient | null => {
   const apiKey = env.ANTHROPIC_API_KEY?.trim() ?? '';
   if (apiKey === '') return null;
@@ -93,7 +97,7 @@ export const claudeClient = (
     apiKey,
     // Always Anthropic's own API, whatever the environment says.
     baseURL: 'https://api.anthropic.com',
-    timeout: READING_TIMEOUT_MS,
+    timeout: timeoutMs,
     maxRetries: READING_RETRIES,
   });
   return {

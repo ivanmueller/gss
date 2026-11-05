@@ -252,7 +252,8 @@ function notes(value: string | null, max: number): string | null {
 /** A decimal as a comparable key: 0725.50 and 725.5 are the same number. */
 function decimalKey(value: string): string {
   const [whole = '', fraction = ''] = value.split('.');
-  const digits = whole.replace(/^0+(?=\d)/, '');
+  // ".50" is 0.5, never 50 (Codex's review of 1485b23, finding 2).
+  const digits = whole.replace(/^0+(?=\d)/, '') || '0';
   const decimals = fraction.replace(/0+$/, '');
   return decimals === '' ? digits : `${digits}.${decimals}`;
 }
@@ -267,6 +268,8 @@ interface Mention {
   priceUnit: PriceUnit | null;
   /** Said as a quantity in metric tonnes ("1,500 tonnes"), not as a price per tonne. */
   tonnes: boolean;
+  /** The currency said with this number, in its own clause ("$725 Canadian"); else null. */
+  currency: QuoteCurrency | null;
 }
 
 const CURRENCY_WORD = String.raw`(?:canadian|cad|cdn|us|u\.s\.|usd|american)`;
@@ -278,6 +281,26 @@ const PRICE_UNIT_AFTER = new RegExp(
 const DOLLARS_AFTER = new RegExp(String.raw`^\s*(?:${CURRENCY_WORD}\s+)?(?:dollars?|bucks)\b`);
 /** After a quantity: "tonnes", "mt", "metric tons". */
 const TONNES_AFTER = /^\s*(?:metric\s+tonnes?|metric\s+tons?|tonnes?|mt)\b/;
+
+/** Where a clause ends: a comma, a semicolon, a full stop and the like, or the next number. */
+const CLAUSE_END = /[,;:!?]|\.(?!\d)|\d/;
+
+/**
+ * The currency said with a number, in its own clause only (Codex's review of 1485b23,
+ * finding 1): "US$725", "CAD 725", "725 Canadian a tonne", "725 US dollars". "US" or "Canadian"
+ * elsewhere in the sentence ("ship it to us") is not a currency. Null when none, or both.
+ */
+function currencyNear(before: string, after: string): QuoteCurrency | null {
+  const cad =
+    /\b(?:cad|cdn|canadian)\s*\$?\s*$/.test(before) ||
+    /^\s*(?:canadian|cad|cdn)\b/.test(after) ||
+    /\b(?:cad|cdn)\b|\bcanadian\s+(?:dollars?|funds|money)\b/.test(after);
+  const usd =
+    /\b(?:usd|us|u\.s\.)\s*\$?\s*$/.test(before) ||
+    /^\s*(?:usd|us|u\.s\.|american)(?![a-z])/.test(after) ||
+    /\busd\b|\b(?:us|u\.s\.|american)\s+(?:dollars?|funds|money)\b/.test(after);
+  return cad === usd ? null : cad ? 'CAD' : 'USD';
+}
 
 /** The price unit a unit word names; "ton" alone is not clear (short or metric). */
 function unitOf(word: string): PriceUnit | null {
@@ -297,11 +320,19 @@ function unitOf(word: string): PriceUnit | null {
 export function mentionsIn(words: string): Mention[] {
   const text = words.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
   const mentions: Mention[] = [];
-  for (const match of text.matchAll(/\d+(?:\.\d+)?/g)) {
+  // The whole number, a leading decimal point included (".50").
+  for (const match of text.matchAll(/\d*\.\d+|\d+/g)) {
     const start = match.index;
     const end = start + match[0].length;
     const before = text.slice(Math.max(0, start - 3), start);
     const after = text.slice(end, end + 40).toLowerCase();
+    const clauseBefore =
+      text
+        .slice(Math.max(0, start - 12), start)
+        .toLowerCase()
+        .split(CLAUSE_END)
+        .pop() ?? '';
+    const clauseAfter = after.split(CLAUSE_END)[0] ?? '';
     const unit = PRICE_UNIT_AFTER.exec(after);
     const price = /\$\s*$/.test(before) || unit !== null || DOLLARS_AFTER.test(after);
     mentions.push({
@@ -309,6 +340,7 @@ export function mentionsIn(words: string): Mention[] {
       price,
       priceUnit: unit?.[1] === undefined ? null : unitOf(unit[1]),
       tonnes: !price && TONNES_AFTER.test(after),
+      currency: currencyNear(clauseBefore, clauseAfter),
     });
   }
   return mentions;
@@ -322,20 +354,11 @@ function amountOf(value: string | null, pattern: RegExp): string | null {
 const PRICE = /^\d{1,17}(?:\.\d{1,12})?$/;
 const QUANTITY = /^\d{1,11}(?:\.\d{1,3})?$/;
 
-/** Whether a currency was said in the text: CAD or USD in words, never a bare "$" or "us". */
-function currencySaid(currency: QuoteCurrency, words: string): boolean {
-  const text = words.toLowerCase();
-  return currency === 'CAD'
-    ? /\b(?:cad|cdn)\b|canadian\s+(?:dollars?|funds|money)|\d\s*canadian\b/.test(text)
-    : /\busd\b|\bus\$|\b(?:us|u\.s\.|american)\s+(?:dollars?|funds|money)|\d\s*(?:us|u\.s\.|american)\b/.test(
-        text,
-      );
-}
-
 /**
  * A phone number whose digits were said in the text, in one run; else null. An extension is
- * kept only when it was said too, after "x", "ext" or "extension" (Codex's review of c9222d3,
- * finding 2); otherwise the number is kept without it.
+ * kept only when it was said with this number, after "x", "ext" or "extension" (Codex's
+ * reviews of c9222d3, finding 2, and 1485b23, finding 3); otherwise the number is kept without
+ * it.
  */
 function saidPhone(value: string | null, words: string): string | null {
   const phone = label(value, 40);
@@ -347,8 +370,13 @@ function saidPhone(value: string | null, words: string): string | null {
   const spoken = words.replace(/(?<=\d)[\s().-]+(?=\d)/g, '');
   if (!spoken.includes(digits)) return null;
   if (extension === undefined || extension === '') return main.trim();
-  const said = [...words.matchAll(/\b(?:x|ext\.?|extension)\s*(\d+)/gi)].map((m) => m[1]);
-  return /^\d+$/.test(extension) && said.includes(extension) ? phone : main.trim();
+  if (!/^\d{1,10}$/.test(extension)) return main.trim();
+  const gap = String.raw`[\s().-]*`;
+  const withExtension = new RegExp(
+    String.raw`(?<!\d)(?:1${gap})?${digits.split('').join(gap)}${gap}[,;]?\s*(?:x|ext\.?|extension)\s*${extension}(?!\d)`,
+    'i',
+  );
+  return withExtension.test(words) ? phone : main.trim();
 }
 
 const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+\.[^@\s\p{Cc}]+$/u;
@@ -413,7 +441,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     put(
       values,
       'currency',
-      asPrice.length > 0 && quote.currency !== null && currencySaid(quote.currency, words)
+      quote.currency !== null && asPrice.some((m) => m.currency === quote.currency)
         ? quote.currency
         : null,
     );

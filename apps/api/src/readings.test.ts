@@ -375,15 +375,19 @@ describe('claudeClient', () => {
     expect(await client?.readCall(request)).toEqual({ status: 'cut_off', model: 'claude-opus-5' });
   });
 
-  it('abandons a request at its deadline, however long Anthropic asks it to wait (Codex, finding 4)', async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error' } }), {
-          status: 429,
-          headers: { 'content-type': 'application/json', 'retry-after': '660' },
+  /** A fetch that never answers until it is aborted. */
+  const hangingFetch = () =>
+    vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
         }),
-      ),
     );
+
+  it('abandons a request at its deadline (Codex, first review, finding 4)', async () => {
+    const fetchMock = hangingFetch();
     vi.stubGlobal('fetch', fetchMock);
     const started = Date.now();
     const failure = await claudeClient(CLAUDE_ENV, { deadlineMs: 200 })
@@ -393,8 +397,45 @@ describe('claudeClient', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(claudeFailure(failure)).toBe('deadline');
     expect(notTakenByAnthropic(failure)).toBe(false);
-    // The SDK was still waiting to retry; the call was given up at the deadline.
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('never tries again by itself, so a timeout is never hidden by a later answer (Codex, second review, finding 4)', async () => {
+    const fetchMock = hangingFetch();
+    fetchMock.mockImplementationOnce(
+      fetchMock.getMockImplementation() ?? (() => Promise.reject(new Error('x'))),
+    );
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error' } }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': '0' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const failure = await claudeClient(CLAUDE_ENV, { timeoutMs: 100 })
+      ?.readCall({ system: 'S', user: 'U', schema: {} })
+      .catch((error: unknown) => error);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(failure).toBeInstanceOf(Anthropic.APIConnectionTimeoutError);
+    expect(notTakenByAnthropic(failure)).toBe(false);
+  });
+
+  it('answers a rate limit at once, without waiting out Retry-After', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error' } }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '660' },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const failure = await claudeClient(CLAUDE_ENV)
+      ?.readCall({ system: 'S', user: 'U', schema: {} })
+      .catch((error: unknown) => error);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(failure).toBeInstanceOf(Anthropic.RateLimitError);
+    expect(notTakenByAnthropic(failure)).toBe(true);
   });
 
   it('tells a request Anthropic answered with an error from one it may have read', () => {

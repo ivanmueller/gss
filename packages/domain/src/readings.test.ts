@@ -67,27 +67,55 @@ const reading = (overrides: Partial<CallReading> = {}): CallReading => ({
 });
 
 describe('mentionsIn', () => {
+  const said = (value: string, more: Record<string, unknown> = {}) => ({
+    value,
+    price: false,
+    priceUnit: null,
+    tonnes: false,
+    currency: null,
+    ...more,
+  });
+
   it('tells a price per unit from a quantity in tonnes', () => {
     expect(mentionsIn('$725.50 a tonne for 1,500 tonnes.')).toEqual([
-      { value: '725.5', price: true, priceUnit: 'MT', tonnes: false },
-      { value: '1500', price: false, priceUnit: null, tonnes: true },
+      said('725.5', { price: true, priceUnit: 'MT' }),
+      said('1500', { tonnes: true }),
     ]);
     expect(mentionsIn('7.25 US a bushel, 12 dollars per cwt, 300 bucks, 9 per short ton')).toEqual([
-      { value: '7.25', price: true, priceUnit: 'BU', tonnes: false },
-      { value: '12', price: true, priceUnit: 'CWT', tonnes: false },
-      { value: '300', price: true, priceUnit: null, tonnes: false },
-      { value: '9', price: true, priceUnit: 'ST', tonnes: false },
+      said('7.25', { price: true, priceUnit: 'BU', currency: 'USD' }),
+      said('12', { price: true, priceUnit: 'CWT' }),
+      said('300', { price: true }),
+      said('9', { price: true, priceUnit: 'ST' }),
     ]);
   });
 
   it('says nothing of a bare number, or of a ton that is not clearly metric', () => {
     expect(mentionsIn('call me at 2, 725 maybe, 400 a ton')).toEqual([
-      { value: '2', price: false, priceUnit: null, tonnes: false },
-      { value: '725', price: false, priceUnit: null, tonnes: false },
-      { value: '400', price: true, priceUnit: null, tonnes: false },
+      said('2'),
+      said('725'),
+      said('400', { price: true }),
     ]);
-    expect(mentionsIn('2000 tons')).toEqual([
-      { value: '2000', price: false, priceUnit: null, tonnes: false },
+    expect(mentionsIn('2000 tons')).toEqual([said('2000')]);
+  });
+
+  it('reads a leading decimal point as part of the number (Codex, second review, finding 2)', () => {
+    expect(mentionsIn('$.50 per bushel, .5 tonnes')).toEqual([
+      said('0.5', { price: true, priceUnit: 'BU' }),
+      said('0.5', { tonnes: true }),
+    ]);
+  });
+
+  it("takes the currency from the price's own clause only (Codex, second review, finding 1)", () => {
+    expect(
+      mentionsIn('Canola is $725 Canadian a tonne. Oats are $300 USD a tonne. Ship it to us.'),
+    ).toEqual([
+      said('725', { price: true, priceUnit: 'MT', currency: 'CAD' }),
+      said('300', { price: true, priceUnit: 'MT', currency: 'USD' }),
+    ]);
+    expect(mentionsIn('US$7.25 a bushel, CAD 310 a tonne, $9 sell to us')).toEqual([
+      said('7.25', { price: true, priceUnit: 'BU', currency: 'USD' }),
+      said('310', { price: true, priceUnit: 'MT', currency: 'CAD' }),
+      said('9', { price: true }),
     ]);
   });
 });
@@ -139,6 +167,30 @@ describe('checkReading: bids and offers', () => {
     expect(values).not.toHaveProperty('quantityMax');
     expect(values).not.toHaveProperty('priceUnit');
     expect(values).not.toHaveProperty('currency');
+  });
+
+  it('does not take a currency or a whole number from another bid (Codex, second review)', () => {
+    const lines: TranscriptLine[] = [
+      {
+        side: 'counterparty',
+        start: 0,
+        text: 'Canola is $725 Canadian a tonne. Oats are $300 USD a tonne.',
+      },
+      { side: 'counterparty', start: 5, text: 'Peas at $.50 per bushel, .5 tonnes only.' },
+    ];
+    const [canola, peas] = checkReading(
+      reading({
+        quotes: [
+          quote({ price: '725', currency: 'USD', quantityMaxMt: null, lines: [0] }),
+          quote({ price: '50', quantityMaxMt: '5', currency: null, lines: [1] }),
+        ],
+      }),
+      context({ lines }),
+    ).drafts;
+    expect(canola?.kind === 'quote' && canola.fields.values.price).toBe('725');
+    expect(canola?.kind === 'quote' && canola.fields.values).not.toHaveProperty('currency');
+    expect(peas?.kind === 'quote' && peas.fields.values).not.toHaveProperty('price');
+    expect(peas?.kind === 'quote' && peas.fields.values).not.toHaveProperty('quantityMax');
   });
 
   it('keeps a unit or currency only when said with the price', () => {
@@ -356,6 +408,33 @@ describe('checkReading: contacts', () => {
       contactName: 'Sam',
       contactPhone: '403 555 0177 x12',
     });
+  });
+
+  it("does not take another number's extension (Codex, second review, finding 3)", () => {
+    const [draft] = checkReading(
+      reading({
+        contacts: [
+          {
+            contactId: null,
+            name: 'Sam',
+            role: null,
+            email: null,
+            phone: '403 555 0177 x999',
+            lines: [0],
+          },
+        ],
+      }),
+      context({
+        lines: [
+          {
+            side: 'counterparty',
+            start: 0,
+            text: 'Sam: 403 555 0177 extension 123; Pat: 403 555 0199 extension 999.',
+          },
+        ],
+      }),
+    ).drafts;
+    expect(draft?.fields.values).toEqual({ contactName: 'Sam', contactPhone: '403 555 0177' });
   });
 
   it('leaves out an email that is not one', () => {
