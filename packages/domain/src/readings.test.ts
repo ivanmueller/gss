@@ -191,6 +191,33 @@ describe('saidPrice', () => {
     });
   });
 
+  it('keeps ordinary prices next to "and" or "to" when there is no range (Codex, sixth review)', () => {
+    const line = ['We bid $7.25 a bushel and $310 a tonne for feed.'];
+    expect(saidPrice('$7.25 a bushel', line)).toEqual({
+      amount: '7.25',
+      currency: null,
+      unit: 'BU',
+    });
+    expect(saidPrice('$310 a tonne', line)).toEqual({ amount: '310', currency: null, unit: 'MT' });
+    expect(saidPrice('$725 a tonne', ['We can agree to $725 a tonne.'])).toEqual({
+      amount: '725',
+      currency: null,
+      unit: 'MT',
+    });
+    // A number earlier in the sentence is not the start of a range.
+    expect(saidPrice('$725 a tonne', ['Up to 2 loads, then go to $725 a tonne.'])).toEqual({
+      amount: '725',
+      currency: null,
+      unit: 'MT',
+    });
+    expect(
+      saidPrice('$725 a tonne', ['Offers went from $700 a tonne to $725 a tonne.']),
+    ).toBeNull();
+    expect(
+      saidPrice('$700 a tonne', ['Offers went from $700 a tonne to $725 a tonne.']),
+    ).toBeNull();
+  });
+
   it('refuses two currencies, zero, or anything more than one price', () => {
     expect(saidPrice('CAD $725 US', ['CAD $725 US'])).toBeNull();
     expect(saidPrice('$0 a tonne', ['$0 a tonne'])).toBeNull();

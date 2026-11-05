@@ -265,8 +265,7 @@ const squash = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
 function standsAlone(
   said: string,
   lines: readonly string[],
-  joinsBefore: RegExp,
-  joinsAfter: RegExp,
+  joins: (before: string, after: string) => boolean,
 ): boolean {
   const needle = squash(said);
   if (needle === '') return false;
@@ -278,7 +277,7 @@ function standsAlone(
       const glued =
         (/[a-z0-9]$/.test(before) && /^[a-z0-9]/.test(needle)) ||
         (/[a-z0-9]$/.test(needle) && /^[a-z0-9]/.test(after));
-      if (!glued && !joinsBefore.test(before) && !joinsAfter.test(after)) return true;
+      if (!glued && !joins(before, after)) return true;
     }
   }
   return false;
@@ -288,15 +287,40 @@ function standsAlone(
  * Right before an amount, what makes it part of something else: a sign ("-$5", "minus", "less"),
  * another digit, a decimal point or thousands separator against it (".50" copied as "50",
  * "1,500" as "500"), a dollar sign or currency left out of it ("CAD $5" copied as "$5"), the
- * first end of a range ("from", "to", "between … and"), and a currency word ("minus Canadian
+ * second end of a range ("between … and"), and a currency word ("minus Canadian
  * $5" copied as "$5"; Codex's review of 5e25edd, finding 1). A comma or full stop ending the
  * words before (", US$7.25") is not part of it.
  */
 const AMOUNT_JOINS_BEFORE =
-  /(?:(?:[\d$+\-−–—/]|\b(?:minus|negative|less|plus|from|to|usd|cad|cdn|us|u\.s|c|canadian|american)|\bbetween\b[^.;]*\band)\s*|\.|\d,)$/;
-/** Right after an amount: more of the number, or the other end of a range ("-725", "to CAD $725"). */
+  /(?:(?:[\d$+\-−–—/]|\b(?:minus|negative|less|plus|usd|cad|cdn|us|u\.s|c|canadian|american)|\bbetween\b[^.;]*\band)\s*|\.|\d,)$/;
+/**
+ * Right after an amount: more of the number, or the other end of a range ("-725", "to CAD
+ * $725"). "And" or "or" and another price is not a range.
+ */
 const AMOUNT_JOINS_AFTER =
-  /^\s*(?:\d|[.,]\d|(?:[-−–—/]|(?:to|and|or)\s)\s*(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*\.?\d|%)/;
+  /^\s*(?:\d|[.,]\d|(?:[-−–—/]|to\s)\s*(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*\.?\d|%)/;
+/**
+ * The second end of a range "… to" before an amount: "to" with an amount right before it, past
+ * at most a currency or unit's few words ("$700 to", "CAD $700 a tonne to"). "Agree to $725"
+ * has none, so it is a price on its own (Codex's review of 06f0532).
+ */
+const RANGE_TO_BEFORE =
+  /\d(?:\s+(?:[a-z.]+|\/[a-z]+)){0,3}\s+to\s+(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*$/;
+
+/**
+ * Whether the words before or after an amount make it part of something longer. A range is
+ * refused only on evidence of one: a dash or "to" and another amount after it, "to" with an
+ * amount before it, or "between … and"; two prices joined by "and" are two prices ("$7.25 a
+ * bushel and $310 a tonne"; Codex's review of 06f0532).
+ */
+function amountJoins(before: string, after: string): boolean {
+  return (
+    AMOUNT_JOINS_BEFORE.test(before) ||
+    RANGE_TO_BEFORE.test(before) ||
+    AMOUNT_JOINS_AFTER.test(after) ||
+    (/\bbetween\b[^.;]*$/.test(before) && /^\s*and\s/.test(after))
+  );
+}
 
 /** A number as written: "1,500", "725.50", ".50". */
 const NUMBER = String.raw`(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
@@ -362,7 +386,7 @@ export function saidPrice(
   if (before !== null && after !== null && before !== after) return null;
   const amount = plainNumber(written);
   if (!PRICE.test(amount) || isZero(amount)) return null;
-  if (!standsAlone(said, lines, AMOUNT_JOINS_BEFORE, AMOUNT_JOINS_AFTER)) return null;
+  if (!standsAlone(said, lines, amountJoins)) return null;
   return { amount, currency: before ?? after, unit: unitOf(unitWord) };
 }
 
@@ -373,7 +397,7 @@ export function saidTonnes(said: string | null, lines: readonly string[]): strin
   if (match === null) return null;
   const amount = plainNumber(match[1] ?? '');
   if (!QUANTITY.test(amount) || isZero(amount)) return null;
-  return standsAlone(said, lines, AMOUNT_JOINS_BEFORE, AMOUNT_JOINS_AFTER) ? amount : null;
+  return standsAlone(said, lines, amountJoins) ? amount : null;
 }
 
 /**
@@ -398,7 +422,14 @@ export function saidPhone(said: string | null, lines: readonly string[]): string
   if (said === null) return null;
   const match = PHONE_SAID.exec(squash(said));
   if (match === null) return null;
-  if (!standsAlone(said, lines, PHONE_JOINS_BEFORE, PHONE_JOINS_AFTER)) return null;
+  if (
+    !standsAlone(
+      said,
+      lines,
+      (before, after) => PHONE_JOINS_BEFORE.test(before) || PHONE_JOINS_AFTER.test(after),
+    )
+  )
+    return null;
   const [, bracketed, area = bracketed ?? '', exchange = '', line = '', extension] = match;
   const number = `(${area}) ${exchange}-${line}`;
   return extension === undefined ? number : `${number} x${extension}`;
