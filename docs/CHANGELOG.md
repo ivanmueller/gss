@@ -2,6 +2,7 @@
 
 ## 2026-11-05 — The Grains reference
 
+- One class at a time with its on-spec limits (`docs/PRODUCT.md`, `docs/DECISIONS.md`); no title above the table.
 - `docs/DECISIONS.md`: the owner's answers (a Grains menu item, every grain the CGC grades, facts in the code, no GSS numbers yet), sources only, the checker, bushels, the Alberta trials' relative figures, what the sources do not cover.
 - `docs/PRODUCT.md`: `/grains` and `/grains/:id`.
 - `docs/DESIGN_SYSTEM.md`: the five grain family colours; `GrainTile` and `GrainSymbol`; commodity badges opening their grain.
