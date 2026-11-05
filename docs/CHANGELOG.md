@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #140
+
+- `docs/HANDOFF.md`: Claude reads each call (ivanmueller/gss#140) with its CI and Deploy staging runs; Codex's findings after the merge, fixed in ivanmueller/gss#141.
+
 ## 2026-11-05 — Codex's review of the call readings
 
 - `docs/DECISIONS.md`: the five findings and their fixes (a price only when said as a price, a quantity only in tonnes, an extension only when said, a new contact accepted only with one's own, a deadline for each reading, a token for each claim).
