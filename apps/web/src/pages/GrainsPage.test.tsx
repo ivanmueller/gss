@@ -13,6 +13,7 @@ afterEach(() => {
 describe('GrainsPage', () => {
   it('shows every grain as a tile, with its family in words', () => {
     render(<GrainsPage />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Grains' })).toHaveClass('sr-only');
     const tiles = within(screen.getByRole('list', { name: 'The grains' })).getAllByRole('link');
     expect(tiles).toHaveLength(GRAINS.length);
     const oats = screen.getByRole('link', { name: /Oats/ });
