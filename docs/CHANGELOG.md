@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #146
+
+- `docs/HANDOFF.md`: numbers filled in and marked when unusual (ivanmueller/gss#146), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Ordinary words keep a number plain
 
 - `docs/DECISIONS.md`: Codex's review of `beebbf6` and the turned-around check (any word that is not ordinary marks the number).
