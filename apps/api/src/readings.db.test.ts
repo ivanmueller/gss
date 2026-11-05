@@ -97,8 +97,13 @@ afterAll(async () => {
 describe("Claude's reading of a call", () => {
   it('claims the transcript, gives its context, and keeps the reading once', async () => {
     // Other tests' recordings may be claimed too; this one is among them.
-    expect(await db.claimCallReadings(10)).toContain(recording);
-    const context = await db.callReadingContext(recording);
+    const claim = (await db.claimCallReadings(10)).find((c) => c.recordingId === recording);
+    if (claim === undefined) throw new Error('The recording was not claimed.');
+    expect(claim.token).toMatch(/^[0-9a-f-]{36}$/);
+    expect(
+      await db.callReadingContext({ recordingId: recording, token: crypto.randomUUID() }),
+    ).toBeNull();
+    const context = await db.callReadingContext(claim);
     expect(context).toMatchObject({
       recordingId: recording,
       counterpartyName: 'Synthetic Prairie Mills',
@@ -114,9 +119,9 @@ describe("Claude's reading of a call", () => {
     });
     expect(context?.calledAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 
-    expect(await db.keepCallReading(recording, 'claude-opus-5-5', READING, 2400, 600)).toBe(true);
-    expect(await db.keepCallReading(recording, 'claude-opus-5-5', READING, 1, 1)).toBe(false);
-    expect(await db.callReadingContext(recording)).toBeNull();
+    expect(await db.keepCallReading(claim, 'claude-opus-5-5', READING, 2400, 600)).toBe(true);
+    expect(await db.keepCallReading(claim, 'claude-opus-5-5', READING, 1, 1)).toBe(false);
+    expect(await db.callReadingContext(claim)).toBeNull();
   });
 
   it('is listed with the recording for everyone on the team, and for no other organization', async () => {

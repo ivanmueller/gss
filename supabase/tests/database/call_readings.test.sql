@@ -8,7 +8,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(46);
+select plan(52);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000044aa', 'tom@example.test', '{"first_name": "Tom"}'),
@@ -61,6 +61,13 @@ begin
 end
 $fn$;
 
+-- A recording's current claim token, read as the table owner.
+create function pg_temp.claim_of(recording uuid) returns text
+language sql as $fn$
+  select coalesce(quote_literal(reading_claim_token::text), 'null')
+    from app.call_recordings where id = recording
+$fn$;
+
 -- Three calls of Tom's to Synthetic A Buyer, placed as Tom; their recordings: one transcribed
 -- an hour ago, one just now, one with nothing said, one not transcribed yet.
 select set_config('app.user_id', '00000000-0000-4000-8000-0000000044aa', true);
@@ -104,20 +111,20 @@ select ok(
 );
 select ok(
   has_function_privilege('app_api', 'app.claim_call_readings(integer)', 'execute')
-    and has_function_privilege('app_api', 'app.call_reading_context(uuid)', 'execute')
-    and has_function_privilege('app_api', 'app.release_call_reading(uuid)', 'execute')
-    and has_function_privilege('app_api', 'app.keep_call_reading(uuid, text, boolean, text, jsonb, integer, integer)', 'execute')
+    and has_function_privilege('app_api', 'app.call_reading_context(uuid, uuid)', 'execute')
+    and has_function_privilege('app_api', 'app.release_call_reading(uuid, uuid)', 'execute')
+    and has_function_privilege('app_api', 'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer)', 'execute')
     and has_function_privilege('app_api', 'app.decide_call_draft(uuid, text, uuid)', 'execute')
     and has_function_privilege('app_api', 'app.correct_call_voicemail(uuid, boolean)', 'execute'),
   'app_api runs the reading functions'
 );
 select ok(
-  not has_function_privilege('anon', 'app.keep_call_reading(uuid, text, boolean, text, jsonb, integer, integer)', 'execute')
+  not has_function_privilege('anon', 'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer)', 'execute')
     and not has_function_privilege('authenticated', 'app.decide_call_draft(uuid, text, uuid)', 'execute')
     and not has_function_privilege('service_role', 'app.claim_call_readings(integer)', 'execute')
-    and not has_function_privilege('public', 'app.call_reading_context(uuid)', 'execute')
+    and not has_function_privilege('public', 'app.call_reading_context(uuid, uuid)', 'execute')
     and not has_function_privilege('anon', 'app.correct_call_voicemail(uuid, boolean)', 'execute')
-    and not has_function_privilege('authenticated', 'app.release_call_reading(uuid)', 'execute'),
+    and not has_function_privilege('authenticated', 'app.release_call_reading(uuid, uuid)', 'execute'),
   'nobody else runs them'
 );
 
@@ -156,12 +163,19 @@ select is(
   1,
   'a claim counts an attempt'
 );
-select pg_temp.api_exec(null, $$select app.release_call_reading('00000000-0000-4000-8000-0000000ec01a')$$);
 select is(
-  (select concat_ws(':', reading_attempts, reading_claimed_at is null) from app.call_recordings
-    where id = '00000000-0000-4000-8000-0000000ec01a'),
-  '0:t',
-  'a claim given back does not count its attempt'
+  pg_temp.api_text(null, format($$select count(*)::text from app.claim_call_readings(0) c
+                                   where c.claim_token = %s$$, pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01a'))),
+  '0',
+  'claiming none claims nothing'
+);
+select pg_temp.api_exec(null, format($$select app.release_call_reading('00000000-0000-4000-8000-0000000ec01a', %s)$$,
+                                      pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01a')));
+select is(
+  (select concat_ws(':', reading_attempts, reading_claimed_at is null, reading_claim_token is null)
+     from app.call_recordings where id = '00000000-0000-4000-8000-0000000ec01a'),
+  '0:t:t',
+  'a claim given back with its token does not count its attempt'
 );
 select is(
   pg_temp.api_text(null, $$select string_agg(recording_id::text, ',') from app.claim_call_readings(10)$$),
@@ -169,17 +183,47 @@ select is(
   'and the recording is claimed again at once'
 );
 
+-- A run whose claim lapsed (Codex's review of c9222d3, finding 5): another run claims the
+-- recording again; the first run's token gives back, reads and keeps nothing.
+create temp table stale on commit drop as
+  select reading_claim_token as token from app.call_recordings where id = '00000000-0000-4000-8000-0000000ec01a';
+update app.call_recordings set reading_claimed_at = now() - interval '11 minutes'
+ where id = '00000000-0000-4000-8000-0000000ec01a';
+select is(
+  pg_temp.api_text(null, $$select count(*)::text from app.claim_call_readings(10)$$),
+  '1',
+  'a lapsed claim is taken by another run'
+);
+select pg_temp.api_exec(null, format($$select app.release_call_reading('00000000-0000-4000-8000-0000000ec01a', %L)$$,
+                                      (select token from stale)));
+select is(
+  (select concat_ws(':', reading_attempts, reading_claim_token is distinct from (select token from stale),
+                    reading_claimed_at > now() - interval '1 minute')
+     from app.call_recordings where id = '00000000-0000-4000-8000-0000000ec01a'),
+  '2:t:t',
+  'the first run cannot give back the newer claim'
+);
+select is(
+  pg_temp.api_text(null, format($$select coalesce(app.call_reading_context('00000000-0000-4000-8000-0000000ec01a', %L)::text, 'none')
+                                   || '|' || app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', %L, 'claude-opus-5-5',
+                                                                  true, null, '[]'::jsonb, 1, 1)::text$$,
+                                (select token from stale), (select token from stale))),
+  'none|false',
+  'nor read its context, nor keep a reading under it'
+);
+
 -- Context -------------------------------------------------------------------------------------
 select is(
   pg_temp.api_text(null, $$select concat_ws('|', c ->> 'counterpartyName', c -> 'counterpartyTypes' ->> 0,
                                             c ->> 'callerName', jsonb_array_length(c -> 'contacts'),
                                             c -> 'contacts' -> 0 ->> 'name', jsonb_array_length(c -> 'lines'))
-                           from app.call_reading_context('00000000-0000-4000-8000-0000000ec01a') c$$),
+                           from app.call_reading_context('00000000-0000-4000-8000-0000000ec01a', $$
+                   || pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01a') || ') c'),
   'Synthetic A Buyer|buyer|Tom|1|Pat Buyer|2',
   'a claimed recording''s context: the company, the caller, its own contacts only, the lines'
 );
 select is(
-  pg_temp.api_text(null, $$select count(*)::text from app.call_reading_context('00000000-0000-4000-8000-0000000ec01d') c
+  pg_temp.api_text(null, $$select count(*)::text from app.call_reading_context('00000000-0000-4000-8000-0000000ec01d', gen_random_uuid()) c
                            where c is not null$$),
   '0',
   'no context for a recording not claimed'
@@ -187,7 +231,8 @@ select is(
 
 -- Keeping a reading ---------------------------------------------------------------------------
 select is(
-  pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', 'claude-opus-5-5', false,
+  pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', $$
+    || pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01a') || $$, 'claude-opus-5-5', false,
     'Pat bids on canola.',
     '[{"kind":"quote","fields":{"side":"bid","commodity":"canola","values":{"price":"725"}},"lines":[1]},
       {"kind":"follow_up","fields":{"values":{"task":"Call Pat back"}},"lines":[0,1]},
@@ -196,7 +241,13 @@ select is(
       {"kind":"quote","fields":{"side":"bid","commodity":"canola","values":{}},"lines":[1]}]'::jsonb,
     1200, 300)::text$$),
   'true',
-  'a reading is kept'
+  'a reading is kept under its claim'
+);
+select is(
+  (select concat_ws(':', reading_claimed_at is null, reading_claim_token is null)
+     from app.call_recordings where id = '00000000-0000-4000-8000-0000000ec01a'),
+  't:t',
+  'and its claim is done with'
 );
 select is(
   (select concat_ws('|', read_model, read_voicemail, read_summary, read_input_tokens, read_output_tokens,
@@ -219,8 +270,8 @@ select is(
   'a contact of another company named in a draft becomes a new contact'
 );
 select is(
-  pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', 'claude-opus-5-5', true,
-    null, '[{"kind":"quote","fields":{},"lines":[0]}]'::jsonb, 1, 1)::text$$),
+  pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', gen_random_uuid(),
+    'claude-opus-5-5', true, null, '[{"kind":"quote","fields":{},"lines":[0]}]'::jsonb, 1, 1)::text$$),
   'false',
   'a reading is kept once'
 );
@@ -230,16 +281,16 @@ select is(
   'and its drafts are not added to'
 );
 select throws_ok(
-  $$select pg_temp.api_text(null, 'select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', ''claude-opus-5-5'', true, null, ''{}''::jsonb, 1, 1)::text')$$,
+  $$select pg_temp.api_text(null, 'select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', gen_random_uuid(), ''claude-opus-5-5'', true, null, ''{}''::jsonb, 1, 1)::text')$$,
   '23514', null, 'drafts must be an array'
 );
 select throws_ok(
-  $$select pg_temp.api_text(null, 'select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', ''claude-opus-5-5'', true, null, ''[{"kind":"quote","fields":{},"lines":[]}]''::jsonb, 1, 1)::text')$$,
+  $$select pg_temp.api_text(null, format('select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', %s, ''claude-opus-5-5'', true, null, ''[{"kind":"quote","fields":{},"lines":[]}]''::jsonb, 1, 1)::text', pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01b')))$$,
   '23514', null, 'a draft names at least one line of the transcript'
 );
 select is(
-  pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01d', 'claude-opus-5-5', true,
-    null, '[]'::jsonb, 1, 1)::text$$),
+  pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01d', gen_random_uuid(),
+    'claude-opus-5-5', true, null, '[]'::jsonb, 1, 1)::text$$),
   'false',
   'a recording without a transcript cannot be read'
 );
@@ -278,7 +329,9 @@ values ('00000000-0000-4000-8000-0000000e0e01', '00000000-0000-4000-8000-0000000
 select set_config('app.user_id', '', true);
 insert into app.counterparty_contacts (id, organization_id, counterparty_id, name, created_by) values
   ('00000000-0000-4000-8000-00000000d3aa', '00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
-   'Sam', '00000000-0000-4000-8000-0000000055aa');
+   'Sam', '00000000-0000-4000-8000-0000000055aa'),
+  ('00000000-0000-4000-8000-00000000d4aa', '00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa',
+   'Someone Tom Added', '00000000-0000-4000-8000-0000000044aa');
 
 create temp table drafts on commit drop as
   select position, id from app.call_drafts where recording_id = '00000000-0000-4000-8000-0000000ec01a';
@@ -355,6 +408,12 @@ select is(
     $$select app.decide_call_draft((select id from drafts where position = 2), 'accepted', '00000000-0000-4000-8000-00000000d3aa')$$),
   'result_not_found',
   'a change to a listed contact is accepted with that contact only'
+);
+select is(
+  pg_temp.api_text('00000000-0000-4000-8000-0000000055aa',
+    $$select app.decide_call_draft((select id from drafts where position = 3), 'accepted', '00000000-0000-4000-8000-00000000d4aa')$$),
+  'result_not_found',
+  'a new-contact draft is not accepted with a contact someone else added'
 );
 select is(
   pg_temp.api_text('00000000-0000-4000-8000-0000000055aa',

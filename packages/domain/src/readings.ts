@@ -13,6 +13,8 @@ import {
   QUOTE_FIRMNESS,
   QUOTE_SIDES,
   SIDE_COUNTERPARTY_TYPES,
+  type PriceUnit,
+  type QuoteCurrency,
   type QuoteFormValues,
   type QuoteSide,
 } from './quotes';
@@ -23,8 +25,9 @@ import { LABEL_MAX, NOTE_MAX } from './terms';
 // voicemail, and drafts of bids and offers, follow-ups and contact details. A person opens each
 // draft in the usual form and saves it, or dismisses it; nothing is saved before. The Worker
 // asks Claude for CALL_READING_JSON_SCHEMA and passes the answer through checkReading, which
-// keeps only what the transcript bears out: a price, quantity or phone number is kept only when
-// its digits were said in the lines the draft points to, and anything missing stays blank.
+// keeps only what the transcript bears out: a price only when said as one in the lines the draft
+// points to (with its unit and currency only when said with it), a quantity only when said in
+// tonnes, a phone number only when its digits were said; anything missing stays blank.
 // The database keeps the drafts (20261105010000_call_readings.sql).
 
 export const DRAFT_KINDS = ['quote', 'follow_up', 'contact'] as const;
@@ -249,40 +252,131 @@ function notes(value: string | null, max: number): string | null {
 /** A decimal as a comparable key: 0725.50 and 725.5 are the same number. */
 function decimalKey(value: string): string {
   const [whole = '', fraction = ''] = value.split('.');
-  const digits = whole.replace(/^0+(?=\d)/, '');
+  // ".50" is 0.5, never 50 (Codex's review of 1485b23, finding 2).
+  const digits = whole.replace(/^0+(?=\d)/, '') || '0';
   const decimals = fraction.replace(/0+$/, '');
   return decimals === '' ? digits : `${digits}.${decimals}`;
 }
 
-/** The numbers written in a text, thousands separators read as part of the number. */
-function numbersIn(words: string): string[] {
-  const joined = words.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
-  return (joined.match(/\d+(?:\.\d+)?/g) ?? []).map(decimalKey);
+/** A number said in a text, and what was said right around it. */
+interface Mention {
+  /** The number as a comparable key (decimalKey). */
+  value: string;
+  /** Said as a price: a dollar sign before it, or dollars or a per-unit after it. */
+  price: boolean;
+  /** The unit said with the price ("a tonne", "per bushel"); null when none or unclear. */
+  priceUnit: PriceUnit | null;
+  /** Said as a quantity in metric tonnes ("1,500 tonnes"), not as a price per tonne. */
+  tonnes: boolean;
+  /** The currency said with this number, in its own clause ("$725 Canadian"); else null. */
+  currency: QuoteCurrency | null;
 }
 
-/** Whether a number such as 725.50 was said, as digits, in the text. */
-export function numberSaid(value: string, words: string): boolean {
-  return numbersIn(words).includes(decimalKey(value));
+const CURRENCY_WORD = String.raw`(?:canadian|cad|cdn|us|u\.s\.|usd|american)`;
+/** After a price: "a tonne", "dollars per bushel", "US a tonne", "/mt". */
+const PRICE_UNIT_AFTER = new RegExp(
+  String.raw`^\s*(?:${CURRENCY_WORD}\s*)?(?:dollars?|bucks)?\s*(?:a|an|per|/)\s*(metric\s+tonnes?|metric\s+tons?|tonnes?|mt|short\s+tons?|tons?|bushels?|bu|hundredweights?|cwt)\b`,
+);
+/** After a price: "dollars", "US dollars", "bucks". */
+const DOLLARS_AFTER = new RegExp(String.raw`^\s*(?:${CURRENCY_WORD}\s+)?(?:dollars?|bucks)\b`);
+/** After a quantity: "tonnes", "mt", "metric tons". */
+const TONNES_AFTER = /^\s*(?:metric\s+tonnes?|metric\s+tons?|tonnes?|mt)\b/;
+
+/** Where a clause ends: a comma, a semicolon, a full stop and the like, or the next number. */
+const CLAUSE_END = /[,;:!?]|\.(?!\d)|\d/;
+
+/**
+ * The currency said with a number, in its own clause only (Codex's review of 1485b23,
+ * finding 1): "US$725", "CAD 725", "725 Canadian a tonne", "725 US dollars". "US" or "Canadian"
+ * elsewhere in the sentence ("ship it to us") is not a currency. Null when none, or both.
+ */
+function currencyNear(before: string, after: string): QuoteCurrency | null {
+  const cad =
+    /\b(?:cad|cdn|canadian)\s*\$?\s*$/.test(before) ||
+    /^\s*(?:canadian|cad|cdn)\b/.test(after) ||
+    /\b(?:cad|cdn)\b|\bcanadian\s+(?:dollars?|funds|money)\b/.test(after);
+  const usd =
+    /\b(?:usd|us|u\.s\.)\s*\$?\s*$/.test(before) ||
+    /^\s*(?:usd|us|u\.s\.|american)(?![a-z])/.test(after) ||
+    /\busd\b|\b(?:us|u\.s\.|american)\s+(?:dollars?|funds|money)\b/.test(after);
+  return cad === usd ? null : cad ? 'CAD' : 'USD';
 }
 
-/** A number as a form takes it (digits, a decimal point), when it was said; else null. */
-function saidAmount(value: string | null, words: string, pattern: RegExp): string | null {
+/** The price unit a unit word names; "ton" alone is not clear (short or metric). */
+function unitOf(word: string): PriceUnit | null {
+  const unit = word.replace(/\s+/g, ' ');
+  if (/^(?:metric tonnes?|metric tons?|tonnes?|mt)$/.test(unit)) return 'MT';
+  if (/^short tons?$/.test(unit)) return 'ST';
+  if (/^(?:bushels?|bu)$/.test(unit)) return 'BU';
+  if (/^(?:hundredweights?|cwt)$/.test(unit)) return 'CWT';
+  return null;
+}
+
+/**
+ * Every number said in a text, with whether it was said as a price (and per what) or as a
+ * quantity in tonnes (Codex's review of c9222d3, finding 1): "$725.50 a tonne for 1,500 tonnes"
+ * says a price of 725.50 per tonne and 1,500 tonnes, never the other way round.
+ */
+export function mentionsIn(words: string): Mention[] {
+  const text = words.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+  const mentions: Mention[] = [];
+  // The whole number, a leading decimal point included (".50").
+  for (const match of text.matchAll(/\d*\.\d+|\d+/g)) {
+    const start = match.index;
+    const end = start + match[0].length;
+    const before = text.slice(Math.max(0, start - 3), start);
+    const after = text.slice(end, end + 40).toLowerCase();
+    const clauseBefore =
+      text
+        .slice(Math.max(0, start - 12), start)
+        .toLowerCase()
+        .split(CLAUSE_END)
+        .pop() ?? '';
+    const clauseAfter = after.split(CLAUSE_END)[0] ?? '';
+    const unit = PRICE_UNIT_AFTER.exec(after);
+    const price = /\$\s*$/.test(before) || unit !== null || DOLLARS_AFTER.test(after);
+    mentions.push({
+      value: decimalKey(match[0]),
+      price,
+      priceUnit: unit?.[1] === undefined ? null : unitOf(unit[1]),
+      tonnes: !price && TONNES_AFTER.test(after),
+      currency: currencyNear(clauseBefore, clauseAfter),
+    });
+  }
+  return mentions;
+}
+
+/** A number as a form takes it (digits, a decimal point, more than zero); else null. */
+function amountOf(value: string | null, pattern: RegExp): string | null {
   const amount = (value ?? '').trim().replace(/^\$/, '').replace(/,/g, '');
-  if (!pattern.test(amount) || /^0*(?:\.0*)?$/.test(amount)) return null;
-  return numberSaid(amount, words) ? amount : null;
+  return pattern.test(amount) && !/^0*(?:\.0*)?$/.test(amount) ? amount : null;
 }
 const PRICE = /^\d{1,17}(?:\.\d{1,12})?$/;
 const QUANTITY = /^\d{1,11}(?:\.\d{1,3})?$/;
 
-/** A phone number whose digits were said in the text, in one run; else null. */
+/**
+ * A phone number whose digits were said in the text, in one run; else null. An extension is
+ * kept only when it was said with this number, after "x", "ext" or "extension" (Codex's
+ * reviews of c9222d3, finding 2, and 1485b23, finding 3); otherwise the number is kept without
+ * it.
+ */
 function saidPhone(value: string | null, words: string): string | null {
   const phone = label(value, 40);
   if (phone === null || !/^[0-9+(). /x-]+$/.test(phone)) return null;
-  let digits = phone.replace(/x.*$/i, '').replace(/\D/g, '');
+  const [main = '', extension] = phone.split(/\s*x\s*/i);
+  let digits = main.replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
   if (digits.length < 7) return null;
   const spoken = words.replace(/(?<=\d)[\s().-]+(?=\d)/g, '');
-  return spoken.includes(digits) ? phone : null;
+  if (!spoken.includes(digits)) return null;
+  if (extension === undefined || extension === '') return main.trim();
+  if (!/^\d{1,10}$/.test(extension)) return main.trim();
+  const gap = String.raw`[\s().-]*`;
+  const withExtension = new RegExp(
+    String.raw`(?<!\d)(?:1${gap})?${digits.split('').join(gap)}${gap}[,;]?\s*(?:x|ext\.?|extension)\s*${extension}(?!\d)`,
+    'i',
+  );
+  return withExtension.test(words) ? phone : main.trim();
 }
 
 const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+\.[^@\s\p{Cc}]+$/u;
@@ -331,14 +425,38 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     const values: QuoteFormValues = { quotedAt, sourceType: 'phone' };
     put(values, 'sourceReference', reference);
     put(values, 'firmness', quote.firmness);
-    put(values, 'price', saidAmount(quote.price, words, PRICE));
-    put(values, 'currency', quote.currency);
-    put(values, 'priceUnit', quote.priceUnit);
+    // A price only when said as a price, with its unit and currency only when said with it.
+    const mentions = mentionsIn(words);
+    const price = amountOf(quote.price, PRICE);
+    const asPrice =
+      price === null ? [] : mentions.filter((m) => m.value === decimalKey(price) && m.price);
+    put(values, 'price', asPrice.length > 0 ? price : null);
+    put(
+      values,
+      'priceUnit',
+      quote.priceUnit !== null && asPrice.some((m) => m.priceUnit === quote.priceUnit)
+        ? quote.priceUnit
+        : null,
+    );
+    put(
+      values,
+      'currency',
+      quote.currency !== null && asPrice.some((m) => m.currency === quote.currency)
+        ? quote.currency
+        : null,
+    );
     put(values, 'grade', label(quote.grade));
     put(values, 'deliveryBasis', quote.deliveryBasis);
     put(values, 'basisLocation', label(quote.basisLocation));
-    put(values, 'quantityMin', saidAmount(quote.quantityMinMt, words, QUANTITY));
-    put(values, 'quantityMax', saidAmount(quote.quantityMaxMt, words, QUANTITY));
+    // A quantity only when said in tonnes, never a price per tonne.
+    const tonnes = (value: string | null) => {
+      const amount = amountOf(value, QUANTITY);
+      return amount !== null && mentions.some((m) => m.value === decimalKey(amount) && m.tonnes)
+        ? amount
+        : null;
+    };
+    put(values, 'quantityMin', tonnes(quote.quantityMinMt));
+    put(values, 'quantityMax', tonnes(quote.quantityMaxMt));
     const start = (quote.deliveryStart ?? '').trim();
     const end = (quote.deliveryEnd ?? '').trim();
     put(values, 'deliveryStart', isCalendarDate(start) ? start : null);
