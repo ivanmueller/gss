@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Telnyx on a paid account
+
+- `docs/DECISIONS.md`: the owner's report that Telnyx is now a paid account; nothing in the app depended on the trial.
+- `docs/HANDOFF.md`: the paid account under "How staging is wired", and the Worker's second scheduled job (transcripts every 2 minutes, audio deleted after 24 hours).
+
 ## 2026-11-05 — Handoff record of #139
 
 - `docs/HANDOFF.md`: the documents pull request ivanmueller/gss#139 (the handoff record of #138 and the Grains status in `AGENTS.md`, `README.md` and `docs/HANDOFF.md`) with its CI and Deploy staging runs.
