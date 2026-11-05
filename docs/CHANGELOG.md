@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #148
+
+- `docs/HANDOFF.md`: no name is plain (ivanmueller/gss#148), with its CI and Deploy staging runs; the key set on staging and the 400 that followed.
+
 ## 2026-11-05 — No name is plain
 
 - `docs/DECISIONS.md`: Codex's review of `208455a`: names no longer exempt a line.
