@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff records of #135 to #137
+
+- `docs/HANDOFF.md`: the Grains reference (ivanmueller/gss#135), its page without a title (#136) and one class at a time with its on-spec limits (#137), with their CI and Deploy staging runs.
+
 ## 2026-11-05 — The Grains reference
 
 - A grain opens in a window: the Prairies' main classes by acres insured in 2025, on spec only; Ontario not yet covered (`docs/DECISIONS.md`, `docs/PRODUCT.md`, `docs/DESIGN_SYSTEM.md`, `README.md`).
