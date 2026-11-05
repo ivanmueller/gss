@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { CallReadingView } from './readings';
+
 // Calling counterparties through Telnyx (the owner's request and decisions of 2026-11-02,
 // docs/DECISIONS.md). Shared by the API, which places calls and follows Telnyx's events, and
 // the web app, which shows a call's progress. The database keeps the same states
@@ -80,6 +82,10 @@ export interface CallRecordingView {
   transcriptFailed: boolean;
   /** Until when the audio can be played (UTC instant); null once deleted. */
   audioUntil: string | null;
+  /** Claude's notes, voicemail answer and drafts; null until it has read the transcript. */
+  reading: CallReadingView | null;
+  /** Claude will not read it (the attempts ran out). */
+  readingFailed: boolean;
 }
 
 /** Which side of a call said a line: the caller (GSS) or the counterparty; null when unknown. */

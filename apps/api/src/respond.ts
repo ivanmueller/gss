@@ -1,13 +1,15 @@
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
+import type { AnthropicBindings } from './anthropic';
 import type { AuthBindings, AuthUser } from './auth';
 import type { TelnyxBindings } from './telnyx';
 import type { Database, RequestContext } from './db';
 
 export interface ApiEnv {
   Bindings: AuthBindings &
-    TelnyxBindings & {
+    TelnyxBindings &
+    AnthropicBindings & {
       /**
        * Cloudflare Hyperdrive in front of Supabase (staging). Hyperdrive verifies Supabase's
        * certificate against Supabase's own CA, which the Workers runtime cannot do itself.

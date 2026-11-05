@@ -857,6 +857,8 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
         contactName: 'Pat Buyer',
         transcriptFailed: false,
         audioUntil: '2026-11-03T16:07:12.000Z',
+        reading: null,
+        readingFailed: false,
       },
     ]);
     const response = await app.request(

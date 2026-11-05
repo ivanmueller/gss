@@ -172,6 +172,12 @@ export function fakeDatabase(): Mocked<Database> {
     playableRecording: vi.fn<Database['playableRecording']>(() => Promise.resolve(null)),
     claimCommand: vi.fn<Database['claimCommand']>(() => Promise.resolve({ status: 'skipped' })),
     finishCommand: vi.fn<Database['finishCommand']>(() => Promise.resolve({ followUp: null })),
+    claimCallReadings: vi.fn<Database['claimCallReadings']>(() => Promise.resolve([])),
+    releaseCallReading: vi.fn<Database['releaseCallReading']>(() => Promise.resolve()),
+    callReadingContext: vi.fn<Database['callReadingContext']>(() => Promise.resolve(null)),
+    keepCallReading: vi.fn<Database['keepCallReading']>(() => Promise.resolve(true)),
+    decideCallDraft: vi.fn<Database['decideCallDraft']>(() => Promise.resolve('decided')),
+    correctCallVoicemail: vi.fn<Database['correctCallVoicemail']>(() => Promise.resolve('saved')),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
   return db;

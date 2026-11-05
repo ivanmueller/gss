@@ -1,5 +1,22 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Claude reads each call
+
+- `docs/DECISIONS.md`: the owner's request and answers (Opus 5.5, every call and the calls already transcribed, all four kinds of draft, voicemail from the transcript, a USD 100 spend limit); how a reading is checked; who accepts drafts; Anthropic's Commercial Terms on training; retention still to be read.
+- `docs/DATA_MODEL.md`: migration `20261105010000_call_readings.sql`.
+- `docs/API.md`: `reading` and `readingFailed` on the recordings list; `POST /calls/drafts/{id}/decision`; `POST /calls/recordings/{id}/voicemail`.
+- `README.md`: Claude reads each call, and the owner's two steps for the key.
+- `AGENTS.md`: Claude through Anthropic's API under the architecture.
+
+## 2026-11-05 — Telnyx on a paid account
+
+- `docs/DECISIONS.md`: the owner's report that Telnyx is now a paid account; nothing in the app depended on the trial.
+- `docs/HANDOFF.md`: the paid account under "How staging is wired", and the Worker's second scheduled job (transcripts every 2 minutes, audio deleted after 24 hours).
+
+## 2026-11-05 — Handoff record of #139
+
+- `docs/HANDOFF.md`: the documents pull request ivanmueller/gss#139 (the handoff record of #138 and the Grains status in `AGENTS.md`, `README.md` and `docs/HANDOFF.md`) with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Status brought up to date after the Grains pull requests
 
 - `AGENTS.md`: the status line with the Grains reference.
