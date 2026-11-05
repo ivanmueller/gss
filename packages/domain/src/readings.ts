@@ -329,18 +329,21 @@ const PER_UNIT = String.raw`(?:a|an|per|/)\s*${PLAIN_UNIT}`;
 /** What may follow a price's number: a currency, "dollars", a unit, each when said. */
 const PRICE_AFTER_NUMBER = String.raw`(?:\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.))?(?:\s*(?:dollars?|bucks))?(?:\s*${PER_UNIT})?`;
 /**
- * A whole price, marked as one: a dollar sign or currency before its number, or "dollars" or a
- * unit after it. "2 loads" is not one.
+ * A whole price, marked as one, as saidPrice reads one: a dollar sign or currency before its
+ * number, or "dollars", a unit or a currency code after it ("700 CAD"; Codex's review of
+ * 742121f). "2 loads" is not one.
  */
-const WHOLE_PRICE = String.raw`(?:${PRICE_BEFORE_NUMBER}\s*${PLAIN_NUMBER}${PRICE_AFTER_NUMBER}|${PLAIN_NUMBER}(?:\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.))?(?:\s*(?:dollars?|bucks)(?:\s*${PER_UNIT})?|\s*${PER_UNIT}))`;
+const WHOLE_PRICE = String.raw`(?:${PRICE_BEFORE_NUMBER}\s*${PLAIN_NUMBER}${PRICE_AFTER_NUMBER}|${PLAIN_NUMBER}(?:\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.))?(?:\s*(?:dollars?|bucks)(?:\s*${PER_UNIT})?|\s*${PER_UNIT})|${PLAIN_NUMBER}\s*(?:usd|cad|cdn)\b(?:\s*(?:dollars?|bucks))?(?:\s*${PER_UNIT})?)`;
 
 /**
  * The second end of a range: "to" right after a whole price, before the words copied ("from $700
- * Canadian dollars per metric tonne to $725 a tonne"). "For 2 loads we agree to $725" has no price
- * before "to", so its price stands (Codex's review of 7221123).
+ * Canadian dollars per metric tonne to $725 a tonne"), or a bare number right before "to", whose
+ * dollars and unit are said once for both ends ("from 700 to 725 dollars a tonne"; Codex's
+ * review of 742121f). "For 2 loads we agree to $725" has neither, so its price stands (Codex's
+ * review of 7221123).
  */
 const RANGE_TO_BEFORE = new RegExp(
-  String.raw`(?<![\w.$])${WHOLE_PRICE}\s+to\s+(?:${CURRENCY_WORDS}\s*)?\$?\s*$`,
+  String.raw`(?<![\w.$])(?:${WHOLE_PRICE}|${PLAIN_NUMBER})\s+to\s+(?:${CURRENCY_WORDS}\s*)?\$?\s*$`,
 );
 /**
  * The first end of a range: the rest of its price, then a dash or "to" and another amount, after

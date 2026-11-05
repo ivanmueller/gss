@@ -238,6 +238,24 @@ describe('saidPrice', () => {
     });
   });
 
+  it('finds a range with a currency code after the number, or a unit said once (Codex, eighth review)', () => {
+    const codes = ['Bids range from 700 CAD to 725 CAD.'];
+    expect(saidPrice('725 CAD', codes)).toBeNull();
+    expect(saidPrice('700 CAD', codes)).toBeNull();
+    const shared = ['Bids range from 700 to 725 dollars a tonne.'];
+    expect(saidPrice('725 dollars a tonne', shared)).toBeNull();
+    expect(saidPrice('725 CAD', ['Make it 725 CAD, firm.'])).toEqual({
+      amount: '725',
+      currency: 'CAD',
+      unit: null,
+    });
+    expect(saidPrice('$725 a tonne', ['Two to three loads, at $725 a tonne.'])).toEqual({
+      amount: '725',
+      currency: null,
+      unit: 'MT',
+    });
+  });
+
   it('refuses two currencies, zero, or anything more than one price', () => {
     expect(saidPrice('CAD $725 US', ['CAD $725 US'])).toBeNull();
     expect(saidPrice('$0 a tonne', ['$0 a tonne'])).toBeNull();
