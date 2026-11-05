@@ -168,6 +168,21 @@
   --color-offer-accent: var(--offer-accent);
   --color-offer-solid: var(--offer-solid);
   --color-offer-solid-foreground: var(--offer-solid-foreground);
+  --color-grain-wheat: var(--grain-wheat);
+  --color-grain-wheat-subtle: var(--grain-wheat-subtle);
+  --color-grain-wheat-border: var(--grain-wheat-border);
+  --color-grain-coarse: var(--grain-coarse);
+  --color-grain-coarse-subtle: var(--grain-coarse-subtle);
+  --color-grain-coarse-border: var(--grain-coarse-border);
+  --color-grain-oilseed: var(--grain-oilseed);
+  --color-grain-oilseed-subtle: var(--grain-oilseed-subtle);
+  --color-grain-oilseed-border: var(--grain-oilseed-border);
+  --color-grain-pulse: var(--grain-pulse);
+  --color-grain-pulse-subtle: var(--grain-pulse-subtle);
+  --color-grain-pulse-border: var(--grain-pulse-border);
+  --color-grain-special: var(--grain-special);
+  --color-grain-special-subtle: var(--grain-special-subtle);
+  --color-grain-special-border: var(--grain-special-border);
 }
 
 /* Stacking order, used as `z-(--z-popover)`. */

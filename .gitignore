@@ -18,3 +18,6 @@ tests/e2e/playwright/.auth/
 # Supabase CLI local state
 supabase/.branches/
 supabase/.temp/
+
+# Downloaded sources of the Grains reference (scripts/check-grains.js --fetch)
+.grain-sources/

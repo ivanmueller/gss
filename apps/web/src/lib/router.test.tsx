@@ -23,6 +23,9 @@ describe('matchRoute', () => {
     expect(matchRoute('/')).toEqual({ page: 'workspace' });
     expect(matchRoute('/counterparties/')).toEqual({ page: 'counterparties' });
     expect(matchRoute('/team')).toEqual({ page: 'team' });
+    expect(matchRoute('/grains')).toEqual({ page: 'grains' });
+    expect(matchRoute('/grains/canary-seed')).toEqual({ page: 'grain', id: 'canary-seed' });
+    expect(matchRoute('/grains/Oats')).toEqual({ page: 'not-found' });
     expect(matchRoute('/quotes/')).toEqual({ page: 'quotes' });
     expect(matchRoute('/quotes/new')).toEqual({ page: 'new-quote' });
     expect(matchRoute('/quotes/00000000-0000-4000-8000-00000000a001')).toEqual({

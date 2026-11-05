@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 
 import type { Account } from './auth/AuthGate';
 import { ChoosePassword, YourName } from './auth/FirstSignIn';
@@ -19,6 +19,10 @@ import { QuotePage } from './pages/QuotePage';
 import { QuotesPage } from './pages/QuotesPage';
 import { TeamPage } from './pages/TeamPage';
 import { Workspace } from './pages/Workspace';
+
+// The Grains reference is large and read now and then: loaded only when opened.
+const GrainsPage = lazy(async () => ({ default: (await import('./pages/GrainsPage')).GrainsPage }));
+const GrainPage = lazy(async () => ({ default: (await import('./pages/GrainPage')).GrainPage }));
 
 function Notice({ children }: { children: ReactNode }) {
   return (
@@ -48,6 +52,9 @@ function section(route: Route): NavSection | null {
     case 'new-freight':
     case 'freight-rate':
       return 'freight';
+    case 'grains':
+    case 'grain':
+      return 'grains';
     case 'redirect':
     case 'not-found':
       return null;
@@ -127,6 +134,21 @@ export function App({ account }: { account?: Account }) {
       page = directory((session) => (
         <FreightRatePage key={route.id} session={session} id={route.id} />
       ));
+      break;
+    case 'grains':
+      // Public reference facts, not GSS's records: shown to anyone signed in.
+      page = (
+        <Suspense fallback={<Notice>Loading…</Notice>}>
+          <GrainsPage />
+        </Suspense>
+      );
+      break;
+    case 'grain':
+      page = (
+        <Suspense fallback={<Notice>Loading…</Notice>}>
+          <GrainPage key={route.id} id={route.id} />
+        </Suspense>
+      );
       break;
     case 'redirect':
       page = null;

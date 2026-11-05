@@ -13,6 +13,8 @@ const palette = read('palette.css');
 const themes = read('themes.css');
 
 const STATUS_ROLES = ['info', 'success', 'caution', 'warning', 'danger', 'bid', 'offer'] as const;
+/** The Grains page's family colours (themes.css). */
+const GRAIN_FAMILIES = ['wheat', 'coarse', 'oilseed', 'pulse', 'special'] as const;
 
 function withoutComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -117,6 +119,12 @@ const TEXT_PAIRS: [string, string][] = [
     [role, `${role}-subtle`],
     ['foreground', `${role}-subtle`],
     [`${role}-solid-foreground`, `${role}-solid`],
+  ]),
+  ...GRAIN_FAMILIES.flatMap((family): [string, string][] => [
+    [`grain-${family}`, 'background'],
+    [`grain-${family}`, 'card'],
+    [`grain-${family}`, `grain-${family}-subtle`],
+    ['foreground', `grain-${family}-subtle`],
   ]),
 ];
 
