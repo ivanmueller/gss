@@ -1,5 +1,15 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Every company summarized; Codex's review of the summaries
+
+- `docs/DECISIONS.md`: every company with history summarized at once (owner's request); Codex's three P2 on `f6d3296` and their fixes (retries after something new, small counts only before what they count, whole values with their sign, dates apart, no number words or scales, no cutting).
+- `docs/DATA_MODEL.md`: `20261105040000_counterparty_summary_retries.sql`.
+- `README.md`: the summaries of companies listed earlier, and the number check.
+
+## 2026-11-05 — Handoff record of #151
+
+- `docs/HANDOFF.md`: the summary on each company's page (ivanmueller/gss#151), with its CI and Deploy staging runs (run #342 on `main` failed starting its database, before any test).
+
 ## 2026-11-05 — The summary on each company's page
 
 - `docs/DECISIONS.md`: the Summary box built: what it says and from which records, when it is written (and what does not start one), the number check, the cost from Anthropic's pricing page.

@@ -169,6 +169,20 @@ describe('writeDueSummaries', () => {
     expect(JSON.stringify(errors.mock.calls)).not.toContain('930');
   });
 
+  // Codex's review of f6d3296, finding 2: a small number is no free pass for a price.
+  it('keeps nothing with an invented small price', async () => {
+    claude.readCall.mockResolvedValueOnce({
+      status: 'read',
+      json: { lines: ['Live bid CAD 7 per bushel.'] },
+      model: READING_MODEL,
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await writeDueSummaries(CLAUDE_ENV, openDatabase, () => claude, { now: () => NOW });
+    expect(db.keepCounterpartySummary).not.toHaveBeenCalled();
+  });
+
   it('keeps nothing when Claude declines or answers in another shape', async () => {
     claude.readCall
       .mockResolvedValueOnce({ status: 'refused', model: READING_MODEL })
