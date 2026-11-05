@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — A number stays plain only in a plain statement
+
+- `docs/DECISIONS.md`: Codex's review of `6b9d065`: a short, closed list of plain words; whole names only.
+
 ## 2026-11-05 — Only the call's own names
 
 - `docs/DECISIONS.md`: Codex's review of `9773921`: names only from the call, any symbol and words of change mark the number.

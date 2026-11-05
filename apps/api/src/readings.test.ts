@@ -128,10 +128,11 @@ describe('readNewTranscripts', () => {
     expect(quote?.kind === 'quote' && quote.fields.values.price).toBe('725');
     expect(quote?.kind === 'quote' && quote.fields.values).not.toHaveProperty('quantityMax');
     // Where the price was said, for the person checking it.
+    // "…, call me Friday" is more than a plain bid: filled, and marked for a second look.
     expect(quote?.kind === 'quote' && quote.fields.checks.price).toEqual({
       said: '725 a tonne',
       line: 1,
-      doubt: null,
+      doubt: 'The line has a word to check, “call”.',
     });
     expect(followUp).toEqual({
       kind: 'follow_up',

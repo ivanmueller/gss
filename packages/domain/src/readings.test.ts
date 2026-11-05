@@ -126,7 +126,7 @@ describe('saidPrice: what was said is filled in, with where', () => {
       'CWT',
       null,
     ]);
-    expect(price('$1,025 a short ton', 'Say $1,025 a short ton.')).toEqual([
+    expect(price('$1,025 a short ton', 'We bid $1,025 a short ton.')).toEqual([
       '1025',
       null,
       'ST',
@@ -180,11 +180,12 @@ describe('saidPrice: what was said is filled in, with where', () => {
   it('keeps two prices and agreements in one sentence plain', () => {
     const line = 'We bid $7.25 a bushel and $310 a tonne for feed.';
     expect(price('$7.25 a bushel', line)?.[3]).toMatch(/another number/);
+    // Anything but a plain statement is marked, the price still filled in.
     expect(price('$725 a tonne', 'We can agree to $725 a tonne.')).toEqual([
       '725',
       null,
       'MT',
-      null,
+      'The line has a word to check, “agree”.',
     ]);
     // A number in words marks it.
     expect(price('$725 a tonne', 'For two loads, we agree to $725 a tonne.')?.[3]).toMatch(/“two”/);
@@ -328,7 +329,7 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
   });
 
   it("leaves ordinary lines plain, the call's own names included", () => {
-    expect(price('$725 a tonne', 'Yeah we can do $725 a tonne delivered next week.')).toEqual([
+    expect(price('$725 a tonne', 'Yeah we can do $725 a tonne delivered.')).toEqual([
       '725',
       null,
       'MT',
@@ -336,19 +337,30 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
     ]);
     const names = nameWords(['Synthetic Prairie Mills', 'Sam Buyer']);
     expect(
-      saidPhone('403 555 0177', one('Talk to Sam, our new merchandiser, at 403 555 0177.'), names)
-        ?.check.doubt,
+      saidPhone('403 555 0177', one('Call Sam Buyer at 403 555 0177.'), names)?.check.doubt,
     ).toBeNull();
     expect(
-      saidPrice('$725 a tonne', one('Prairie Mills can do $725 a tonne.'), [], names)?.check.doubt,
+      saidPrice('$725 a tonne', one('Synthetic Prairie Mills can do $725 a tonne.'), [], names)
+        ?.check.doubt,
     ).toBeNull();
+    // Only a whole name: one of its words alone is not one (Codex, 6b9d065).
+    const down = nameWords(['Sam Down']);
+    expect(
+      saidPrice('$5 per tonne', one('Our bid is down $5 per tonne.'), [], down)?.check.doubt,
+    ).toMatch(/“down”/);
+  });
+
+  it('marks a negation or a deduction, however plain the words (Codex, 6b9d065)', () => {
+    expect(tonnes('500 tonnes', 'We do not have 500 tonnes available.')?.[1]).toMatch(/“not”/);
+    expect(price('$725 per tonne', 'We do not bid $725 per tonne.')?.[3]).toMatch(/“not”/);
+    expect(price('$5 per tonne', 'Take $5 per tonne for dockage.')?.[3]).toMatch(/“take”/);
   });
 
   it('marks a word it does not know, even capitalized: a code, a place (Codex, 9773921)', () => {
     expect(price('US$725 per tonne', 'We bid US$725 per tonne AUD.')?.[3]).toMatch(/“aud”/);
     expect(price('$5 per tonne', 'Our bid is a Debit of $5 per tonne.')?.[3]).toMatch(/“debit”/);
     expect(price('$725 a tonne', 'Our bid is from Nought to $725 a tonne.')?.[3]).toMatch(
-      /“nought”/,
+      /word to check/,
     );
     expect(price('$725 a tonne', 'We can do $725 a tonne delivered Lethbridge.')?.[3]).toMatch(
       /“lethbridge”/,
@@ -370,8 +382,8 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
 describe('saidTonnes', () => {
   it('reads a quantity said whole in metric tonnes', () => {
     expect(tonnes('1,500 tonnes', 'For 1,500 tonnes.')).toEqual(['1500', null]);
-    expect(tonnes('.5 tonnes', 'Only .5 tonnes left.')).toEqual(['0.5', null]);
-    expect(tonnes('200 mt', '200 MT a month.')).toEqual(['200', null]);
+    expect(tonnes('.5 tonnes', 'We have .5 tonnes.')).toEqual(['0.5', null]);
+    expect(tonnes('200 mt', 'We have 200 MT.')).toEqual(['200', null]);
     expect(tonnes('500 t', 'We have 500 t.')).toEqual(['500', null]);
     expect(tonnes('500 mts', 'We have 500 mts.')).toEqual(['500', null]);
     expect(tonnes('500 metric-tonnes', 'We have 500 metric-tonnes.')).toEqual(['500', null]);
@@ -652,7 +664,14 @@ describe('checkReading: contacts', () => {
       contactId: null,
       fields: {
         values: { contactName: 'Sam', contactRole: 'Merchandiser', contactPhone: '(403) 555-0177' },
-        checks: { contactPhone: { said: '403 555 0177', line: 3, doubt: null } },
+        // "Talk to … new merchandiser" is not a plain way to give a number: a second look.
+        checks: {
+          contactPhone: {
+            said: '403 555 0177',
+            line: 3,
+            doubt: 'The line has a word to check, “talk”.',
+          },
+        },
       },
       lines: [3],
     });

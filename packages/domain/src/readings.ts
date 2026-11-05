@@ -357,47 +357,30 @@ const PRICE_WORD_AFTER =
   /^\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.|dollars?|bucks|(?:a|an|per)\s+(?:metric\s+)?(?:tonnes?|tons?|t|mts?|bushels?|bu|hundredweights?|cwt)\b|\/)/;
 
 /**
- * The ordinary words a line may hold for its numbers to stay plain: everyday English and the
- * trade's own words. Any other word marks them for a second look ("seven", "half", "point",
- * "subtracting", "forty", "Australian dollars"), so a new way of saying a sign, a range, a
- * fraction or a foreign number is marked even though nobody listed it (the owner's choice of
- * 2026-11-05, after Codex's reviews kept finding wordings no list of risky words covered).
- * Words that say a price moved ("down", "up", "back", "over", "more", "after", "basis") are not
- * ordinary: the amount may be a change, not the price (Codex's review of 9773921).
+ * The only words a line may hold, besides its numbers' own words and the call's names, for a
+ * price or quantity to stay plain: a plain statement of a bid or offer ("we bid", "our offer is",
+ * "can do", "delivered", "firm") and the grains and units. None of them can say "not", "less",
+ * "down", "take … for dockage", a range or a condition; any other word marks the number "Check
+ * this" (the owner's choice of 2026-11-05: a text check cannot read meaning, so anything but a
+ * plain statement is left to the person, with the number still filled in; Codex's reviews of
+ * 9773921 and 6b9d065).
  */
-const ORDINARY_WORDS = new Set(
-  `a about across again agree agreed all along already also am an
-and any anything april are around as ask asked at august available
-barley based be bean beans been before being best bid bidding bids
-big book booked both bought bring bushel bushels but buy buyer buyers
-buying by call called calling can canary canola cash cell check chickpeas
-close confirm confirmed contract contracts corn could crop crops current currently customer
-cwt deal december deliver delivered delivery desk did do dockage does doing
-done durum each early either elevator else email end even ever every
-ex ext extension faba far farm february feed fine firm flax flaxseed
-fob for freight friday from get gets getting give go going good
-got grade grain grains great green guys had has have having he
-hear heard hello her here hey hi high him his hold how
-hundredweight i if in indicative inside interest interested into is it it's
-its january july june just keep kind know last later left lentil
-lentils let let's like line list little load loaded loads look looking
-lot low make malt manager march may me merchandiser metric might mill
-moisture monday month morning move mt mts much must mustard my near
-need new next nice no not november now number oat oats october
-of offer offering offers office ok okay old on one's only or
-order other our out outside own owner pea peas phone pick picked
-pickup place plant please pm port price priced prices pricing protein put
-quote quoted rail reach ready really red right rye said same saturday
-say says see seed seeds sell seller selling send september ship shipped
-shipping should small so sold some something soon sorry soy soybean soybeans
-spot spring still sunday sunflower sure take talk tell terminal test than
-thank thanks that that's the their them then there these they they're
-thing think this those thursday tight time to today together tomorrow ton
-tonight tonne tonnes tons too trade trader truck trucks tuesday until us
-use very wait want wanted was we we'll we're we've wednesday week
-weekend weeks weight well were what what's wheat when where which while
-who why will winter with without work would yard yeah year yellow
-yes yesterday yet you you're your`.split(/\s+/),
+const PLAIN_AMOUNT_WORDS: ReadonlySet<string> = new Set(
+  `a an and are at barley be beans bid bidding bids bushel
+bushels can canary canola cash chickpeas corn cwt delivered delivery do durum
+elevator ex faba farm feed firm flax flaxseed fob for grain green
+has have hello hi hundredweight i indicative is it it's lentil lentils
+malt metric mt mts mustard my oat oats offer offering offers ok
+okay our pea peas plant price priced prices red rye seed soybean
+soybeans spring sunflower thanks that that's the this today tonne tonnes we
+wheat will winter would yeah yellow yes`.split(/\s+/),
+);
+/** The same for a phone number: how one is given ("call", "reach me at", "cell", "extension"). */
+const PLAIN_PHONE_WORDS: ReadonlySet<string> = new Set(
+  `a an are at be call can cell desk ext extension hello
+her hi his i is it it's me my number office ok
+okay on our phone reach thanks that that's the their this us
+we will x yeah yes`.split(/\s+/),
 );
 /** Numbers in words: never ordinary, even as a name. */
 const NUMBER_WORDS = new Set(
@@ -411,36 +394,40 @@ twelve twenty two zero`.split(/\s+/),
 /** No names known. */
 const NO_NAMES: ReadonlySet<string> = new Set();
 
-/** The words of the call's names (the company, the contact called, the caller, its contacts). */
+/**
+ * The call's full names (the company, the contact called, the caller, its contacts), squashed,
+ * as phrases of at least two words: only a whole name in a line is a name, never one of its
+ * words alone ("down" is not "Sam Down"; Codex's review of 6b9d065).
+ */
 export function nameWords(names: readonly (string | null | undefined)[]): ReadonlySet<string> {
-  const words = new Set<string>();
+  const phrases = new Set<string>();
   for (const name of names) {
-    for (const match of (name ?? '').normalize('NFKC').matchAll(/\p{L}[\p{L}'\u2019]*/gu)) {
-      const word = match[0].toLowerCase().replace(/\u2019/g, "'");
-      if (!NUMBER_WORDS.has(word)) words.add(word);
-    }
+    const phrase = squash(name ?? '');
+    if (phrase.split(' ').length >= 2) phrases.add(phrase);
   }
-  return words;
+  return phrases;
 }
 
 /** The marks an ordinary line may hold: spaces, everyday punctuation, quotes, hyphens. */
 const ORDINARY_MARK = /[\p{L}\p{N}\s.,!?;:'"()\u2018\u2019\u201C\u201D\p{Pd}]/u;
 
 /**
- * The first word or mark in a line, other than the copied words and the draft's own filled-in
- * amounts (`masked`), that is not ordinary, or null: a word not in ORDINARY_WORDS and not one of
- * the call's own names (`names`), a number in words, or any symbol other than everyday
- * punctuation ("➖", "±", "%"). A capitalized word is not a name by itself (Codex's review of
- * 9773921: "AUD", "Debit", "Nought"), so a place name marks the number too.
+ * The first word or mark in a line, other than the copied words, the draft's own filled-in
+ * amounts (`masked`) and the call's whole names (`names`), that is not plain, or null: a word not
+ * in `plain`, a number in words, or any symbol other than everyday punctuation ("➖", "±", "%").
  */
 function unusualWord(
   line: string,
   masked: readonly { at: number; length: number }[],
   names: ReadonlySet<string>,
+  plain: ReadonlySet<string>,
 ): string | null {
   let text = squash(line);
   for (const { at, length } of masked) {
     text = `${text.slice(0, at)}${' '.repeat(length)}${text.slice(at + length)}`;
+  }
+  for (const name of names) {
+    text = text.split(name).join(' '.repeat(name.length));
   }
   for (const char of text) {
     if (!ORDINARY_MARK.test(char)) return char;
@@ -448,7 +435,7 @@ function unusualWord(
   for (const match of text.matchAll(/[\p{L}][\p{L}'\u2019]*/gu)) {
     const word = match[0].replace(/\u2019/g, "'");
     if (NUMBER_WORDS.has(word)) return match[0];
-    if (ORDINARY_WORDS.has(word) || names.has(word)) continue;
+    if (plain.has(word)) continue;
     return match[0];
   }
   return null;
@@ -493,7 +480,7 @@ function amountDoubt(
   if (PRICE_WORD_BEFORE.test(found.before) || PRICE_WORD_AFTER.test(found.after)) {
     return 'Words right next to it may belong to it.';
   }
-  const word = unusualWord(line, [found, ...spansOf(line, explained)], names);
+  const word = unusualWord(line, [found, ...spansOf(line, explained)], names, PLAIN_AMOUNT_WORDS);
   if (word !== null) return `The line has a word to check, “${word}”.`;
   return null;
 }
@@ -703,7 +690,7 @@ export function saidPhone(
     doubt = 'The line has another number.';
   } else {
     const line = cited.find((c) => c.line === found.line)?.text ?? '';
-    const word = unusualWord(line, [found], names);
+    const word = unusualWord(line, [found], names, PLAIN_PHONE_WORDS);
     if (word !== null) doubt = `The line has a word to check, “${word}”.`;
   }
   return {
