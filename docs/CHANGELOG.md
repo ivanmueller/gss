@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #139
+
+- `docs/HANDOFF.md`: the documents pull request ivanmueller/gss#139 (the handoff record of #138 and the Grains status in `AGENTS.md`, `README.md` and `docs/HANDOFF.md`) with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Status brought up to date after the Grains pull requests
 
 - `AGENTS.md`: the status line with the Grains reference.
