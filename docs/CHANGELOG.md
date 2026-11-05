@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — No name is plain
+
+- `docs/DECISIONS.md`: Codex's review of `208455a`: names no longer exempt a line.
+
 ## 2026-11-05 — Handoff record of #147
 
 - `docs/HANDOFF.md`: a number plain only in a plain statement (ivanmueller/gss#147), with its CI and Deploy staging runs; the bids-and-offers browser test that failed once, in the next task.

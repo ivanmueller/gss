@@ -168,7 +168,6 @@ export async function readNewTranscripts(
           contacts: context.contacts,
           callerId: context.callerId,
           calledAt: context.calledAt,
-          names: [context.counterpartyName, context.contactName, context.callerName],
         });
         const model = /^[a-z0-9][a-z0-9.-]{0,79}$/.test(answer.model) ? answer.model : 'unknown';
         await db.keepCallReading(claim, model, checked, answer.inputTokens, answer.outputTokens);
