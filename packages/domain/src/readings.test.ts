@@ -218,6 +218,26 @@ describe('saidPrice', () => {
     ).toBeNull();
   });
 
+  it('finds a range by the whole price before "to", not by a count (Codex, seventh review)', () => {
+    const range = ['Offers range from $700 Canadian dollars per metric tonne to $725 a tonne.'];
+    expect(saidPrice('$725 a tonne', range)).toBeNull();
+    expect(saidPrice('$700 Canadian dollars per metric tonne', range)).toBeNull();
+    expect(saidPrice('$700', range)).toBeNull();
+    expect(saidPrice('$725 a tonne', ['For 2 loads we agree to $725 a tonne.'])).toEqual({
+      amount: '725',
+      currency: null,
+      unit: 'MT',
+    });
+    const words = ['We bid 725 dollars a tonne to 730 dollars a tonne.'];
+    expect(saidPrice('730 dollars a tonne', words)).toBeNull();
+    expect(saidPrice('725 dollars a tonne', words)).toBeNull();
+    expect(saidPrice('$725 a tonne', ['Ship 500 tonnes to Lethbridge at $725 a tonne.'])).toEqual({
+      amount: '725',
+      currency: null,
+      unit: 'MT',
+    });
+  });
+
   it('refuses two currencies, zero, or anything more than one price', () => {
     expect(saidPrice('CAD $725 US', ['CAD $725 US'])).toBeNull();
     expect(saidPrice('$0 a tonne', ['$0 a tonne'])).toBeNull();
