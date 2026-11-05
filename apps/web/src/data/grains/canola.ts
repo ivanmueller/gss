@@ -21,7 +21,8 @@ export const canola: Grain = {
     },
     {
       label: 'Varieties eligible for the top grades',
-      value: 'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of canola.',
+      value:
+        'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of canola.',
       source: 'cgc-oggg',
       where: 'Chapter 10, Grading factors, Variety (VAR)',
     },
@@ -115,7 +116,10 @@ export const canola: Grain = {
       name: 'Rapeseed, Canada',
       abbreviation: 'CAN',
       grades: ['No. 1 Canada', 'No. 2 Canada', 'No. 3 Canada'],
-      gradesCitation: { source: 'cgc-oggg', where: 'Chapter 10, Rapeseed, Canada (CAN), standard of quality' },
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 10, Rapeseed, Canada (CAN), standard of quality',
+      },
       facts: [
         {
           label: 'Rapeseed',
@@ -185,7 +189,13 @@ export const canola: Grain = {
     },
     {
       title: 'Harvest quality of Canola, No. 1 Canada',
-      columns: ['Quality parameter', '2025', '2024', '5-year mean, 2020 to 2024', '10-year mean, 2015 to 2024'],
+      columns: [
+        'Quality parameter',
+        '2025',
+        '2024',
+        '5-year mean, 2020 to 2024',
+        '10-year mean, 2015 to 2024',
+      ],
       rows: [
         ['Percentage of samples graded Canola, No. 1 Canada', '95.0', '90.0', '92.0', '89.5'],
         ['Oil content, %, 8.5% moisture', '43.6', '42.4', '42.6', '43.5'],
@@ -222,7 +232,8 @@ export const canola: Grain = {
       ],
       note: 'Oil and glucosinolates on an 8.5% moisture basis; chlorophyll on an as-is moisture basis. Values are weighted averages based on provincial production estimates from Statistics Canada.',
       source: 'cgc-canola-2025',
-      where: 'Table 2, Oil, protein, chlorophyll, total glucosinolate and free fatty acid content of oil for 2025 canola harvest samples according to grade and province',
+      where:
+        'Table 2, Oil, protein, chlorophyll, total glucosinolate and free fatty acid content of oil for 2025 canola harvest samples according to grade and province',
     },
     {
       title: 'Canola, No. 1 Canada by province, 2025 (means)',

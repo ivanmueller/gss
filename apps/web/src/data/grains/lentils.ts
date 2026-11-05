@@ -28,7 +28,8 @@ export const lentils: Grain = {
     },
     {
       label: 'Types',
-      value: 'A type may have a specific seed coat colour such as black or tan, or a specific characteristic, such as speckled green.',
+      value:
+        'A type may have a specific seed coat colour such as black or tan, or a specific characteristic, such as speckled green.',
       source: 'cgc-oggg',
       where: 'Chapter 18, Classes and types, Types',
     },
@@ -195,7 +196,14 @@ export const lentils: Grain = {
     },
     {
       title: 'Green lentils: protein by grade, western Canada, 2025 (%, dry basis)',
-      columns: ['Grade', 'Number of samples', '2025 mean', '2025 minimum', '2025 maximum', '2024 mean'],
+      columns: [
+        'Grade',
+        'Number of samples',
+        '2025 mean',
+        '2025 minimum',
+        '2025 maximum',
+        '2024 mean',
+      ],
       rows: [
         ['Lentils, No. 1 Canada', '44', '26.4', '24.2', '28.3', '28.4'],
         ['Lentils, No. 2 Canada', '140', '25.9', '20.8', '29.6', '27.3'],
@@ -209,7 +217,14 @@ export const lentils: Grain = {
     },
     {
       title: 'Red lentils: protein by grade, western Canada, 2025 (%, dry basis)',
-      columns: ['Grade', 'Number of samples', '2025 mean', '2025 minimum', '2025 maximum', '2024 mean'],
+      columns: [
+        'Grade',
+        'Number of samples',
+        '2025 mean',
+        '2025 minimum',
+        '2025 maximum',
+        '2024 mean',
+      ],
       rows: [
         ['Lentils, No. 1 Canada', '128', '26.8', '24.2', '29.4', '27.7'],
         ['Lentils, No. 2 Canada', '17', '27.2', '25.1', '29.4', '27.9'],

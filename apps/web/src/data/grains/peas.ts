@@ -20,7 +20,8 @@ export const peas: Grain = {
     },
     {
       label: 'How the class is determined',
-      value: 'by cotyledon colour and, in the case of Maple, Austrian, Vienna and Dun peas, seed coat and cotyledon colour',
+      value:
+        'by cotyledon colour and, in the case of Maple, Austrian, Vienna and Dun peas, seed coat and cotyledon colour',
       source: 'cgc-oggg',
       where: 'Chapter 16, Classes, types and varieties, Classes',
     },
@@ -126,7 +127,13 @@ export const peas: Grain = {
       tables: [
         {
           title: 'Standard of quality',
-          columns: ['Grading factor', 'No. 1 Canada', 'No. 2 Canada', 'Extra No. 3 Canada', 'No. 3 Canada'],
+          columns: [
+            'Grading factor',
+            'No. 1 Canada',
+            'No. 2 Canada',
+            'Extra No. 3 Canada',
+            'No. 3 Canada',
+          ],
           rows: [
             ['Colour', 'Good natural colour', 'Fair colour', 'Fair colour', 'Off-colour'],
             [
@@ -144,7 +151,13 @@ export const peas: Grain = {
         },
         {
           title: 'Damage, maximum',
-          columns: ['Grading factor', 'No. 1 Canada', 'No. 2 Canada', 'Extra No. 3 Canada', 'No. 3 Canada'],
+          columns: [
+            'Grading factor',
+            'No. 1 Canada',
+            'No. 2 Canada',
+            'Extra No. 3 Canada',
+            'No. 3 Canada',
+          ],
           rows: [
             ['Heated %', '0.00', '0.05', '0.05', '0.20'],
             ['Insect damage %', '1.0', '1.5', '1.5', '4.0'],
@@ -159,7 +172,13 @@ export const peas: Grain = {
         },
         {
           title: 'Foreign material, maximum',
-          columns: ['Grading factor', 'No. 1 Canada', 'No. 2 Canada', 'Extra No. 3 Canada', 'No. 3 Canada'],
+          columns: [
+            'Grading factor',
+            'No. 1 Canada',
+            'No. 2 Canada',
+            'Extra No. 3 Canada',
+            'No. 3 Canada',
+          ],
           rows: [
             ['Ergot %', '0.05', '0.05', '0.05', '0.05'],
             ['Excreta %', '0.01', '0.01', '0.01', '0.01'],
@@ -186,7 +205,8 @@ export const peas: Grain = {
       ],
       note: 'Samples are graded as feed peas only when designated by the shipper as feed peas. In feed peas, pulses other than green, yellow or orange peas refers specifically to maple and marrowfat peas.',
       source: 'cgc-oggg',
-      where: 'Chapter 16, Peas, Canada Feed (CAN); Classes; Pulses other than green, yellow or orange peas',
+      where:
+        'Chapter 16, Peas, Canada Feed (CAN); Classes; Pulses other than green, yellow or orange peas',
     },
     {
       title: 'Moisture: straight, tough and damp',
@@ -197,7 +217,14 @@ export const peas: Grain = {
     },
     {
       title: 'Yellow peas: protein by grade, western Canada, 2025 (%, dry basis)',
-      columns: ['Grade', 'Number of samples', '2025 mean', '2025 minimum', '2025 maximum', '2024 mean'],
+      columns: [
+        'Grade',
+        'Number of samples',
+        '2025 mean',
+        '2025 minimum',
+        '2025 maximum',
+        '2024 mean',
+      ],
       rows: [
         ['Peas, No. 1 Canada', '89', '22.1', '18.2', '27.2', '24.9'],
         ['Peas, No. 2 Canada', '138', '22.6', '18.8', '26.3', '25.1'],
@@ -211,7 +238,14 @@ export const peas: Grain = {
     },
     {
       title: 'Green peas: protein by grade, western Canada, 2025 (%, dry basis)',
-      columns: ['Grade', 'Number of samples', '2025 mean', '2025 minimum', '2025 maximum', '2024 mean'],
+      columns: [
+        'Grade',
+        'Number of samples',
+        '2025 mean',
+        '2025 minimum',
+        '2025 maximum',
+        '2024 mean',
+      ],
       rows: [
         ['Peas, No. 1 Canada', '14', '23.7', '21.8', '25.5', '25.8'],
         ['Peas, No. 2 Canada', '34', '23.4', '21.4', '26.0', '25.8'],
@@ -239,7 +273,13 @@ export const peas: Grain = {
     },
     {
       title: 'Yellow pea composites: quality by grade',
-      columns: ['Quality parameter', 'No. 1 Canada, 2025', 'No. 1 Canada, 2024', 'No. 2 Canada, 2025', 'No. 2 Canada, 2024'],
+      columns: [
+        'Quality parameter',
+        'No. 1 Canada, 2025',
+        'No. 1 Canada, 2024',
+        'No. 2 Canada, 2025',
+        'No. 2 Canada, 2024',
+      ],
       rows: [
         ['Protein, %, dry basis', '21.8', '24.6', '22.3', '25.4'],
         ['Starch, %, dry basis', '48.1', '46.0', '47.2', '45.5'],
@@ -253,7 +293,13 @@ export const peas: Grain = {
     },
     {
       title: 'Green pea composites: quality by grade',
-      columns: ['Quality parameter', 'No. 1 Canada, 2025', 'No. 1 Canada, 2024', 'No. 2 Canada, 2025', 'No. 2 Canada, 2024'],
+      columns: [
+        'Quality parameter',
+        'No. 1 Canada, 2025',
+        'No. 1 Canada, 2024',
+        'No. 2 Canada, 2025',
+        'No. 2 Canada, 2024',
+      ],
       rows: [
         ['Protein, %, dry basis', '23.4', '25.7', '23.3', '26.1'],
         ['Starch, %, dry basis', '46.2', '45.1', '45.8', '45.3'],

@@ -19,7 +19,8 @@ export const safflower: Grain = {
     },
     {
       label: 'Varieties eligible for the top grades',
-      value: 'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of safflower seed.',
+      value:
+        'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of safflower seed.',
       source: 'cgc-oggg',
       where: 'Chapter 15, Grading factors, Variety (VAR)',
     },
@@ -29,18 +30,15 @@ export const safflower: Grain = {
       name: 'Safflower Seed, Canada',
       abbreviation: 'CAN',
       grades: ['No. 1 Canada', 'No. 2 Canada', 'No. 3 Canada'],
-      gradesCitation: { source: 'cgc-oggg', where: 'Chapter 15, Safflower Seed, Canada (CAN), standard of quality' },
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 15, Safflower Seed, Canada (CAN), standard of quality',
+      },
       tables: [
         {
           title: 'Standard of quality',
           columns: cols,
           rows: [
-            [
-              'Degree of soundness',
-              'Well matured, good natural colour',
-              'Reasonably well matured, may be moderately weather-stained',
-              'Excluded from higher grades on account of weather-stained, may have the odour associated with low-quality seed but not distinctly sour, musty or rancid',
-            ],
             [
               'Variety',
               'Any variety of safflower registered under the Seeds Act',
@@ -82,7 +80,9 @@ export const safflower: Grain = {
     {
       title: 'Moisture specifications',
       columns: ['Grain', 'Straight (%)', 'Tough (%)', 'Damp (%)', 'Moist (%)', 'Wet (%)'],
-      rows: [['Safflower seed', 'less than 9.6', '9.6-13.5', '13.6-17.0', '17.1-22.0', 'over 22.0']],
+      rows: [
+        ['Safflower seed', 'less than 9.6', '9.6-13.5', '13.6-17.0', '17.1-22.0', 'over 22.0'],
+      ],
       note: 'Moisture meter: calibrate at 73.',
       source: 'cgc-oggg',
       where: 'Chapter 2, Moisture specifications',

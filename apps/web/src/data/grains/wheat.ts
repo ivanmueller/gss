@@ -7,10 +7,10 @@ export const wheat: Grain = {
   number: 1,
   family: 'wheat',
   commodities: ['spring_wheat', 'durum_wheat', 'winter_wheat'],
-  tileFacts: ['No. 1 CWRS minimum test weight (kg/hL)', 'No. 1 CWRS minimum protein (%)'],
+  tileFacts: ['No. 1 CWRS minimum test weight, kg/hL (g/0.5 L)', 'No. 1 CWRS minimum protein (%)'],
   facts: [
     {
-      label: 'No. 1 CWRS minimum test weight (kg/hL)',
+      label: 'No. 1 CWRS minimum test weight, kg/hL (g/0.5 L)',
       value: '75 (365)',
       source: 'cgc-oggg',
       where:
@@ -31,7 +31,7 @@ export const wheat: Grain = {
         'Chapter 4, Primary grade determination tables, Wheat, Canada Western Red Spring (CWRS), standard of quality',
     },
     {
-      label: 'No. 1 CWAD minimum test weight (kg/hL)',
+      label: 'No. 1 CWAD minimum test weight, kg/hL (g/0.5 L)',
       value: '79 (387)',
       source: 'cgc-oggg',
       where:
@@ -1581,11 +1581,6 @@ export const wheat: Grain = {
         where:
           'Chapter 25, Experimental grades of wheat, Primary grade determination tables, Wheat, Canada Western Experimental (CW EXPRMTL), standard of quality',
       },
-      varieties: ['No varieties currently designated.'],
-      varietiesCitation: {
-        source: 'cgc-variety-lists',
-        where: 'Order 2026-22, Wheat, Canada Western Experimental (CW EXPRMTL)',
-      },
       facts: [
         {
           label: 'Eligibility',
@@ -1593,6 +1588,12 @@ export const wheat: Grain = {
             'A variety is eligible to be assigned to the grades defined in the experimental grade schedules only if the variety is designated by the Canadian Grain Commission.',
           source: 'cgc-oggg',
           where: 'Chapter 25, Criteria for designation as experimental grades',
+        },
+        {
+          label: 'Varieties designated',
+          value: 'No varieties currently designated.',
+          source: 'cgc-variety-lists',
+          where: 'Order 2026-22, Wheat, Canada Western Experimental (CW EXPRMTL)',
         },
       ],
       tables: [

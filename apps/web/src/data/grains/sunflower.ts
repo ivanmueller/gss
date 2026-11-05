@@ -19,7 +19,8 @@ export const sunflower: Grain = {
     },
     {
       label: 'How the class is determined',
-      value: 'The method of determining the class of sunflower seed is by the size and colour of the sunflower seed hull.',
+      value:
+        'The method of determining the class of sunflower seed is by the size and colour of the sunflower seed hull.',
       source: 'cgc-oggg',
       where: 'Chapter 14, Classes',
     },
@@ -33,11 +34,13 @@ export const sunflower: Grain = {
       label: 'No. 1 Canada Confectionery minimum test weight (kg/hL)',
       value: '31',
       source: 'cgc-oggg',
-      where: 'Chapter 14, Sunflower Seed, Canada Confectionery (CAN), standard of quality (kg/hL (g/0.5 L))',
+      where:
+        'Chapter 14, Sunflower Seed, Canada Confectionery (CAN), standard of quality (kg/hL (g/0.5 L))',
     },
     {
       label: 'Varieties eligible for the top grades',
-      value: 'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of sunflower seed.',
+      value:
+        'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of sunflower seed.',
       source: 'cgc-oggg',
       where: 'Chapter 14, Grading factors, Variety (VAR)',
     },
@@ -100,7 +103,8 @@ export const sunflower: Grain = {
             ['Stones %', '0.1', '0.1'],
           ],
           source: 'cgc-oggg',
-          where: 'Chapter 14, Sunflower Seed, Canada Confectionery (CAN), foreign material included in dockage',
+          where:
+            'Chapter 14, Sunflower Seed, Canada Confectionery (CAN), foreign material included in dockage',
         },
       ],
     },
@@ -108,7 +112,10 @@ export const sunflower: Grain = {
       name: 'Sunflower Seed, Canada Oil',
       abbreviation: 'CAN',
       grades: ['No. 1 Canada', 'No. 2 Canada'],
-      gradesCitation: { source: 'cgc-oggg', where: 'Chapter 14, Sunflower Seed, Canada Oil (CAN), standard of quality' },
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 14, Sunflower Seed, Canada Oil (CAN), standard of quality',
+      },
       facts: [
         {
           label: 'Description',
@@ -158,7 +165,8 @@ export const sunflower: Grain = {
             ['Stones %', '0.1', '0.1'],
           ],
           source: 'cgc-oggg',
-          where: 'Chapter 14, Sunflower Seed, Canada Oil (CAN), foreign material included in dockage',
+          where:
+            'Chapter 14, Sunflower Seed, Canada Oil (CAN), foreign material included in dockage',
         },
       ],
     },
@@ -167,7 +175,9 @@ export const sunflower: Grain = {
     {
       title: 'Moisture specifications',
       columns: ['Grain', 'Straight (%)', 'Tough (%)', 'Damp (%)', 'Moist (%)', 'Wet (%)'],
-      rows: [['Sunflower seed', 'less than 9.6', '9.6-13.5', '13.6-17.0', '17.1-22.0', 'over 22.0']],
+      rows: [
+        ['Sunflower seed', 'less than 9.6', '9.6-13.5', '13.6-17.0', '17.1-22.0', 'over 22.0'],
+      ],
       note: 'Moisture meter: calibrate at 73.',
       source: 'cgc-oggg',
       where: 'Chapter 2, Moisture specifications',

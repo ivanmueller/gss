@@ -34,7 +34,8 @@ export const soybeans: Grain = {
     },
     {
       label: 'Varieties eligible for the top grades',
-      value: 'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of soybeans.',
+      value:
+        'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of soybeans.',
       source: 'cgc-oggg',
       where: 'Chapter 20, Grading factors, Variety (VAR)',
     },
@@ -70,7 +71,14 @@ export const soybeans: Grain = {
               'Cool, may be stained',
               'Cool, may be stained',
             ],
-            ['Minimum test weight kg/hL (g/0.5 L)', '70 (356)', '68 (346)', '66 (335)', '63 (320)', '59 (298)'],
+            [
+              'Minimum test weight kg/hL (g/0.5 L)',
+              '70 (356)',
+              '68 (346)',
+              '66 (335)',
+              '63 (320)',
+              '59 (298)',
+            ],
             ['Other colours %', '2', '3', '5', '10', '15'],
           ],
           note: 'Variety: any variety of soybeans registered under the Seeds Act for No. 1 to No. 4 Canada; any variety of soybeans for No. 5 Canada. Soybeans of a variety not registered under the Seeds Act and listed in Appendix A to the annual non-registered varieties order are permitted to be assigned a grade that is higher than the lowest grade established by regulation. The colour is added to the grade name. The tolerance for other colours is not applicable for mixed soybeans.',

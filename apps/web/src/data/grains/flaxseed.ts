@@ -31,7 +31,8 @@ export const flaxseed: Grain = {
     },
     {
       label: 'Varieties eligible for the top grades',
-      value: 'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of flaxseed.',
+      value:
+        'Only varieties registered in Canada under the Seeds Act are eligible for the top grades of flaxseed.',
       source: 'cgc-oggg',
       where: 'Chapter 11, Grading factors, Variety (VAR)',
     },
@@ -39,19 +40,22 @@ export const flaxseed: Grain = {
       label: 'Oil content, brown No. 1 CW, 2025 (%)',
       value: '45.1',
       source: 'cgc-flaxseed-2025',
-      where: 'Table 1, Quality data for 2025 harvest samples of brown flaxseed graded No. 1 CW (dry matter basis)',
+      where:
+        'Table 1, Quality data for 2025 harvest samples of brown flaxseed graded No. 1 CW (dry matter basis)',
     },
     {
       label: 'Area seeded in western Canada, 2025 (thousand hectares)',
       value: '619.2',
       source: 'cgc-flaxseed-2025',
-      where: 'Table 5, Seeded area and production of western Canadian flaxseed in 2025 (Statistics Canada)',
+      where:
+        'Table 5, Seeded area and production of western Canadian flaxseed in 2025 (Statistics Canada)',
     },
     {
       label: 'Production in western Canada, 2025 (thousand metric tonnes)',
       value: '453.1',
       source: 'cgc-flaxseed-2025',
-      where: 'Table 5, Seeded area and production of western Canadian flaxseed in 2025 (Statistics Canada)',
+      where:
+        'Table 5, Seeded area and production of western Canadian flaxseed in 2025 (Statistics Canada)',
     },
   ],
   classes: [
@@ -60,7 +64,10 @@ export const flaxseed: Grain = {
       abbreviation: 'CW',
       region: 'Western',
       grades: ['No. 1 CW', 'No. 2 CW', 'No. 3 CW'],
-      gradesCitation: { source: 'cgc-oggg', where: 'Chapter 11, Flaxseed, Canada Western (CW), standard of quality' },
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 11, Flaxseed, Canada Western (CW), standard of quality',
+      },
       tables: [
         {
           title: 'Standard of quality',
@@ -110,7 +117,10 @@ export const flaxseed: Grain = {
       abbreviation: 'CE',
       region: 'Eastern',
       grades: ['No. 1 CE', 'No. 2 CE', 'No. 3 CE'],
-      gradesCitation: { source: 'cgc-oggg', where: 'Chapter 11, Flaxseed, Canada Eastern (CE), standard of quality' },
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 11, Flaxseed, Canada Eastern (CE), standard of quality',
+      },
       tables: [
         {
           title: 'Standard of quality',
@@ -173,7 +183,13 @@ export const flaxseed: Grain = {
     },
     {
       title: 'Brown flaxseed, No. 1 CW, by province, 2025 (means)',
-      columns: ['Location', 'Number of samples', 'Oil content (%)', 'Protein content (%)', 'Iodine value (units)'],
+      columns: [
+        'Location',
+        'Number of samples',
+        'Oil content (%)',
+        'Protein content (%)',
+        'Iodine value (units)',
+      ],
       rows: [
         ['Manitoba', '8', '44.6', '23.7', '193.0'],
         ['Saskatchewan', '91', '45.2', '23.0', '190.7'],
@@ -182,7 +198,8 @@ export const flaxseed: Grain = {
       ],
       note: 'As printed in Table 6; the report’s Table 1 gives the western Canada means as 23.1% protein and 191.3 units.',
       source: 'cgc-flaxseed-2025',
-      where: 'Table 6, Oil content, protein content and iodine value for 2025 harvest samples of brown flaxseed graded No. 1 CW',
+      where:
+        'Table 6, Oil content, protein content and iodine value for 2025 harvest samples of brown flaxseed graded No. 1 CW',
     },
     {
       title: 'Flax varieties in Alberta trials',

@@ -1,4 +1,4 @@
-import type { Grain, GrainClass } from './types';
+import type { Grain } from './types';
 
 const grades = ['No. 1 Canada', 'No. 2 Canada', 'No. 3 Canada', 'No. 4 Canada'];
 const cols = ['Grading factor', ...grades];
@@ -9,7 +9,8 @@ const soundness = [
   'May have the natural odour associated with low-quality seed not any odour that would indicate serious deterioration',
   'May have the natural odour associated with low-quality seed not any odour that would indicate serious deterioration',
 ];
-const classNote = 'Note: The class, whether yellow, oriental, brown or mixed is added to the grade name';
+const classNote =
+  'Note: The class, whether yellow, oriental, brown or mixed is added to the grade name';
 
 function mustardClass(
   type: 'Brown' | 'Oriental' | 'Yellow',
@@ -18,7 +19,7 @@ function mustardClass(
   foreign: string[][],
   quality: string[][],
   mainVariety: string,
-): GrainClass {
+): Grain['classes'][number] {
   const name = `Domestic Mustard Seed, ${type}, Canada (CAN)`;
   return {
     name: `Domestic Mustard Seed, ${type}, Canada`,
@@ -58,7 +59,14 @@ function mustardClass(
       },
       {
         title: 'Harvest quality by grade, 2025 (means, dry matter basis)',
-        columns: ['Grade', 'Location', 'Number of samples', 'Oil content (%)', 'Protein content (%)', 'Glucosinolates (µmol/g)'],
+        columns: [
+          'Grade',
+          'Location',
+          'Number of samples',
+          'Oil content (%)',
+          'Protein content (%)',
+          'Glucosinolates (µmol/g)',
+        ],
         rows: quality,
         source: 'cgc-mustard-2025',
         where: `Table 1, Oil, protein and total glucosinolate content of 2025 western Canadian mustard seed, Domestic Mustard Seed, ${type}, Canada`,
@@ -221,7 +229,8 @@ export const mustard: Grain = {
       where: 'Chapter 2, Moisture specifications',
     },
     {
-      title: 'Domestic Mustard Seed, No. 1 Canada: oil, protein and glucosinolates (dry matter basis)',
+      title:
+        'Domestic Mustard Seed, No. 1 Canada: oil, protein and glucosinolates (dry matter basis)',
       columns: [
         'Class',
         'Oil 2025 (%)',
@@ -244,7 +253,16 @@ export const mustard: Grain = {
     },
     {
       title: 'Oil composition of No. 1 mustard seed, western Canada, 2025',
-      columns: ['Class', 'Oleic C18:1 (%)', 'Linoleic C18:2 (%)', 'Linolenic C18:3 (%)', 'Erucic C22:1 (%)', 'Iodine value (units)', 'Chlorophyll (mg/kg)', 'FFA (%)'],
+      columns: [
+        'Class',
+        'Oleic C18:1 (%)',
+        'Linoleic C18:2 (%)',
+        'Linolenic C18:3 (%)',
+        'Erucic C22:1 (%)',
+        'Iodine value (units)',
+        'Chlorophyll (mg/kg)',
+        'FFA (%)',
+      ],
       rows: [
         ['Oriental', '21.8', '22.3', '11.6', '21.9', '116.6', '0.6', '0.14'],
         ['Brown', '19.6', '20.9', '13.8', '23.2', '119.5', '4.3', '0.10'],
@@ -252,7 +270,8 @@ export const mustard: Grain = {
       ],
       note: 'Relative fatty acid composition of the oil.',
       source: 'cgc-mustard-2025',
-      where: 'Table 2, Relative fatty acid composition of the oil, chlorophyll content and free fatty acid content of 2025 western Canadian mustard seed (No. 1, Western Canada rows)',
+      where:
+        'Table 2, Relative fatty acid composition of the oil, chlorophyll content and free fatty acid content of 2025 western Canadian mustard seed (No. 1, Western Canada rows)',
     },
   ],
 };
