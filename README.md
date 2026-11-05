@@ -141,6 +141,17 @@ Traders, operations and admin members can:
 
 Rates are shown as quoted, never converted or estimated; the trading engine, when built, will convert them with recorded factors. A location on a route cannot be removed from its counterparty.
 
+## Grains
+
+**Grains** in the menu is a reference of the 19 grains graded in Canada, laid out like a periodic table and coloured by family (wheat, coarse grains, oilseeds, pulses, special crops). Search finds a grain, a class (CWRS) or a variety (CS Camden). A grain's page shows its official classes with their grades, main grade limits and designated varieties, its moisture limits, quality figures (protein, oil, test weight) and variety trial tables, each with its source: the Canadian Grain Commission's Official Grain Grading Guide (August 1, 2026), its 2026 variety designation lists and its harvest and export quality reports, and the Alberta Seed Guide's spring 2026 trial tables. Nothing on it is GSS's own data. A verified commodity's badge on a counterparty's page opens its grain.
+
+The facts live in `apps/web/src/data/grains/`, one file per grain, and change only by pull request. Before one, check them against the sources (needs `curl` and `pdftotext`):
+
+```
+node --experimental-strip-types scripts/check-grains.js --fetch   # once: downloads the sources into .grain-sources/
+node --experimental-strip-types scripts/check-grains.js           # every value must be found in its source
+```
+
 ## Map
 
 **Counterparties → Map** shows the organization's counterparty locations on a Mapbox map (Mapbox GL JS, `docs/DECISIONS.md`), as street map or satellite: buyers green, sellers red, both (or brokers and carriers) blue; filled pins are exact locations, hollow pins approximate ones (such as a town). It shows every located place of the counterparties the filters above leave, whatever part of the map is in view, and moves to hold them when the filters change. Clicking a pin shows the location with a link to its counterparty. There is no count or list under the map (owner's request, 2026-10-30). Old links to `/map` open this view.

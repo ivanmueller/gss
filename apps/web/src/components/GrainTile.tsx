@@ -68,15 +68,13 @@ export function GrainTile({ grain, dimmed = false }: { grain: Grain; dimmed?: bo
     <Link
       href={`/grains/${grain.id}`}
       className={cn(
-        'group flex min-h-36 flex-col gap-1 rounded-card border p-3 shadow-xs transition-[box-shadow,opacity] hover:shadow-sm',
+        'group flex h-full min-h-36 flex-col gap-1 rounded-card border p-3 shadow-xs transition-[box-shadow,opacity] hover:shadow-sm',
         colours.tile,
         dimmed && 'opacity-40',
       )}
     >
       <span className="flex items-start justify-between gap-2">
-        <span className={cn('text-xs font-medium tabular-nums', colours.text)}>
-          {grain.number}
-        </span>
+        <span className={cn('text-xs font-medium tabular-nums', colours.text)}>{grain.number}</span>
         <span className={cn('text-2xs font-medium', colours.text)}>
           {familyLabel(grain.family)}
         </span>

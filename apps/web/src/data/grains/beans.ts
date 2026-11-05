@@ -46,7 +46,7 @@ const TRIAL_COLUMNS = [
   'Site years 2014-2025',
   'Overall yield (% of check)',
   'Days to bloom',
-  'Days to maturity',
+  'Days to maturity (the check; others ± the check)',
   'TSW (g)',
   'Plant height (cm)',
   'Lodging (1-5)',

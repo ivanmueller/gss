@@ -84,7 +84,9 @@ export const oats: Grain = {
         {
           title: 'Standard of quality',
           columns: ['Grading factor', 'No. 1 CE', 'No. 2 CE', 'No. 3 CE', 'No. 4 CE'],
-          rows: [['Minimum test weight kg/hL (g/0.5 L)', '51 (235)', '49 (225)', '46 (210)', '43 (195)']],
+          rows: [
+            ['Minimum test weight kg/hL (g/0.5 L)', '51 (235)', '49 (225)', '46 (210)', '43 (195)'],
+          ],
           source: 'cgc-oggg',
           where: 'Chapter 7, Oats, Canada Eastern (CE), standard of quality',
         },
@@ -115,7 +117,15 @@ export const oats: Grain = {
     },
     {
       title: 'Milling varieties in Alberta trials',
-      columns: ['Variety', 'Test weight (lb/bu)', 'TKW (g)', 'Height (cm)', 'Lodging resistance', 'Smuts', 'BYDV'],
+      columns: [
+        'Variety',
+        'Test weight (lb/bu)',
+        'TKW (g)',
+        'Height (cm)',
+        'Lodging resistance',
+        'Smuts',
+        'BYDV',
+      ],
       rows: [
         ['CS Camden', '40', '41', '99', 'VG', 'I', 'S'],
         ['AAC Anthony', '39', '45', '104', 'G', 'R', 'R'],

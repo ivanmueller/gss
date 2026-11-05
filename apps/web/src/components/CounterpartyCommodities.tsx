@@ -8,7 +8,7 @@ import { CircleDashed, Pencil, Wheat } from 'lucide-react';
 import { useState } from 'react';
 
 import { ApiError, sendJson, type CounterpartyDetail } from '../lib/api';
-import { grainForCommodity } from '../lib/grains';
+import { grainHref } from '../lib/grainLinks';
 import { Link } from '../lib/router';
 import { cn } from '../lib/utils';
 import { Badge } from './ui/badge';
@@ -341,12 +341,12 @@ function VerifiedBadge({ item, direction }: { item: Listed; direction: Commodity
       <span className="sr-only">, verified</span>
     </Badge>
   );
-  const grain = grainForCommodity(item.code);
-  if (!grain) return badge;
+  const href = grainHref(item.code);
+  if (!href) return badge;
   return (
     <Link
-      href={`/grains/${grain.id}`}
-      title={`Verified. Open ${grain.name} on Grains`}
+      href={href}
+      title="Verified. Open it on Grains"
       className="block rounded-badge hover:opacity-80"
     >
       {badge}

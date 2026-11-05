@@ -42,9 +42,10 @@ describe('GrainsPage', () => {
   it('explains the Canadian and U.S. bushels, with the source', () => {
     render(<GrainsPage />);
     expect(screen.getByText(/Winchester bushel, 35\.24 L/)).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: /Test weight for Canadian grains/ }),
-    ).toHaveAttribute('href', expect.stringContaining('grainscanada.gc.ca'));
+    expect(screen.getByRole('link', { name: /Test weight for Canadian grains/ })).toHaveAttribute(
+      'href',
+      expect.stringContaining('grainscanada.gc.ca'),
+    );
   });
 });
 
@@ -56,12 +57,13 @@ describe('GrainPage', () => {
     expect(
       within(within(western).getByRole('list', { name: /Grades of/ })).getAllByRole('listitem'),
     ).toHaveLength(4);
-    expect(screen.getByRole('heading', { name: 'Milling varieties in Alberta trials' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Milling varieties in Alberta trials' }),
+    ).toBeInTheDocument();
     const sources = screen.getByRole('region', { name: 'Sources' });
-    expect(within(sources).getByRole('link', { name: /Official Grain Grading Guide/ })).toHaveAttribute(
-      'target',
-      '_blank',
-    );
+    expect(
+      within(sources).getByRole('link', { name: /Official Grain Grading Guide/ }),
+    ).toHaveAttribute('target', '_blank');
     expect(within(sources).getAllByText(/checked November 5, 2026/).length).toBeGreaterThan(0);
   });
 
@@ -76,7 +78,9 @@ describe('GrainPage', () => {
     render(<GrainPage id={grain.id} />);
     const list = screen.getByRole('list', { name: `Varieties of ${grainClass?.name ?? ''}` });
     expect(within(list).getAllByRole('listitem')).toHaveLength(40);
-    await user.click(screen.getAllByRole('button', { name: `Show all ${String(count)}` })[0]!);
+    const [showAll] = screen.getAllByRole('button', { name: `Show all ${String(count)}` });
+    if (!showAll) throw new Error('no Show all button');
+    await user.click(showAll);
     expect(within(list).getAllByRole('listitem')).toHaveLength(count);
   });
 

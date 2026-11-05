@@ -15,16 +15,18 @@ const tables = GRAINS.flatMap((grain) => [
 ]);
 
 function citations(): { grain: string; citation: Citation }[] {
-  return GRAINS.flatMap((grain) => [
-    ...grain.facts,
-    ...grain.tables,
-    ...grain.classes.flatMap((grainClass) => [
-      ...(grainClass.facts ?? []),
-      ...(grainClass.tables ?? []),
-      ...(grainClass.gradesCitation ? [grainClass.gradesCitation] : []),
-      ...(grainClass.varietiesCitation ? [grainClass.varietiesCitation] : []),
-    ]),
-  ].map((citation) => ({ grain: grain.id, citation })));
+  return GRAINS.flatMap((grain) =>
+    [
+      ...grain.facts,
+      ...grain.tables,
+      ...grain.classes.flatMap((grainClass) => [
+        ...(grainClass.facts ?? []),
+        ...(grainClass.tables ?? []),
+        ...(grainClass.gradesCitation ? [grainClass.gradesCitation] : []),
+        ...(grainClass.varietiesCitation ? [grainClass.varietiesCitation] : []),
+      ]),
+    ].map((citation) => ({ grain: grain.id, citation })),
+  );
 }
 
 describe('the grains reference', () => {
@@ -43,7 +45,10 @@ describe('the grains reference', () => {
   it('links each of GSS’s commodities to exactly one grain', () => {
     for (const { code } of COMMODITIES) {
       const owners = GRAINS.filter((grain) => (grain.commodities as string[]).includes(code));
-      expect(owners.map((grain) => grain.id), code).toHaveLength(1);
+      expect(
+        owners.map((grain) => grain.id),
+        code,
+      ).toHaveLength(1);
     }
   });
 

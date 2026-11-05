@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-05 — The Grains reference
+
+- `docs/DECISIONS.md`: the owner's answers (a Grains menu item, every grain the CGC grades, facts in the code, no GSS numbers yet), sources only, the checker, bushels, the Alberta trials' relative figures, what the sources do not cover.
+- `docs/PRODUCT.md`: `/grains` and `/grains/:id`.
+- `docs/DESIGN_SYSTEM.md`: the five grain family colours; `GrainTile` and `GrainSymbol`; commodity badges opening their grain.
+- `README.md`: the Grains section and how to check its facts.
+
 ## 2026-11-04 — Handoff record of #134
 
 - `docs/HANDOFF.md`: the documents pull request ivanmueller/gss#134 (the handoff record of #133, `AGENTS.md` and `README.md` brought up to date) with its CI and Deploy staging runs.

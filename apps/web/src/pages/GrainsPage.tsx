@@ -99,11 +99,11 @@ export function GrainsPage() {
       </ul>
 
       <p className="max-w-3xl text-xs text-muted-foreground">
-        A bushel is not the same in both countries: Canada uses the British Imperial (Avery)
-        bushel, 36.37 L, and the United States the Winchester bushel, 35.24 L. Canadian bushel
-        weights are in lb/bu-A and account for compaction; U.S. contracts usually mean lb/bu-W.
-        There is no single bushels-to-tonnes factor, even for one grain: the grain’s own test
-        weight decides it. Source:{' '}
+        A bushel is not the same in both countries: Canada uses the British Imperial (Avery) bushel,
+        36.37 L, and the United States the Winchester bushel, 35.24 L. Canadian bushel weights are
+        in lb/bu-A and account for compaction; U.S. contracts usually mean lb/bu-W. There is no
+        single bushels-to-tonnes factor, even for one grain: the grain’s own test weight decides it.
+        Source:{' '}
         <a
           href={BUSHELS.url}
           target="_blank"

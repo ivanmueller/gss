@@ -25,13 +25,7 @@ import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
 export type NavSection =
-  | 'workspace'
-  | 'counterparties'
-  | 'follow-ups'
-  | 'quotes'
-  | 'freight'
-  | 'grains'
-  | 'team';
+  'workspace' | 'counterparties' | 'follow-ups' | 'quotes' | 'freight' | 'grains' | 'team';
 
 interface NavItem {
   id: NavSection;

@@ -358,7 +358,7 @@ export const wheat: Grain = {
           columns: [
             'Variety',
             'Overall yield (% of check)',
-            'Protein (%)',
+            'Protein (% for the check; others ± the check)',
             'Test weight (lb/bu)',
             'TKW (g)',
             'Height (cm)',
@@ -767,7 +767,7 @@ export const wheat: Grain = {
           columns: [
             'Variety',
             'Overall yield (% of check)',
-            'Protein (%)',
+            'Protein (% for the check; others ± the check)',
             'Test weight (lb/bu)',
             'TKW (g)',
             'Height (cm)',
@@ -907,7 +907,7 @@ export const wheat: Grain = {
             'Variety',
             'Overall yield (% of check)',
             'Winter survival',
-            'Protein (%)',
+            'Protein (% for the check; others ± the check)',
             'Test weight (lb/bu)',
             'TKW (g)',
             'Height (cm)',
@@ -1035,7 +1035,7 @@ export const wheat: Grain = {
           columns: [
             'Variety',
             'Overall yield (% of check)',
-            'Protein (%)',
+            'Protein (% for the check; others ± the check)',
             'Test weight (lb/bu)',
             'TKW (g)',
             'Height (cm)',
@@ -1306,7 +1306,7 @@ export const wheat: Grain = {
           columns: [
             'Variety',
             'Overall yield (% of check)',
-            'Protein (%)',
+            'Protein (% for the check; others ± the check)',
             'Test weight (lb/bu)',
             'TKW (g)',
             'Height (cm)',
@@ -1547,7 +1547,7 @@ export const wheat: Grain = {
           columns: [
             'Variety',
             'Overall yield (% of check)',
-            'Protein (%)',
+            'Protein (% for the check; others ± the check)',
             'Test weight (lb/bu)',
             'TKW (g)',
             'Height (cm)',
