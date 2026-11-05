@@ -10,7 +10,6 @@ import {
   saidPhone,
   saidPrice,
   saidTonnes,
-  nameWords,
   type CallReading,
   type CitedLine,
   type ReadingContext,
@@ -324,30 +323,43 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
 
   it('marks a phone number after a foreign code in words', () => {
     expect(phone('403 555 0177', 'Our UK number is plus forty four 403 555 0177.')?.[1]).toMatch(
-      /word to check/,
+      /sign word|word to check/,
     );
   });
 
-  it("leaves ordinary lines plain, the call's own names included", () => {
+  it('leaves a plain statement plain', () => {
     expect(price('$725 a tonne', 'Yeah we can do $725 a tonne delivered.')).toEqual([
       '725',
       null,
       'MT',
       null,
     ]);
-    const names = nameWords(['Synthetic Prairie Mills', 'Sam Buyer']);
-    expect(
-      saidPhone('403 555 0177', one('Call Sam Buyer at 403 555 0177.'), names)?.check.doubt,
-    ).toBeNull();
-    expect(
-      saidPrice('$725 a tonne', one('Synthetic Prairie Mills can do $725 a tonne.'), [], names)
-        ?.check.doubt,
-    ).toBeNull();
-    // Only a whole name: one of its words alone is not one (Codex, 6b9d065).
-    const down = nameWords(['Sam Down']);
-    expect(
-      saidPrice('$5 per tonne', one('Our bid is down $5 per tonne.'), [], down)?.check.doubt,
-    ).toMatch(/“down”/);
+    expect(phone('403 555 0177', 'Call me at 403 555 0177.')).toEqual(['(403) 555-0177', null]);
+  });
+
+  it('marks a line that names anyone: a name may hold any word (Codex, 352c13c and 208455a)', () => {
+    for (const [said, text] of [
+      ['$5 per tonne', 'Our price cut is $5 per tonne.'],
+      ['$5 per tonne', 'Our debit charge is $5 per tonne.'],
+      ['$7', 'We bid $7 point five a bushel.'],
+      ['$725 a tonne', 'Synthetic Prairie Mills can do $725 a tonne.'],
+      ['$5 per tonne', 'Our bid is down $5 per tonne.'],
+    ] as const) {
+      expect(price(said, text)?.[3], text).toMatch(/word to check/);
+    }
+    for (const text of ['Call Sam Buyer at 403 555 0177.', 'Call plus forty four 403 555 0177.']) {
+      expect(phone('403 555 0177', text)?.[1], text).not.toBeNull();
+    }
+    // Through checkReading too: a contact draft's own name does not make its line plain.
+    const [person] = checkReading(
+      reading({
+        contacts: [contact({ name: 'Plus Forty Four', phoneSaid: '403 555 0177', lines: [0] })],
+      }),
+      context({
+        lines: [{ side: 'counterparty', start: 0, text: 'Call plus forty four 403 555 0177.' }],
+      }),
+    ).drafts;
+    expect(person?.kind === 'contact' && person.fields.checks.contactPhone?.doubt).not.toBeNull();
   });
 
   it('marks a negation or a deduction, however plain the words (Codex, 6b9d065)', () => {
