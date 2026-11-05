@@ -8,8 +8,6 @@ import type { ContactFieldId } from './directory';
 import { isCalendarDate } from './fx';
 import {
   DELIVERY_BASES,
-  PRICE_UNITS,
-  QUOTE_CURRENCIES,
   QUOTE_FIRMNESS,
   QUOTE_SIDES,
   SIDE_COUNTERPARTY_TYPES,
@@ -25,9 +23,10 @@ import { LABEL_MAX, NOTE_MAX } from './terms';
 // voicemail, and drafts of bids and offers, follow-ups and contact details. A person opens each
 // draft in the usual form and saves it, or dismisses it; nothing is saved before. The Worker
 // asks Claude for CALL_READING_JSON_SCHEMA and passes the answer through checkReading, which
-// keeps only what the transcript bears out: a price only when said as one in the lines the draft
-// points to (with its unit and currency only when said with it), a quantity only when said in
-// tonnes, a phone number only when its digits were said; anything missing stays blank.
+// keeps only what the transcript bears out. Claude copies each price, quantity and phone number
+// exactly as said; the Worker keeps one only when those words stand whole in a line the draft
+// points to and read as a price (its currency and unit from the same words), a quantity in
+// tonnes, or a North American phone number. Anything else stays blank.
 // The database keeps the drafts (20261105010000_call_readings.sql).
 
 export const DRAFT_KINDS = ['quote', 'follow_up', 'contact'] as const;
@@ -59,14 +58,12 @@ export const callReadingSchema = z.object({
       side: z.enum(QUOTE_SIDES),
       commodity: z.enum(COMMODITY_CODES).nullable(),
       firmness: z.enum(QUOTE_FIRMNESS).nullable(),
-      price: nullableText,
-      currency: z.enum(QUOTE_CURRENCIES).nullable(),
-      priceUnit: z.enum(PRICE_UNITS).nullable(),
+      priceSaid: nullableText,
       grade: nullableText,
       deliveryBasis: z.enum(DELIVERY_BASES).nullable(),
       basisLocation: nullableText,
-      quantityMinMt: nullableText,
-      quantityMaxMt: nullableText,
+      quantityMinSaid: nullableText,
+      quantityMaxSaid: nullableText,
       deliveryStart: nullableText,
       deliveryEnd: nullableText,
       validUntil: nullableText,
@@ -83,7 +80,7 @@ export const callReadingSchema = z.object({
       name: nullableText,
       role: nullableText,
       email: nullableText,
-      phone: nullableText,
+      phoneSaid: nullableText,
       lines: z.array(z.number()),
     }),
   ),
@@ -139,14 +136,18 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
         QUOTE_FIRMNESS,
         'firm only when the counterparty said it is firm; indicative when they said it is indicative or only an idea; null otherwise.',
       ),
-      price: text('The price exactly as said, digits only with a decimal point (e.g. 725.50).'),
-      currency: choice(QUOTE_CURRENCIES, 'Only when said or plainly meant.'),
-      priceUnit: choice(PRICE_UNITS, 'MT tonne, ST short ton, BU bushel, CWT hundredweight.'),
+      priceSaid: text(
+        'The price exactly as written in one transcript line, copied character for character with its currency and unit when they are said with it, e.g. "$725.50 Canadian a tonne", "US$7.25 a bushel", "CAD $310 per tonne". Null when no single price was said.',
+      ),
       grade: text('The grade or spec as said, e.g. "1 CW", "feed".'),
       deliveryBasis: choice(DELIVERY_BASES, 'How the price is delivered, when said.'),
       basisLocation: text('The place the price is for, as said.'),
-      quantityMinMt: text('A smallest quantity in metric tonnes, only when said in tonnes.'),
-      quantityMaxMt: text('The quantity in metric tonnes, only when said in tonnes.'),
+      quantityMinSaid: text(
+        'A smallest quantity exactly as written in one transcript line, in metric tonnes, e.g. "500 tonnes". Null otherwise.',
+      ),
+      quantityMaxSaid: text(
+        'The quantity exactly as written in one transcript line, in metric tonnes, e.g. "1,500 tonnes". Null otherwise.',
+      ),
       deliveryStart: text('The first day of delivery, YYYY-MM-DD.'),
       deliveryEnd: text('The last day of delivery, YYYY-MM-DD.'),
       validUntil: text(
@@ -174,7 +175,9 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
       name: text("The person's name, as said."),
       role: text('Their job, as said.'),
       email: text('Their email address, as said.'),
-      phone: text('Their phone number, digits as said.'),
+      phoneSaid: text(
+        'Their phone number exactly as written in one transcript line, with its extension when said with it, e.g. "403 555 0177 extension 12". Null otherwise.',
+      ),
       lines: lineNumbers,
     }),
   },
@@ -249,143 +252,156 @@ function notes(value: string | null, max: number): string | null {
   return cleaned.length <= max ? cleaned : `${cleaned.slice(0, max - 1).trimEnd()}…`;
 }
 
-/** A decimal as a comparable key: 0725.50 and 725.5 are the same number. */
-function decimalKey(value: string): string {
-  const [whole = '', fraction = ''] = value.split('.');
-  // ".50" is 0.5, never 50 (Codex's review of 1485b23, finding 2).
-  const digits = whole.replace(/^0+(?=\d)/, '') || '0';
-  const decimals = fraction.replace(/0+$/, '');
-  return decimals === '' ? digits : `${digits}.${decimals}`;
+/** A text as compared: spaces collapsed, lower case. */
+const squash = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Whether `said` stands in one of `lines` exactly as Claude copied it (case and spacing aside),
+ * as a whole expression: never inside a longer word or number, and with nothing right before or
+ * after it that changes what it says (`joinsBefore`, `joinsAfter`). This is how a draft's price,
+ * quantity and phone number are tied to one thing that was said (Codex's reviews of the call
+ * readings: c9222d3, 1485b23, a5c8986 and 66e61ae).
+ */
+function standsAlone(
+  said: string,
+  lines: readonly string[],
+  joinsBefore: RegExp,
+  joinsAfter: RegExp,
+): boolean {
+  const needle = squash(said);
+  if (needle === '') return false;
+  for (const line of lines) {
+    const text = squash(line);
+    for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+      const before = text.slice(0, at);
+      const after = text.slice(at + needle.length);
+      const glued =
+        (/[a-z0-9]$/.test(before) && /^[a-z0-9]/.test(needle)) ||
+        (/[a-z0-9]$/.test(needle) && /^[a-z0-9]/.test(after));
+      if (!glued && !joinsBefore.test(before) && !joinsAfter.test(after)) return true;
+    }
+  }
+  return false;
 }
 
-/** A number said in a text, and what was said right around it. */
-interface Mention {
-  /** The number as a comparable key (decimalKey). */
-  value: string;
-  /** Said as a price: a dollar sign before it, or dollars or a per-unit after it. */
-  price: boolean;
-  /** The unit said with the price ("a tonne", "per bushel"); null when none or unclear. */
-  priceUnit: PriceUnit | null;
-  /** Said as a quantity in metric tonnes ("1,500 tonnes"), not as a price per tonne. */
-  tonnes: boolean;
-  /** The currency said as part of this price ("$725 Canadian", "US$725"); else null. */
-  currency: QuoteCurrency | null;
-}
+/**
+ * Right before an amount, what makes it part of something else: a sign ("-$5", "minus", "less"),
+ * another digit, a decimal point or thousands separator against it (".50" copied as "50",
+ * "1,500" as "500"), a dollar sign or currency left out of it ("CAD $5" copied as "$5"), the
+ * first end of a range ("from", "to", "between … and"), and a currency word ("minus Canadian
+ * $5" copied as "$5"; Codex's review of 5e25edd, finding 1). A comma or full stop ending the
+ * words before (", US$7.25") is not part of it.
+ */
+const AMOUNT_JOINS_BEFORE =
+  /(?:(?:[\d$+\-−–—/]|\b(?:minus|negative|less|plus|from|to|usd|cad|cdn|us|u\.s|c|canadian|american)|\bbetween\b[^.;]*\band)\s*|\.|\d,)$/;
+/** Right after an amount: more of the number, or the other end of a range ("-725", "to CAD $725"). */
+const AMOUNT_JOINS_AFTER =
+  /^\s*(?:\d|[.,]\d|(?:[-−–—/]|(?:to|and|or)\s)\s*(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*\.?\d|%)/;
 
-const CURRENCY_WORD = String.raw`(?:canadian|cad|cdn|us|u\.s\.|usd|american)`;
-/** After a price: "a tonne", "dollars per bushel", "US a tonne", "/mt". */
-const PRICE_UNIT_AFTER = new RegExp(
-  String.raw`^\s*(?:${CURRENCY_WORD}\s*)?(?:dollars?|bucks)?\s*(?:a|an|per|/)\s*(metric\s+tonnes?|metric\s+tons?|tonnes?|mt|short\s+tons?|tons?|bushels?|bu|hundredweights?|cwt)\b`,
+/** A number as written: "1,500", "725.50", ".50". */
+const NUMBER = String.raw`(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
+const UNIT = String.raw`(metric tonnes?|metric tons?|tonnes?|mt|short tons?|tons?|bushels?|bu|hundredweights?|cwt)`;
+
+/**
+ * A price as said, whole: an optional currency before ("CAD", "USD $", "US$", "US $", "C$", "$"), the
+ * number, an optional currency after ("Canadian", "USD", "US"), "dollars", and an optional unit
+ * ("a tonne", "per bushel", "/mt"). Nothing else: no sign, no second number.
+ */
+const PRICE_SAID = new RegExp(
+  String.raw`^(?:(usd|cad|cdn)\s*\$?|(us|u\.s\.|c|canadian|american)\s*\$|(\$))?\s*${NUMBER}\s*(usd|cad|cdn|canadian|american|us|u\.s\.)?\s*(dollars?|bucks)?\s*(?:(?:a|an|per|/)\s*${UNIT})?$`,
 );
-/** After a price: "dollars", "US dollars", "bucks". */
-const DOLLARS_AFTER = new RegExp(String.raw`^\s*(?:${CURRENCY_WORD}\s+)?(?:dollars?|bucks)\b`);
-/** After a quantity: "tonnes", "mt", "metric tons". */
-const TONNES_AFTER = /^\s*(?:metric\s+tonnes?|metric\s+tons?|tonnes?|mt)\b/;
+/** A quantity as said, whole: the number and metric tonnes. */
+const TONNES_SAID = new RegExp(String.raw`^${NUMBER}\s*(metric tonnes?|metric tons?|tonnes?|mt)$`);
 
-/**
- * The currency said as part of a price itself, right against its number (Codex's reviews of
- * 1485b23, finding 1, and a5c8986, finding 1): "US$725", "C$725", "USD 725", "CAD $725" before
- * it, or "725 Canadian", "725 USD", "725 US dollars", "725 US a tonne" after it. A currency
- * anywhere else in the sentence belongs to something else ("$725 a tonne and oats are USD
- * $300"), and "us" that is not money ("ship it to us") is not one. Null when none, or both.
- */
-function currencyOfPrice(before: string, after: string): QuoteCurrency | null {
-  const cad =
-    /(?:\b(?:cad|cdn)\s*\$?|\bc\$)\s*$/.test(before) || /^\s*(?:cad|cdn|canadian)\b/.test(after);
-  const usd =
-    /(?:\busd\s*\$?|\b(?:us|u\.s\.)\$)\s*$/.test(before) ||
-    /^\s*(?:usd|american)\b/.test(after) ||
-    /^\s*(?:us|u\.s\.)(?=\s*(?:dollars?\b|funds\b|money\b|a\s|an\s|per\b|\/|[,.;:!?]|$))/.test(
-      after,
-    );
-  return cad === usd ? null : cad ? 'CAD' : 'USD';
+/** A number as the forms take it: no thousands separators, a leading 0 before a decimal point. */
+function plainNumber(written: string): string {
+  const number = written.replace(/,/g, '');
+  return number.startsWith('.') ? `0${number}` : number;
 }
-
-/**
- * A minus sign or word right before a number, a dollar sign between them or not ("-$5",
- * "minus 5"): the number is negative, which no price or quantity here may be (Codex's review of
- * a5c8986, finding 2). A dash after another number ("700-725") is read the same way, so a range
- * is left for the person to fill in.
- */
-const NEGATIVE_BEFORE = /(?:[-\u2212\u2013]|\bminus\s|\bnegative\s)\s*\$?\s*$/;
 
 /** The price unit a unit word names; "ton" alone is not clear (short or metric). */
-function unitOf(word: string): PriceUnit | null {
-  const unit = word.replace(/\s+/g, ' ');
-  if (/^(?:metric tonnes?|metric tons?|tonnes?|mt)$/.test(unit)) return 'MT';
-  if (/^short tons?$/.test(unit)) return 'ST';
-  if (/^(?:bushels?|bu)$/.test(unit)) return 'BU';
-  if (/^(?:hundredweights?|cwt)$/.test(unit)) return 'CWT';
+function unitOf(word: string | undefined): PriceUnit | null {
+  if (word === undefined) return null;
+  if (/^(?:metric tonnes?|metric tons?|tonnes?|mt)$/.test(word)) return 'MT';
+  if (/^short tons?$/.test(word)) return 'ST';
+  if (/^(?:bushels?|bu)$/.test(word)) return 'BU';
+  if (/^(?:hundredweights?|cwt)$/.test(word)) return 'CWT';
   return null;
 }
 
-/**
- * Every number said in a text, with whether it was said as a price (and per what) or as a
- * quantity in tonnes (Codex's review of c9222d3, finding 1): "$725.50 a tonne for 1,500 tonnes"
- * says a price of 725.50 per tonne and 1,500 tonnes, never the other way round.
- */
-export function mentionsIn(words: string): Mention[] {
-  const text = words.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
-  const mentions: Mention[] = [];
-  // The whole number, a leading decimal point included (".50").
-  for (const match of text.matchAll(/\d*\.\d+|\d+/g)) {
-    const start = match.index;
-    const end = start + match[0].length;
-    const before = text.slice(Math.max(0, start - 12), start).toLowerCase();
-    const after = text.slice(end, end + 40).toLowerCase();
-    const value = decimalKey(match[0]);
-    if (NEGATIVE_BEFORE.test(before)) {
-      mentions.push({ value, price: false, priceUnit: null, tonnes: false, currency: null });
-      continue;
-    }
-    const unit = PRICE_UNIT_AFTER.exec(after);
-    const price = /\$\s*$/.test(before) || unit !== null || DOLLARS_AFTER.test(after);
-    mentions.push({
-      value,
-      price,
-      priceUnit: unit?.[1] === undefined ? null : unitOf(unit[1]),
-      tonnes: !price && TONNES_AFTER.test(after),
-      currency: price ? currencyOfPrice(before, after) : null,
-    });
-  }
-  return mentions;
+function currencyOf(word: string | undefined): QuoteCurrency | null {
+  if (word === undefined) return null;
+  if (/^(?:cad|cdn|canadian|c)$/.test(word)) return 'CAD';
+  if (/^(?:usd|us|u\.s\.|american)$/.test(word)) return 'USD';
+  return null;
 }
 
-/** A number as a form takes it (digits, a decimal point, more than zero); else null. */
-function amountOf(value: string | null, pattern: RegExp): string | null {
-  const amount = (value ?? '').trim().replace(/^\$/, '').replace(/,/g, '');
-  return pattern.test(amount) && !/^0*(?:\.0*)?$/.test(amount) ? amount : null;
-}
 const PRICE = /^\d{1,17}(?:\.\d{1,12})?$/;
 const QUANTITY = /^\d{1,11}(?:\.\d{1,3})?$/;
+const isZero = (amount: string) => /^0*(?:\.0*)?$/.test(amount);
 
 /**
- * A phone number whose digits were said in the text, in one run; else null. An extension is
- * kept only when it was said with this number, after "x", "ext" or "extension" (Codex's
- * reviews of c9222d3, finding 2, and 1485b23, finding 3); otherwise the number is kept without
- * it.
+ * A price as one thing said in the cited lines: its amount, and its currency and unit only when
+ * said in that same expression. The three always come from the same words, so they can never be
+ * put together from different prices. Null when the words were not said as a whole price.
  */
-function saidPhone(value: string | null, words: string): string | null {
-  const phone = label(value, 40);
-  if (phone === null || !/^[0-9+(). /x-]+$/.test(phone)) return null;
-  // A number and at most one extension; anything more is not a phone number (Codex's review of
-  // a5c8986, finding 3). What is kept is rebuilt from the parts checked, never passed through.
-  const parts = phone.split(/\s*x\s*/i);
-  if (parts.length > 2) return null;
-  const [main = '', extension] = parts;
-  let digits = main.replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
-  if (digits.length < 7) return null;
-  const spoken = words.replace(/(?<=\d)[\s().-]+(?=\d)/g, '');
-  if (!spoken.includes(digits)) return null;
-  if (extension === undefined || extension === '') return main.trim();
-  if (!/^\d{1,10}$/.test(extension)) return main.trim();
-  const gap = String.raw`[\s().-]*`;
-  const withExtension = new RegExp(
-    String.raw`(?<!\d)(?:1${gap})?${digits.split('').join(gap)}${gap}[,;]?\s*(?:x|ext\.?|extension)\s*${extension}(?!\d)`,
-    'i',
-  );
-  return withExtension.test(words) ? `${main.trim()} x${extension}` : main.trim();
+export function saidPrice(
+  said: string | null,
+  lines: readonly string[],
+): { amount: string; currency: QuoteCurrency | null; unit: PriceUnit | null } | null {
+  if (said === null) return null;
+  const match = PRICE_SAID.exec(squash(said));
+  if (match === null) return null;
+  const [, codeBefore, shortBefore, dollarSign, written = '', codeAfter, dollars, unitWord] = match;
+  // A price says so: a dollar sign, a currency code, "dollars" or a unit. A country word alone
+  // after a number is not one ("725 US customers"; Codex's review of 5e25edd, finding 2).
+  const codeOnly = codeAfter !== undefined && /^(?:usd|cad|cdn)$/.test(codeAfter);
+  if (!(codeBefore ?? shortBefore ?? dollarSign ?? dollars ?? unitWord) && !codeOnly) return null;
+  const before = currencyOf(codeBefore ?? shortBefore);
+  const after = currencyOf(codeAfter);
+  if (before !== null && after !== null && before !== after) return null;
+  const amount = plainNumber(written);
+  if (!PRICE.test(amount) || isZero(amount)) return null;
+  if (!standsAlone(said, lines, AMOUNT_JOINS_BEFORE, AMOUNT_JOINS_AFTER)) return null;
+  return { amount, currency: before ?? after, unit: unitOf(unitWord) };
+}
+
+/** A quantity in metric tonnes as one thing said in the cited lines; else null. */
+export function saidTonnes(said: string | null, lines: readonly string[]): string | null {
+  if (said === null) return null;
+  const match = TONNES_SAID.exec(squash(said));
+  if (match === null) return null;
+  const amount = plainNumber(match[1] ?? '');
+  if (!QUANTITY.test(amount) || isZero(amount)) return null;
+  return standsAlone(said, lines, AMOUNT_JOINS_BEFORE, AMOUNT_JOINS_AFTER) ? amount : null;
+}
+
+/**
+ * A North American phone number as said, whole: a "1" or "+1" only when said, the area code,
+ * the number, and at most one extension after "x", "ext" or "extension".
+ */
+const PHONE_SAID =
+  /^(?:\+?1[\s.-]*)?(?:\((\d{3})\)|(\d{3}))[\s.-]*(\d{3})[\s.-]*(\d{4})(?:\s*,?\s*(?:x|ext\.?|extension)\s*(\d{1,10}))?$/;
+/**
+ * Right before or after a phone number: more of a number ("+44 20 …", "… 0177 9"), or an
+ * extension said after it and left out of the copy (Codex's review of 5e25edd, finding 3).
+ */
+const PHONE_JOINS_BEFORE = /(?:\d[\s().-]*|\+\s*)$/;
+const PHONE_JOINS_AFTER = /^(?:[\s().-]*\d|\s*,?\s*(?:x|ext\b|extension)\s*\.?\s*\d)/;
+
+/**
+ * A phone number as one thing said in the cited lines, written as the directory keeps it,
+ * "(403) 555-0177 x12", from the parts checked; null when it was not said whole. A number from
+ * another country is left for the person to add.
+ */
+export function saidPhone(said: string | null, lines: readonly string[]): string | null {
+  if (said === null) return null;
+  const match = PHONE_SAID.exec(squash(said));
+  if (match === null) return null;
+  if (!standsAlone(said, lines, PHONE_JOINS_BEFORE, PHONE_JOINS_AFTER)) return null;
+  const [, bracketed, area = bracketed ?? '', exchange = '', line = '', extension] = match;
+  const number = `(${area}) ${exchange}-${line}`;
+  return extension === undefined ? number : `${number} x${extension}`;
 }
 
 const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+\.[^@\s\p{Cc}]+$/u;
@@ -419,14 +435,14 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
   const count = context.lines.length;
   const evidence = (numbers: readonly number[]) => {
     const lines = lineNumbersOf(numbers, count);
-    return { lines, words: lines.map((n) => context.lines[n]?.text ?? '').join('\n') };
+    return { lines, texts: lines.map((n) => context.lines[n]?.text ?? '') };
   };
   const drafts: DraftInput[] = [];
   const quotedAt = new Date(context.calledAt).toISOString();
   const reference = label(`Call of ${formatAlberta(quotedAt)}, drafted by Claude`);
 
   for (const quote of reading.quotes.slice(0, DRAFTS_PER_KIND_MAX)) {
-    const { lines, words } = evidence(quote.lines);
+    const { lines, texts } = evidence(quote.lines);
     if (lines.length === 0) continue;
     if (!SIDE_COUNTERPARTY_TYPES[quote.side].some((t) => context.counterpartyTypes.includes(t))) {
       continue;
@@ -434,38 +450,16 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     const values: QuoteFormValues = { quotedAt, sourceType: 'phone' };
     put(values, 'sourceReference', reference);
     put(values, 'firmness', quote.firmness);
-    // A price only when said as a price, with its unit and currency only when said with it.
-    const mentions = mentionsIn(words);
-    const price = amountOf(quote.price, PRICE);
-    const asPrice =
-      price === null ? [] : mentions.filter((m) => m.value === decimalKey(price) && m.price);
-    put(values, 'price', asPrice.length > 0 ? price : null);
-    put(
-      values,
-      'priceUnit',
-      quote.priceUnit !== null && asPrice.some((m) => m.priceUnit === quote.priceUnit)
-        ? quote.priceUnit
-        : null,
-    );
-    put(
-      values,
-      'currency',
-      quote.currency !== null && asPrice.some((m) => m.currency === quote.currency)
-        ? quote.currency
-        : null,
-    );
+    // The price, its currency and its unit from one price said whole (saidPrice).
+    const price = saidPrice(quote.priceSaid, texts);
+    put(values, 'price', price?.amount ?? null);
+    put(values, 'currency', price?.currency ?? null);
+    put(values, 'priceUnit', price?.unit ?? null);
     put(values, 'grade', label(quote.grade));
     put(values, 'deliveryBasis', quote.deliveryBasis);
     put(values, 'basisLocation', label(quote.basisLocation));
-    // A quantity only when said in tonnes, never a price per tonne.
-    const tonnes = (value: string | null) => {
-      const amount = amountOf(value, QUANTITY);
-      return amount !== null && mentions.some((m) => m.value === decimalKey(amount) && m.tonnes)
-        ? amount
-        : null;
-    };
-    put(values, 'quantityMin', tonnes(quote.quantityMinMt));
-    put(values, 'quantityMax', tonnes(quote.quantityMaxMt));
+    put(values, 'quantityMin', saidTonnes(quote.quantityMinSaid, texts));
+    put(values, 'quantityMax', saidTonnes(quote.quantityMaxSaid, texts));
     const start = (quote.deliveryStart ?? '').trim();
     const end = (quote.deliveryEnd ?? '').trim();
     put(values, 'deliveryStart', isCalendarDate(start) ? start : null);
@@ -494,7 +488,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
   }
 
   for (const contact of reading.contacts.slice(0, DRAFTS_PER_KIND_MAX)) {
-    const { lines, words } = evidence(contact.lines);
+    const { lines, texts } = evidence(contact.lines);
     if (lines.length === 0) continue;
     const listed = context.contacts.find((c) => c.id === contact.contactId) ?? null;
     const email = label(contact.email, 254)?.toLowerCase() ?? null;
@@ -502,7 +496,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     put(found, 'contactName', label(contact.name));
     put(found, 'contactRole', label(contact.role));
     put(found, 'contactEmail', email !== null && EMAIL.test(email) ? email : null);
-    put(found, 'contactPhone', saidPhone(contact.phone, words));
+    put(found, 'contactPhone', saidPhone(contact.phoneSaid, texts));
     const values: ContactFormValues = {};
     const same = (a: string | null | undefined, b: string | null) =>
       (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();

@@ -1,5 +1,18 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Codex's fifth review of the call readings
+
+- `docs/DECISIONS.md`: the four findings on `5e25edd` and their fixes; the slow import test given longer.
+
+## 2026-11-05 — Codex's fourth review of the call readings
+
+- `docs/DECISIONS.md`: the three findings on `66e61ae` and the new approach (Claude copies each price, quantity and phone number exactly as said; the Worker checks the words stand whole and reads the price, currency and unit from them alone).
+- `README.md`: Claude reads each call, as now.
+
+## 2026-11-05 — Handoff record of #142
+
+- `docs/HANDOFF.md`: Codex's third review fixed (ivanmueller/gss#142) with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Handoff record of #141
 
 - `docs/HANDOFF.md`: Codex's reviews of the call readings fixed (ivanmueller/gss#141) with its CI and Deploy staging runs and the new migration.
