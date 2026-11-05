@@ -177,6 +177,20 @@ export const GRAIN_SOURCES = {
     url: 'https://www.grainscanada.gc.ca/en/grain-research/grain-harvest-export-quality/wheat/averages/historical-protein-content-cwrs-wheat.html',
     checked: '2026-11-05',
   },
+  'cgc-acreage-2025-cereals': {
+    title: 'Cereal varieties by acreage insured in 2025',
+    publisher: 'Canadian Grain Commission',
+    edition: '2025',
+    url: 'https://www.grainscanada.gc.ca/en/grain-research/statistics/varieties-by-acreage/cereal-varieties/varieties-2025-c-en.csv',
+    checked: '2026-11-05',
+  },
+  'cgc-acreage-2025-other': {
+    title: 'Oilseed, pulse and minor crop varieties by acreage insured in 2025',
+    publisher: 'Canadian Grain Commission',
+    edition: '2025',
+    url: 'https://www.grainscanada.gc.ca/en/grain-research/statistics/varieties-by-acreage/oilseed-pulse-minor-varieties/varieties-2025-g-en.csv',
+    checked: '2026-11-05',
+  },
 } as const satisfies Record<string, GrainSource>;
 
 export type SourceId = keyof typeof GRAIN_SOURCES;

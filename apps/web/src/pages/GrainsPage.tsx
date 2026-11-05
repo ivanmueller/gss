@@ -1,14 +1,22 @@
 import { Search } from 'lucide-react';
 
 import { GrainTile, FAMILY_CLASSES } from '../components/GrainTile';
+import { GrainWindow } from '../components/GrainWindow';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
-import { GRAINS, GRAIN_FAMILIES, GRAIN_SOURCES } from '../data/grains';
+import { GRAINS, GRAIN_FAMILIES, GRAIN_SOURCES, grainById } from '../data/grains';
 import { formatCheckedDate, searchGrains } from '../lib/grains';
-import { Link, setSearchParams, useSearch } from '../lib/router';
+import { goBackTo, Link, setSearchParams, useSearch } from '../lib/router';
 import { cn } from '../lib/utils';
 
 const BUSHELS = GRAIN_SOURCES['cgc-test-weight'];
+
+/** The table with a grain's window open, keeping the search typed. */
+function grainAddress(id: string, query: string): string {
+  const params = new URLSearchParams(query.trim() === '' ? {} : { q: query });
+  params.set('grain', id);
+  return `/grains?${params.toString()}`;
+}
 
 /**
  * /grains: the grains graded in Canada as a periodic table, coloured by family, with a search
@@ -16,7 +24,9 @@ const BUSHELS = GRAIN_SOURCES['cgc-test-weight'];
  * facts from the Canadian Grain Commission and the Alberta Seed Guide, each with its source.
  */
 export function GrainsPage() {
-  const query = new URLSearchParams(useSearch()).get('q') ?? '';
+  const params = new URLSearchParams(useSearch());
+  const query = params.get('q') ?? '';
+  const open = grainById(params.get('grain') ?? '');
   const results = searchGrains(query);
   const searching = query.trim() !== '';
   const found = new Set(results.map((result) => result.grain.id));
@@ -69,7 +79,7 @@ export function GrainsPage() {
               {results.map((result) => (
                 <li key={`${result.grain.id}:${result.detail ?? ''}:${result.name}`}>
                   <Link
-                    href={`/grains/${result.grain.id}`}
+                    href={grainAddress(result.grain.id, query)}
                     className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 px-4 py-2.5 text-sm hover:bg-muted/50"
                   >
                     <span className="font-medium">{result.name}</span>
@@ -112,6 +122,17 @@ export function GrainsPage() {
         </a>{' '}
         (checked {formatCheckedDate(BUSHELS.checked)}).
       </p>
+      {open && (
+        <GrainWindow
+          key={open.id}
+          grain={open}
+          classParam={params.get('class')}
+          onClose={() => {
+            // Back to the table as it was (its search kept), or to the table when opened by link.
+            goBackTo('/grains');
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -24,7 +24,10 @@ describe('matchRoute', () => {
     expect(matchRoute('/counterparties/')).toEqual({ page: 'counterparties' });
     expect(matchRoute('/team')).toEqual({ page: 'team' });
     expect(matchRoute('/grains')).toEqual({ page: 'grains' });
-    expect(matchRoute('/grains/canary-seed')).toEqual({ page: 'grain', id: 'canary-seed' });
+    expect(matchRoute('/grains/canary-seed')).toEqual({
+      page: 'redirect',
+      to: '/grains?grain=canary-seed',
+    });
     expect(matchRoute('/grains/Oats')).toEqual({ page: 'not-found' });
     expect(matchRoute('/quotes/')).toEqual({ page: 'quotes' });
     expect(matchRoute('/quotes/new')).toEqual({ page: 'new-quote' });

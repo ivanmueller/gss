@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Grain, GrainClass, GrainTable } from '../data/grains';
-import { classGroups, classLabel, classMoisture, classSlug, onSpec } from './grainClasses';
+import { classLabel, classMoisture, classSlug, onSpec } from './grainClasses';
 
 // Made-up grains, so the rules are tested apart from the reference's data.
 const QUALITY: GrainTable = {
@@ -79,16 +79,6 @@ describe('classSlug', () => {
   it('makes a short address from the abbreviation, region and label', () => {
     expect(classSlug(RED)).toBe('cwxx-western-example-red');
     expect(classSlug(HULLESS)).toBe('ce-eastern-malting-two-row-hulless');
-  });
-});
-
-describe('classGroups', () => {
-  it('groups by region, with headings only when a group has several', () => {
-    const grain = spelt([RED, HULLESS, MALTING], ROWS);
-    expect(classGroups(grain).map((group) => group.title)).toEqual(['Western', 'Eastern']);
-    expect(classGroups(spelt([RED, HULLESS], ROWS))).toEqual([
-      { title: null, classes: [RED, HULLESS] },
-    ]);
   });
 });
 

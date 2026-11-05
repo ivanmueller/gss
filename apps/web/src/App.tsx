@@ -22,7 +22,6 @@ import { Workspace } from './pages/Workspace';
 
 // The Grains reference is large and read now and then: loaded only when opened.
 const GrainsPage = lazy(async () => ({ default: (await import('./pages/GrainsPage')).GrainsPage }));
-const GrainPage = lazy(async () => ({ default: (await import('./pages/GrainPage')).GrainPage }));
 
 function Notice({ children }: { children: ReactNode }) {
   return (
@@ -53,7 +52,6 @@ function section(route: Route): NavSection | null {
     case 'freight-rate':
       return 'freight';
     case 'grains':
-    case 'grain':
       return 'grains';
     case 'redirect':
     case 'not-found':
@@ -140,13 +138,6 @@ export function App({ account }: { account?: Account }) {
       page = (
         <Suspense fallback={<Notice>Loading…</Notice>}>
           <GrainsPage />
-        </Suspense>
-      );
-      break;
-    case 'grain':
-      page = (
-        <Suspense fallback={<Notice>Loading…</Notice>}>
-          <GrainPage key={route.id} id={route.id} />
         </Suspense>
       );
       break;

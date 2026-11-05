@@ -42,19 +42,6 @@ export function classSlug(grainClass: GrainClass): string {
   return [...new Set(words)].join('-');
 }
 
-/** The classes in groups for the picker: Western, Eastern, then those for all of Canada. */
-export function classGroups(grain: Grain): { title: string | null; classes: GrainClass[] }[] {
-  const groups = [
-    { title: 'Western', classes: grain.classes.filter((c) => c.region === 'Western') },
-    { title: 'Eastern', classes: grain.classes.filter((c) => c.region === 'Eastern') },
-    { title: 'Canada', classes: grain.classes.filter((c) => c.region === undefined) },
-  ].filter((group) => group.classes.length > 0);
-  // One group, or one class in each (Western and Eastern oats), needs no headings.
-  return groups.length === 1 || groups.every((group) => group.classes.length === 1)
-    ? [{ title: null, classes: grain.classes }]
-    : groups;
-}
-
 export interface Moisture {
   /** As printed, e.g. "less than 14.6": the most a straight (dry) grade may hold. */
   straight: string;

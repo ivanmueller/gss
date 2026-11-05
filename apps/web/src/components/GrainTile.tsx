@@ -39,34 +39,13 @@ function tileFacts(grain: Grain) {
     .filter((fact) => fact !== undefined);
 }
 
-/** The square symbol of a grain, as on its tile; also the top of its page. */
-export function GrainSymbol({ grain, className }: { grain: Grain; className?: string }) {
-  const colours = FAMILY_CLASSES[grain.family];
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'relative flex size-16 shrink-0 items-center justify-center rounded-card border font-price text-2xl font-semibold',
-        colours.tile,
-        colours.text,
-        className,
-      )}
-    >
-      <span className="absolute top-1 left-1.5 text-2xs font-medium tabular-nums">
-        {grain.number}
-      </span>
-      {grain.symbol}
-    </span>
-  );
-}
-
 /** One element of the table: number, symbol, name, a key fact and its family in words. */
 export function GrainTile({ grain, dimmed = false }: { grain: Grain; dimmed?: boolean }) {
   const colours = FAMILY_CLASSES[grain.family];
   const facts = tileFacts(grain);
   return (
     <Link
-      href={`/grains/${grain.id}`}
+      href={`/grains?grain=${grain.id}`}
       className={cn(
         'group flex h-full min-h-36 flex-col gap-1 rounded-card border p-3 shadow-xs transition-[box-shadow,opacity] hover:shadow-sm',
         colours.tile,

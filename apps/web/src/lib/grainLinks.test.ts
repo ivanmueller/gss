@@ -9,7 +9,7 @@ describe('grainHref', () => {
     for (const { code } of COMMODITIES) {
       const grain = grainForCommodity(code);
       expect(grain, code).toBeDefined();
-      expect(grainHref(code), code).toBe(`/grains/${grain?.id ?? ''}`);
+      expect(grainHref(code), code).toBe(`/grains?grain=${grain?.id ?? ''}`);
     }
   });
 

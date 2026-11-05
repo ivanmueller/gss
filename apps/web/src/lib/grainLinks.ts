@@ -1,8 +1,8 @@
 import type { CommodityCode } from '@grain/domain';
 
 /**
- * The grain on the Grains page that each of GSS's commodities belongs to (its address,
- * /grains/<id>). Kept apart from the grain data so a commodity badge links to it without
+ * The grain on the Grains page that each of GSS's commodities belongs to (its window,
+ * /grains?grain=<id>). Kept apart from the grain data so a commodity badge links to it without
  * loading the whole reference; a test keeps the two in step.
  */
 export const GRAIN_OF_COMMODITY: Record<CommodityCode, string> = {
@@ -28,8 +28,8 @@ export const GRAIN_OF_COMMODITY: Record<CommodityCode, string> = {
   sunflower_seed: 'sunflower',
 };
 
-/** The address of a commodity's grain page, or undefined for a code not in the list. */
+/** The address of a commodity's grain window, or undefined for a code not in the list. */
 export function grainHref(code: string): string | undefined {
   const id = (GRAIN_OF_COMMODITY as Record<string, string | undefined>)[code];
-  return id === undefined ? undefined : `/grains/${id}`;
+  return id === undefined ? undefined : `/grains?grain=${id}`;
 }
