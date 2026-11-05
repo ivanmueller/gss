@@ -101,11 +101,24 @@ const phone = (said: string, text: string) => {
 
 describe('saidPrice: what was said is filled in, with where', () => {
   it('reads a price said whole, its currency and unit from the same words', () => {
-    const line =
-      'We bid $725.50 Canadian a tonne. Oats are US$7.25 a bushel; barley CAD $310 per tonne.';
-    expect(price('$725.50 Canadian a tonne', line)).toEqual(['725.50', 'CAD', 'MT', null]);
-    expect(price('US$7.25 a bushel', line)).toEqual(['7.25', 'USD', 'BU', null]);
-    expect(price('CAD $310 per tonne', line)).toEqual(['310', 'CAD', 'MT', null]);
+    expect(price('$725.50 Canadian a tonne', 'We bid $725.50 Canadian a tonne.')).toEqual([
+      '725.50',
+      'CAD',
+      'MT',
+      null,
+    ]);
+    expect(price('US$7.25 a bushel', 'Oats are US$7.25 a bushel.')).toEqual([
+      '7.25',
+      'USD',
+      'BU',
+      null,
+    ]);
+    expect(price('CAD $310 per tonne', 'Barley at CAD $310 per tonne.')).toEqual([
+      '310',
+      'CAD',
+      'MT',
+      null,
+    ]);
     expect(price('12 US dollars per cwt', 'That is 12 US dollars per cwt.')).toEqual([
       '12',
       'USD',
@@ -208,6 +221,12 @@ describe('saidPrice: plain errors are refused', () => {
 });
 
 describe('saidPrice: anything unusual is filled in and marked for a second look', () => {
+  /** Expect the price never filled in plain: refused, or filled and marked. */
+  const notPlain = (said: string, text: string) => {
+    const result = price(said, text);
+    // Refused (null), or filled with a reason to look twice.
+    expect(result?.[3] !== null, text).toBe(true);
+  };
   /** Expect the price filled in, with a doubt matching `why`. */
   const doubtful = (said: string, text: string, why: RegExp) => {
     const result = price(said, text);
@@ -235,9 +254,12 @@ describe('saidPrice: anything unusual is filled in and marked for a second look'
 
   it('a dash of any kind against it, before or after', () => {
     for (const dash of ['-', '‐', '‑', '‒', '–', '—', '−', '﹣', '－']) {
-      doubtful('$725 per tonne', `The bid is ${dash}$725 per tonne.`, /dash or minus/);
+      doubtful('$725 per tonne', `The bid is ${dash}$725 per tonne.`, /dash, minus or plus/);
     }
     doubtful('$725', 'Accounting price: $725- per tonne.', /dash/);
+    doubtful('$725 per tonne', 'The bid is - ($725 per tonne).', /dash/);
+    doubtful('$725 per tonne', 'The bid is - EUR $725 per tonne.', /dash/);
+    doubtful('$725 per tonne', 'The bid is + $725 per tonne.', /plus/);
   });
 
   it('a range in any wording: another number in the sentence', () => {
@@ -250,7 +272,7 @@ describe('saidPrice: anything unusual is filled in and marked for a second look'
       ['$725 per tonne', 'Bids range from $725 per tonne thru $750 per tonne.'],
       ['750 CAD', 'From 700 up to 750 CAD.'],
       ['$725 per tonne', 'Bids range from $725 per tonne..$750 per tonne.'],
-      ['$750 per tonne', 'Bids range from $725 per tonne…$750 per tonne.'],
+      ['$750 per tonne', 'Bids range from $725 per tonne through $750 per tonne.'],
       ['USD $750 per tonne', 'Between U.S. $725 per tonne and USD $750 per tonne.'],
       ['$725 a tonne', 'Between $700 and $725 a tonne.'],
     ] as const) {
@@ -259,7 +281,12 @@ describe('saidPrice: anything unusual is filled in and marked for a second look'
   });
 
   it('a fraction or scale after it, or currency words left out of the copy', () => {
-    doubtful('$7', 'We bid $7½ per bushel.', /said with/);
+    // "…" and "½" are read as "..." and "1⁄2": the copy is then part of a longer number, refused.
+    notPlain('$750 per tonne', 'Bids range from $725 per tonne…$750 per tonne.');
+    notPlain('$7', 'We bid $7½ per bushel.');
+    doubtful('$1.5', 'The price is $1.5 M per tonne.', /said with “m”/);
+    doubtful('$725 per tonne', 'Prices range from 700 U.S. to $725 per tonne.', /another number/);
+    doubtful('-$5 per tonne', 'The bid is -$5 per tonne.', /minus sign/);
     doubtful('$1.5', 'We bid $1.5 million per tonne.', /said with “million”/);
     doubtful('$725', 'We bid $725 thousand.', /said with “thousand”/);
     doubtful('$725 per tonne', 'Give us $725 per tonne.', /next to it/);
@@ -276,6 +303,15 @@ describe('saidTonnes', () => {
     expect(tonnes('500 mts', 'We have 500 mts.')).toEqual(['500', null]);
     expect(tonnes('500 metric-tonnes', 'We have 500 metric-tonnes.')).toEqual(['500', null]);
     expect(tonnes('1 500 tonnes', 'We have 1 500 tonnes.')).toEqual(['1500', null]);
+  });
+
+  it('refuses a number cut out of one written with other digits (Codex, 5d1ecfa)', () => {
+    expect(tonnes('500 tonnes', 'We have \uff11500 tonnes.')).toBeNull();
+    expect(tonnes('1500 tonnes', 'We have \uff11500 tonnes.')).toEqual(['1500', null]);
+  });
+
+  it('marks a quantity said after "per": part of a price (Codex, 5d1ecfa)', () => {
+    expect(tonnes('500 tonnes', 'The freight price is per 500 tonnes.')?.[1]).toMatch(/per/);
   });
 
   it('refuses tons, a price per tonne, or part of a number', () => {
@@ -314,6 +350,24 @@ describe('saidPhone', () => {
     ] as const) {
       expect(phone(said, text), text).toEqual(['(403) 555-0177 x12', null]);
     }
+  });
+
+  it('reads an extension in brackets or after a semicolon (Codex, 5d1ecfa, P3)', () => {
+    expect(phone('403 555 0177 (extension 12)', 'Call 403 555 0177 (extension 12).')).toEqual([
+      '(403) 555-0177 x12',
+      null,
+    ]);
+    expect(phone('403 555 0177; extension 12', 'Call 403 555 0177; extension 12.')).toEqual([
+      '(403) 555-0177 x12',
+      null,
+    ]);
+  });
+
+  it('fills a number followed by a separate count, marked (Codex, 5d1ecfa, P3)', () => {
+    expect(phone('403 555 0177', 'Call 403 555 0177 2 loads.')).toEqual([
+      '(403) 555-0177',
+      'The line has another number.',
+    ]);
   });
 
   it('refuses a number that is part of a longer or foreign one', () => {
@@ -395,6 +449,29 @@ describe('checkReading: bids and offers', () => {
     for (const field of ['price', 'currency', 'priceUnit', 'quantityMax']) {
       expect(values).not.toHaveProperty(field);
     }
+  });
+
+  it('lets only filled-in amounts explain other numbers in the line (Codex, 5d1ecfa)', () => {
+    const lines: TranscriptLine[] = [
+      { side: 'counterparty', start: 0, text: 'Prices range from $700 to $725 per tonne.' },
+    ];
+    const [draft] = checkReading(
+      reading({
+        quotes: [
+          quote({
+            priceSaid: '$725 per tonne',
+            quantityMaxSaid: '$700',
+            validUntil: null,
+            lines: [0],
+          }),
+        ],
+      }),
+      context({ lines }),
+    ).drafts;
+    const fields = draft?.kind === 'quote' ? draft.fields : null;
+    expect(fields?.values.price).toBe('725');
+    expect(fields?.values).not.toHaveProperty('quantityMax');
+    expect(fields?.checks.price?.doubt).toMatch(/another number/);
   });
 
   it('leaves out what was not said rather than guessing', () => {

@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Codex's review of the fill-and-mark contract
+
+- `docs/DECISIONS.md`: the nine findings on `5d1ecfa` and their fixes (signs and other numbers anywhere in the line, NFKC digits, scale abbreviations, "per" before a quantity, signed copies, more extension forms).
+
 ## 2026-11-05 — Numbers filled in and marked when unusual
 
 - `docs/DECISIONS.md`: the owner's choice after Codex's exhaustive pass: plain errors refused, anything unusual filled in and marked, each number kept with where it was said.
