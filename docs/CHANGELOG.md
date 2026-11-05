@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Only the call's own names
+
+- `docs/DECISIONS.md`: Codex's review of `9773921`: names only from the call, any symbol and words of change mark the number.
+
 ## 2026-11-05 — Handoff record of #146
 
 - `docs/HANDOFF.md`: numbers filled in and marked when unusual (ivanmueller/gss#146), with its CI and Deploy staging runs.

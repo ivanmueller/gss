@@ -10,6 +10,7 @@ import {
   saidPhone,
   saidPrice,
   saidTonnes,
+  nameWords,
   type CallReading,
   type CitedLine,
   type ReadingContext,
@@ -326,14 +327,43 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
     );
   });
 
-  it('leaves ordinary lines plain', () => {
-    expect(
-      price('$725 a tonne', 'Yeah we can do $725 a tonne delivered Lethbridge next week.'),
-    ).toEqual(['725', null, 'MT', null]);
-    expect(phone('403 555 0177', 'Talk to Sam, our new merchandiser, at 403 555 0177.')).toEqual([
-      '(403) 555-0177',
+  it("leaves ordinary lines plain, the call's own names included", () => {
+    expect(price('$725 a tonne', 'Yeah we can do $725 a tonne delivered next week.')).toEqual([
+      '725',
+      null,
+      'MT',
       null,
     ]);
+    const names = nameWords(['Synthetic Prairie Mills', 'Sam Buyer']);
+    expect(
+      saidPhone('403 555 0177', one('Talk to Sam, our new merchandiser, at 403 555 0177.'), names)
+        ?.check.doubt,
+    ).toBeNull();
+    expect(
+      saidPrice('$725 a tonne', one('Prairie Mills can do $725 a tonne.'), [], names)?.check.doubt,
+    ).toBeNull();
+  });
+
+  it('marks a word it does not know, even capitalized: a code, a place (Codex, 9773921)', () => {
+    expect(price('US$725 per tonne', 'We bid US$725 per tonne AUD.')?.[3]).toMatch(/“aud”/);
+    expect(price('$5 per tonne', 'Our bid is a Debit of $5 per tonne.')?.[3]).toMatch(/“debit”/);
+    expect(price('$725 a tonne', 'Our bid is from Nought to $725 a tonne.')?.[3]).toMatch(
+      /“nought”/,
+    );
+    expect(price('$725 a tonne', 'We can do $725 a tonne delivered Lethbridge.')?.[3]).toMatch(
+      /“lethbridge”/,
+    );
+  });
+
+  it('marks any symbol and any word that says the price moved (Codex, 9773921)', () => {
+    for (const symbol of ['\u2796', '\u00b1', '\u2213', '%', '&']) {
+      expect(price('$5 per tonne', `We bid ${symbol}$5 per tonne.`)?.[3], symbol).not.toBeNull();
+    }
+    for (const word of ['down', 'up', 'back', 'over', 'more', 'after']) {
+      expect(price('$5 per tonne', `Our bid is ${word} $5 per tonne.`)?.[3], word).toMatch(
+        new RegExp(word),
+      );
+    }
   });
 });
 
@@ -378,7 +408,7 @@ describe('saidTonnes', () => {
 
 describe('saidPhone', () => {
   it('reads a North American number said whole, written as the directory keeps it', () => {
-    expect(phone('403 555 0177', 'Reach Sam at 403 555 0177.')).toEqual(['(403) 555-0177', null]);
+    expect(phone('403 555 0177', 'Reach us at 403 555 0177.')).toEqual(['(403) 555-0177', null]);
     expect(phone('1-403-555-0177 extension 12', 'Call 1-403-555-0177 extension 12.')).toEqual([
       '(403) 555-0177 x12',
       null,
@@ -466,8 +496,17 @@ describe('checkReading: bids and offers', () => {
             validUntil: '2026-11-06T18:00:00.000Z',
           },
           checks: {
-            price: { said: '$725.50 Canadian a tonne', line: 1, doubt: null },
-            quantityMax: { said: '1,500 tonnes', line: 1, doubt: null },
+            // A place is not one of the call's names: a second look, the values still filled.
+            price: {
+              said: '$725.50 Canadian a tonne',
+              line: 1,
+              doubt: 'The line has a word to check, “lethbridge”.',
+            },
+            quantityMax: {
+              said: '1,500 tonnes',
+              line: 1,
+              doubt: 'The line has a word to check, “lethbridge”.',
+            },
           },
         },
         lines: [1, 2],

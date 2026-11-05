@@ -198,6 +198,8 @@ export interface ReadingContext {
   }[];
   /** Who placed the call: the follow-ups are theirs. */
   callerId: string;
+  /** The call's names (the company, the contact called, the caller): ordinary in its lines. */
+  names?: readonly string[];
   /** When the call connected (UTC instant): the bids and offers are quoted then. */
   calledAt: string;
 }
@@ -360,42 +362,42 @@ const PRICE_WORD_AFTER =
  * "subtracting", "forty", "Australian dollars"), so a new way of saying a sign, a range, a
  * fraction or a foreign number is marked even though nobody listed it (the owner's choice of
  * 2026-11-05, after Codex's reviews kept finding wordings no list of risky words covered).
- * A name in the middle of a sentence ("delivered Lethbridge", "talk to Sam") is ordinary too.
+ * Words that say a price moved ("down", "up", "back", "over", "more", "after", "basis") are not
+ * ordinary: the amount may be a change, not the price (Codex's review of 9773921).
  */
 const ORDINARY_WORDS = new Set(
-  `a about across after again agree agreed all along already also am
-an and any anything april are around as ask asked at august
-available back barley based basis be bean beans been before being best
-bid bidding bids big book booked both bought bring bushel bushels but
-buy buyer buyers buying by call called calling can canary canola cash
-cell check chickpeas close confirm confirmed contract contracts corn could crop crops
-current currently customer cwt deal december deliver delivered delivery desk did do
-dockage does doing done down durum each early either elevator else email
-end even ever every ex ext extension faba far farm february feed
-fine firm flax flaxseed fob for freight friday from get gets getting
-give go going good got grade grain grains great green guys had
-has have having he hear heard hello her here hey hi high
-him his hold how hundredweight i if in indicative inside interest interested
-into is it it's its january july june just keep kind know
-last later left lentil lentils let let's like line list little load
-loaded loads look looking lot low make malt manager march may me
-merchandiser metric might mill moisture monday month more morning most move mt
-mts much must mustard my near need new next nice no not
-november now number oat oats october of offer offering offers office ok
-okay old on one's only or order other our out outside over
-own owner pea peas phone pick picked pickup place plant please pm
-port price priced prices pricing protein put quote quoted rail reach ready
-really red right rye said same saturday say says see seed seeds
-sell seller selling send september ship shipped shipping should small so sold
-some something soon sorry soy soybean soybeans spot spring still sunday sunflower
-sure take talk tell terminal test than thank thanks that that's the
-their them then there these they they're thing think this those thursday
-tight time to today together tomorrow ton tonight tonne tonnes tons too
-trade trader truck trucks tuesday until up upon us use very wait
-want wanted was we we'll we're we've wednesday week weekend weeks weight
-well were what what's wheat when where which while who why will
-winter with without work would yard yeah year yellow yes yesterday yet
-you you're your`.split(/\s+/),
+  `a about across again agree agreed all along already also am an
+and any anything april are around as ask asked at august available
+barley based be bean beans been before being best bid bidding bids
+big book booked both bought bring bushel bushels but buy buyer buyers
+buying by call called calling can canary canola cash cell check chickpeas
+close confirm confirmed contract contracts corn could crop crops current currently customer
+cwt deal december deliver delivered delivery desk did do dockage does doing
+done durum each early either elevator else email end even ever every
+ex ext extension faba far farm february feed fine firm flax flaxseed
+fob for freight friday from get gets getting give go going good
+got grade grain grains great green guys had has have having he
+hear heard hello her here hey hi high him his hold how
+hundredweight i if in indicative inside interest interested into is it it's
+its january july june just keep kind know last later left lentil
+lentils let let's like line list little load loaded loads look looking
+lot low make malt manager march may me merchandiser metric might mill
+moisture monday month morning move mt mts much must mustard my near
+need new next nice no not november now number oat oats october
+of offer offering offers office ok okay old on one's only or
+order other our out outside own owner pea peas phone pick picked
+pickup place plant please pm port price priced prices pricing protein put
+quote quoted rail reach ready really red right rye said same saturday
+say says see seed seeds sell seller selling send september ship shipped
+shipping should small so sold some something soon sorry soy soybean soybeans
+spot spring still sunday sunflower sure take talk tell terminal test than
+thank thanks that that's the their them then there these they they're
+thing think this those thursday tight time to today together tomorrow ton
+tonight tonne tonnes tons too trade trader truck trucks tuesday until us
+use very wait want wanted was we we'll we're we've wednesday week
+weekend weeks weight well were what what's wheat when where which while
+who why will winter with without work would yard yeah year yellow
+yes yesterday yet you you're your`.split(/\s+/),
 );
 /** Numbers in words: never ordinary, even as a name. */
 const NUMBER_WORDS = new Set(
@@ -406,31 +408,47 @@ sixteen sixty ten tenth third thirds thirteen thirty thousand thousands three tr
 twelve twenty two zero`.split(/\s+/),
 );
 
+/** No names known. */
+const NO_NAMES: ReadonlySet<string> = new Set();
+
+/** The words of the call's names (the company, the contact called, the caller, its contacts). */
+export function nameWords(names: readonly (string | null | undefined)[]): ReadonlySet<string> {
+  const words = new Set<string>();
+  for (const name of names) {
+    for (const match of (name ?? '').normalize('NFKC').matchAll(/\p{L}[\p{L}'\u2019]*/gu)) {
+      const word = match[0].toLowerCase().replace(/\u2019/g, "'");
+      if (!NUMBER_WORDS.has(word)) words.add(word);
+    }
+  }
+  return words;
+}
+
+/** The marks an ordinary line may hold: spaces, everyday punctuation, quotes, hyphens. */
+const ORDINARY_MARK = /[\p{L}\p{N}\s.,!?;:'"()\u2018\u2019\u201C\u201D\p{Pd}]/u;
+
 /**
- * The first word in a line, other than the copied words and the draft's own filled-in amounts
- * (`masked`), that is not ordinary, or null. A capitalized word is a name when it does not start
- * a sentence and is not a number.
+ * The first word or mark in a line, other than the copied words and the draft's own filled-in
+ * amounts (`masked`), that is not ordinary, or null: a word not in ORDINARY_WORDS and not one of
+ * the call's own names (`names`), a number in words, or any symbol other than everyday
+ * punctuation ("➖", "±", "%"). A capitalized word is not a name by itself (Codex's review of
+ * 9773921: "AUD", "Debit", "Nought"), so a place name marks the number too.
  */
 function unusualWord(
   line: string,
   masked: readonly { at: number; length: number }[],
+  names: ReadonlySet<string>,
 ): string | null {
-  const cased = line.normalize('NFKC').replace(/\s+/g, ' ').trim();
-  const lower = cased.toLowerCase();
-  // Lower case keeps the same positions for the letters a transcript uses; if not, no names.
-  const named = lower.length === cased.length ? cased : lower;
-  let text = named;
+  let text = squash(line);
   for (const { at, length } of masked) {
     text = `${text.slice(0, at)}${' '.repeat(length)}${text.slice(at + length)}`;
   }
+  for (const char of text) {
+    if (!ORDINARY_MARK.test(char)) return char;
+  }
   for (const match of text.matchAll(/[\p{L}][\p{L}'\u2019]*/gu)) {
-    const word = match[0].toLowerCase().replace(/\u2019/g, "'");
+    const word = match[0].replace(/\u2019/g, "'");
     if (NUMBER_WORDS.has(word)) return match[0];
-    if (ORDINARY_WORDS.has(word)) continue;
-    const startsSentence = /(?:^|[.!?]\s*)$/.test(
-      text.slice(0, match.index).trimEnd() === '' ? '' : text.slice(0, match.index),
-    );
-    if (/^\p{Lu}/u.test(match[0]) && !startsSentence) continue;
+    if (ORDINARY_WORDS.has(word) || names.has(word)) continue;
     return match[0];
   }
   return null;
@@ -452,7 +470,12 @@ function spansOf(line: string, phrases: readonly string[]): { at: number; length
  * number anywhere in the line (other than the ones `explained`: the draft's own price and
  * quantities, only those filled in), or currency or unit words next to it left out of the copy.
  */
-function amountDoubt(found: Found, line: string, explained: readonly string[]): string | null {
+function amountDoubt(
+  found: Found,
+  line: string,
+  explained: readonly string[],
+  names: ReadonlySet<string>,
+): string | null {
   const text = squash(line);
   const sign = SIGN_WORDS.exec(text);
   if (sign !== null) return `The line says “${sign[0]}”.`;
@@ -470,7 +493,7 @@ function amountDoubt(found: Found, line: string, explained: readonly string[]): 
   if (PRICE_WORD_BEFORE.test(found.before) || PRICE_WORD_AFTER.test(found.after)) {
     return 'Words right next to it may belong to it.';
   }
-  const word = unusualWord(line, [found, ...spansOf(line, explained)]);
+  const word = unusualWord(line, [found, ...spansOf(line, explained)], names);
   if (word !== null) return `The line has a word to check, “${word}”.`;
   return null;
 }
@@ -538,6 +561,7 @@ export function saidPrice(
   said: string | null,
   cited: readonly CitedLine[],
   explained: readonly (string | null)[] = [],
+  names: ReadonlySet<string> = NO_NAMES,
 ): {
   amount: string;
   currency: QuoteCurrency | null;
@@ -594,6 +618,7 @@ export function saidPrice(
               found,
               line,
               explained.filter((e) => e !== null),
+              names,
             )
           : 'It was said with a sign.',
     },
@@ -605,6 +630,7 @@ export function saidTonnes(
   said: string | null,
   cited: readonly CitedLine[],
   explained: readonly (string | null)[] = [],
+  names: ReadonlySet<string> = NO_NAMES,
 ): { amount: string; check: SaidCheck } | null {
   if (said === null) return null;
   const words = squash(said);
@@ -620,6 +646,7 @@ export function saidTonnes(
     found,
     line,
     explained.filter((e) => e !== null),
+    names,
   );
   // "Per 500 tonnes" is part of a price, not a quantity on offer (Codex's review of 5d1ecfa).
   if (sign !== null) doubt = 'It was said with a sign.';
@@ -660,6 +687,7 @@ const EXTENSION_AFTER = /^\s*[,;:(]?\s*(?:x\s*\d|ext|extn|extension|#\s*\d)/;
 export function saidPhone(
   said: string | null,
   cited: readonly CitedLine[],
+  names: ReadonlySet<string> = NO_NAMES,
 ): { phone: string; check: SaidCheck } | null {
   if (said === null) return null;
   const match = PHONE_SAID.exec(squash(said));
@@ -675,7 +703,7 @@ export function saidPhone(
     doubt = 'The line has another number.';
   } else {
     const line = cited.find((c) => c.line === found.line)?.text ?? '';
-    const word = unusualWord(line, [found]);
+    const word = unusualWord(line, [found], names);
     if (word !== null) doubt = `The line has a word to check, “${word}”.`;
   }
   return {
@@ -718,6 +746,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     return { lines, cited: lines.map((n) => ({ line: n, text: context.lines[n]?.text ?? '' })) };
   };
   const drafts: DraftInput[] = [];
+  const names = nameWords([...(context.names ?? []), ...context.contacts.map((c) => c.name)]);
   const quotedAt = new Date(context.calledAt).toISOString();
   const reference = label(`Call of ${formatAlberta(quotedAt)}, drafted by Claude`);
 
@@ -739,7 +768,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     const minOk = filled(quote.quantityMinSaid, saidTonnes(quote.quantityMinSaid, cited));
     const maxOk = filled(quote.quantityMaxSaid, saidTonnes(quote.quantityMaxSaid, cited));
     const priceOk = filled(quote.priceSaid, saidPrice(quote.priceSaid, cited));
-    const price = saidPrice(quote.priceSaid, cited, [minOk, maxOk]);
+    const price = saidPrice(quote.priceSaid, cited, [minOk, maxOk], names);
     if (price !== null) checks.price = price.check;
     put(values, 'price', price?.amount ?? null);
     put(values, 'currency', price?.currency ?? null);
@@ -747,8 +776,8 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     put(values, 'grade', label(quote.grade));
     put(values, 'deliveryBasis', quote.deliveryBasis);
     put(values, 'basisLocation', label(quote.basisLocation));
-    const quantityMin = saidTonnes(quote.quantityMinSaid, cited, [priceOk, maxOk]);
-    const quantityMax = saidTonnes(quote.quantityMaxSaid, cited, [priceOk, minOk]);
+    const quantityMin = saidTonnes(quote.quantityMinSaid, cited, [priceOk, maxOk], names);
+    const quantityMax = saidTonnes(quote.quantityMaxSaid, cited, [priceOk, minOk], names);
     if (quantityMin !== null) checks.quantityMin = quantityMin.check;
     if (quantityMax !== null) checks.quantityMax = quantityMax.check;
     put(values, 'quantityMin', quantityMin?.amount ?? null);
@@ -789,7 +818,12 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     put(found, 'contactName', label(contact.name));
     put(found, 'contactRole', label(contact.role));
     put(found, 'contactEmail', email !== null && EMAIL.test(email) ? email : null);
-    const phone = saidPhone(contact.phoneSaid, cited);
+    // The person drafted is a name in the line their number was said in.
+    const phone = saidPhone(
+      contact.phoneSaid,
+      cited,
+      new Set([...names, ...nameWords([contact.name])]),
+    );
     put(found, 'contactPhone', phone?.phone ?? null);
     const values: ContactFormValues = {};
     const same = (a: string | null | undefined, b: string | null) =>
