@@ -159,18 +159,38 @@ export function notTakenByAnthropic(error: unknown): boolean {
   return error instanceof Anthropic.APIError && error.status !== undefined;
 }
 
-/** A secret-free summary of a failed request: the API's status and error type, never its text. */
+/**
+ * Anthropic's own explanation of a refused request ("Schema is too complex for compilation."),
+ * made safe to log: anything quoted is removed, and so are runs of digits, so no word or number
+ * from a call can reach the log; one line, at most 160 characters.
+ */
+function safeMessage(text: string): string {
+  return text
+    .replace(/"[^"]*"|'[^']*'|`[^`]*`|“[^”]*”/g, '…')
+    .replace(/\d{3,}/g, '#')
+    .replace(/[^\x20-\x7e…#]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
+/**
+ * A secret-free summary of a failed request: the API's status and error type, and its message
+ * with anything quoted and any digits taken out (safeMessage); never the request's text.
+ */
 export function claudeFailure(error: unknown): string {
   if (error instanceof ReadingDeadlineError) return 'deadline';
   if (error instanceof Anthropic.APIConnectionTimeoutError) return 'timeout';
   if (error instanceof Anthropic.APIConnectionError) return 'connection';
   if (error instanceof Anthropic.APIError) {
     const body: unknown = error.error;
-    const type =
+    const details =
       typeof body === 'object' && body !== null && 'error' in body
-        ? (body as { error?: { type?: unknown } }).error?.type
+        ? (body as { error?: { type?: unknown; message?: unknown } }).error
         : undefined;
-    return `status=${String(error.status)}${typeof type === 'string' && /^[a-z_]{1,60}$/.test(type) ? ` type=${type}` : ''}`;
+    const type = details?.type;
+    const message = typeof details?.message === 'string' ? safeMessage(details.message) : '';
+    return `status=${String(error.status)}${typeof type === 'string' && /^[a-z_]{1,60}$/.test(type) ? ` type=${type}` : ''}${message === '' ? '' : ` message=${message}`}`;
   }
   return error instanceof Error ? error.name : 'unknown';
 }

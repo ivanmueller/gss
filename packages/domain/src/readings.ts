@@ -47,7 +47,18 @@ const COMMODITY_CODES = COMMODITIES.map((commodity) => commodity.code) as [
   ...CommodityCode[],
 ];
 
-const nullableText = z.string().nullable();
+/**
+ * A field Claude leaves empty ("") when it was not said, read as null. Anthropic's structured
+ * outputs allow at most 16 fields that may be either a value or null across a schema, so the
+ * answer has none: every text field is a plain string, empty when not said (staging, 2026-11-05:
+ * every request was refused with a 400 while the schema had 21).
+ */
+const blankable = <T extends z.ZodType>(schema: T) =>
+  z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+    schema.nullable(),
+  );
+const nullableText = blankable(z.string());
 
 /** What Claude answers, as it is checked before anything else is done with it. */
 export const callReadingSchema = z.object({
@@ -56,11 +67,11 @@ export const callReadingSchema = z.object({
   quotes: z.array(
     z.object({
       side: z.enum(QUOTE_SIDES),
-      commodity: z.enum(COMMODITY_CODES).nullable(),
-      firmness: z.enum(QUOTE_FIRMNESS).nullable(),
+      commodity: blankable(z.enum(COMMODITY_CODES)),
+      firmness: blankable(z.enum(QUOTE_FIRMNESS)),
       priceSaid: nullableText,
       grade: nullableText,
-      deliveryBasis: z.enum(DELIVERY_BASES).nullable(),
+      deliveryBasis: blankable(z.enum(DELIVERY_BASES)),
       basisLocation: nullableText,
       quantityMinSaid: nullableText,
       quantityMaxSaid: nullableText,
@@ -72,7 +83,7 @@ export const callReadingSchema = z.object({
     }),
   ),
   followUps: z.array(
-    z.object({ task: z.string(), dueAt: nullableText, lines: z.array(z.number()) }),
+    z.object({ task: nullableText, dueAt: nullableText, lines: z.array(z.number()) }),
   ),
   contacts: z.array(
     z.object({
@@ -89,12 +100,13 @@ export type CallReading = z.infer<typeof callReadingSchema>;
 
 type JsonSchema = Record<string, unknown>;
 const text = (description: string): JsonSchema => ({
-  anyOf: [{ type: 'string' }, { type: 'null' }],
-  description,
+  type: 'string',
+  description: `${description} Empty ("") when not said.`,
 });
 const choice = (values: readonly string[], description: string): JsonSchema => ({
-  anyOf: [{ type: 'string', enum: [...values] }, { type: 'null' }],
-  description,
+  type: 'string',
+  enum: ['', ...values],
+  description: `${description} Empty ("") when not said.`,
 });
 const lineNumbers: JsonSchema = {
   type: 'array',
@@ -111,7 +123,8 @@ const object = (properties: Record<string, JsonSchema>): JsonSchema => ({
 /**
  * The JSON schema Claude answers with (structured outputs). It names the same fields as
  * callReadingSchema; a test keeps them in step. Only what structured outputs accept: no
- * lengths or numeric limits, every object closed.
+ * lengths or numeric limits, every object closed, every field required (no optional ones) and
+ * none that may be one type or another (no anyOf, no null: empty strings instead).
  */
 export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
   voicemail: {
@@ -120,7 +133,7 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
       "True when the counterparty's side was a voicemail greeting or system and no person answered.",
   },
   summary: text(
-    'Two to five short plain sentences of notes on the call, or null when nothing was said worth noting.',
+    'Two to five short plain sentences of notes on the call, or empty when nothing was said worth noting.',
   ),
   quotes: {
     type: 'array',
@@ -131,22 +144,22 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
         enum: [...QUOTE_SIDES],
         description: 'bid: the counterparty wants to buy. offer: the counterparty wants to sell.',
       },
-      commodity: choice(COMMODITY_CODES, 'The commodity code, or null when not clear.'),
+      commodity: choice(COMMODITY_CODES, 'The commodity code, or empty when not clear.'),
       firmness: choice(
         QUOTE_FIRMNESS,
         'firm only when the counterparty said it is firm; indicative when they said it is indicative or only an idea; null otherwise.',
       ),
       priceSaid: text(
-        'The price exactly as written in one transcript line, copied character for character with its currency and unit when they are said with it, e.g. "$725.50 Canadian a tonne", "US$7.25 a bushel", "CAD $310 per tonne". Null when no single price was said.',
+        'The price exactly as written in one transcript line, copied character for character with its currency and unit when they are said with it, e.g. "$725.50 Canadian a tonne", "US$7.25 a bushel", "CAD $310 per tonne".',
       ),
       grade: text('The grade or spec as said, e.g. "1 CW", "feed".'),
       deliveryBasis: choice(DELIVERY_BASES, 'How the price is delivered, when said.'),
       basisLocation: text('The place the price is for, as said.'),
       quantityMinSaid: text(
-        'A smallest quantity exactly as written in one transcript line, in metric tonnes, e.g. "500 tonnes". Null otherwise.',
+        'A smallest quantity exactly as written in one transcript line, in metric tonnes, e.g. "500 tonnes".',
       ),
       quantityMaxSaid: text(
-        'The quantity exactly as written in one transcript line, in metric tonnes, e.g. "1,500 tonnes". Null otherwise.',
+        'The quantity exactly as written in one transcript line, in metric tonnes, e.g. "1,500 tonnes".',
       ),
       deliveryStart: text('The first day of delivery, YYYY-MM-DD.'),
       deliveryEnd: text('The last day of delivery, YYYY-MM-DD.'),
@@ -171,12 +184,14 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
     description:
       'New people, or new details of listed contacts, said on the call; empty when none.',
     items: object({
-      contactId: text('The id of the listed contact these details are for; null for a new person.'),
+      contactId: text(
+        'The id of the listed contact these details are for; empty for a new person.',
+      ),
       name: text("The person's name, as said."),
       role: text('Their job, as said.'),
       email: text('Their email address, as said.'),
       phoneSaid: text(
-        'Their phone number exactly as written in one transcript line, with its extension when said with it, e.g. "403 555 0177 extension 12". Null otherwise.',
+        'Their phone number exactly as written in one transcript line, with its extension when said with it, e.g. "403 555 0177 extension 12".',
       ),
       lines: lineNumbers,
     }),
