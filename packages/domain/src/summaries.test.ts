@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkSummary, SUMMARY_LINE_MAX, type SummaryFacts } from './summaries';
+import {
+  checkSummary,
+  SUMMARY_LINE_MAX,
+  SUMMARY_PLAIN_WORDS,
+  type SummaryFacts,
+} from './summaries';
 
 // Synthetic records only.
 const FACTS: SummaryFacts = {
@@ -9,7 +14,12 @@ const FACTS: SummaryFacts = {
     F1: '"Send the bid sheet", due Thu 5 Nov 2026, 9:00 am MT (overdue), for Tess Trader',
     H1: 'Call with Pat Buyer, Thu 5 Nov 2026, 9:05 am MT',
     drafts: '2 drafts from calls to review',
+    tonnes: 'about 1,500 tonnes a year',
   },
+  records: [
+    '[H1] Call with Pat Buyer, Thu 5 Nov 2026, 9:05 am MT. Notes: Pat wants flaxseed delivered weekly.',
+    '[Q1] bid (they buy) Flaxseed at CAD 725.00/MT. [tonnes] about 1,500 tonnes a year.',
+  ].join('\n'),
 };
 
 const check = (...lines: string[]) => checkSummary({ lines }, FACTS);
@@ -73,23 +83,48 @@ describe('checkSummary', () => {
     ['overdue of its own', 'The follow-up is overdue.'],
     ['an ordinal', 'The first call went well.'],
     ['a number word in a name', 'Spoke with Five Star Grain.'],
+    // Codex's review of 3a7617c.
+    ['a dash before a parenthesis and a label', 'Capacity: - ([tonnes]).'],
+    ['a minus symbol before a label', 'Capacity: ➖[tonnes].'],
+    ['a minus-or-plus symbol before a label', 'Capacity: ∓[tonnes].'],
+    ['an em dash', 'Capacity — [tonnes].'],
+    ['a fraction of a measure', 'Available quantity is a millionth of a tonne.'],
+    ['a coin word', 'Price is a fiver per tonne.'],
+    ['a currency name', 'Price is a euro per tonne.'],
+    ['a month in lower case', 'Delivery is due in may.'],
+    ['a time of day synonym', 'Call at midday.'],
+    ['a period word, even one in the records', 'Deliveries are weekly.'],
+    ['a measure with an article', 'Pat wants a tonne.'],
+    ['once', 'Pat called once.'],
   ])('refuses %s in its own words', (_, line) => {
     expect(check(line)).toEqual({ status: 'number_in_text' });
   });
 
-  it('keeps plain words that only look like the refused ones', () => {
-    expect(check('Pat may call back about [Q1]; someone at the company will confirm.')).toEqual({
+  it('keeps plain words and words of the records, in their plain forms', () => {
+    expect(check('Pat might call back about [Q1]; someone at the company will confirm.')).toEqual({
       status: 'ok',
-      summary: `Pat may call back about ${FACTS.values.Q1 ?? ''}; someone at the company will confirm.`,
+      summary: `Pat might call back about ${FACTS.values.Q1 ?? ''}; someone at the company will confirm.`,
+    });
+    expect(check('Pat asked about delivering flaxseed; a follow-up was planned.')).toMatchObject({
+      status: 'ok',
     });
   });
 
+  it('accepts every plain word Claude is offered', () => {
+    const refused = SUMMARY_PLAIN_WORDS.filter((word) => check(`Pat ${word}.`).status !== 'ok');
+    expect(refused).toEqual([]);
+  });
+
+  it('refuses a word that is neither plain nor in the records', () => {
+    expect(check('Pat is ecstatic about [Q1].')).toEqual({ status: 'unknown_word' });
+  });
+
   it('keeps at most six lines, and nothing with a line too long once written out', () => {
-    expect(check('a\nb', 'b', 'c', 'd', 'e', 'f', 'g')).toEqual({
+    expect(check('Pat\ncalled', 'Live', 'Open', 'Waiting', 'Pending', 'New', 'Firm')).toEqual({
       status: 'ok',
-      summary: 'a b\nb\nc\nd\ne\nf',
+      summary: 'Pat called\nLive\nOpen\nWaiting\nPending\nNew',
     });
-    expect(check(`${'word '.repeat(SUMMARY_LINE_MAX / 5 - 20)}[Q1]`)).toEqual({
+    expect(check(`${'Pat '.repeat(SUMMARY_LINE_MAX / 4 - 30)}[Q1]`)).toEqual({
       status: 'too_long',
     });
   });
