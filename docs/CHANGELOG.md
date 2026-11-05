@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #150
+
+- `docs/HANDOFF.md`: reviewing Claude's drafts in the contact history (ivanmueller/gss#150), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Reviewing Claude's drafts
 
 - `docs/DECISIONS.md`: the review of Claude's drafts in the contact history (Voicemail and "to review" badges, Claude's notes with Use as notes, Review and Dismiss, the source line highlighted and Check this).
