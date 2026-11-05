@@ -1,7 +1,6 @@
 import { Search } from 'lucide-react';
 
 import { GrainTile, FAMILY_CLASSES } from '../components/GrainTile';
-import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { GRAINS, GRAIN_FAMILIES, GRAIN_SOURCES } from '../data/grains';
@@ -24,11 +23,10 @@ export function GrainsPage() {
 
   return (
     <section aria-labelledby="grains-heading" className="flex flex-col gap-6">
-      <PageHeader
-        id="grains-heading"
-        title="Grains"
-        description="Every grain graded in Canada: its official classes and grades, varieties, test weights, moisture limits and quality. Each fact names its source."
-      />
+      {/* No visible title or description (owner's request, 2026-11-05): the table starts at once. */}
+      <h1 id="grains-heading" className="sr-only">
+        Grains
+      </h1>
 
       <div className="flex flex-col gap-3">
         <label className="relative block max-w-md">
