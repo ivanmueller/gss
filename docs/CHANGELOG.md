@@ -1,5 +1,14 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Calls refused on staging; the company summary planned
+
+- `docs/DECISIONS.md`: the 400 on every request (too many either-or fields in the answer's schema) and its fix; the owner's answers for a summary on each company's page.
+- `README.md`: what the log shows when a call is not read.
+
+## 2026-11-05 — Handoff record of #148
+
+- `docs/HANDOFF.md`: no name is plain (ivanmueller/gss#148), with its CI and Deploy staging runs; the key set on staging and the 400 that followed.
+
 ## 2026-11-05 — No name is plain
 
 - `docs/DECISIONS.md`: Codex's review of `208455a`: names no longer exempt a line.

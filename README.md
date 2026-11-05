@@ -196,7 +196,7 @@ After a call's transcript is saved, the Worker's job every 2 minutes sends it to
 1. At platform.claude.com, **API keys → Create key**, named for the staging Worker; copy it. (A monthly spend limit is set there under **Limits**.)
 2. In Cloudflare (**Workers & Pages → grain-trading-api-staging → Settings → Variables and Secrets → Add**): type **Secret**, name `ANTHROPIC_API_KEY`, paste the key, **Deploy**.
 
-Until it is there, calls work as before and nothing is sent to Anthropic. Failures appear in the Worker's log as `Call not read: …` with a status, never the transcript.
+Until it is there, calls work as before and nothing is sent to Anthropic. Failures appear in the Worker's log as `Call not read…` with a status and Anthropic's own explanation (anything quoted and any digits removed), never the transcript.
 
 ## Staging database connection
 

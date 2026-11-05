@@ -458,7 +458,26 @@ describe('claudeClient', () => {
     expect(notTakenByAnthropic(new Error('x'))).toBe(false);
   });
 
-  it('summarizes a failure by status and error type only', async () => {
+  it("logs Anthropic's explanation without anything quoted or any digits from a call", () => {
+    const error = new Anthropic.BadRequestError(
+      400,
+      {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message:
+            'Schema is too complex for compilation. Value "We bid $725 to Pat" at 4035550177.',
+        },
+      },
+      undefined,
+      new Headers(),
+    );
+    expect(claudeFailure(error)).toBe(
+      'status=400 type=invalid_request_error message=Schema is too complex for compilation. Value … at #.',
+    );
+  });
+
+  it('summarizes a failure by status, error type and a safe message', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() =>
@@ -476,7 +495,9 @@ describe('claudeClient', () => {
     const failure = await claudeClient(CLAUDE_ENV)
       ?.readCall({ system: 'S', user: 'U', schema: {} })
       .catch((error: unknown) => claudeFailure(error));
-    expect(failure).toBe('status=400 type=invalid_request_error');
+    expect(failure).toBe(
+      'status=400 type=invalid_request_error message=details that are not logged',
+    );
   });
 });
 

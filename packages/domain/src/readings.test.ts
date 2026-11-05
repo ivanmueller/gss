@@ -794,6 +794,45 @@ describe('the schema Claude answers with', () => {
     );
   });
 
+  it("stays within Anthropic's structured-output limits: no union types, nothing optional", () => {
+    // At most 16 parameters with union types (anyOf or type arrays) and 24 optional ones per
+    // request (Anthropic's structured outputs page); staging refused every request at 21.
+    const json = JSON.stringify(CALL_READING_JSON_SCHEMA);
+    expect(json).not.toMatch(/anyOf|oneOf|"null"|"type":\[/);
+    const objects: Record<string, unknown>[] = [];
+    const walk = (node: unknown) => {
+      if (typeof node !== 'object' || node === null) return;
+      const record = node as Record<string, unknown>;
+      if (record.type === 'object') objects.push(record);
+      Object.values(record).forEach(walk);
+    };
+    walk(CALL_READING_JSON_SCHEMA);
+    for (const object of objects) {
+      const properties = Object.keys(object.properties as object);
+      expect(object.required).toEqual(properties);
+    }
+  });
+
+  it('reads an empty answer as not said', () => {
+    const parsed = callReadingSchema.parse({
+      ...reading({
+        quotes: [quote()],
+        followUps: [{ task: 'Call back', dueAt: null, lines: [2] }],
+      }),
+      summary: '  ',
+      quotes: [{ ...quote(), commodity: '', firmness: '', priceSaid: '', deliveryBasis: '' }],
+      followUps: [{ task: 'Call back', dueAt: '', lines: [2] }],
+    });
+    expect(parsed.summary).toBeNull();
+    expect(parsed.quotes[0]).toMatchObject({
+      commodity: null,
+      firmness: null,
+      priceSaid: null,
+      deliveryBasis: null,
+    });
+    expect(parsed.followUps[0]?.dueAt).toBeNull();
+  });
+
   it('parses an answer in that shape', () => {
     expect(callReadingSchema.safeParse(reading({ quotes: [quote()] })).success).toBe(true);
     expect(callReadingSchema.safeParse({ voicemail: 'no' }).success).toBe(false);
