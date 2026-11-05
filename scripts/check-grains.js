@@ -68,6 +68,8 @@ function fetchSources(sources) {
     let text;
     if (PDFS[id] || source.url.endsWith('.pdf')) {
       text = pdfText(download(PDFS[id] ?? source.url), id);
+    } else if (source.url.endsWith('.csv')) {
+      text = download(source.url).toString();
     } else if (id === 'cgc-variety-lists') {
       // The index links one page per class; their texts together are the source.
       const index = download(source.url).toString();

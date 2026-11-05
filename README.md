@@ -143,7 +143,7 @@ Rates are shown as quoted, never converted or estimated; the trading engine, whe
 
 ## Grains
 
-**Grains** in the menu is a reference of the 19 grains graded in Canada, laid out like a periodic table and coloured by family (wheat, coarse grains, oilseeds, pulses, special crops). Search finds a grain, a class (CWRS) or a variety (CS Camden). A grain's page shows its official classes with their grades, main grade limits and designated varieties, its moisture limits, quality figures (protein, oil, test weight) and variety trial tables, each with its source: the Canadian Grain Commission's Official Grain Grading Guide (August 1, 2026), its 2026 variety designation lists and its harvest and export quality reports, and the Alberta Seed Guide's spring 2026 trial tables. Nothing on it is GSS's own data. A verified commodity's badge on a counterparty's page opens its grain.
+**Grains** in the menu is a reference of the 19 grains graded in Canada, laid out like a periodic table and coloured by family (wheat, coarse grains, oilseeds, pulses, special crops). Search finds a grain, a class (CWRS) or a variety (CS Camden). Clicking a grain opens it in a window: the classes most grown in Alberta, Saskatchewan and Manitoba (acres insured in 2025), and for the class chosen only what is on spec: each grade's minimum test weight and protein, the moisture, and the most grown varieties. Grades come from the Canadian Grain Commission's Official Grain Grading Guide (August 1, 2026); classes and varieties from its "Grain varieties by acreage insured". Nothing on it is GSS's own data. A verified commodity's badge on a counterparty's page opens its grain.
 
 The facts live in `apps/web/src/data/grains/`, one file per grain, and change only by pull request. Before one, check them against the sources (needs `curl` and `pdftotext`):
 
@@ -151,6 +151,8 @@ The facts live in `apps/web/src/data/grains/`, one file per grain, and change on
 node --experimental-strip-types scripts/check-grains.js --fetch   # once: downloads the sources into .grain-sources/
 node --experimental-strip-types scripts/check-grains.js           # every value must be found in its source
 ```
+
+The acres come from the CGC's two 2025 CSV files (cereals; oilseeds, pulses and minor crops) through `node scripts/build-grain-acreage.js <cereals.csv> <others.csv>`, which writes `apps/web/src/data/grains/acreage.ts`.
 
 ## Map
 
