@@ -214,7 +214,7 @@ export const flaxseed: Grain = {
         ['WestLin 60', 'brown', '95', '-2', 'M', '48', 'G', 'NT', '46', '60', '198'],
         ['WestLin 72', 'brown', '96', '2', 'S', '51', 'VG', 'MR', '47', '57', '193'],
       ],
-      note: 'CDC Glas maturity is its rating in days; the others are days +/- CDC Glas. CDC Glas overall yield is 44 bu/ac. All listed varieties are immune to flax rust and MR to Fusarium wilt. NT - Not tested for disease. Data heavily weighted on Saskatchewan registration data. AAC Marvelous, CDC Bethune, CDC Neela, CDC Plava and CDC Sorrel are flagged for possible removal in 2027.',
+      note: 'Maturity column as printed: Rating (Days +/- CDC Glas). CDC Glas overall yield: 44 bu/ac. Yield and agronomic data only directly comparable to CDC Glas. All listed varieties are immune to flax rust and MR to Fusarium wilt. NT - Not tested for disease. Data heavily weighted on Saskatchewan registration data. AAC Marvelous, CDC Bethune, CDC Neela, CDC Plava and CDC Sorrel are flagged for possible removal in 2027.',
       source: 'asg-rvt-2026',
       where: 'Flax',
     },
