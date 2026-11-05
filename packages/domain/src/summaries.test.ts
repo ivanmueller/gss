@@ -1,94 +1,100 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkSummary, numbersIn, SUMMARY_LINE_MAX } from './summaries';
+import { checkSummary, SUMMARY_LINE_MAX, type SummaryFacts } from './summaries';
 
 // Synthetic records only.
-const RECORDS = [
-  'Bid: Flaxseed, CAD 725.00 per MT, 1,500 MT, delivered Synthetic Town, valid until Fri 6 Nov 2026, 4:00 pm MT.',
-  'Call with Pat Buyer, Thu 5 Nov 2026, 9:05 am MT: wants November delivery.',
-].join('\n');
+const FACTS: SummaryFacts = {
+  values: {
+    Q1: 'bid (they buy) Flaxseed at CAD 725.00/MT, up to 1,500 MT, Delivered Synthetic Town, AB, indicative, until Fri 6 Nov 2026, 4:00 pm MT',
+    F1: '"Send the bid sheet", due Thu 5 Nov 2026, 9:00 am MT (overdue), for Tess Trader',
+    H1: 'Call with Pat Buyer, Thu 5 Nov 2026, 9:05 am MT',
+    drafts: '2 drafts from calls to review',
+  },
+};
 
-describe('numbersIn', () => {
-  it('reads each number in one form, dates and times first', () => {
-    expect(numbersIn('CAD 725.00, 1,500 MT, 9:05 am, 0.50, −3, .5')).toEqual([
-      '9',
-      '5',
-      '725',
-      '1500',
-      '0.5',
-      '-3',
-      '0.5',
-    ]);
-  });
-});
+const check = (...lines: string[]) => checkSummary({ lines }, FACTS);
 
 describe('checkSummary', () => {
-  it('keeps plain lines whose numbers are in the records, however they are written', () => {
+  it("writes each record's own text in place of its label", () => {
     expect(
-      checkSummary(
-        { lines: ['- Bids flaxseed at $725/MT for 1500 MT.', '', '• Called 5 Nov at 9:05 am.'] },
-        RECORDS,
+      check(
+        '- Latest: [H1]. Pat wants more flaxseed and will call back.',
+        '',
+        '• Live: [Q1].',
+        'Waiting on GSS: [F1]; [drafts].',
       ),
     ).toEqual({
       status: 'ok',
-      summary: 'Bids flaxseed at $725/MT for 1500 MT.\nCalled 5 Nov at 9:05 am.',
+      summary: [
+        'Latest: Call with Pat Buyer, Thu 5 Nov 2026, 9:05 am MT. Pat wants more flaxseed and will call back.',
+        'Live: bid (they buy) Flaxseed at CAD 725.00/MT, up to 1,500 MT, Delivered Synthetic Town, AB, indicative, until Fri 6 Nov 2026, 4:00 pm MT.',
+        'Waiting on GSS: "Send the bid sheet", due Thu 5 Nov 2026, 9:00 am MT (overdue), for Tess Trader; 2 drafts from calls to review.',
+      ].join('\n'),
     });
   });
 
-  it('refuses a number not in the records', () => {
-    expect(checkSummary({ lines: ['Bids flaxseed at $730/MT.'] }, RECORDS)).toEqual({
-      status: 'unsupported_number',
-    });
-    expect(checkSummary({ lines: ['About 1,600 MT a year.'] }, RECORDS)).toEqual({
-      status: 'unsupported_number',
-    });
-    expect(checkSummary({ lines: ['Bids at 725.5.'] }, RECORDS)).toEqual({
-      status: 'unsupported_number',
-    });
+  it('refuses a label that is not a record', () => {
+    expect(check('Live: [Q2].')).toEqual({ status: 'unknown_reference' });
+    expect(check('Live: [Q1')).toEqual({ status: 'unknown_reference' });
   });
 
-  it('lets small counts through', () => {
-    expect(checkSummary({ lines: ['3 calls this month, 2 follow-ups open.'] }, RECORDS)).toEqual({
+  // Codex's reviews of f6d3296 and 3403497: no number of Claude's own, however written.
+  it.each([
+    ['digits', 'Live bid CAD 7 per bushel.'],
+    ['a quantity', 'Wants 12 tonnes.'],
+    ['a leading decimal point', 'Offer at .50 a bushel.'],
+    ['a sign', 'Bid at −725.'],
+    ['a plus sign', 'Bid at +725.'],
+    ['digits of another script', 'Bid at ٩٩٩٩.'],
+    ['a fraction', 'Wants ½ tonne.'],
+    ['an exponent', 'Wants 1e3 tonnes.'],
+    ['a number in words', 'Bid at nine hundred.'],
+    ['a small number in words', 'Wants two metric tonnes.'],
+    ['a fraction in words', 'Wants half a tonne.'],
+    ['a scale', 'Wants [Q1] million.'],
+    ['a scale word on its own', 'About mn tonnes.'],
+    ['a count', '2 calls this week.'],
+    ['a currency word', 'Wants it in CAD.'],
+    ['a currency symbol', 'Bid at $ [Q1].'],
+    ['a sign word before a label', 'Basis minus [Q1].'],
+    ['a dash before a label', 'Basis -[Q1].'],
+    ['a dash and a space before a label', 'Basis – [Q1].'],
+    ['a letter glued to a label', 'Bid [Q1]k.'],
+    ['a digit glued to a label', 'Bid 7[Q1].'],
+    ['a percent', 'Up [Q1] %.'],
+    ['a date', 'Due on 7 Nov.'],
+    ['a month', 'Wants November delivery.'],
+    ['a short month name', 'Wants Dec delivery.'],
+    ['May as a month', 'Wants May delivery.'],
+    ['a day', 'Call back Friday.'],
+    ['a relative day', 'Call back tomorrow.'],
+    ['a period', 'Call back next week.'],
+    ['a time of day', 'Call back this afternoon.'],
+    ['overdue of its own', 'The follow-up is overdue.'],
+    ['an ordinal', 'The first call went well.'],
+    ['a number word in a name', 'Spoke with Five Star Grain.'],
+  ])('refuses %s in its own words', (_, line) => {
+    expect(check(line)).toEqual({ status: 'number_in_text' });
+  });
+
+  it('keeps plain words that only look like the refused ones', () => {
+    expect(check('Pat may call back about [Q1]; someone at the company will confirm.')).toEqual({
       status: 'ok',
-      summary: '3 calls this month, 2 follow-ups open.',
+      summary: `Pat may call back about ${FACTS.values.Q1 ?? ''}; someone at the company will confirm.`,
     });
   });
 
-  it('keeps at most six one-line lines, and nothing with a line too long rather than cut it', () => {
-    expect(
-      checkSummary({ lines: ['a\nb', 'two', 'three', 'four', 'five', 'six', 'seven'] }, RECORDS),
-    ).toEqual({ status: 'ok', summary: 'a b\ntwo\nthree\nfour\nfive\nsix' });
-    expect(checkSummary({ lines: ['word '.repeat(SUMMARY_LINE_MAX / 4)] }, RECORDS)).toEqual({
+  it('keeps at most six lines, and nothing with a line too long once written out', () => {
+    expect(check('a\nb', 'b', 'c', 'd', 'e', 'f', 'g')).toEqual({
+      status: 'ok',
+      summary: 'a b\nb\nc\nd\ne\nf',
+    });
+    expect(check(`${'word '.repeat(SUMMARY_LINE_MAX / 5 - 20)}[Q1]`)).toEqual({
       status: 'too_long',
     });
   });
 
-  // Codex's review of f6d3296, findings 2 and 3.
-  it.each([
-    ['an invented price under the count limit', 'Live bid CAD 7 per bushel.', 'CAD 725 per tonne.'],
-    ['an invented quantity under the count limit', 'Wants 12 tonnes.', 'Wants 1,500 tonnes.'],
-    ['a leading decimal point', 'Offer at .50 a bushel.', 'Offer at 50.00 a bushel.'],
-    ['a sign the records do not have', 'Bid at −725.', 'Bid at 725.'],
-    ['a minus sign', 'Basis -725 under.', 'Bid at 725.'],
-    ['digits other than 0 to 9', 'Bid at ٩٩٩٩.', 'Bid at 725.'],
-    ['a number in words', 'Bid at nine hundred.', 'Bid at 725.'],
-    ['a scale word', 'Bid at 725 million.', 'Bid at 725.'],
-    ['a scale letter', 'Bid at 725k.', 'Bid at 725.'],
-    ['a small number in words for an amount', 'Bid at seven per bushel.', 'Bid at 725.'],
-    ['a currency before a small number in words', 'Bid at CAD five.', 'Bid at 725.'],
-    ['a day not in the records', 'Called on 7 Nov.', 'Thu 5 Nov 2026, 9:05 am MT. 7 tonnes.'],
-    ['a time not in the records', 'Called at 8:30 am.', 'Thu 5 Nov 2026, 9:05 am MT. 8 and 30 MT.'],
-  ])('refuses %s', (_, summary, records) => {
-    expect(checkSummary({ lines: [summary] }, records)).toEqual({ status: 'unsupported_number' });
-  });
-
-  it('reads a sign only where it is one: not in UTC-6 or a range', () => {
-    expect(
-      checkSummary({ lines: ['Bids 700-725 delivered, UTC-6.'] }, 'Bid 700 to 725 at UTC 6.'),
-    ).toEqual({ status: 'ok', summary: 'Bids 700-725 delivered, UTC-6.' });
-  });
-
   it('says when there is nothing to keep', () => {
-    expect(checkSummary({ lines: ['  ', ''] }, RECORDS)).toEqual({ status: 'empty' });
+    expect(check('  ', '')).toEqual({ status: 'empty' });
   });
 });
