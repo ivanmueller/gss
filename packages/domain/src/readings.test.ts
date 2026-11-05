@@ -324,7 +324,7 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
 
   it('marks a phone number after a foreign code in words', () => {
     expect(phone('403 555 0177', 'Our UK number is plus forty four 403 555 0177.')?.[1]).toMatch(
-      /word to check/,
+      /sign word|word to check/,
     );
   });
 
@@ -348,6 +348,31 @@ describe('saidPrice and saidPhone: any word that is not ordinary marks the numbe
     expect(
       saidPrice('$5 per tonne', one('Our bid is down $5 per tonne.'), [], down)?.check.doubt,
     ).toMatch(/“down”/);
+  });
+
+  it('lets no name hide a number word or sign (Codex, 352c13c)', () => {
+    const [draft] = checkReading(
+      reading({
+        quotes: [quote({ priceSaid: '$7', quantityMaxSaid: null, validUntil: null, lines: [0] })],
+      }),
+      context({
+        lines: [{ side: 'counterparty', start: 0, text: 'We bid $7 point five a bushel.' }],
+        names: ['Point Five'],
+      }),
+    ).drafts;
+    expect(draft?.kind === 'quote' && draft.fields.checks.price?.doubt).toMatch(/point/);
+    const [person] = checkReading(
+      reading({
+        contacts: [contact({ name: 'Plus Forty Four', phoneSaid: '403 555 0177', lines: [0] })],
+      }),
+      context({
+        lines: [{ side: 'counterparty', start: 0, text: 'Call plus forty four 403 555 0177.' }],
+      }),
+    ).drafts;
+    expect(person?.kind === 'contact' && person.fields.checks.contactPhone?.doubt).not.toBeNull();
+    expect(nameWords(['Point Five', 'Plus Forty Four', 'Sam Down', 'Prairie Mills'])).toEqual(
+      new Set(['prairie mills']),
+    );
   });
 
   it('marks a negation or a deduction, however plain the words (Codex, 6b9d065)', () => {

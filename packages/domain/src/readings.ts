@@ -403,10 +403,21 @@ export function nameWords(names: readonly (string | null | undefined)[]): Readon
   const phrases = new Set<string>();
   for (const name of names) {
     const phrase = squash(name ?? '');
+    const words = phrase.match(/\p{L}[\p{L}'\u2019]*/gu) ?? [];
+    // A name with a number, sign, negation, change or scale word in it is no name to the check,
+    // so it can hide nothing ("Point Five", "Plus Forty Four"; Codex's review of 352c13c).
+    if (words.some((word) => NUMBER_WORDS.has(word) || NOT_IN_NAMES.has(word))) continue;
     if (phrase.split(' ').length >= 2) phrases.add(phrase);
   }
   return phrases;
 }
+
+/** Words that change what a number says, which no name may hide. */
+const NOT_IN_NAMES: ReadonlySet<string> = new Set(
+  `minus plus negative less below above under over down up back more most after before basis
+  not no never nor without off deduct deducted deduction discount net extra add added
+  thousand million billion grand hundred k m mm mn mil mln b bn point`.split(/\s+/),
+);
 
 /** The marks an ordinary line may hold: spaces, everyday punctuation, quotes, hyphens. */
 const ORDINARY_MARK = /[\p{L}\p{N}\s.,!?;:'"()\u2018\u2019\u201C\u201D\p{Pd}]/u;
@@ -425,6 +436,12 @@ function unusualWord(
   let text = squash(line);
   for (const { at, length } of masked) {
     text = `${text.slice(0, at)}${' '.repeat(length)}${text.slice(at + length)}`;
+  }
+  // Numbers in words and sign words are looked for before any name is masked: a name never
+  // hides one (Codex's review of 352c13c).
+  for (const match of text.matchAll(/[\p{L}][\p{L}'\u2019]*/gu)) {
+    const word = match[0].replace(/\u2019/g, "'");
+    if (NUMBER_WORDS.has(word) || NOT_IN_NAMES.has(word)) return match[0];
   }
   for (const name of names) {
     text = text.split(name).join(' '.repeat(name.length));
@@ -688,6 +705,8 @@ export function saidPhone(
     doubt = 'An extension may follow it.';
   } else if (/\p{N}/u.test(found.rest)) {
     doubt = 'The line has another number.';
+  } else if (SIGN_WORDS.test(squash(cited.find((c) => c.line === found.line)?.text ?? ''))) {
+    doubt = 'The line has a sign word: the number may not be whole.';
   } else {
     const line = cited.find((c) => c.line === found.line)?.text ?? '';
     const word = unusualWord(line, [found], names, PLAIN_PHONE_WORDS);
