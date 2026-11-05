@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Status brought up to date after the Grains pull requests
+
+- `AGENTS.md`: the status line with the Grains reference.
+- `docs/HANDOFF.md`: the status with Grains (ivanmueller/gss#135 to #138); the check on staging for them; Ontario left out by the owner's choice.
+- `docs/DECISIONS.md`: Ontario left out, and why.
+- `README.md`: Grains in the list of what is on staging.
+
+## 2026-11-05 — Handoff record of #138
+
+- `docs/HANDOFF.md`: a grain in a window, on spec only (ivanmueller/gss#138), with its CI and Deploy staging runs and the one freight browser-test failure on its first run.
+
 ## 2026-11-05 — Handoff records of #135 to #137
 
 - `docs/HANDOFF.md`: the Grains reference (ivanmueller/gss#135), its page without a title (#136) and one class at a time with its on-spec limits (#137), with their CI and Deploy staging runs.
