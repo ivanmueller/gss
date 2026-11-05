@@ -300,14 +300,6 @@ const AMOUNT_JOINS_BEFORE =
 const AMOUNT_JOINS_AFTER =
   /^\s*(?:\d|[.,]\d|(?:[-−–—/]|to\s)\s*(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*\.?\d|%)/;
 /**
- * The second end of a range "… to" before an amount: "to" with an amount right before it, past
- * at most a currency or unit's few words ("$700 to", "CAD $700 a tonne to"). "Agree to $725"
- * has none, so it is a price on its own (Codex's review of 06f0532).
- */
-const RANGE_TO_BEFORE =
-  /\d(?:\s+(?:[a-z.]+|\/[a-z]+)){0,3}\s+to\s+(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*$/;
-
-/**
  * Whether the words before or after an amount make it part of something longer. A range is
  * refused only on evidence of one: a dash or "to" and another amount after it, "to" with an
  * amount before it, or "between … and"; two prices joined by "and" are two prices ("$7.25 a
@@ -318,6 +310,7 @@ function amountJoins(before: string, after: string): boolean {
     AMOUNT_JOINS_BEFORE.test(before) ||
     RANGE_TO_BEFORE.test(before) ||
     AMOUNT_JOINS_AFTER.test(after) ||
+    RANGE_AFTER.test(after) ||
     (/\bbetween\b[^.;]*$/.test(before) && /^\s*and\s/.test(after))
   );
 }
@@ -325,6 +318,40 @@ function amountJoins(before: string, after: string): boolean {
 /** A number as written: "1,500", "725.50", ".50". */
 const NUMBER = String.raw`(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
 const UNIT = String.raw`(metric tonnes?|metric tons?|tonnes?|mt|short tons?|tons?|bushels?|bu|hundredweights?|cwt)`;
+
+// The pieces of a price expression, without capture groups, for finding one around the words
+// copied: a currency before the number, the number, and a currency, "dollars" and a unit after.
+const CURRENCY_WORDS = String.raw`(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)`;
+const PLAIN_NUMBER = String.raw`(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
+const PLAIN_UNIT = String.raw`(?:metric tonnes?|metric tons?|tonnes?|mt|short tons?|tons?|bushels?|bu|hundredweights?|cwt)`;
+const PRICE_BEFORE_NUMBER = String.raw`(?:(?:usd|cad|cdn)\s*\$?|(?:us|u\.s\.|c|canadian|american)\s*\$|\$)`;
+const PER_UNIT = String.raw`(?:a|an|per|/)\s*${PLAIN_UNIT}`;
+/** What may follow a price's number: a currency, "dollars", a unit, each when said. */
+const PRICE_AFTER_NUMBER = String.raw`(?:\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.))?(?:\s*(?:dollars?|bucks))?(?:\s*${PER_UNIT})?`;
+/**
+ * A whole price, marked as one, as saidPrice reads one: a dollar sign or currency before its
+ * number, or "dollars", a unit or a currency code after it ("700 CAD"; Codex's review of
+ * 742121f). "2 loads" is not one.
+ */
+const WHOLE_PRICE = String.raw`(?:${PRICE_BEFORE_NUMBER}\s*${PLAIN_NUMBER}${PRICE_AFTER_NUMBER}|${PLAIN_NUMBER}(?:\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.))?(?:\s*(?:dollars?|bucks)(?:\s*${PER_UNIT})?|\s*${PER_UNIT})|${PLAIN_NUMBER}\s*(?:usd|cad|cdn)\b(?:\s*(?:dollars?|bucks))?(?:\s*${PER_UNIT})?)`;
+
+/**
+ * The second end of a range: "to" right after a whole price, before the words copied ("from $700
+ * Canadian dollars per metric tonne to $725 a tonne"), or a bare number right before "to", whose
+ * dollars and unit are said once for both ends ("from 700 to 725 dollars a tonne"; Codex's
+ * review of 742121f). "For 2 loads we agree to $725" has neither, so its price stands (Codex's
+ * review of 7221123).
+ */
+const RANGE_TO_BEFORE = new RegExp(
+  String.raw`(?<![\w.$])(?:${WHOLE_PRICE}|${PLAIN_NUMBER})\s+to\s+(?:${CURRENCY_WORDS}\s*)?\$?\s*$`,
+);
+/**
+ * The first end of a range: the rest of its price, then a dash or "to" and another amount, after
+ * the words copied ("$700" copied from "$700 Canadian dollars per tonne to $725").
+ */
+const RANGE_AFTER = new RegExp(
+  String.raw`^${PRICE_AFTER_NUMBER}\s*(?:[-−–—]|to\s)\s*(?:${CURRENCY_WORDS}\s*)?\$?\s*\.?\d`,
+);
 
 /**
  * A price as said, whole: an optional currency before ("CAD", "USD $", "US$", "US $", "C$", "$"), the

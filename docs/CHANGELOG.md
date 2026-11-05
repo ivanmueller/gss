@@ -1,5 +1,21 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Codex's eighth review of the call readings
+
+- `docs/DECISIONS.md`: ranges with a currency code after the number, or a unit said once.
+
+## 2026-11-05 — Handoff record of #144
+
+- `docs/HANDOFF.md`: a range refused only on evidence of one (ivanmueller/gss#144), with its CI and Deploy staging runs.
+
+## 2026-11-05 — Codex's seventh review of the call readings
+
+- `docs/DECISIONS.md`: the start of a range found as a whole price, not a number and a few words.
+
+## 2026-11-05 — Handoff record of #143
+
+- `docs/HANDOFF.md`: Claude copies each price, quantity and phone number as said, and the fifth review's fixes (ivanmueller/gss#143), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Codex's sixth review of the call readings
 
 - `docs/DECISIONS.md`: a range refused only on evidence of one.
