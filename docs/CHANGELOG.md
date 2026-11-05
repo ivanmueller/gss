@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #144
+
+- `docs/HANDOFF.md`: a range refused only on evidence of one (ivanmueller/gss#144), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Codex's seventh review of the call readings
 
 - `docs/DECISIONS.md`: the start of a range found as a whole price, not a number and a few words.
