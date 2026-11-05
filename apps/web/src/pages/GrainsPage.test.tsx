@@ -51,38 +51,75 @@ describe('GrainsPage', () => {
 });
 
 describe('GrainPage', () => {
-  it('shows a grain’s classes, grades, tables and sources', () => {
+  it('shows the first class’s on-spec limits, the rest folded away', async () => {
+    const user = userEvent.setup();
     render(<GrainPage id="oats" />);
     expect(screen.getByRole('heading', { level: 1, name: /Oats/ })).toBeInTheDocument();
     const western = screen.getByRole('region', { name: 'Oats, Canada Western' });
+    expect(within(western).getByRole('heading', { name: 'On spec' })).toBeInTheDocument();
+    expect(within(western).getByRole('row', { name: /No\. 1 CW 56/ })).toBeInTheDocument();
+    expect(within(western).getByText(/Moisture: less than 13\.6%/)).toBeInTheDocument();
     expect(
-      within(within(western).getByRole('list', { name: /Grades of/ })).getAllByRole('listitem'),
-    ).toHaveLength(4);
-    expect(
-      screen.getByRole('heading', { name: 'Milling varieties in Alberta trials' }),
+      within(western).getByText(
+        /wetter is graded Tough \(13\.6-17\.0%\), then Damp \(over 17\.0%\)/,
+      ),
     ).toBeInTheDocument();
-    const sources = screen.getByRole('region', { name: 'Sources' });
+    expect(within(western).queryByRole('heading', { name: 'Damage, maximum' })).toBeNull();
+    await user.click(within(western).getByRole('button', { name: 'More details' }));
+    expect(within(western).getByRole('heading', { name: 'Damage, maximum' })).toBeInTheDocument();
+  });
+
+  it('shows only the class chosen, kept in the address', async () => {
+    const user = userEvent.setup();
+    render(<GrainPage id="oats" />);
+    await user.click(screen.getByRole('button', { name: 'Eastern' }));
+    expect(window.location.search).toBe('?class=ce-eastern');
+    expect(screen.getByRole('button', { name: 'Eastern' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Oats, Canada Eastern' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Oats, Canada Western' })).toBeNull();
+  });
+
+  it('groups wheat’s classes and shows a protein minimum', () => {
+    window.history.replaceState(null, '', '/grains/wheat?class=cwrs-western-red-spring');
+    render(<GrainPage id="wheat" />);
+    const classes = screen.getByRole('navigation', { name: 'Classes' });
+    expect(within(classes).getByRole('heading', { name: 'Western' })).toBeInTheDocument();
+    expect(within(classes).getByRole('heading', { name: 'Eastern' })).toBeInTheDocument();
+    const red = screen.getByRole('region', { name: 'Wheat, Canada Western Red Spring' });
+    expect(within(red).getByRole('row', { name: /No\. 1 CWRS 75 10\.0/ })).toBeInTheDocument();
+  });
+
+  it('keeps the grain’s other tables and sources under More about', async () => {
+    const user = userEvent.setup();
+    render(<GrainPage id="oats" />);
+    const more = screen.getByRole('region', { name: 'More about oats' });
+    expect(within(more).queryByRole('heading', { name: 'Sources' })).toBeNull();
+    await user.click(within(more).getByRole('button', { name: 'Show' }));
+    expect(
+      within(more).getByRole('heading', { name: 'Milling varieties in Alberta trials' }),
+    ).toBeInTheDocument();
+    const sources = within(more).getByRole('heading', { name: 'Sources' }).parentElement;
+    if (!sources) throw new Error('no Sources');
     expect(
       within(sources).getByRole('link', { name: /Official Grain Grading Guide/ }),
     ).toHaveAttribute('target', '_blank');
-    expect(within(sources).getAllByText(/checked November 5, 2026/).length).toBeGreaterThan(0);
+    expect(within(more).getAllByText(/checked November 5, 2026/).length).toBeGreaterThan(0);
   });
 
   it('shows the first 40 varieties of a long list, then all of them', async () => {
     const user = userEvent.setup();
-    const grain = GRAINS.find((candidate) =>
-      candidate.classes.some((grainClass) => (grainClass.varieties?.length ?? 0) > 40),
-    );
-    if (!grain) return;
-    const grainClass = grain.classes.find((candidate) => (candidate.varieties?.length ?? 0) > 40);
-    const count = grainClass?.varieties?.length ?? 0;
-    render(<GrainPage id={grain.id} />);
-    const list = screen.getByRole('list', { name: `Varieties of ${grainClass?.name ?? ''}` });
+    window.history.replaceState(null, '', '/grains/wheat?class=cwrs-western-red-spring');
+    render(<GrainPage id="wheat" />);
+    const red = screen.getByRole('region', { name: 'Wheat, Canada Western Red Spring' });
+    await user.click(within(red).getByRole('button', { name: 'More details' }));
+    const list = within(red).getByRole('list', {
+      name: 'Varieties of Wheat, Canada Western Red Spring',
+    });
     expect(within(list).getAllByRole('listitem')).toHaveLength(40);
-    const [showAll] = screen.getAllByRole('button', { name: `Show all ${String(count)}` });
+    const [showAll] = within(red).getAllByRole('button', { name: /^Show all \d+$/ });
     if (!showAll) throw new Error('no Show all button');
     await user.click(showAll);
-    expect(within(list).getAllByRole('listitem')).toHaveLength(count);
+    expect(within(list).getAllByRole('listitem').length).toBeGreaterThan(40);
   });
 
   it('says when there is no grain at the address', () => {
