@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #142
+
+- `docs/HANDOFF.md`: Codex's third review fixed (ivanmueller/gss#142) with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Handoff record of #141
 
 - `docs/HANDOFF.md`: Codex's reviews of the call readings fixed (ivanmueller/gss#141) with its CI and Deploy staging runs and the new migration.
