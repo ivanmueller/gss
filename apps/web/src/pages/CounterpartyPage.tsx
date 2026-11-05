@@ -549,8 +549,18 @@ function CounterpartyView({
   const trading = tradingLayout(detail.types);
   const carrier = detail.types.includes('carrier');
   const contactNames = useMemo(() => detail.contacts.map((contact) => contact.name), [detail]);
-  const crm = useCounterpartyCrm(session, { id: detail.id, archived, contactNames });
   const quotes = useCounterpartyQuotes(session, detail.id);
+  const crm = useCounterpartyCrm(session, {
+    id: detail.id,
+    archived,
+    contactNames,
+    contacts: detail.contacts,
+    // After a call's draft was saved: its contact or bid or offer shows on the page.
+    reload: () => {
+      reload();
+      quotes.reload();
+    },
+  });
   // Two columns on a computer screen (Tailwind's `xl`); one, in order of use, below it.
   const wide = useMediaQuery('(min-width: 1280px)', true);
 

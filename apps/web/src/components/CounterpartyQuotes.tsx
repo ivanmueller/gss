@@ -16,6 +16,8 @@ export interface CounterpartyQuotesState {
   /** Withdrawn and expired ones are listed too. */
   everything: boolean;
   setEverything: (everything: boolean) => void;
+  /** Loads the list again (after a bid or offer was saved from a call's draft). */
+  reload: () => void;
 }
 
 /** A counterparty's bids and offers, live ones unless `everything` is chosen. */
@@ -24,11 +26,11 @@ export function useCounterpartyQuotes(
   counterpartyId: string,
 ): CounterpartyQuotesState {
   const [everything, setEverything] = useState(false);
-  const [list] = useApiResource<QuoteListResponse>(
+  const [list, reload] = useApiResource<QuoteListResponse>(
     `/quotes?counterparty_id=${counterpartyId}${everything ? '&status=all' : ''}`,
     session.token,
   );
-  return { list, everything, setEverything };
+  return { list, everything, setEverything, reload };
 }
 
 /** A counterparty's bids and offers on its page, with buttons to enter new ones. */

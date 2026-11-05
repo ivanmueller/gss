@@ -8,6 +8,7 @@ import {
   type CallRecordingView,
 } from '@grain/domain';
 import {
+  Bot,
   Ellipsis,
   History,
   Mail,
@@ -20,10 +21,11 @@ import {
   Plus,
   Trash2,
   Users,
+  Voicemail,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { sendJson } from '../lib/api';
+import { sendJson, type Contact } from '../lib/api';
 import {
   canLogContacts,
   canRemoveContactLog,
@@ -34,8 +36,10 @@ import { albertaNowInput } from '../lib/time';
 import { useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ContactLogForm, FollowUpForm } from './CrmForms';
+import { CallReadingPanel, openDrafts, reachedVoicemail } from './CallDrafts';
 import { CallRecordingDetails } from './Calling';
 import { FollowUpItem } from './FollowUpItem';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
 import {
@@ -91,6 +95,7 @@ function Revision({ revision }: { revision: ContactLogEntry['current'] }) {
 }
 
 function Entry({
+  crm,
   session,
   entry,
   contactNames,
@@ -99,6 +104,7 @@ function Entry({
   onChanged,
   recordings,
 }: {
+  crm: CounterpartyCrmState;
   session: DirectorySession;
   entry: ContactLogEntry;
   contactNames: readonly string[];
@@ -119,10 +125,34 @@ function Entry({
   const earlier = entry.revisions.slice(1);
   const title = contactTitle(current);
   const loggedBy = entry.revisions.at(-1)?.recordedByName ?? current.recordedByName;
-  const summary = current.notes?.split('\n').find((line) => line.trim() !== '') ?? null;
+  const firstLine = (text: string | null | undefined) =>
+    text?.split('\n').find((line) => line.trim() !== '') ?? null;
+  const summary = firstLine(current.notes);
+  // Without notes of its own, the line shows the start of Claude's notes of the call.
+  const claudeSummary =
+    summary === null
+      ? (recordings.map((recording) => firstLine(recording.reading?.summary)).find(Boolean) ?? null)
+      : null;
+  const voicemail = reachedVoicemail(recordings);
+  const toReview = openDrafts(recordings);
   // Opening shows what the two lines leave out: all the notes (the line can cut even a single
   // paragraph short; Codex's review of ac2d085, finding 1), the call, earlier versions.
   const hasMore = recordings.length > 0 || earlier.length > 0 || summary !== null;
+  // Claude's notes become the entry's own (a new version) only while it has none.
+  const saveAsNotes =
+    canCorrect && (current.notes ?? '').trim() === ''
+      ? async (notes: string) => {
+          await sendJson(`/contact-log/${entry.id}/revisions`, session.token, 'POST', {
+            basedOnRevision: current.revisionNumber,
+            values: {
+              occurredAt: new Date(current.occurredAt).toISOString(),
+              channel: current.channel,
+              contactName: current.contactName,
+              notes,
+            },
+          });
+        }
+      : null;
 
   async function act(run: () => Promise<unknown>, message: string) {
     setBusy(true);
@@ -194,8 +224,25 @@ function Entry({
               <Pin aria-label="Pinned" className="size-3.5 shrink-0 text-muted-foreground" />
             )}
             <span className="shrink-0 font-medium">{title}</span>
+            {voicemail && (
+              <Badge variant="caution" className="shrink-0">
+                <Voicemail aria-hidden="true" />
+                Voicemail
+              </Badge>
+            )}
+            {toReview > 0 && (
+              <Badge variant="warning" className="shrink-0">
+                {toReview} to review
+              </Badge>
+            )}
             {summary !== null && (
               <span className="min-w-0 truncate text-muted-foreground">· {summary}</span>
+            )}
+            {claudeSummary !== null && (
+              <span className="min-w-0 truncate text-muted-foreground">
+                · <Bot aria-label="Claude's notes" className="inline size-3.5 align-[-2px]" />{' '}
+                {claudeSummary}
+              </span>
             )}
           </span>
           <span className="text-xs text-muted-foreground">
@@ -304,7 +351,10 @@ function Entry({
         <div className="ml-7 flex flex-col gap-2">
           {current.notes && <p className="text-sm whitespace-pre-line">{current.notes}</p>}
           {recordings.map((recording) => (
-            <CallRecordingDetails key={recording.id} token={session.token} recording={recording} />
+            <div key={recording.id} className="flex flex-col gap-2">
+              <CallRecordingDetails token={session.token} recording={recording} />
+              <CallReadingPanel crm={crm} recording={recording} saveAsNotes={saveAsNotes} />
+            </div>
           ))}
           {earlier.length > 0 && (
             <div className="flex flex-col gap-2">
@@ -347,7 +397,15 @@ export type CrmAdding = 'contact' | 'follow-up' | null;
 /** The CRM of one counterparty, shared by its follow-ups, its history and the page's header. */
 export interface CounterpartyCrmState {
   session: DirectorySession;
-  counterparty: { id: string; archived: boolean; contactNames: readonly string[] };
+  counterparty: {
+    id: string;
+    archived: boolean;
+    contactNames: readonly string[];
+    /** Its contacts, for drafts of a contact's new details (the counterparty's page). */
+    contacts?: readonly Contact[];
+    /** Loads the page again after a draft was saved as a contact, bid or offer. */
+    reload?: () => void;
+  };
   team: TeamMemberName[] | null;
   log: Resource<ContactLogResponse>;
   followUps: Resource<FollowUpListResponse>;
@@ -627,6 +685,7 @@ export function ContactHistoryCard({ crm }: { crm: CounterpartyCrmState }) {
             {log.data.entries.map((entry) => (
               <Entry
                 key={entry.id}
+                crm={crm}
                 session={session}
                 entry={entry}
                 contactNames={counterparty.contactNames}
