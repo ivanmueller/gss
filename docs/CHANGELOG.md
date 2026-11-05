@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #143
+
+- `docs/HANDOFF.md`: Claude copies each price, quantity and phone number as said, and the fifth review's fixes (ivanmueller/gss#143), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Codex's sixth review of the call readings
 
 - `docs/DECISIONS.md`: a range refused only on evidence of one.
