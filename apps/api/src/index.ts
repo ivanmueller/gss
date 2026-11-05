@@ -18,6 +18,7 @@ import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { memberRoutes } from './members';
 import { commodityRoutes, quoteRoutes } from './quotes';
+import { callReadingRoutes, readNewTranscripts } from './readings';
 import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 import { telnyxClient, type TelnyxFactory } from './telnyx';
 
@@ -128,6 +129,7 @@ export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: Tel
   app.route('/follow-ups', followUpRoutes(openDatabase));
   app.route('/me/phone', memberPhoneRoutes(openDatabase));
   app.route('/calls', callRoutes(openDatabase, telnyx));
+  app.route('/calls', callReadingRoutes(openDatabase));
 
   return app;
 }
@@ -137,10 +139,12 @@ export const app = createApp(postgresDatabase);
 export default {
   fetch: app.fetch,
   // wrangler.jsonc, triggers: the Bank of Canada's USD/CAD rate twice a day, and every 2 minutes
-  // (RECORDINGS_CRON) new recordings transcribed by side and call audio 24 hours old deleted.
+  // (RECORDINGS_CRON) new recordings transcribed by side, call audio 24 hours old deleted, and
+  // new transcripts read by Claude.
   scheduled(controller, env, ctx) {
     if (controller.cron === RECORDINGS_CRON) {
       ctx.waitUntil(runRecordingsJob(env, postgresDatabase));
+      ctx.waitUntil(readNewTranscripts(env, postgresDatabase));
       return;
     }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));

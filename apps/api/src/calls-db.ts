@@ -1,6 +1,7 @@
 import {
   callLogNotes,
   dialablePhone,
+  type CallDraftView,
   type CallOutcome,
   type CallRecordingView,
   type CallStatus,
@@ -259,6 +260,24 @@ const toPending = (row: CommandRow): PendingCommand => ({
   callControlId: row.call_control_id,
 });
 
+/** A draft as listed with its recording (decided_at as JSON text). */
+interface DraftRow {
+  id: string;
+  kind: CallDraftView['kind'];
+  status: CallDraftView['status'];
+  fields: CallDraftView['fields'];
+  lines: number[];
+  contactId: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  resultId: string | null;
+}
+
+const toDraftView = (row: DraftRow): CallDraftView => ({
+  ...row,
+  decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
+});
+
 export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
   return {
     getMemberPhone(ctx, organizationId) {
@@ -426,6 +445,15 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
             contact_name: string;
             failed: boolean;
             audio_until: Date | null;
+            read_at: Date | null;
+            read_model: string | null;
+            read_voicemail: boolean | null;
+            read_summary: string | null;
+            voicemail_corrected: boolean | null;
+            voicemail_corrected_by_name: string | null;
+            voicemail_corrected_at: Date | null;
+            reading_failed: boolean;
+            drafts: DraftRow[];
           }[]
         >`
           select r.id, r.call_id, c.contact_log_entry_id, r.transcript, r.transcript_lines,
@@ -433,7 +461,18 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
                  r.transcript is null
                    and (r.transcribe_attempts >= 5 or r.audio_deleted_at is not null) as failed,
                  case when r.audio_deleted_at is null and app.recording_audio_until(r) > now()
-                      then app.recording_audio_until(r) end as audio_until
+                      then app.recording_audio_until(r) end as audio_until,
+                 r.read_at, r.read_model, r.read_voicemail, r.read_summary,
+                 r.voicemail_corrected, r.voicemail_corrected_by_name, r.voicemail_corrected_at,
+                 r.read_at is null and r.reading_attempts >= 5 as reading_failed,
+                 coalesce((
+                   select jsonb_agg(jsonb_build_object(
+                            'id', d.id, 'kind', d.kind, 'status', d.status, 'fields', d.fields,
+                            'lines', d.lines, 'contactId', d.contact_id,
+                            'decidedByName', d.decided_by_name, 'decidedAt', d.decided_at,
+                            'resultId', d.result_id) order by d.position)
+                     from app.call_drafts d where d.recording_id = r.id
+                 ), '[]'::jsonb) as drafts
           from app.call_recordings r join app.calls c on c.id = r.call_id
           where c.counterparty_id = ${counterpartyId}
           order by r.created_at desc
@@ -448,6 +487,20 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           contactName: row.contact_name,
           transcriptFailed: row.failed,
           audioUntil: row.audio_until?.toISOString() ?? null,
+          reading:
+            row.read_at === null || row.read_model === null || row.read_voicemail === null
+              ? null
+              : {
+                  readAt: row.read_at.toISOString(),
+                  model: row.read_model,
+                  voicemail: row.voicemail_corrected ?? row.read_voicemail,
+                  claudeVoicemail: row.read_voicemail,
+                  voicemailCorrectedByName: row.voicemail_corrected_by_name,
+                  voicemailCorrectedAt: row.voicemail_corrected_at?.toISOString() ?? null,
+                  summary: row.read_summary,
+                  drafts: row.drafts.map(toDraftView),
+                },
+          readingFailed: row.reading_failed,
         }));
       });
     },

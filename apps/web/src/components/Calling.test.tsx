@@ -289,6 +289,8 @@ describe('CallRecordingDetails', () => {
     contactName: 'Pat Buyer',
     transcriptFailed: false,
     audioUntil: '2999-01-01T00:00:00.000Z',
+    reading: null,
+    readingFailed: false,
   };
 
   it('shows the transcript and plays the audio through the API', async () => {

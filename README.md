@@ -189,6 +189,15 @@ Until all four are there, phone numbers stay plain phone links and Telnyx's even
 
 Every call that connects is recorded (both sides). Every 2 minutes (`*/2 * * * *`) the Worker has Telnyx's speech-to-text (Deepgram) transcribe new recordings, each side separately; under the call in the contact history, everyone on the team sees **Transcript** as a conversation (who said each line) and, for 24 hours, **Play recording**. The audio stays at Telnyx and is deleted there 24 hours after the call by the same job, side by side with the transcription so one never holds back the other; the transcript stays.
 
+### Claude reads each call
+
+After a call's transcript is saved, the Worker's job every 2 minutes sends it to Claude (Anthropic's Opus 5.5) once, and keeps what comes back (owner's request and answers, 2026-11-05, `docs/DECISIONS.md`): a few lines of notes, whether the call reached a voicemail, and drafts of bids and offers, follow-ups and contact details. Nothing is saved as a bid, offer, follow-up or contact until a person opens a draft in the usual form and saves it; a draft can also be dismissed. A price, quantity or phone number is kept in a draft only when its digits were said in the transcript; anything not said stays blank. Calls transcribed before this was set up are read too, newest first. Anthropic is called only from the Worker; its key is a Worker secret the owner adds:
+
+1. At platform.claude.com, **API keys → Create key**, named for the staging Worker; copy it. (A monthly spend limit is set there under **Limits**.)
+2. In Cloudflare (**Workers & Pages → grain-trading-api-staging → Settings → Variables and Secrets → Add**): type **Secret**, name `ANTHROPIC_API_KEY`, paste the key, **Deploy**.
+
+Until it is there, calls work as before and nothing is sent to Anthropic. Failures appear in the Worker's log as `Call not read: …` with a status, never the transcript.
+
 ## Staging database connection
 
 The staging Worker reaches Supabase through Cloudflare Hyperdrive, which verifies Supabase's certificate (`docs/DECISIONS.md`). To create or update it: give the Cloudflare API token Hyperdrive and SSL and Certificates edit permissions, add the GitHub secret `SUPABASE_HYPERDRIVE_URL` (`postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres`, Supabase's session pooler), then run **Actions → Set up Hyperdrive (staging)**. Its summary shows the configuration ID that `apps/api/wrangler.jsonc` binds as `HYPERDRIVE`. Locally, `wrangler dev --env staging` connects that binding to the database in `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE` (CI sets it to the throwaway database).

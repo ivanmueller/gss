@@ -13,6 +13,7 @@ Build a secure, auditable Canadian-to-U.S. physical grain trading operations pla
 - Geocoding with Geocodio's free plan, from the Worker only, when counterparties and locations are added (owner's decisions, `docs/DECISIONS.md`): sure results are saved, doubtful ones are reviewed before saving.
 - FX: the Bank of Canada's daily USD/CAD rate, fetched once a day by the Worker and stored per day with its source, stale after four days (owner's decision, `docs/DECISIONS.md`). Built (GT-052): the Worker's scheduled job stores it at 14:15 and 22:15 UTC; without a current rate, USD bids and offers stay out of the workspace's order book with a note.
 - Calling and texting through Telnyx (owner's decisions, `docs/DECISIONS.md`): Telnyx is called from the Worker only, with its API key a Worker secret; its webhooks are accepted only with a valid Ed25519 signature. Recordings are transcribed by Telnyx's speech-to-text after the call; the audio stays at Telnyx and is deleted 24 hours after the call; transcripts are kept.
+- Claude through Anthropic's API (owner's decisions, `docs/DECISIONS.md`, 2026-11-05): called from the Worker only, with `ANTHROPIC_API_KEY` a Worker secret, one request per call transcript with no tools; it drafts notes, voicemail, bids and offers, follow-ups and contact details that a person confirms before anything is saved, and the Worker checks every price, quantity and phone number against the transcript.
 - Python is out of scope until analytics or optimization justifies it.
 
 ## Always follow

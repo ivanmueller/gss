@@ -1,5 +1,13 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Claude reads each call
+
+- `docs/DECISIONS.md`: the owner's request and answers (Opus 5.5, every call and the calls already transcribed, all four kinds of draft, voicemail from the transcript, a USD 100 spend limit); how a reading is checked; who accepts drafts; Anthropic's Commercial Terms on training; retention still to be read.
+- `docs/DATA_MODEL.md`: migration `20261105010000_call_readings.sql`.
+- `docs/API.md`: `reading` and `readingFailed` on the recordings list; `POST /calls/drafts/{id}/decision`; `POST /calls/recordings/{id}/voicemail`.
+- `README.md`: Claude reads each call, and the owner's two steps for the key.
+- `AGENTS.md`: Claude through Anthropic's API under the architecture.
+
 ## 2026-11-05 — Telnyx on a paid account
 
 - `docs/DECISIONS.md`: the owner's report that Telnyx is now a paid account; nothing in the app depended on the trial.
