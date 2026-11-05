@@ -1,5 +1,21 @@
 # Documentation pack changelog
 
+## 2026-11-05 — A number stays plain only in a plain statement
+
+- `docs/DECISIONS.md`: Codex's review of `6b9d065`: a short, closed list of plain words; whole names only.
+
+## 2026-11-05 — Only the call's own names
+
+- `docs/DECISIONS.md`: Codex's review of `9773921`: names only from the call, any symbol and words of change mark the number.
+
+## 2026-11-05 — Handoff record of #146
+
+- `docs/HANDOFF.md`: numbers filled in and marked when unusual (ivanmueller/gss#146), with its CI and Deploy staging runs.
+
+## 2026-11-05 — Ordinary words keep a number plain
+
+- `docs/DECISIONS.md`: Codex's review of `beebbf6` and the turned-around check (any word that is not ordinary marks the number).
+
 ## 2026-11-05 — Codex's review of the fill-and-mark contract
 
 - `docs/DECISIONS.md`: the nine findings on `5d1ecfa` and their fixes (signs and other numbers anywhere in the line, NFKC digits, scale abbreviations, "per" before a quantity, signed copies, more extension forms).

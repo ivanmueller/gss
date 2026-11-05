@@ -10,6 +10,7 @@ import {
   saidPhone,
   saidPrice,
   saidTonnes,
+  nameWords,
   type CallReading,
   type CitedLine,
   type ReadingContext,
@@ -125,7 +126,7 @@ describe('saidPrice: what was said is filled in, with where', () => {
       'CWT',
       null,
     ]);
-    expect(price('$1,025 a short ton', 'Say $1,025 a short ton.')).toEqual([
+    expect(price('$1,025 a short ton', 'We bid $1,025 a short ton.')).toEqual([
       '1025',
       null,
       'ST',
@@ -179,18 +180,15 @@ describe('saidPrice: what was said is filled in, with where', () => {
   it('keeps two prices and agreements in one sentence plain', () => {
     const line = 'We bid $7.25 a bushel and $310 a tonne for feed.';
     expect(price('$7.25 a bushel', line)?.[3]).toMatch(/another number/);
+    // Anything but a plain statement is marked, the price still filled in.
     expect(price('$725 a tonne', 'We can agree to $725 a tonne.')).toEqual([
       '725',
       null,
       'MT',
-      null,
+      'The line has a word to check, “agree”.',
     ]);
-    expect(price('$725 a tonne', 'For two loads, we agree to $725 a tonne.')).toEqual([
-      '725',
-      null,
-      'MT',
-      null,
-    ]);
+    // A number in words marks it.
+    expect(price('$725 a tonne', 'For two loads, we agree to $725 a tonne.')?.[3]).toMatch(/“two”/);
   });
 });
 
@@ -286,7 +284,7 @@ describe('saidPrice: anything unusual is filled in and marked for a second look'
     notPlain('$7', 'We bid $7½ per bushel.');
     doubtful('$1.5', 'The price is $1.5 M per tonne.', /said with “m”/);
     doubtful('$725 per tonne', 'Prices range from 700 U.S. to $725 per tonne.', /another number/);
-    doubtful('-$5 per tonne', 'The bid is -$5 per tonne.', /minus sign/);
+    doubtful('-$5 per tonne', 'The bid is -$5 per tonne.', /said with a sign/);
     doubtful('$1.5', 'We bid $1.5 million per tonne.', /said with “million”/);
     doubtful('$725', 'We bid $725 thousand.', /said with “thousand”/);
     doubtful('$725 per tonne', 'Give us $725 per tonne.', /next to it/);
@@ -294,11 +292,98 @@ describe('saidPrice: anything unusual is filled in and marked for a second look'
   });
 });
 
+describe('saidPrice and saidPhone: any word that is not ordinary marks the number (Codex, beebbf6)', () => {
+  it('marks worded fractions, worded numbers, deductions and foreign currencies', () => {
+    for (const [said, text] of [
+      ['$7', 'We bid $7 and a half per bushel.'],
+      ['$7', 'We bid $7 point five per bushel.'],
+      ['$7', 'We bid $7 and a quarter per bushel.'],
+      ['$9 per bushel', 'Offers range from seven dollars to $9 per bushel.'],
+      ['$9 per bushel', 'Seven dollars to $9 per bushel, they said.'],
+      ['$5 per tonne', 'The net bid is zero dollars after subtracting $5 per tonne.'],
+      ['$5 per tonne', 'Subtracting $5 per tonne from the bid.'],
+      ['US$725', 'Bid US$725 Australian dollars per tonne.'],
+    ] as const) {
+      // Refused (null), or filled with a reason to look twice.
+      expect(price(said, text)?.[3] !== null, text).toBe(true);
+    }
+  });
+
+  it('fills a whole signed copy, marked (Codex, beebbf6, P3)', () => {
+    expect(price('+$5 per tonne', 'The bid is +$5 per tonne.')).toEqual([
+      '5',
+      null,
+      'MT',
+      'It was said with a sign.',
+    ]);
+    expect(price('plus $5 per tonne', 'The bid is plus $5 per tonne.')?.[3]).toBe(
+      'It was said with a sign.',
+    );
+    expect(tonnes('+500 tonnes', 'Add +500 tonnes.')).toEqual(['500', 'It was said with a sign.']);
+  });
+
+  it('marks a phone number after a foreign code in words', () => {
+    expect(phone('403 555 0177', 'Our UK number is plus forty four 403 555 0177.')?.[1]).toMatch(
+      /word to check/,
+    );
+  });
+
+  it("leaves ordinary lines plain, the call's own names included", () => {
+    expect(price('$725 a tonne', 'Yeah we can do $725 a tonne delivered.')).toEqual([
+      '725',
+      null,
+      'MT',
+      null,
+    ]);
+    const names = nameWords(['Synthetic Prairie Mills', 'Sam Buyer']);
+    expect(
+      saidPhone('403 555 0177', one('Call Sam Buyer at 403 555 0177.'), names)?.check.doubt,
+    ).toBeNull();
+    expect(
+      saidPrice('$725 a tonne', one('Synthetic Prairie Mills can do $725 a tonne.'), [], names)
+        ?.check.doubt,
+    ).toBeNull();
+    // Only a whole name: one of its words alone is not one (Codex, 6b9d065).
+    const down = nameWords(['Sam Down']);
+    expect(
+      saidPrice('$5 per tonne', one('Our bid is down $5 per tonne.'), [], down)?.check.doubt,
+    ).toMatch(/“down”/);
+  });
+
+  it('marks a negation or a deduction, however plain the words (Codex, 6b9d065)', () => {
+    expect(tonnes('500 tonnes', 'We do not have 500 tonnes available.')?.[1]).toMatch(/“not”/);
+    expect(price('$725 per tonne', 'We do not bid $725 per tonne.')?.[3]).toMatch(/“not”/);
+    expect(price('$5 per tonne', 'Take $5 per tonne for dockage.')?.[3]).toMatch(/“take”/);
+  });
+
+  it('marks a word it does not know, even capitalized: a code, a place (Codex, 9773921)', () => {
+    expect(price('US$725 per tonne', 'We bid US$725 per tonne AUD.')?.[3]).toMatch(/“aud”/);
+    expect(price('$5 per tonne', 'Our bid is a Debit of $5 per tonne.')?.[3]).toMatch(/“debit”/);
+    expect(price('$725 a tonne', 'Our bid is from Nought to $725 a tonne.')?.[3]).toMatch(
+      /word to check/,
+    );
+    expect(price('$725 a tonne', 'We can do $725 a tonne delivered Lethbridge.')?.[3]).toMatch(
+      /“lethbridge”/,
+    );
+  });
+
+  it('marks any symbol and any word that says the price moved (Codex, 9773921)', () => {
+    for (const symbol of ['\u2796', '\u00b1', '\u2213', '%', '&']) {
+      expect(price('$5 per tonne', `We bid ${symbol}$5 per tonne.`)?.[3], symbol).not.toBeNull();
+    }
+    for (const word of ['down', 'up', 'back', 'over', 'more', 'after']) {
+      expect(price('$5 per tonne', `Our bid is ${word} $5 per tonne.`)?.[3], word).toMatch(
+        new RegExp(word),
+      );
+    }
+  });
+});
+
 describe('saidTonnes', () => {
   it('reads a quantity said whole in metric tonnes', () => {
     expect(tonnes('1,500 tonnes', 'For 1,500 tonnes.')).toEqual(['1500', null]);
-    expect(tonnes('.5 tonnes', 'Only .5 tonnes left.')).toEqual(['0.5', null]);
-    expect(tonnes('200 mt', '200 MT a month.')).toEqual(['200', null]);
+    expect(tonnes('.5 tonnes', 'We have .5 tonnes.')).toEqual(['0.5', null]);
+    expect(tonnes('200 mt', 'We have 200 MT.')).toEqual(['200', null]);
     expect(tonnes('500 t', 'We have 500 t.')).toEqual(['500', null]);
     expect(tonnes('500 mts', 'We have 500 mts.')).toEqual(['500', null]);
     expect(tonnes('500 metric-tonnes', 'We have 500 metric-tonnes.')).toEqual(['500', null]);
@@ -335,7 +420,7 @@ describe('saidTonnes', () => {
 
 describe('saidPhone', () => {
   it('reads a North American number said whole, written as the directory keeps it', () => {
-    expect(phone('403 555 0177', 'Reach Sam at 403 555 0177.')).toEqual(['(403) 555-0177', null]);
+    expect(phone('403 555 0177', 'Reach us at 403 555 0177.')).toEqual(['(403) 555-0177', null]);
     expect(phone('1-403-555-0177 extension 12', 'Call 1-403-555-0177 extension 12.')).toEqual([
       '(403) 555-0177 x12',
       null,
@@ -423,8 +508,17 @@ describe('checkReading: bids and offers', () => {
             validUntil: '2026-11-06T18:00:00.000Z',
           },
           checks: {
-            price: { said: '$725.50 Canadian a tonne', line: 1, doubt: null },
-            quantityMax: { said: '1,500 tonnes', line: 1, doubt: null },
+            // A place is not one of the call's names: a second look, the values still filled.
+            price: {
+              said: '$725.50 Canadian a tonne',
+              line: 1,
+              doubt: 'The line has a word to check, “lethbridge”.',
+            },
+            quantityMax: {
+              said: '1,500 tonnes',
+              line: 1,
+              doubt: 'The line has a word to check, “lethbridge”.',
+            },
           },
         },
         lines: [1, 2],
@@ -570,7 +664,14 @@ describe('checkReading: contacts', () => {
       contactId: null,
       fields: {
         values: { contactName: 'Sam', contactRole: 'Merchandiser', contactPhone: '(403) 555-0177' },
-        checks: { contactPhone: { said: '403 555 0177', line: 3, doubt: null } },
+        // "Talk to … new merchandiser" is not a plain way to give a number: a second look.
+        checks: {
+          contactPhone: {
+            said: '403 555 0177',
+            line: 3,
+            doubt: 'The line has a word to check, “talk”.',
+          },
+        },
       },
       lines: [3],
     });

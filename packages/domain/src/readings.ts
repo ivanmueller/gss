@@ -198,6 +198,8 @@ export interface ReadingContext {
   }[];
   /** Who placed the call: the follow-ups are theirs. */
   callerId: string;
+  /** The call's names (the company, the contact called, the caller): ordinary in its lines. */
+  names?: readonly string[];
   /** When the call connected (UTC instant): the bids and offers are quoted then. */
   calledAt: string;
 }
@@ -294,6 +296,9 @@ interface Found {
   after: string;
   /** The rest of the line they stand in, without them. */
   rest: string;
+  /** Where they stand in the line (squashed), and how long they are. */
+  at: number;
+  length: number;
 }
 
 /**
@@ -317,7 +322,7 @@ function find(
         (/[\p{L}\p{N}]$/u.test(before) && /^[\p{L}\p{N}]/u.test(needle)) ||
         (/[\p{L}\p{N}]$/u.test(needle) && /^[\p{L}\p{N}]/u.test(after));
       if (glued || refuse(before, after)) continue;
-      return { line, before, after, rest: `${before} ${after}` };
+      return { line, before, after, rest: `${before} ${after}`, at, length: needle.length };
     }
   }
   return null;
@@ -352,12 +357,112 @@ const PRICE_WORD_AFTER =
   /^\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.|dollars?|bucks|(?:a|an|per)\s+(?:metric\s+)?(?:tonnes?|tons?|t|mts?|bushels?|bu|hundredweights?|cwt)\b|\/)/;
 
 /**
+ * The only words a line may hold, besides its numbers' own words and the call's names, for a
+ * price or quantity to stay plain: a plain statement of a bid or offer ("we bid", "our offer is",
+ * "can do", "delivered", "firm") and the grains and units. None of them can say "not", "less",
+ * "down", "take … for dockage", a range or a condition; any other word marks the number "Check
+ * this" (the owner's choice of 2026-11-05: a text check cannot read meaning, so anything but a
+ * plain statement is left to the person, with the number still filled in; Codex's reviews of
+ * 9773921 and 6b9d065).
+ */
+const PLAIN_AMOUNT_WORDS: ReadonlySet<string> = new Set(
+  `a an and are at barley be beans bid bidding bids bushel
+bushels can canary canola cash chickpeas corn cwt delivered delivery do durum
+elevator ex faba farm feed firm flax flaxseed fob for grain green
+has have hello hi hundredweight i indicative is it it's lentil lentils
+malt metric mt mts mustard my oat oats offer offering offers ok
+okay our pea peas plant price priced prices red rye seed soybean
+soybeans spring sunflower thanks that that's the this today tonne tonnes we
+wheat will winter would yeah yellow yes`.split(/\s+/),
+);
+/** The same for a phone number: how one is given ("call", "reach me at", "cell", "extension"). */
+const PLAIN_PHONE_WORDS: ReadonlySet<string> = new Set(
+  `a an are at be call can cell desk ext extension hello
+her hi his i is it it's me my number office ok
+okay on our phone reach thanks that that's the their this us
+we will x yeah yes`.split(/\s+/),
+);
+/** Numbers in words: never ordinary, even as a name. */
+const NUMBER_WORDS = new Set(
+  `billion couple double dozen eight eighteen eighty eleven few fifteen fifth fifty
+five forty four fourteen fourth half halves hundred hundreds million millions nine
+nineteen ninety oh one point quarter quarters seven seventeen seventy several six
+sixteen sixty ten tenth third thirds thirteen thirty thousand thousands three triple
+twelve twenty two zero`.split(/\s+/),
+);
+
+/** No names known. */
+const NO_NAMES: ReadonlySet<string> = new Set();
+
+/**
+ * The call's full names (the company, the contact called, the caller, its contacts), squashed,
+ * as phrases of at least two words: only a whole name in a line is a name, never one of its
+ * words alone ("down" is not "Sam Down"; Codex's review of 6b9d065).
+ */
+export function nameWords(names: readonly (string | null | undefined)[]): ReadonlySet<string> {
+  const phrases = new Set<string>();
+  for (const name of names) {
+    const phrase = squash(name ?? '');
+    if (phrase.split(' ').length >= 2) phrases.add(phrase);
+  }
+  return phrases;
+}
+
+/** The marks an ordinary line may hold: spaces, everyday punctuation, quotes, hyphens. */
+const ORDINARY_MARK = /[\p{L}\p{N}\s.,!?;:'"()\u2018\u2019\u201C\u201D\p{Pd}]/u;
+
+/**
+ * The first word or mark in a line, other than the copied words, the draft's own filled-in
+ * amounts (`masked`) and the call's whole names (`names`), that is not plain, or null: a word not
+ * in `plain`, a number in words, or any symbol other than everyday punctuation ("➖", "±", "%").
+ */
+function unusualWord(
+  line: string,
+  masked: readonly { at: number; length: number }[],
+  names: ReadonlySet<string>,
+  plain: ReadonlySet<string>,
+): string | null {
+  let text = squash(line);
+  for (const { at, length } of masked) {
+    text = `${text.slice(0, at)}${' '.repeat(length)}${text.slice(at + length)}`;
+  }
+  for (const name of names) {
+    text = text.split(name).join(' '.repeat(name.length));
+  }
+  for (const char of text) {
+    if (!ORDINARY_MARK.test(char)) return char;
+  }
+  for (const match of text.matchAll(/[\p{L}][\p{L}'\u2019]*/gu)) {
+    const word = match[0].replace(/\u2019/g, "'");
+    if (NUMBER_WORDS.has(word)) return match[0];
+    if (plain.has(word)) continue;
+    return match[0];
+  }
+  return null;
+}
+
+/** Where each of `phrases` first stands in a squashed line, to mask it. */
+function spansOf(line: string, phrases: readonly string[]): { at: number; length: number }[] {
+  const text = squash(line);
+  return phrases.flatMap((phrase) => {
+    const words = squash(phrase);
+    const at = words === '' ? -1 : text.indexOf(words);
+    return at === -1 ? [] : [{ at, length: words.length }];
+  });
+}
+
+/**
  * Why a person should look twice at an amount found in a transcript line, or null: a sign word
  * or a dash, minus or plus sign anywhere in the line, a fraction or scale after it, another
  * number anywhere in the line (other than the ones `explained`: the draft's own price and
  * quantities, only those filled in), or currency or unit words next to it left out of the copy.
  */
-function amountDoubt(found: Found, line: string, explained: readonly string[]): string | null {
+function amountDoubt(
+  found: Found,
+  line: string,
+  explained: readonly string[],
+  names: ReadonlySet<string>,
+): string | null {
   const text = squash(line);
   const sign = SIGN_WORDS.exec(text);
   if (sign !== null) return `The line says “${sign[0]}”.`;
@@ -375,11 +480,16 @@ function amountDoubt(found: Found, line: string, explained: readonly string[]): 
   if (PRICE_WORD_BEFORE.test(found.before) || PRICE_WORD_AFTER.test(found.after)) {
     return 'Words right next to it may belong to it.';
   }
+  const word = unusualWord(line, [found, ...spansOf(line, explained)], names, PLAIN_AMOUNT_WORDS);
+  if (word !== null) return `The line has a word to check, “${word}”.`;
   return null;
 }
 
-/** A sign copied with the amount: it is read without it, and marked for a second look. */
-const SIGN_COPIED = /^(?:[-\u2212]|minus\s+|negative\s+)\s*/;
+/**
+ * A sign copied with the amount ("-$5", "+$5", "minus 5", "plus 500 tonnes"): it is read without
+ * it, and marked for a second look.
+ */
+const SIGN_COPIED = /^(?:[-\u2212+]|minus\s+|negative\s+|plus\s+)\s*/;
 
 /** A number as written: "1,500", "1 500", "725.50", ".50". */
 const NUMBER = String.raw`(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?: \d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
@@ -438,6 +548,7 @@ export function saidPrice(
   said: string | null,
   cited: readonly CitedLine[],
   explained: readonly (string | null)[] = [],
+  names: ReadonlySet<string> = NO_NAMES,
 ): {
   amount: string;
   currency: QuoteCurrency | null;
@@ -494,8 +605,9 @@ export function saidPrice(
               found,
               line,
               explained.filter((e) => e !== null),
+              names,
             )
-          : 'It was said with a minus sign.',
+          : 'It was said with a sign.',
     },
   };
 }
@@ -505,6 +617,7 @@ export function saidTonnes(
   said: string | null,
   cited: readonly CitedLine[],
   explained: readonly (string | null)[] = [],
+  names: ReadonlySet<string> = NO_NAMES,
 ): { amount: string; check: SaidCheck } | null {
   if (said === null) return null;
   const words = squash(said);
@@ -520,13 +633,14 @@ export function saidTonnes(
     found,
     line,
     explained.filter((e) => e !== null),
+    names,
   );
-  if (sign !== null) doubt = 'It was said with a minus sign.';
-  else if (doubt === null && /\$\s*$/.test(found.before))
-    doubt = 'A dollar sign is right before it.';
   // "Per 500 tonnes" is part of a price, not a quantity on offer (Codex's review of 5d1ecfa).
-  else if (doubt === null && /(?:\b(?:per|a|an|each)|\/)\s*$/.test(found.before)) {
+  if (sign !== null) doubt = 'It was said with a sign.';
+  else if (/(?:\b(?:per|a|an|each)|\/)\s*$/.test(found.before)) {
     doubt = 'It is said after “per”: it may be part of a price.';
+  } else if (doubt === null && /\$\s*$/.test(found.before)) {
+    doubt = 'A dollar sign is right before it.';
   }
   return { amount, check: { said, line: found.line, doubt } };
 }
@@ -560,6 +674,7 @@ const EXTENSION_AFTER = /^\s*[,;:(]?\s*(?:x\s*\d|ext|extn|extension|#\s*\d)/;
 export function saidPhone(
   said: string | null,
   cited: readonly CitedLine[],
+  names: ReadonlySet<string> = NO_NAMES,
 ): { phone: string; check: SaidCheck } | null {
   if (said === null) return null;
   const match = PHONE_SAID.exec(squash(said));
@@ -573,6 +688,10 @@ export function saidPhone(
     doubt = 'An extension may follow it.';
   } else if (/\p{N}/u.test(found.rest)) {
     doubt = 'The line has another number.';
+  } else {
+    const line = cited.find((c) => c.line === found.line)?.text ?? '';
+    const word = unusualWord(line, [found], names, PLAIN_PHONE_WORDS);
+    if (word !== null) doubt = `The line has a word to check, “${word}”.`;
   }
   return {
     phone: extension === undefined ? written : `${written} x${extension}`,
@@ -614,6 +733,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     return { lines, cited: lines.map((n) => ({ line: n, text: context.lines[n]?.text ?? '' })) };
   };
   const drafts: DraftInput[] = [];
+  const names = nameWords([...(context.names ?? []), ...context.contacts.map((c) => c.name)]);
   const quotedAt = new Date(context.calledAt).toISOString();
   const reference = label(`Call of ${formatAlberta(quotedAt)}, drafted by Claude`);
 
@@ -635,7 +755,7 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     const minOk = filled(quote.quantityMinSaid, saidTonnes(quote.quantityMinSaid, cited));
     const maxOk = filled(quote.quantityMaxSaid, saidTonnes(quote.quantityMaxSaid, cited));
     const priceOk = filled(quote.priceSaid, saidPrice(quote.priceSaid, cited));
-    const price = saidPrice(quote.priceSaid, cited, [minOk, maxOk]);
+    const price = saidPrice(quote.priceSaid, cited, [minOk, maxOk], names);
     if (price !== null) checks.price = price.check;
     put(values, 'price', price?.amount ?? null);
     put(values, 'currency', price?.currency ?? null);
@@ -643,8 +763,8 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     put(values, 'grade', label(quote.grade));
     put(values, 'deliveryBasis', quote.deliveryBasis);
     put(values, 'basisLocation', label(quote.basisLocation));
-    const quantityMin = saidTonnes(quote.quantityMinSaid, cited, [priceOk, maxOk]);
-    const quantityMax = saidTonnes(quote.quantityMaxSaid, cited, [priceOk, minOk]);
+    const quantityMin = saidTonnes(quote.quantityMinSaid, cited, [priceOk, maxOk], names);
+    const quantityMax = saidTonnes(quote.quantityMaxSaid, cited, [priceOk, minOk], names);
     if (quantityMin !== null) checks.quantityMin = quantityMin.check;
     if (quantityMax !== null) checks.quantityMax = quantityMax.check;
     put(values, 'quantityMin', quantityMin?.amount ?? null);
@@ -685,7 +805,12 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     put(found, 'contactName', label(contact.name));
     put(found, 'contactRole', label(contact.role));
     put(found, 'contactEmail', email !== null && EMAIL.test(email) ? email : null);
-    const phone = saidPhone(contact.phoneSaid, cited);
+    // The person drafted is a name in the line their number was said in.
+    const phone = saidPhone(
+      contact.phoneSaid,
+      cited,
+      new Set([...names, ...nameWords([contact.name])]),
+    );
     put(found, 'contactPhone', phone?.phone ?? null);
     const values: ContactFormValues = {};
     const same = (a: string | null | undefined, b: string | null) =>
