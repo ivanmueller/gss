@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Codex's fifth review of the call readings
+
+- `docs/DECISIONS.md`: the four findings on `5e25edd` and their fixes; the slow import test given longer.
+
 ## 2026-11-05 — Codex's fourth review of the call readings
 
 - `docs/DECISIONS.md`: the three findings on `66e61ae` and the new approach (Claude copies each price, quantity and phone number exactly as said; the Worker checks the words stand whole and reads the price, currency and unit from them alone).

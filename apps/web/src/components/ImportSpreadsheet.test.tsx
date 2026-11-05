@@ -112,41 +112,50 @@ function proposal(n: number, city: string, match: Record<string, unknown> | null
 }
 
 describe('ImportSpreadsheet', () => {
-  it('imports a file of sellers and lists the columns that are not used', async () => {
-    const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
-    importer();
-    await chooseFile(
-      ['Grower,Country,Bushels,Notes', 'Synthetic Grower,Canada,5000,Synthetic', ''].join('\n'),
-    );
+  // The file's first test also pays for loading the import screen, and it works two dropdowns:
+  // about 1.7 s locally, and over the default 5 s once on a busy CI runner (run #319). Its
+  // checks are unchanged; it is only given longer to finish.
+  it(
+    'imports a file of sellers and lists the columns that are not used',
+    { timeout: 15_000 },
+    async () => {
+      const calls = mockApi({ 'POST /counterparties/import': () => Response.json(result()) });
+      importer();
+      await chooseFile(
+        ['Grower,Country,Bushels,Notes', 'Synthetic Grower,Canada,5000,Synthetic', ''].join('\n'),
+      );
 
-    expect(await screen.findByLabelText('Company name (required)')).toHaveTextContent('Grower');
-    expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent('Bushels');
-    expect(screen.getByText(/1 column in your file is not used/)).toBeInTheDocument();
-    // The columns found are listed in green, and their fields marked found (owner's request,
-    // 2026-11-01).
-    expect(screen.getByRole('list', { name: 'Columns found' }).textContent).toBe(
-      'GrowerCountryNotes',
-    );
-    expect(screen.getByText(/3 columns found in your file/)).toBeInTheDocument();
-    const legalName = screen.getByLabelText('Company name (required)').closest('[data-found]');
-    expect(legalName).toHaveClass('bg-success-subtle');
-    expect(legalName).toHaveTextContent('Found in your file.');
-    expect(screen.getByLabelText('Website').closest('[data-found]')).toBeNull();
+      expect(await screen.findByLabelText('Company name (required)')).toHaveTextContent('Grower');
+      expect(screen.getByRole('list', { name: 'Columns not used' })).toHaveTextContent('Bushels');
+      expect(screen.getByText(/1 column in your file is not used/)).toBeInTheDocument();
+      // The columns found are listed in green, and their fields marked found (owner's request,
+      // 2026-11-01).
+      expect(screen.getByRole('list', { name: 'Columns found' }).textContent).toBe(
+        'GrowerCountryNotes',
+      );
+      expect(screen.getByText(/3 columns found in your file/)).toBeInTheDocument();
+      const legalName = screen.getByLabelText('Company name (required)').closest('[data-found]');
+      expect(legalName).toHaveClass('bg-success-subtle');
+      expect(legalName).toHaveTextContent('Found in your file.');
+      expect(screen.getByLabelText('Website').closest('[data-found]')).toBeNull();
 
-    const side = screen.getByRole('group', { name: 'The companies in this file are' });
-    // A carrier sheet too (owner's request, 2026-11-01).
-    expect(within(side).getByRole('button', { name: 'Carriers' })).toBeInTheDocument();
-    await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
-    // Choosing the column for a field takes it off the unused list.
-    await choose(screen.getByLabelText('Counterparty type'), 'Bushels');
-    expect(screen.getByText('Every column in your file is used.')).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Rows with an empty type are' })).toBeInTheDocument();
-    await choose(screen.getByLabelText('Counterparty type'), '— not in my file —');
+      const side = screen.getByRole('group', { name: 'The companies in this file are' });
+      // A carrier sheet too (owner's request, 2026-11-01).
+      expect(within(side).getByRole('button', { name: 'Carriers' })).toBeInTheDocument();
+      await userEvent.click(within(side).getByRole('button', { name: 'Sellers' }));
+      // Choosing the column for a field takes it off the unused list.
+      await choose(screen.getByLabelText('Counterparty type'), 'Bushels');
+      expect(screen.getByText('Every column in your file is used.')).toBeInTheDocument();
+      expect(
+        screen.getByRole('group', { name: 'Rows with an empty type are' }),
+      ).toBeInTheDocument();
+      await choose(screen.getByLabelText('Counterparty type'), '— not in my file —');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
-    const review = calls.find((call) => call.method === 'POST');
-    expect(review?.body).toMatchObject({ defaultTypes: ['seller'] });
-  });
+      await userEvent.click(screen.getByRole('button', { name: 'Review import' }));
+      const review = calls.find((call) => call.method === 'POST');
+      expect(review?.body).toMatchObject({ defaultTypes: ['seller'] });
+    },
+  );
 
   // The owner's request of 2026-11-03: the columns offered follow who the file's companies are.
   it("starts a sellers' file on Sellers, its own columns offered and no Market", async () => {

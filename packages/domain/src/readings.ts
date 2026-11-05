@@ -288,25 +288,27 @@ function standsAlone(
  * Right before an amount, what makes it part of something else: a sign ("-$5", "minus", "less"),
  * another digit, a decimal point or thousands separator against it (".50" copied as "50",
  * "1,500" as "500"), a dollar sign or currency left out of it ("CAD $5" copied as "$5"), the
- * first end of a range ("from", "between … and"). A comma or full stop ending the words before
- * (", US$7.25") is not part of it.
+ * first end of a range ("from", "to", "between … and"), and a currency word ("minus Canadian
+ * $5" copied as "$5"; Codex's review of 5e25edd, finding 1). A comma or full stop ending the
+ * words before (", US$7.25") is not part of it.
  */
 const AMOUNT_JOINS_BEFORE =
-  /(?:(?:[\d$+\-−–—/]|\b(?:minus|negative|less|plus|from|usd|cad|cdn|us|c)|\bbetween\b[^.;]*\band)\s*|\.|\d,)$/;
-/** Right after an amount: more of the number, or the other end of a range ("-725", "to 725"). */
-const AMOUNT_JOINS_AFTER = /^\s*(?:\d|[.,]\d|[-−–—/]\s*\$?\s*\.?\d|(?:to|and|or)\s+\$?\s*\.?\d|%)/;
+  /(?:(?:[\d$+\-−–—/]|\b(?:minus|negative|less|plus|from|to|usd|cad|cdn|us|u\.s|c|canadian|american)|\bbetween\b[^.;]*\band)\s*|\.|\d,)$/;
+/** Right after an amount: more of the number, or the other end of a range ("-725", "to CAD $725"). */
+const AMOUNT_JOINS_AFTER =
+  /^\s*(?:\d|[.,]\d|(?:[-−–—/]|(?:to|and|or)\s)\s*(?:(?:usd|cad|cdn|us|u\.s\.|c|canadian|american)\s*)?\$?\s*\.?\d|%)/;
 
 /** A number as written: "1,500", "725.50", ".50". */
 const NUMBER = String.raw`(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
 const UNIT = String.raw`(metric tonnes?|metric tons?|tonnes?|mt|short tons?|tons?|bushels?|bu|hundredweights?|cwt)`;
 
 /**
- * A price as said, whole: an optional currency before ("CAD", "USD $", "US$", "C$", "$"), the
+ * A price as said, whole: an optional currency before ("CAD", "USD $", "US$", "US $", "C$", "$"), the
  * number, an optional currency after ("Canadian", "USD", "US"), "dollars", and an optional unit
  * ("a tonne", "per bushel", "/mt"). Nothing else: no sign, no second number.
  */
 const PRICE_SAID = new RegExp(
-  String.raw`^(?:(usd|cad|cdn)\s*\$?|(us|u\.s\.|c)\$|(\$))?\s*${NUMBER}\s*(usd|cad|cdn|canadian|american|us|u\.s\.)?\s*(dollars?|bucks)?\s*(?:(?:a|an|per|/)\s*${UNIT})?$`,
+  String.raw`^(?:(usd|cad|cdn)\s*\$?|(us|u\.s\.|c|canadian|american)\s*\$|(\$))?\s*${NUMBER}\s*(usd|cad|cdn|canadian|american|us|u\.s\.)?\s*(dollars?|bucks)?\s*(?:(?:a|an|per|/)\s*${UNIT})?$`,
 );
 /** A quantity as said, whole: the number and metric tonnes. */
 const TONNES_SAID = new RegExp(String.raw`^${NUMBER}\s*(metric tonnes?|metric tons?|tonnes?|mt)$`);
@@ -351,7 +353,10 @@ export function saidPrice(
   const match = PRICE_SAID.exec(squash(said));
   if (match === null) return null;
   const [, codeBefore, shortBefore, dollarSign, written = '', codeAfter, dollars, unitWord] = match;
-  if (!(codeBefore ?? shortBefore ?? dollarSign ?? codeAfter ?? dollars ?? unitWord)) return null;
+  // A price says so: a dollar sign, a currency code, "dollars" or a unit. A country word alone
+  // after a number is not one ("725 US customers"; Codex's review of 5e25edd, finding 2).
+  const codeOnly = codeAfter !== undefined && /^(?:usd|cad|cdn)$/.test(codeAfter);
+  if (!(codeBefore ?? shortBefore ?? dollarSign ?? dollars ?? unitWord) && !codeOnly) return null;
   const before = currencyOf(codeBefore ?? shortBefore);
   const after = currencyOf(codeAfter);
   if (before !== null && after !== null && before !== after) return null;
@@ -377,9 +382,12 @@ export function saidTonnes(said: string | null, lines: readonly string[]): strin
  */
 const PHONE_SAID =
   /^(?:\+?1[\s.-]*)?(?:\((\d{3})\)|(\d{3}))[\s.-]*(\d{3})[\s.-]*(\d{4})(?:\s*,?\s*(?:x|ext\.?|extension)\s*(\d{1,10}))?$/;
-/** Right before or after a phone number: more of a number ("+44 20 …", "… 0177 9"). */
+/**
+ * Right before or after a phone number: more of a number ("+44 20 …", "… 0177 9"), or an
+ * extension said after it and left out of the copy (Codex's review of 5e25edd, finding 3).
+ */
 const PHONE_JOINS_BEFORE = /(?:\d[\s().-]*|\+\s*)$/;
-const PHONE_JOINS_AFTER = /^[\s().-]*\d/;
+const PHONE_JOINS_AFTER = /^(?:[\s().-]*\d|\s*,?\s*(?:x|ext\b|extension)\s*\.?\s*\d)/;
 
 /**
  * A phone number as one thing said in the cited lines, written as the directory keeps it,

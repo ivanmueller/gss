@@ -161,6 +161,36 @@ describe('saidPrice', () => {
     expect(saidPrice('$725 a ton', ['It is $725 a tonne.'])).toBeNull();
   });
 
+  it('refuses a price cut out of a signed or ranged one past a currency (Codex, fifth review, finding 1)', () => {
+    expect(saidPrice('$5 a tonne', ['It is minus Canadian $5 a tonne.'])).toBeNull();
+    expect(saidPrice('CAD $725 per tonne', ['From CAD $700 to CAD $725 per tonne.'])).toBeNull();
+    expect(saidPrice('CAD $700', ['From CAD $700 to CAD $725 per tonne.'])).toBeNull();
+    expect(saidPrice('$725 per tonne', ['From US $700 to US $725 per tonne.'])).toBeNull();
+  });
+
+  it('is not a price for a number and a country word alone (Codex, fifth review, finding 2)', () => {
+    expect(saidPrice('725 US', ['We serve 725 US customers.'])).toBeNull();
+    expect(saidPrice('725 Canadian', ['We have 725 Canadian growers.'])).toBeNull();
+    expect(saidPrice('725 USD', ['Make it 725 USD.'])).toEqual({
+      amount: '725',
+      currency: 'USD',
+      unit: null,
+    });
+  });
+
+  it('reads a currency written with a space before the dollar sign (Codex, fifth review, finding 4)', () => {
+    expect(saidPrice('US $725 per tonne', ['That is US $725 per tonne.'])).toEqual({
+      amount: '725',
+      currency: 'USD',
+      unit: 'MT',
+    });
+    expect(saidPrice('Canadian $310 a tonne', ['Canadian $310 a tonne, firm.'])).toEqual({
+      amount: '310',
+      currency: 'CAD',
+      unit: 'MT',
+    });
+  });
+
   it('refuses two currencies, zero, or anything more than one price', () => {
     expect(saidPrice('CAD $725 US', ['CAD $725 US'])).toBeNull();
     expect(saidPrice('$0 a tonne', ['$0 a tonne'])).toBeNull();
@@ -201,6 +231,17 @@ describe('saidPhone', () => {
       ]),
     ).toBeNull();
     expect(saidPhone('403 555 0177 x123 x999', ['403 555 0177 x123 x999'])).toBeNull();
+  });
+
+  it('refuses a number copied without the extension said after it (Codex, fifth review, finding 3)', () => {
+    expect(saidPhone('403 555 0177', ['Call 403 555 0177 extension 12.'])).toBeNull();
+    expect(saidPhone('403 555 0177', ['Call 403 555 0177, ext. 12.'])).toBeNull();
+    expect(saidPhone('403 555 0177 extension 12', ['Call 403 555 0177 extension 12.'])).toBe(
+      '(403) 555-0177 x12',
+    );
+    expect(saidPhone('403 555 0177', ['Call 403 555 0177, extra lines later.'])).toBe(
+      '(403) 555-0177',
+    );
   });
 
   it('never makes a number from part of a longer or foreign one (Codex, fourth review, finding 3)', () => {
