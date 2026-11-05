@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-05 — No number in a summary is Claude's
+
+- `docs/DECISIONS.md`: Codex's review of `3403497` (four P2) and the change of approach: Claude refers to records by label and the Worker writes each record's own text; no number, date, time, amount or period in Claude's own words.
+- `README.md`, `AGENTS.md`: the same, in a line.
+
 ## 2026-11-05 — Every company summarized; Codex's review of the summaries
 
 - `docs/DECISIONS.md`: every company with history summarized at once (owner's request); Codex's three P2 on `f6d3296` and their fixes (retries after something new, small counts only before what they count, whole values with their sign, dates apart, no number words or scales, no cutting).
