@@ -268,7 +268,7 @@ interface Mention {
   priceUnit: PriceUnit | null;
   /** Said as a quantity in metric tonnes ("1,500 tonnes"), not as a price per tonne. */
   tonnes: boolean;
-  /** The currency said with this number, in its own clause ("$725 Canadian"); else null. */
+  /** The currency said as part of this price ("$725 Canadian", "US$725"); else null. */
   currency: QuoteCurrency | null;
 }
 
@@ -282,25 +282,32 @@ const DOLLARS_AFTER = new RegExp(String.raw`^\s*(?:${CURRENCY_WORD}\s+)?(?:dolla
 /** After a quantity: "tonnes", "mt", "metric tons". */
 const TONNES_AFTER = /^\s*(?:metric\s+tonnes?|metric\s+tons?|tonnes?|mt)\b/;
 
-/** Where a clause ends: a comma, a semicolon, a full stop and the like, or the next number. */
-const CLAUSE_END = /[,;:!?]|\.(?!\d)|\d/;
-
 /**
- * The currency said with a number, in its own clause only (Codex's review of 1485b23,
- * finding 1): "US$725", "CAD 725", "725 Canadian a tonne", "725 US dollars". "US" or "Canadian"
- * elsewhere in the sentence ("ship it to us") is not a currency. Null when none, or both.
+ * The currency said as part of a price itself, right against its number (Codex's reviews of
+ * 1485b23, finding 1, and a5c8986, finding 1): "US$725", "C$725", "USD 725", "CAD $725" before
+ * it, or "725 Canadian", "725 USD", "725 US dollars", "725 US a tonne" after it. A currency
+ * anywhere else in the sentence belongs to something else ("$725 a tonne and oats are USD
+ * $300"), and "us" that is not money ("ship it to us") is not one. Null when none, or both.
  */
-function currencyNear(before: string, after: string): QuoteCurrency | null {
+function currencyOfPrice(before: string, after: string): QuoteCurrency | null {
   const cad =
-    /\b(?:cad|cdn|canadian)\s*\$?\s*$/.test(before) ||
-    /^\s*(?:canadian|cad|cdn)\b/.test(after) ||
-    /\b(?:cad|cdn)\b|\bcanadian\s+(?:dollars?|funds|money)\b/.test(after);
+    /(?:\b(?:cad|cdn)\s*\$?|\bc\$)\s*$/.test(before) || /^\s*(?:cad|cdn|canadian)\b/.test(after);
   const usd =
-    /\b(?:usd|us|u\.s\.)\s*\$?\s*$/.test(before) ||
-    /^\s*(?:usd|us|u\.s\.|american)(?![a-z])/.test(after) ||
-    /\busd\b|\b(?:us|u\.s\.|american)\s+(?:dollars?|funds|money)\b/.test(after);
+    /(?:\busd\s*\$?|\b(?:us|u\.s\.)\$)\s*$/.test(before) ||
+    /^\s*(?:usd|american)\b/.test(after) ||
+    /^\s*(?:us|u\.s\.)(?=\s*(?:dollars?\b|funds\b|money\b|a\s|an\s|per\b|\/|[,.;:!?]|$))/.test(
+      after,
+    );
   return cad === usd ? null : cad ? 'CAD' : 'USD';
 }
+
+/**
+ * A minus sign or word right before a number, a dollar sign between them or not ("-$5",
+ * "minus 5"): the number is negative, which no price or quantity here may be (Codex's review of
+ * a5c8986, finding 2). A dash after another number ("700-725") is read the same way, so a range
+ * is left for the person to fill in.
+ */
+const NEGATIVE_BEFORE = /(?:[-\u2212\u2013]|\bminus\s|\bnegative\s)\s*\$?\s*$/;
 
 /** The price unit a unit word names; "ton" alone is not clear (short or metric). */
 function unitOf(word: string): PriceUnit | null {
@@ -324,23 +331,21 @@ export function mentionsIn(words: string): Mention[] {
   for (const match of text.matchAll(/\d*\.\d+|\d+/g)) {
     const start = match.index;
     const end = start + match[0].length;
-    const before = text.slice(Math.max(0, start - 3), start);
+    const before = text.slice(Math.max(0, start - 12), start).toLowerCase();
     const after = text.slice(end, end + 40).toLowerCase();
-    const clauseBefore =
-      text
-        .slice(Math.max(0, start - 12), start)
-        .toLowerCase()
-        .split(CLAUSE_END)
-        .pop() ?? '';
-    const clauseAfter = after.split(CLAUSE_END)[0] ?? '';
+    const value = decimalKey(match[0]);
+    if (NEGATIVE_BEFORE.test(before)) {
+      mentions.push({ value, price: false, priceUnit: null, tonnes: false, currency: null });
+      continue;
+    }
     const unit = PRICE_UNIT_AFTER.exec(after);
     const price = /\$\s*$/.test(before) || unit !== null || DOLLARS_AFTER.test(after);
     mentions.push({
-      value: decimalKey(match[0]),
+      value,
       price,
       priceUnit: unit?.[1] === undefined ? null : unitOf(unit[1]),
       tonnes: !price && TONNES_AFTER.test(after),
-      currency: currencyNear(clauseBefore, clauseAfter),
+      currency: price ? currencyOfPrice(before, after) : null,
     });
   }
   return mentions;
@@ -363,7 +368,11 @@ const QUANTITY = /^\d{1,11}(?:\.\d{1,3})?$/;
 function saidPhone(value: string | null, words: string): string | null {
   const phone = label(value, 40);
   if (phone === null || !/^[0-9+(). /x-]+$/.test(phone)) return null;
-  const [main = '', extension] = phone.split(/\s*x\s*/i);
+  // A number and at most one extension; anything more is not a phone number (Codex's review of
+  // a5c8986, finding 3). What is kept is rebuilt from the parts checked, never passed through.
+  const parts = phone.split(/\s*x\s*/i);
+  if (parts.length > 2) return null;
+  const [main = '', extension] = parts;
   let digits = main.replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
   if (digits.length < 7) return null;
@@ -376,7 +385,7 @@ function saidPhone(value: string | null, words: string): string | null {
     String.raw`(?<!\d)(?:1${gap})?${digits.split('').join(gap)}${gap}[,;]?\s*(?:x|ext\.?|extension)\s*${extension}(?!\d)`,
     'i',
   );
-  return withExtension.test(words) ? phone : main.trim();
+  return withExtension.test(words) ? `${main.trim()} x${extension}` : main.trim();
 }
 
 const EMAIL = /^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+\.[^@\s\p{Cc}]+$/u;

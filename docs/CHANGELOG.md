@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Codex's third review of the call readings
+
+- `docs/DECISIONS.md`: the three findings on `a5c8986` and their fixes (a currency only as part of the price, negative amounts never kept, one extension at most, rebuilt).
+
 ## 2026-11-05 — Handoff record of #140
 
 - `docs/HANDOFF.md`: Claude reads each call (ivanmueller/gss#140) with its CI and Deploy staging runs; Codex's findings after the merge, fixed in ivanmueller/gss#141.

@@ -541,6 +541,11 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Safety and privacy:** Anthropic is called only from the Worker, with its key a Worker secret (`ANTHROPIC_API_KEY`) the owner adds in Cloudflare. Anthropic's Commercial Terms (anthropic.com/legal/commercial-terms, effective June 17, 2025, read 2026-11-05) say "Anthropic may not train models on Customer Content from Services." How long Anthropic keeps API requests is on its privacy pages, which this session could not reach; to be read and recorded here before production. The transcript is treated as what people said, never as instructions; Claude cannot save, send or change anything. A request Claude declines is tried again server-side on the model Anthropic recommends (`fallbacks: "default"`), so a call still gets its drafts. Nothing in a transcript is logged.
 - **Not an agent framework (AGENTS.md rule 9):** one request per call to Anthropic's Messages API with the official SDK (`@anthropic-ai/sdk`), no tools, no loop.
 
+**2026-11-05 — Codex's third review of the call readings (`a5c8986`, merged as ivanmueller/gss#141 before the review ended): three P2, all fixed with tests; no database change.**
+1. **A currency from the next bid:** a currency counts only when it is part of the price itself, right against its number ("US$725", "C$9", "USD 725", "725 Canadian", "725 US dollars", "725 US a tonne"); "$725 a tonne and oats are USD $300" no longer gives the 725 a currency.
+2. **A negative amount:** a number with a minus sign or word right before it ("-$5", "minus 10", "negative $3") is never a price or quantity, so it stays blank; a range written with a dash ("700-725") is left for the person too.
+3. **Several extensions:** a phone number with more than one extension is left out, and what is kept is rebuilt from the number and the one extension checked, never passed through as Claude wrote it.
+
 **2026-11-05 — Codex's re-review of the call readings (`1485b23`): four P2, all fixed with tests.**
 1. **A currency from another bid:** the currency is now read from the price's own clause only ("$725 Canadian a tonne"), not from anywhere in the lines; "us" in "ship it to us" is not a currency.
 2. **Leading decimals:** ".50" is read whole, as 0.50, so "$.50 per bushel" can no longer become a price of 50, nor ".5 tonnes" a quantity of 5.
