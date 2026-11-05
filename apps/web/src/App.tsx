@@ -13,6 +13,8 @@ import { CounterpartyPage } from './pages/CounterpartyPage';
 import { FollowUpsPage } from './pages/FollowUpsPage';
 import { FreightPage } from './pages/FreightPage';
 import { FreightRatePage } from './pages/FreightRatePage';
+import { GrainPage } from './pages/GrainPage';
+import { GrainsPage } from './pages/GrainsPage';
 import { NewFreightPage } from './pages/NewFreightPage';
 import { NewQuotePage } from './pages/NewQuotePage';
 import { QuotePage } from './pages/QuotePage';
@@ -48,6 +50,9 @@ function section(route: Route): NavSection | null {
     case 'new-freight':
     case 'freight-rate':
       return 'freight';
+    case 'grains':
+    case 'grain':
+      return 'grains';
     case 'redirect':
     case 'not-found':
       return null;
@@ -127,6 +132,13 @@ export function App({ account }: { account?: Account }) {
       page = directory((session) => (
         <FreightRatePage key={route.id} session={session} id={route.id} />
       ));
+      break;
+    case 'grains':
+      // Public reference facts, not GSS's records: shown to anyone signed in.
+      page = <GrainsPage />;
+      break;
+    case 'grain':
+      page = <GrainPage key={route.id} id={route.id} />;
       break;
     case 'redirect':
       page = null;

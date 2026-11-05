@@ -8,6 +8,8 @@ import { CircleDashed, Pencil, Wheat } from 'lucide-react';
 import { useState } from 'react';
 
 import { ApiError, sendJson, type CounterpartyDetail } from '../lib/api';
+import { grainForCommodity } from '../lib/grains';
+import { Link } from '../lib/router';
 import { cn } from '../lib/utils';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -281,15 +283,7 @@ export function CounterpartyCommodities({
                       {items.map((item) => (
                         <li key={item.code}>
                           {item.verifiedAt !== null ? (
-                            <Badge
-                              variant={direction === 'buys' ? 'bid' : 'offer'}
-                              className="px-2 py-1 text-sm"
-                              title="Verified"
-                            >
-                              <Wheat aria-hidden="true" />
-                              {item.name}
-                              <span className="sr-only">, verified</span>
-                            </Badge>
+                            <VerifiedBadge item={item} direction={direction} />
                           ) : canChange ? (
                             <button
                               type="button"
@@ -331,6 +325,32 @@ export function CounterpartyCommodities({
         />
       </section>
     </Card>
+  );
+}
+
+/** A verified commodity; it opens its grain's page on Grains, when there is one. */
+function VerifiedBadge({ item, direction }: { item: Listed; direction: CommodityDirection }) {
+  const badge = (
+    <Badge
+      variant={direction === 'buys' ? 'bid' : 'offer'}
+      className="px-2 py-1 text-sm"
+      title="Verified"
+    >
+      <Wheat aria-hidden="true" />
+      {item.name}
+      <span className="sr-only">, verified</span>
+    </Badge>
+  );
+  const grain = grainForCommodity(item.code);
+  if (!grain) return badge;
+  return (
+    <Link
+      href={`/grains/${grain.id}`}
+      title={`Verified. Open ${grain.name} on Grains`}
+      className="block rounded-badge hover:opacity-80"
+    >
+      {badge}
+    </Link>
   );
 }
 

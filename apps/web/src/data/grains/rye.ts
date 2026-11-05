@@ -1,0 +1,195 @@
+import type { Grain } from './types';
+
+export const rye: Grain = {
+  id: 'rye',
+  name: 'Rye',
+  symbol: 'Ry',
+  number: 3,
+  family: 'coarse',
+  commodities: ['rye'],
+  tileFacts: ['No. 1 CW minimum test weight'],
+  facts: [
+    {
+      label: 'No. 1 CW minimum test weight',
+      value: '72 (349)',
+      source: 'cgc-oggg',
+      where: 'Chapter 5, Rye, Canada Western (CW), standard of quality (kg/hL (g/0.5 L))',
+    },
+    {
+      label: 'Varieties eligible',
+      value: 'Any variety of rye registered under the Seeds Act',
+      source: 'cgc-oggg',
+      where: 'Chapter 5, Rye, Canada Western (CW), standard of quality',
+    },
+    {
+      label: 'Falling number preferred by the rye milling market',
+      value: 'a falling number of 180 seconds or greater',
+      source: 'asg-rvt-2026',
+      where: 'Fall rye, remarks',
+    },
+  ],
+  classes: [
+    {
+      name: 'Rye, Canada Western',
+      abbreviation: 'CW',
+      region: 'Western',
+      grades: ['No. 1 CW', 'No. 2 CW', 'No. 3 CW'],
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 5, Rye, Canada Western (CW), standard of quality',
+      },
+      facts: [
+        {
+          label: 'Varieties eligible',
+          value: 'Any variety of rye registered under the Seeds Act',
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Western (CW), standard of quality',
+        },
+      ],
+      tables: [
+        {
+          title: 'Standard of quality',
+          columns: ['Grading factor', 'No. 1 CW', 'No. 2 CW', 'No. 3 CW'],
+          rows: [
+            [
+              'Degree of soundness',
+              'Well matured, practically free from weather-damaged kernels',
+              'Reasonably well matured, reasonably free from weather-damaged kernels',
+              'Excluded from higher grades on account of damaged kernels',
+            ],
+            ['Minimum test weight kg/hL (g/0.5 L)', '72 (349)', '69 (334)', '63 (304)'],
+          ],
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Western (CW), standard of quality',
+        },
+        {
+          title: 'Damage, maximum',
+          columns: ['Grading factor', 'No. 1 CW', 'No. 2 CW', 'No. 3 CW'],
+          rows: [
+            ['Broken %', '4', '5', '8'],
+            ['Fireburnt %', '0.0', '0.0', '0.0'],
+            ['Fusarium %', '0.3', '0.5', '1.0'],
+            ['Heated %', '0.1', '0.8', '5.0'],
+            ['Sprouted %', '0.5', '2.0', '10.0'],
+          ],
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Western (CW), damage',
+        },
+        {
+          title: 'Foreign material, maximum',
+          columns: ['Grading factor', 'No. 1 CW', 'No. 2 CW', 'No. 3 CW'],
+          rows: [
+            ['Cereal grains other than wheat %', '2', '3', '10'],
+            ['Ergot %', '0.05', '0.20', '0.33'],
+            ['Excreta %', '0.01', '0.01', '0.02'],
+            ['Matter other than cereal grains %', '0.5', '1.0', '2.0'],
+            ['Sclerotinia %', '0.05', '0.20', '0.33'],
+            ['Stones %', '0.03', '0.03', '0.06'],
+            ['Total foreign material %', '2', '5', '10'],
+          ],
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Western (CW), foreign material',
+        },
+      ],
+    },
+    {
+      name: 'Rye, Canada Eastern',
+      abbreviation: 'CE',
+      region: 'Eastern',
+      grades: ['No. 1 CE', 'No. 2 CE', 'No. 3 CE'],
+      gradesCitation: {
+        source: 'cgc-oggg',
+        where: 'Chapter 5, Rye, Canada Eastern (CE), standard of quality',
+      },
+      facts: [
+        {
+          label: 'Varieties eligible',
+          value: 'Any variety of rye registered under the Seeds Act',
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Eastern (CE), standard of quality',
+        },
+      ],
+      tables: [
+        {
+          title: 'Standard of quality',
+          columns: ['Grading factor', 'No. 1 CE', 'No. 2 CE', 'No. 3 CE'],
+          rows: [
+            [
+              'Degree of soundness',
+              'Well matured, practically free from weather-damaged kernels',
+              'Reasonably well matured, reasonably free from weather-damaged kernels',
+              'Excluded from higher grades on account of damaged kernels',
+            ],
+            ['Minimum test weight kg/hL (g/0.5 L)', '72 (349)', '69 (334)', '63 (304)'],
+          ],
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Eastern (CE), standard of quality',
+        },
+        {
+          title: 'Damage, maximum',
+          columns: ['Grading factor', 'No. 1 CE', 'No. 2 CE', 'No. 3 CE'],
+          rows: [
+            ['Broken %', '4', '5', '8'],
+            ['Fireburnt %', '0.0', '0.0', '0.0'],
+            ['Fusarium %', '0.3', '0.5', '1.0'],
+            ['Heated %', '0.1', '0.8', '5.0'],
+            ['Sprouted %', '0.5', '2.0', '10.0'],
+          ],
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Eastern (CE), damage',
+        },
+        {
+          title: 'Foreign material, maximum',
+          columns: ['Grading factor', 'No. 1 CE', 'No. 2 CE', 'No. 3 CE'],
+          rows: [
+            ['Cereal grains other than wheat %', '2', '3', '10'],
+            ['Ergot %', '0.05', '0.20', '0.33'],
+            ['Excreta %', '0.01', '0.01', '0.02'],
+            ['Matter other than cereal grains %', '0.5', '1.0', '2.0'],
+            ['Sclerotinia %', '0.05', '0.20', '0.33'],
+            ['Stones %', '0.03', '0.03', '0.06'],
+            ['Total foreign material %', '2', '5', '10'],
+          ],
+          source: 'cgc-oggg',
+          where: 'Chapter 5, Rye, Canada Eastern (CE), foreign material',
+        },
+      ],
+    },
+  ],
+  tables: [
+    {
+      title: 'Moisture: straight, tough and damp',
+      columns: ['Rye', 'Straight (%)', 'Tough (%)', 'Damp (%)'],
+      rows: [['Rye', 'less than 14.1', '14.1-17.0', 'over 17.0']],
+      source: 'cgc-oggg',
+      where: 'Chapter 2, Moisture specifications',
+    },
+    {
+      title: 'Fall rye varieties in Alberta trials',
+      columns: [
+        'Variety',
+        'Hybrid or open pollinated',
+        'Test weight (lb/bu)',
+        'TKW (g)',
+        'Falling number (s)',
+        'Height (cm)',
+        'Lodging resistance',
+      ],
+      rows: [
+        ['Hazlet', 'OP', '59', '38', '182', '106', 'G'],
+        ['Prima', 'OP', '58', '32', '230', '117', 'F'],
+        ['SU Bebop', 'OP', '59', '35', '257', '102', 'G'],
+        ['KWS Daniello', 'Hybrid', '58', '34', '318', '96', 'G'],
+        ['KWS Inspirator', 'Hybrid', '58', '34', '331', '93', 'G'],
+        ['KWS Pulsor', 'Hybrid', '58', '33', '295', '94', 'G'],
+        ['KWS Receptor', 'Hybrid', '59', '32', '308', '94', 'G'],
+        ['KWS Serafino', 'Hybrid', '59', '33', '309', '96', 'G'],
+        ['KWS Teodor', 'Hybrid', '58', '32', '279', '96', 'G'],
+        ['KWS Trebiano', 'Hybrid', '59', '35', '299', '99', 'G'],
+      ],
+      note: 'OP open pollinated. G good, F fair. TKW: thousand kernel weight. Yield and agronomic information only directly comparable to Hazlet. Data from 2025 were not available at the time of table preparation. Typically, a falling number of 180 seconds or greater is preferred by the rye milling market. All fall rye varieties are susceptible to ergot, however KWS Daniello, KWS Serafino, KWS Trebiano, KWS Sandor and Prima have reduced susceptibility to natural ergot infection compared with Hazlet.',
+      source: 'asg-rvt-2026',
+      where: 'Fall rye',
+    },
+  ],
+};

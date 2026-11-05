@@ -35,6 +35,10 @@
  *   bid       leaf    buyer bids (the order book's right column)
  *   offer     coral   seller offers, called asks in the order book (its left column)
  *
+ * Grain families (the Grains page's tiles, 2026-11-05), each with <family>, -subtle and -border:
+ *   grain-wheat yellow, grain-coarse orange, grain-oilseed teal, grain-pulse green,
+ *   grain-special indigo. A tile always names its family in words too.
+ *
  * Bids are green and asks red, the trading convention the owner asked for, in the softer leaf
  * green and coral of the owner's reference (2026-10-28) rather than the status ramps. A bid or
  * ask still carries its word ("Bid", "Ask") or sits under its column heading. The `-accent`
@@ -123,6 +127,26 @@
   --offer-solid: var(--coral-700);
   --offer-solid-foreground: var(--white);
 
+  --grain-wheat: var(--yellow-800);
+  --grain-wheat-subtle: var(--yellow-50);
+  --grain-wheat-border: var(--yellow-200);
+
+  --grain-coarse: var(--orange-700);
+  --grain-coarse-subtle: var(--orange-50);
+  --grain-coarse-border: var(--orange-200);
+
+  --grain-oilseed: var(--teal-700);
+  --grain-oilseed-subtle: var(--teal-50);
+  --grain-oilseed-border: var(--teal-200);
+
+  --grain-pulse: var(--green-700);
+  --grain-pulse-subtle: var(--green-50);
+  --grain-pulse-border: var(--green-200);
+
+  --grain-special: var(--indigo-700);
+  --grain-special-subtle: var(--indigo-50);
+  --grain-special-border: var(--indigo-200);
+
   --map-land: var(--white);
   --map-water: var(--gray-200);
   --map-border: var(--gray-300);
@@ -206,6 +230,26 @@
   --offer-accent: var(--coral-400);
   --offer-solid: var(--coral-700);
   --offer-solid-foreground: var(--white);
+
+  --grain-wheat: var(--yellow-300);
+  --grain-wheat-subtle: color-mix(in oklch, var(--yellow-500) 15%, transparent);
+  --grain-wheat-border: color-mix(in oklch, var(--yellow-500) 35%, transparent);
+
+  --grain-coarse: var(--orange-300);
+  --grain-coarse-subtle: color-mix(in oklch, var(--orange-500) 15%, transparent);
+  --grain-coarse-border: color-mix(in oklch, var(--orange-500) 35%, transparent);
+
+  --grain-oilseed: var(--teal-300);
+  --grain-oilseed-subtle: color-mix(in oklch, var(--teal-500) 15%, transparent);
+  --grain-oilseed-border: color-mix(in oklch, var(--teal-500) 35%, transparent);
+
+  --grain-pulse: var(--green-300);
+  --grain-pulse-subtle: color-mix(in oklch, var(--green-500) 15%, transparent);
+  --grain-pulse-border: color-mix(in oklch, var(--green-500) 35%, transparent);
+
+  --grain-special: var(--indigo-300);
+  --grain-special-subtle: color-mix(in oklch, var(--indigo-500) 15%, transparent);
+  --grain-special-border: color-mix(in oklch, var(--indigo-500) 35%, transparent);
 
   --map-land: var(--slate-600);
   --map-water: var(--slate-700);

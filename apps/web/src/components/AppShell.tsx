@@ -8,6 +8,7 @@ import {
   Menu,
   Truck,
   Users,
+  Wheat,
   type LucideIcon,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -24,7 +25,13 @@ import { Callout } from './ui/callout';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 
 export type NavSection =
-  'workspace' | 'counterparties' | 'follow-ups' | 'quotes' | 'freight' | 'team';
+  | 'workspace'
+  | 'counterparties'
+  | 'follow-ups'
+  | 'quotes'
+  | 'freight'
+  | 'grains'
+  | 'team';
 
 interface NavItem {
   id: NavSection;
@@ -40,6 +47,7 @@ const NAV: readonly NavItem[] = [
   { id: 'follow-ups', href: '/follow-ups', label: 'Follow-ups', Icon: ListTodo },
   { id: 'quotes', href: '/quotes', label: 'Bids & offers', Icon: ArrowLeftRight },
   { id: 'freight', href: '/freight', label: 'Freight', Icon: Truck },
+  { id: 'grains', href: '/grains', label: 'Grains', Icon: Wheat },
   { id: 'team', href: '/team', label: 'Team', Icon: Users },
 ];
 
