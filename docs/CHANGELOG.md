@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Claude's own words in a summary from a closed list
+
+- `docs/DECISIONS.md`: Codex's review of `3a7617c` (three P2) and the change from refused words to allowed ones: plain characters, everyday words or the records' own, never numbers, measures, money, dates, times or periods.
+- `README.md`: the same, in a line.
+
 ## 2026-11-05 — No number in a summary is Claude's
 
 - `docs/DECISIONS.md`: Codex's review of `3403497` (four P2) and the change of approach: Claude refers to records by label and the Worker writes each record's own text; no number, date, time, amount or period in Claude's own words.
