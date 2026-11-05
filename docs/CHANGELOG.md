@@ -1,5 +1,15 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Reviewing Claude's drafts
+
+- `docs/DECISIONS.md`: the review of Claude's drafts in the contact history (Voicemail and "to review" badges, Claude's notes with Use as notes, Review and Dismiss, the source line highlighted and Check this).
+- `docs/PRODUCT.md`: the counterparty page's contact history with Claude's reading of each call.
+- `AGENTS.md`: drafts from transcripts reviewed on the counterparty's page.
+
+## 2026-11-05 — Handoff record of #149
+
+- `docs/HANDOFF.md`: no either-or fields in the answer's schema (ivanmueller/gss#149), with its CI and Deploy staging runs; calls read on staging.
+
 ## 2026-11-05 — Calls refused on staging; the company summary planned
 
 - `docs/DECISIONS.md`: the 400 on every request (too many either-or fields in the answer's schema) and its fix; the owner's answers for a summary on each company's page.
