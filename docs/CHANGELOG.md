@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #151
+
+- `docs/HANDOFF.md`: the summary on each company's page (ivanmueller/gss#151), with its CI and Deploy staging runs (run #342 on `main` failed starting its database, before any test).
+
 ## 2026-11-05 — The summary on each company's page
 
 - `docs/DECISIONS.md`: the Summary box built: what it says and from which records, when it is written (and what does not start one), the number check, the cost from Anthropic's pricing page.
