@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Numbers filled in and marked when unusual
+
+- `docs/DECISIONS.md`: the owner's choice after Codex's exhaustive pass: plain errors refused, anything unusual filled in and marked, each number kept with where it was said.
+- `docs/API.md`: `checks` in a draft's fields.
+- `README.md`: Claude reads each call, as now.
+
 ## 2026-11-05 — Handoff record of #145
 
 - `docs/HANDOFF.md`: the start of a range as a whole price (ivanmueller/gss#145), with its CI and Deploy staging runs.

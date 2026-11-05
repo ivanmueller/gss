@@ -40,6 +40,7 @@ const READING: CheckedReading = {
         side: 'bid',
         commodity: 'canola',
         values: { price: '725', quotedAt: '2026-11-05T15:00:00.000Z', sourceType: 'phone' },
+        checks: { price: { said: '725 a tonne', line: 1, doubt: null } },
       },
       lines: [1],
     },
@@ -47,7 +48,7 @@ const READING: CheckedReading = {
     {
       kind: 'contact',
       contactId: pat,
-      fields: { values: { contactRole: 'Head buyer' } },
+      fields: { values: { contactRole: 'Head buyer' }, checks: {} },
       lines: [1],
     },
   ],

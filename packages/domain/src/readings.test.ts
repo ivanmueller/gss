@@ -11,6 +11,7 @@ import {
   saidPrice,
   saidTonnes,
   type CallReading,
+  type CitedLine,
   type ReadingContext,
 } from './readings';
 
@@ -80,240 +81,268 @@ const reading = (overrides: Partial<CallReading> = {}): CallReading => ({
   ...overrides,
 });
 
-describe('saidPrice', () => {
-  it('reads a price said whole, with its currency and unit from the same words', () => {
-    const line = ['We bid $725.50 Canadian a tonne, US$7.25 a bushel, CAD $310 per tonne.'];
-    expect(saidPrice('$725.50 Canadian a tonne', line)).toEqual({
-      amount: '725.50',
-      currency: 'CAD',
-      unit: 'MT',
-    });
-    expect(saidPrice('US$7.25 a bushel', line)).toEqual({
-      amount: '7.25',
-      currency: 'USD',
-      unit: 'BU',
-    });
-    expect(saidPrice('CAD $310 per tonne', line)).toEqual({
-      amount: '310',
-      currency: 'CAD',
-      unit: 'MT',
-    });
-    expect(saidPrice('12 US dollars per cwt', ['That is 12 US dollars per cwt.'])).toEqual({
-      amount: '12',
-      currency: 'USD',
-      unit: 'CWT',
-    });
-    expect(saidPrice('$1,025 a short ton', ['Say $1,025 a short ton.'])).toEqual({
-      amount: '1025',
-      currency: null,
-      unit: 'ST',
-    });
+/** One cited transcript line, number 0. */
+const one = (text: string): CitedLine[] => [{ line: 0, text }];
+/** What saidPrice gives, in short: amount, currency, unit and the doubt (null: nothing unusual). */
+const price = (said: string, text: string) => {
+  const result = saidPrice(said, one(text));
+  return result === null
+    ? null
+    : ([result.amount, result.currency, result.unit, result.check.doubt] as const);
+};
+const tonnes = (said: string, text: string) => {
+  const result = saidTonnes(said, one(text));
+  return result === null ? null : ([result.amount, result.check.doubt] as const);
+};
+const phone = (said: string, text: string) => {
+  const result = saidPhone(said, one(text));
+  return result === null ? null : ([result.phone, result.check.doubt] as const);
+};
+
+describe('saidPrice: what was said is filled in, with where', () => {
+  it('reads a price said whole, its currency and unit from the same words', () => {
+    const line =
+      'We bid $725.50 Canadian a tonne. Oats are US$7.25 a bushel; barley CAD $310 per tonne.';
+    expect(price('$725.50 Canadian a tonne', line)).toEqual(['725.50', 'CAD', 'MT', null]);
+    expect(price('US$7.25 a bushel', line)).toEqual(['7.25', 'USD', 'BU', null]);
+    expect(price('CAD $310 per tonne', line)).toEqual(['310', 'CAD', 'MT', null]);
+    expect(price('12 US dollars per cwt', 'That is 12 US dollars per cwt.')).toEqual([
+      '12',
+      'USD',
+      'CWT',
+      null,
+    ]);
+    expect(price('$1,025 a short ton', 'Say $1,025 a short ton.')).toEqual([
+      '1025',
+      null,
+      'ST',
+      null,
+    ]);
   });
 
+  it('records the line and the words it came from', () => {
+    expect(
+      saidPrice('$725 a tonne', [
+        { line: 3, text: 'Hello.' },
+        { line: 7, text: 'We can do $725 a tonne delivered.' },
+      ])?.check,
+    ).toEqual({ said: '$725 a tonne', line: 7, doubt: null });
+  });
+
+  it('reads the wordings Codex found left blank (Codex, matrix review, P3)', () => {
+    expect(
+      price('725 dollars Canadian per tonne', 'We bid 725 dollars Canadian per tonne.'),
+    ).toEqual(['725', 'CAD', 'MT', null]);
+    expect(
+      price('Canadian dollars 725 per tonne', 'We bid Canadian dollars 725 per tonne.'),
+    ).toEqual(['725', 'CAD', 'MT', null]);
+    expect(price('$725 per tonne CAD', 'We bid $725 per tonne CAD.')).toEqual([
+      '725',
+      'CAD',
+      'MT',
+      null,
+    ]);
+    expect(price('Cdn. $725 per tonne', 'We bid Cdn. $725 per tonne.')).toEqual([
+      '725',
+      'CAD',
+      'MT',
+      null,
+    ]);
+    expect(price('725 CAD / t', 'We bid 725 CAD / t.')).toEqual(['725', 'CAD', 'MT', null]);
+    expect(price('CAD 1 025 per tonne', 'We bid CAD 1 025 per tonne.')).toEqual([
+      '1025',
+      'CAD',
+      'MT',
+      null,
+    ]);
+    expect(price('US $725 per tonne', 'That is US $725 per tonne.')).toEqual([
+      '725',
+      'USD',
+      'MT',
+      null,
+    ]);
+  });
+
+  it('keeps two prices and agreements in one sentence plain', () => {
+    const line = 'We bid $7.25 a bushel and $310 a tonne for feed.';
+    expect(price('$7.25 a bushel', line)?.[3]).toMatch(/another number/);
+    expect(price('$725 a tonne', 'We can agree to $725 a tonne.')).toEqual([
+      '725',
+      null,
+      'MT',
+      null,
+    ]);
+    expect(price('$725 a tonne', 'For two loads, we agree to $725 a tonne.')).toEqual([
+      '725',
+      null,
+      'MT',
+      null,
+    ]);
+  });
+});
+
+describe('saidPrice: plain errors are refused', () => {
   it('needs the words exactly as said, in a cited line', () => {
-    expect(saidPrice('$730 a tonne', ['We bid $725 a tonne.'])).toBeNull();
+    expect(price('$730 a tonne', 'We bid $725 a tonne.')).toBeNull();
     expect(saidPrice('$725 a tonne', [])).toBeNull();
   });
 
-  it('is not a price without a dollar sign, currency, dollars or unit', () => {
-    expect(saidPrice('725', ['Maybe 725 for canola.'])).toBeNull();
-    expect(saidPrice('1,500 tonnes', ['For 1,500 tonnes.'])).toBeNull();
+  it('is not a price without a dollar sign, currency code, dollars or unit', () => {
+    expect(price('725', 'Maybe 725 for canola.')).toBeNull();
+    expect(price('725 US', 'We serve 725 US customers.')).toBeNull();
+    expect(price('725 Canadian', 'We have 725 Canadian growers.')).toBeNull();
+    expect(price('1,500 tonnes', 'For 1,500 tonnes.')).toBeNull();
   });
 
-  it('never puts a currency and unit together from two prices (Codex, fourth review, finding 1)', () => {
-    const line = ['Canola is CAD $725 per tonne; oats are USD $725 per short ton.'];
-    expect(saidPrice('$725 per tonne', line)).toBeNull();
-    expect(saidPrice('CAD $725 per tonne', line)).toEqual({
-      amount: '725',
-      currency: 'CAD',
-      unit: 'MT',
-    });
-    expect(saidPrice('USD $725 per short ton', line)).toEqual({
-      amount: '725',
-      currency: 'USD',
-      unit: 'ST',
-    });
-    // The currency of the next bid is not this one's (third review, finding 1).
-    expect(
-      saidPrice('$725 a tonne', ['Canola is $725 a tonne and oats are USD $300 a tonne.']),
-    ).toEqual({ amount: '725', currency: null, unit: 'MT' });
+  it('never a part of a number: a decimal point, separator or digit against it', () => {
+    expect(price('$50 per bushel', 'Peas at $.50 per bushel.')).toBeNull();
+    expect(price('$7', 'It is $7.25 a bushel.')).toBeNull();
+    expect(price('$725', 'It is $725,000 in all.')).toBeNull();
+    expect(price('$725 a ton', 'It is $725 a tonne.')).toBeNull();
   });
 
-  it('refuses a signed or ranged price (Codex, third and fourth reviews, finding 2)', () => {
-    expect(saidPrice('$5 a tonne', ['The bid is -$5 a tonne.'])).toBeNull();
-    expect(saidPrice('-$5 a tonne', ['The bid is -$5 a tonne.'])).toBeNull();
-    expect(saidPrice('CAD $5 a tonne', ['It is minus CAD $5 a tonne.'])).toBeNull();
-    expect(saidPrice('$700', ['Somewhere $700-725 a tonne.'])).toBeNull();
-    expect(saidPrice('725 a tonne', ['Somewhere $700-725 a tonne.'])).toBeNull();
-    expect(saidPrice('$700', ['From $700 to $725 a tonne.'])).toBeNull();
-    expect(saidPrice('$725 a tonne', ['Between $700 and $725 a tonne.'])).toBeNull();
+  it('refuses two currencies or zero', () => {
+    expect(price('CAD $725 US', 'CAD $725 US')).toBeNull();
+    expect(price('$0 a tonne', '$0 a tonne')).toBeNull();
+  });
+});
+
+describe('saidPrice: anything unusual is filled in and marked for a second look', () => {
+  /** Expect the price filled in, with a doubt matching `why`. */
+  const doubtful = (said: string, text: string, why: RegExp) => {
+    const result = price(said, text);
+    expect(result, text).not.toBeNull();
+    expect(result?.[3], text).toMatch(why);
+  };
+
+  it('a sign or a deduction anywhere in the line (Codex, all reviews)', () => {
+    for (const text of [
+      'The bid is -$5 a tonne.',
+      'It is minus CAD $5 a tonne.',
+      'It is minus Canadian $5 a tonne.',
+      'The bid is negative: $725 per tonne.',
+      'The bid is negative ($725 per tonne).',
+      'The bid is negative amount of $725 per tonne.',
+      'The bid is below zero: $725 per tonne.',
+      'The price is $725 per tonne below zero.',
+      'The bid is minus EUR $725 per tonne.',
+      'The net bid is $725 per tonne minus $25 per tonne.',
+    ]) {
+      const said = /\$\d+ (?:a|per) tonne/.exec(text)?.[0] ?? '';
+      doubtful(said, text, /line says|dash|minus/);
+    }
   });
 
-  it('reads a leading decimal whole and never a part of a number (Codex, second review, finding 2)', () => {
-    expect(saidPrice('$.50 per bushel', ['Peas at $.50 per bushel.'])).toEqual({
-      amount: '0.50',
-      currency: null,
-      unit: 'BU',
-    });
-    expect(saidPrice('$50 per bushel', ['Peas at $.50 per bushel.'])).toBeNull();
-    expect(saidPrice('$7', ['It is $7.25 a bushel.'])).toBeNull();
-    expect(saidPrice('$725', ['It is $725,000 in all.'])).toBeNull();
-    expect(saidPrice('$725 a ton', ['It is $725 a tonne.'])).toBeNull();
+  it('a dash of any kind against it, before or after', () => {
+    for (const dash of ['-', '‐', '‑', '‒', '–', '—', '−', '﹣', '－']) {
+      doubtful('$725 per tonne', `The bid is ${dash}$725 per tonne.`, /dash or minus/);
+    }
+    doubtful('$725', 'Accounting price: $725- per tonne.', /dash/);
   });
 
-  it('refuses a price cut out of a signed or ranged one past a currency (Codex, fifth review, finding 1)', () => {
-    expect(saidPrice('$5 a tonne', ['It is minus Canadian $5 a tonne.'])).toBeNull();
-    expect(saidPrice('CAD $725 per tonne', ['From CAD $700 to CAD $725 per tonne.'])).toBeNull();
-    expect(saidPrice('CAD $700', ['From CAD $700 to CAD $725 per tonne.'])).toBeNull();
-    expect(saidPrice('$725 per tonne', ['From US $700 to US $725 per tonne.'])).toBeNull();
+  it('a range in any wording: another number in the sentence', () => {
+    for (const [said, text] of [
+      ['$725 a tonne', 'Offers went from $700 a tonne to $725 a tonne.'],
+      ['$725 a tonne', 'Offers range from $700 Canadian dollars per metric tonne to $725 a tonne.'],
+      ['725 CAD', 'Bids range from 700 CAD to 725 CAD.'],
+      ['725 dollars a tonne', 'Bids range from 700 to 725 dollars a tonne.'],
+      ['$750 per tonne', 'Bids range from $725 per tonne through $750 per tonne.'],
+      ['$725 per tonne', 'Bids range from $725 per tonne thru $750 per tonne.'],
+      ['750 CAD', 'From 700 up to 750 CAD.'],
+      ['$725 per tonne', 'Bids range from $725 per tonne..$750 per tonne.'],
+      ['$750 per tonne', 'Bids range from $725 per tonne…$750 per tonne.'],
+      ['USD $750 per tonne', 'Between U.S. $725 per tonne and USD $750 per tonne.'],
+      ['$725 a tonne', 'Between $700 and $725 a tonne.'],
+    ] as const) {
+      doubtful(said, text, /another number|dash/);
+    }
   });
 
-  it('is not a price for a number and a country word alone (Codex, fifth review, finding 2)', () => {
-    expect(saidPrice('725 US', ['We serve 725 US customers.'])).toBeNull();
-    expect(saidPrice('725 Canadian', ['We have 725 Canadian growers.'])).toBeNull();
-    expect(saidPrice('725 USD', ['Make it 725 USD.'])).toEqual({
-      amount: '725',
-      currency: 'USD',
-      unit: null,
-    });
-  });
-
-  it('reads a currency written with a space before the dollar sign (Codex, fifth review, finding 4)', () => {
-    expect(saidPrice('US $725 per tonne', ['That is US $725 per tonne.'])).toEqual({
-      amount: '725',
-      currency: 'USD',
-      unit: 'MT',
-    });
-    expect(saidPrice('Canadian $310 a tonne', ['Canadian $310 a tonne, firm.'])).toEqual({
-      amount: '310',
-      currency: 'CAD',
-      unit: 'MT',
-    });
-  });
-
-  it('keeps ordinary prices next to "and" or "to" when there is no range (Codex, sixth review)', () => {
-    const line = ['We bid $7.25 a bushel and $310 a tonne for feed.'];
-    expect(saidPrice('$7.25 a bushel', line)).toEqual({
-      amount: '7.25',
-      currency: null,
-      unit: 'BU',
-    });
-    expect(saidPrice('$310 a tonne', line)).toEqual({ amount: '310', currency: null, unit: 'MT' });
-    expect(saidPrice('$725 a tonne', ['We can agree to $725 a tonne.'])).toEqual({
-      amount: '725',
-      currency: null,
-      unit: 'MT',
-    });
-    // A number earlier in the sentence is not the start of a range.
-    expect(saidPrice('$725 a tonne', ['Up to 2 loads, then go to $725 a tonne.'])).toEqual({
-      amount: '725',
-      currency: null,
-      unit: 'MT',
-    });
-    expect(
-      saidPrice('$725 a tonne', ['Offers went from $700 a tonne to $725 a tonne.']),
-    ).toBeNull();
-    expect(
-      saidPrice('$700 a tonne', ['Offers went from $700 a tonne to $725 a tonne.']),
-    ).toBeNull();
-  });
-
-  it('finds a range by the whole price before "to", not by a count (Codex, seventh review)', () => {
-    const range = ['Offers range from $700 Canadian dollars per metric tonne to $725 a tonne.'];
-    expect(saidPrice('$725 a tonne', range)).toBeNull();
-    expect(saidPrice('$700 Canadian dollars per metric tonne', range)).toBeNull();
-    expect(saidPrice('$700', range)).toBeNull();
-    expect(saidPrice('$725 a tonne', ['For 2 loads we agree to $725 a tonne.'])).toEqual({
-      amount: '725',
-      currency: null,
-      unit: 'MT',
-    });
-    const words = ['We bid 725 dollars a tonne to 730 dollars a tonne.'];
-    expect(saidPrice('730 dollars a tonne', words)).toBeNull();
-    expect(saidPrice('725 dollars a tonne', words)).toBeNull();
-    expect(saidPrice('$725 a tonne', ['Ship 500 tonnes to Lethbridge at $725 a tonne.'])).toEqual({
-      amount: '725',
-      currency: null,
-      unit: 'MT',
-    });
-  });
-
-  it('finds a range with a currency code after the number, or a unit said once (Codex, eighth review)', () => {
-    const codes = ['Bids range from 700 CAD to 725 CAD.'];
-    expect(saidPrice('725 CAD', codes)).toBeNull();
-    expect(saidPrice('700 CAD', codes)).toBeNull();
-    const shared = ['Bids range from 700 to 725 dollars a tonne.'];
-    expect(saidPrice('725 dollars a tonne', shared)).toBeNull();
-    expect(saidPrice('725 CAD', ['Make it 725 CAD, firm.'])).toEqual({
-      amount: '725',
-      currency: 'CAD',
-      unit: null,
-    });
-    expect(saidPrice('$725 a tonne', ['Two to three loads, at $725 a tonne.'])).toEqual({
-      amount: '725',
-      currency: null,
-      unit: 'MT',
-    });
-  });
-
-  it('refuses two currencies, zero, or anything more than one price', () => {
-    expect(saidPrice('CAD $725 US', ['CAD $725 US'])).toBeNull();
-    expect(saidPrice('$0 a tonne', ['$0 a tonne'])).toBeNull();
-    expect(saidPrice('$725 or $730 a tonne', ['$725 or $730 a tonne'])).toBeNull();
+  it('a fraction or scale after it, or currency words left out of the copy', () => {
+    doubtful('$7', 'We bid $7½ per bushel.', /said with/);
+    doubtful('$1.5', 'We bid $1.5 million per tonne.', /said with “million”/);
+    doubtful('$725', 'We bid $725 thousand.', /said with “thousand”/);
+    doubtful('$725 per tonne', 'Give us $725 per tonne.', /next to it/);
+    doubtful('$725 per tonne', 'We bid $725 per tonne 500 tonnes available.', /another number/);
   });
 });
 
 describe('saidTonnes', () => {
   it('reads a quantity said whole in metric tonnes', () => {
-    expect(saidTonnes('1,500 tonnes', ['For 1,500 tonnes.'])).toBe('1500');
-    expect(saidTonnes('.5 tonnes', ['Only .5 tonnes left.'])).toBe('0.5');
-    expect(saidTonnes('200 mt', ['200 MT a month.'])).toBe('200');
+    expect(tonnes('1,500 tonnes', 'For 1,500 tonnes.')).toEqual(['1500', null]);
+    expect(tonnes('.5 tonnes', 'Only .5 tonnes left.')).toEqual(['0.5', null]);
+    expect(tonnes('200 mt', '200 MT a month.')).toEqual(['200', null]);
+    expect(tonnes('500 t', 'We have 500 t.')).toEqual(['500', null]);
+    expect(tonnes('500 mts', 'We have 500 mts.')).toEqual(['500', null]);
+    expect(tonnes('500 metric-tonnes', 'We have 500 metric-tonnes.')).toEqual(['500', null]);
+    expect(tonnes('1 500 tonnes', 'We have 1 500 tonnes.')).toEqual(['1500', null]);
   });
 
-  it('never a price per tonne, tons, a signed, ranged or partial number', () => {
-    expect(saidTonnes('725.50 a tonne', ['$725.50 a tonne'])).toBeNull();
-    expect(saidTonnes('2,000 tons', ['2,000 tons'])).toBeNull();
-    expect(saidTonnes('10 tonnes', ['minus 10 tonnes'])).toBeNull();
-    expect(saidTonnes('500 tonnes', ['400-500 tonnes'])).toBeNull();
-    expect(saidTonnes('5 tonnes', ['Only .5 tonnes left.'])).toBeNull();
-    expect(saidTonnes('500 tonnes', ['1500 tonnes'])).toBeNull();
+  it('refuses tons, a price per tonne, or part of a number', () => {
+    expect(tonnes('725.50 a tonne', '$725.50 a tonne')).toBeNull();
+    expect(tonnes('2,000 tons', '2,000 tons')).toBeNull();
+    expect(tonnes('5 tonnes', 'Only .5 tonnes left.')).toBeNull();
+    expect(tonnes('500 tonnes', '1500 tonnes')).toBeNull();
+  });
+
+  it('marks a signed, ranged or net quantity for a second look', () => {
+    expect(tonnes('10 tonnes', 'minus 10 tonnes')?.[1]).toMatch(/minus/);
+    expect(tonnes('500 tonnes', '400-500 tonnes')?.[1]).toMatch(/dash/);
+    expect(tonnes('750 tonnes', 'We have from 500 tonnes to 750 tonnes.')?.[1]).toMatch(
+      /another number/,
+    );
+    expect(tonnes('500 tonnes', 'Available quantity is 500 tonnes less 25 tonnes.')?.[1]).toMatch(
+      /less/,
+    );
   });
 });
 
 describe('saidPhone', () => {
   it('reads a North American number said whole, written as the directory keeps it', () => {
-    expect(saidPhone('403 555 0177', ['Reach Sam at 403 555 0177.'])).toBe('(403) 555-0177');
-    expect(saidPhone('1-403-555-0177 extension 12', ['Call 1-403-555-0177 extension 12.'])).toBe(
+    expect(phone('403 555 0177', 'Reach Sam at 403 555 0177.')).toEqual(['(403) 555-0177', null]);
+    expect(phone('1-403-555-0177 extension 12', 'Call 1-403-555-0177 extension 12.')).toEqual([
       '(403) 555-0177 x12',
-    );
+      null,
+    ]);
+    expect(phone('403/555/0177', 'Call 403/555/0177.')).toEqual(['(403) 555-0177', null]);
+    for (const [said, text] of [
+      ['403 555 0177 extension: 12', 'Call 403 555 0177 extension: 12.'],
+      ['403 555 0177 ext12', 'Call 403 555 0177 ext12.'],
+      ['403 555 0177 #12', 'Call 403 555 0177 #12.'],
+      ['403 555 0177 extn 12', 'Call 403 555 0177 extn 12.'],
+      ['403 555 0177 ext=12', 'Call 403 555 0177 ext=12.'],
+    ] as const) {
+      expect(phone(said, text), text).toEqual(['(403) 555-0177 x12', null]);
+    }
   });
 
-  it('keeps an extension only when said with that number (Codex, first and second reviews)', () => {
-    expect(saidPhone('403 555 0177 x999', ['Sam is at 403 555 0177.'])).toBeNull();
-    expect(
-      saidPhone('403 555 0177 extension 999', [
-        'Sam: 403 555 0177 extension 123; Pat: 403 555 0199 extension 999.',
-      ]),
-    ).toBeNull();
-    expect(saidPhone('403 555 0177 x123 x999', ['403 555 0177 x123 x999'])).toBeNull();
+  it('refuses a number that is part of a longer or foreign one', () => {
+    expect(phone('+1 205 555 0177', 'Our London desk is +44 20 5555 0177.')).toBeNull();
+    expect(phone('205 555 0177', 'Our London desk is +44 205 555 0177.')).toBeNull();
+    expect(phone('4035550177', 'Our foreign number is +44/4035550177.')).toBeNull();
+    expect(phone('4035550177', 'Our foreign number is +44:4035550177.')).toBeNull();
+    expect(phone('4035550177', 'The number is 4035550177/9.')).toBeNull();
+    expect(phone('4035550177', 'The number is 4035550177,9.')).toBeNull();
+    expect(phone('403 555 0177', 'Dial 1 403 555 01778.')).toBeNull();
+    expect(phone('403 555 0177 x123 x999', '403 555 0177 x123 x999')).toBeNull();
+    expect(phone('403 555 0177 x999', 'Sam is at 403 555 0177.')).toBeNull();
   });
 
-  it('refuses a number copied without the extension said after it (Codex, fifth review, finding 3)', () => {
-    expect(saidPhone('403 555 0177', ['Call 403 555 0177 extension 12.'])).toBeNull();
-    expect(saidPhone('403 555 0177', ['Call 403 555 0177, ext. 12.'])).toBeNull();
-    expect(saidPhone('403 555 0177 extension 12', ['Call 403 555 0177 extension 12.'])).toBe(
-      '(403) 555-0177 x12',
+  it('marks a number that may have left out its extension, or shares its sentence', () => {
+    for (const text of [
+      'Call 403 555 0177 extension 12.',
+      'Call 403 555 0177, ext. 12.',
+      'Call 403 555 0177 ext12.',
+      'Call 403 555 0177 extension: 12.',
+      'Call 403 555 0177 (extension 12).',
+      'Call 403 555 0177 #12.',
+      'Call 403 555 0177 extension twelve.',
+    ]) {
+      expect(phone('403 555 0177', text)?.[1], text).toMatch(/extension/);
+    }
+    expect(phone('403 555 0177', 'Call 403 555 0177 about 2 loads.')?.[1]).toMatch(
+      /another number/,
     );
-    expect(saidPhone('403 555 0177', ['Call 403 555 0177, extra lines later.'])).toBe(
-      '(403) 555-0177',
-    );
-  });
-
-  it('never makes a number from part of a longer or foreign one (Codex, fourth review, finding 3)', () => {
-    expect(saidPhone('+1 205 555 0177', ['Our London desk is +44 20 5555 0177.'])).toBeNull();
-    expect(saidPhone('205 555 0177', ['Our London desk is +44 205 555 0177.'])).toBeNull();
-    expect(saidPhone('403 555 0177', ['Dial 1 403 555 01778.'])).toBeNull();
-    expect(saidPhone('+44 20 5555 0177', ['Our London desk is +44 20 5555 0177.'])).toBeNull();
   });
 });
 
@@ -338,6 +367,10 @@ describe('checkReading: bids and offers', () => {
             quantityMax: '1500',
             // Friday noon in Alberta (UTC−6).
             validUntil: '2026-11-06T18:00:00.000Z',
+          },
+          checks: {
+            price: { said: '$725.50 Canadian a tonne', line: 1, doubt: null },
+            quantityMax: { said: '1,500 tonnes', line: 1, doubt: null },
           },
         },
         lines: [1, 2],
@@ -460,6 +493,7 @@ describe('checkReading: contacts', () => {
       contactId: null,
       fields: {
         values: { contactName: 'Sam', contactRole: 'Merchandiser', contactPhone: '(403) 555-0177' },
+        checks: { contactPhone: { said: '403 555 0177', line: 3, doubt: null } },
       },
       lines: [3],
     });
@@ -493,7 +527,7 @@ describe('checkReading: contacts', () => {
       {
         kind: 'contact',
         contactId: PAT,
-        fields: { values: { contactRole: 'Head buyer' } },
+        fields: { values: { contactRole: 'Head buyer' }, checks: {} },
         lines: [3],
       },
     ]);

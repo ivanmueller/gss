@@ -121,10 +121,12 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
         fields: draft.fields,
         lines: draft.lines,
       }));
+      // As plain JSON: fields left out (undefined) are not kept.
+      const json = JSON.parse(JSON.stringify(drafts)) as postgres.JSONValue;
       const [row] = await sql<{ kept: boolean }[]>`
         select app.keep_call_reading(${claim.recordingId}, ${claim.token}, ${model},
                                      ${reading.voicemail},
-                                     ${reading.summary}, ${sql.json(drafts)}::jsonb,
+                                     ${reading.summary}, ${sql.json(json)}::jsonb,
                                      ${inputTokens}, ${outputTokens}) as kept`;
       return row?.kept === true;
     },

@@ -127,6 +127,12 @@ describe('readNewTranscripts', () => {
     // 725 was said; 2000 tonnes was not, so it stays blank.
     expect(quote?.kind === 'quote' && quote.fields.values.price).toBe('725');
     expect(quote?.kind === 'quote' && quote.fields.values).not.toHaveProperty('quantityMax');
+    // Where the price was said, for the person checking it.
+    expect(quote?.kind === 'quote' && quote.fields.checks.price).toEqual({
+      said: '725 a tonne',
+      line: 1,
+      doubt: null,
+    });
     expect(followUp).toEqual({
       kind: 'follow_up',
       fields: {
