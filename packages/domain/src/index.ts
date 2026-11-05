@@ -15,3 +15,4 @@ export * from './commodities';
 export * from './carriers';
 export * from './calls';
 export * from './readings';
+export * from './summaries';

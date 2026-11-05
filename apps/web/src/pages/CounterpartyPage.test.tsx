@@ -499,7 +499,12 @@ describe('CounterpartyPage editing', () => {
       },
     });
     expect(
-      calls.filter((call) => call.method === 'GET' && call.path.startsWith('/counterparties')),
+      calls.filter(
+        (call) =>
+          call.method === 'GET' &&
+          call.path.startsWith('/counterparties') &&
+          !call.path.endsWith('/summary'),
+      ),
     ).toHaveLength(2);
     expect(screen.getByRole('status')).toHaveTextContent('Details saved.');
   });
@@ -569,7 +574,12 @@ describe('CounterpartyPage editing', () => {
     await userEvent.click(within(form).getByRole('button', { name: 'Load the latest version' }));
     await waitFor(() => {
       expect(
-        calls.filter((call) => call.method === 'GET' && call.path.startsWith('/counterparties')),
+        calls.filter(
+          (call) =>
+            call.method === 'GET' &&
+            call.path.startsWith('/counterparties') &&
+            !call.path.endsWith('/summary'),
+        ),
       ).toHaveLength(2);
     });
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
