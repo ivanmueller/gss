@@ -69,6 +69,7 @@ import { CounterpartyCommodities } from '../components/CounterpartyCommodities';
 import { CounterpartyFreight } from '../components/CounterpartyFreight';
 import { CounterpartyLocationsMap } from '../components/CounterpartyLocationsMap';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
+import { CounterpartySummary } from '../components/CounterpartySummary';
 import {
   CounterpartyQuotesCard,
   quoteSides,
@@ -1347,6 +1348,7 @@ function CounterpartyView({
       {tradingHeader}
       {editDetails}
       <CrmMessage crm={crm} />
+      <CounterpartySummary session={session} counterpartyId={detail.id} canAsk={crm.writer} />
       {trading &&
         (wide ? (
           <div className="grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-4">

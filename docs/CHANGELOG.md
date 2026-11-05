@@ -1,5 +1,16 @@
 # Documentation pack changelog
 
+## 2026-11-05 — The summary on each company's page
+
+- `docs/DECISIONS.md`: the Summary box built: what it says and from which records, when it is written (and what does not start one), the number check, the cost from Anthropic's pricing page.
+- `docs/DATA_MODEL.md`: `20261105030000_counterparty_summaries.sql`.
+- `docs/API.md`: `GET /counterparties/{id}/summary`, `POST /counterparties/{id}/summary/request`.
+- `docs/PRODUCT.md`, `README.md`, `AGENTS.md`: the Summary box.
+
+## 2026-11-05 — Handoff record of #150
+
+- `docs/HANDOFF.md`: reviewing Claude's drafts in the contact history (ivanmueller/gss#150), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Reviewing Claude's drafts
 
 - `docs/DECISIONS.md`: the review of Claude's drafts in the contact history (Voicemail and "to review" badges, Claude's notes with Use as notes, Review and Dismiss, the source line highlighted and Check this).

@@ -178,6 +178,22 @@ export function fakeDatabase(): Mocked<Database> {
     keepCallReading: vi.fn<Database['keepCallReading']>(() => Promise.resolve(true)),
     decideCallDraft: vi.fn<Database['decideCallDraft']>(() => Promise.resolve('decided')),
     correctCallVoicemail: vi.fn<Database['correctCallVoicemail']>(() => Promise.resolve('saved')),
+    claimCounterpartySummaries: vi.fn<Database['claimCounterpartySummaries']>(() =>
+      Promise.resolve([]),
+    ),
+    releaseCounterpartySummary: vi.fn<Database['releaseCounterpartySummary']>(() =>
+      Promise.resolve(),
+    ),
+    counterpartySummaryContext: vi.fn<Database['counterpartySummaryContext']>(() =>
+      Promise.resolve(null),
+    ),
+    keepCounterpartySummary: vi.fn<Database['keepCounterpartySummary']>(() =>
+      Promise.resolve(true),
+    ),
+    counterpartySummary: vi.fn<Database['counterpartySummary']>(() => Promise.resolve(null)),
+    requestCounterpartySummary: vi.fn<Database['requestCounterpartySummary']>(() =>
+      Promise.resolve('requested'),
+    ),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
   return db;

@@ -416,6 +416,7 @@ describe('a buyer’s or seller’s page', () => {
     show('trader');
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(headings()).toEqual([
+      'Summary',
       'Bids and offers',
       'Follow-ups',
       'Contact history',
@@ -437,6 +438,7 @@ describe('a buyer’s or seller’s page', () => {
     show('trader');
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
     expect(headings()).toEqual([
+      'Summary',
       'Follow-ups',
       'Bids and offers',
       'Contacts',
@@ -500,6 +502,7 @@ describe('a carrier’s page', () => {
     // Its freight rates are open, not folded.
     expect(await screen.findByRole('region', { name: 'Freight rates (0)' })).toBeInTheDocument();
     expect(headings()).toEqual([
+      'Summary',
       'Freight rates',
       'Follow-ups',
       'Contact history',
@@ -525,6 +528,7 @@ describe('a carrier’s page', () => {
     show('trader');
     await screen.findByRole('region', { name: 'Freight rates (0)' });
     expect(headings()).toEqual([
+      'Summary',
       'Follow-ups',
       'Lanes',
       'Freight rates',
