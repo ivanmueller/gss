@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #138
+
+- `docs/HANDOFF.md`: a grain in a window, on spec only (ivanmueller/gss#138), with its CI and Deploy staging runs and the one freight browser-test failure on its first run.
+
 ## 2026-11-05 — Handoff records of #135 to #137
 
 - `docs/HANDOFF.md`: the Grains reference (ivanmueller/gss#135), its page without a title (#136) and one class at a time with its on-spec limits (#137), with their CI and Deploy staging runs.
