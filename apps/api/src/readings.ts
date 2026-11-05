@@ -11,7 +11,13 @@ import {
 } from '@grain/domain';
 import { Hono } from 'hono';
 
-import { claudeClient, claudeFailure, type ClaudeFactory, type ReadingAnswer } from './anthropic';
+import {
+  claudeClient,
+  claudeFailure,
+  notTakenByAnthropic,
+  type ClaudeFactory,
+  type ReadingAnswer,
+} from './anthropic';
 import { RECORDINGS_JOB_BUDGET_MS } from './calls';
 import type { ReadingContextRow } from './readings-db';
 import {
@@ -103,10 +109,10 @@ interface JobOptions {
 
 /**
  * Reads the newest transcripts not read yet, at most READ_MOST a run, within the job's time
- * budget. A recording is claimed only when it is about to be read; an answer that cannot be
- * kept is tried again after its 10-minute claim lapses, up to 5 attempts, while a request
- * Anthropic did not take gives its attempt back and stops the run. Without the API key it does
- * nothing.
+ * budget. A recording is claimed only when it is about to be read, and is read and kept under
+ * that claim only. An answer that cannot be kept is tried again after its 10-minute claim
+ * lapses, up to 5 attempts; a failed request stops the run, and gives its attempt back when
+ * Anthropic did not take it. Without the API key it does nothing.
  */
 export async function readNewTranscripts(
   env: ApiEnv['Bindings'],
@@ -122,10 +128,10 @@ export async function readNewTranscripts(
   try {
     for (let count = 0; count < READ_MOST; count += 1) {
       if (now() - started >= RECORDINGS_JOB_BUDGET_MS) break;
-      const [recordingId] = await db.claimCallReadings(1);
-      if (recordingId === undefined) break;
+      const [claim] = await db.claimCallReadings(1);
+      if (claim === undefined) break;
       try {
-        const context = await db.callReadingContext(recordingId);
+        const context = await db.callReadingContext(claim);
         if (context === null) continue;
         const lines = linesOf(context);
         let answer: ReadingAnswer;
@@ -136,13 +142,14 @@ export async function readNewTranscripts(
             schema: CALL_READING_JSON_SCHEMA,
           });
         } catch (error) {
-          // Anthropic did not take the request (a wrong key, the spend limit reached, an
-          // overload, no connection): the attempt is given back and the run stops, so no call
-          // runs out of attempts before the problem is fixed; the next run tries again.
+          // The run stops; the next one tries again. When Anthropic did not take the request
+          // (a wrong key, the spend limit reached, an overload, no connection), nothing was
+          // charged and the attempt is given back, so no call runs out of attempts before the
+          // problem is fixed. A timeout or the deadline counts it: Anthropic may have read it.
           console.error(
             `Call not read, reading paused until the next run: ${claudeFailure(error)}`,
           );
-          await db.releaseCallReading(recordingId);
+          if (notTakenByAnthropic(error)) await db.releaseCallReading(claim);
           break;
         }
         if (answer.status !== 'read') {
@@ -162,13 +169,7 @@ export async function readNewTranscripts(
           calledAt: context.calledAt,
         });
         const model = /^[a-z0-9][a-z0-9.-]{0,79}$/.test(answer.model) ? answer.model : 'unknown';
-        await db.keepCallReading(
-          recordingId,
-          model,
-          checked,
-          answer.inputTokens,
-          answer.outputTokens,
-        );
+        await db.keepCallReading(claim, model, checked, answer.inputTokens, answer.outputTokens);
       } catch (error) {
         console.error(`Call not read: ${claudeFailure(error)}`);
       }

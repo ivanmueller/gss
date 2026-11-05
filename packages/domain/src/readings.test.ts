@@ -7,7 +7,7 @@ import {
   checkReading,
   decideDraftSchema,
   numberedTranscript,
-  numberSaid,
+  mentionsIn,
   type CallReading,
   type ReadingContext,
 } from './readings';
@@ -21,7 +21,7 @@ const LINES: TranscriptLine[] = [
   {
     side: 'counterparty',
     start: 3,
-    text: 'We can bid $725.50 a tonne delivered Lethbridge for 1,500 tonnes.',
+    text: 'We can bid $725.50 Canadian a tonne delivered Lethbridge for 1,500 tonnes.',
   },
   { side: 'counterparty', start: 9, text: 'Good until Friday noon. Call me back Thursday at 2.' },
   { side: 'counterparty', start: 15, text: 'Talk to Sam, our new merchandiser, at 403 555 0177.' },
@@ -66,13 +66,29 @@ const reading = (overrides: Partial<CallReading> = {}): CallReading => ({
   ...overrides,
 });
 
-describe('numberSaid', () => {
-  it('finds a number as said, with thousands separators and trailing zeros', () => {
-    expect(numberSaid('725.50', 'bid $725.5 a tonne')).toBe(true);
-    expect(numberSaid('1500', 'for 1,500 tonnes')).toBe(true);
-    expect(numberSaid('725', 'bid 725.50')).toBe(false);
-    expect(numberSaid('72', 'bid 725')).toBe(false);
-    expect(numberSaid('725', 'seven twenty five')).toBe(false);
+describe('mentionsIn', () => {
+  it('tells a price per unit from a quantity in tonnes', () => {
+    expect(mentionsIn('$725.50 a tonne for 1,500 tonnes.')).toEqual([
+      { value: '725.5', price: true, priceUnit: 'MT', tonnes: false },
+      { value: '1500', price: false, priceUnit: null, tonnes: true },
+    ]);
+    expect(mentionsIn('7.25 US a bushel, 12 dollars per cwt, 300 bucks, 9 per short ton')).toEqual([
+      { value: '7.25', price: true, priceUnit: 'BU', tonnes: false },
+      { value: '12', price: true, priceUnit: 'CWT', tonnes: false },
+      { value: '300', price: true, priceUnit: null, tonnes: false },
+      { value: '9', price: true, priceUnit: 'ST', tonnes: false },
+    ]);
+  });
+
+  it('says nothing of a bare number, or of a ton that is not clearly metric', () => {
+    expect(mentionsIn('call me at 2, 725 maybe, 400 a ton')).toEqual([
+      { value: '2', price: false, priceUnit: null, tonnes: false },
+      { value: '725', price: false, priceUnit: null, tonnes: false },
+      { value: '400', price: true, priceUnit: null, tonnes: false },
+    ]);
+    expect(mentionsIn('2000 tons')).toEqual([
+      { value: '2000', price: false, priceUnit: null, tonnes: false },
+    ]);
   });
 });
 
@@ -111,6 +127,29 @@ describe('checkReading: bids and offers', () => {
     ).drafts;
     expect(draft?.kind === 'quote' && draft.fields.values).not.toHaveProperty('price');
     expect(draft?.kind === 'quote' && draft.fields.values).not.toHaveProperty('quantityMax');
+  });
+
+  it('never takes a quantity for a price or a price for a quantity (Codex, finding 1)', () => {
+    const [draft] = checkReading(
+      reading({ quotes: [quote({ price: '1500', quantityMaxMt: '725.50' })] }),
+      context(),
+    ).drafts;
+    const values = draft?.kind === 'quote' ? draft.fields.values : {};
+    expect(values).not.toHaveProperty('price');
+    expect(values).not.toHaveProperty('quantityMax');
+    expect(values).not.toHaveProperty('priceUnit');
+    expect(values).not.toHaveProperty('currency');
+  });
+
+  it('keeps a unit or currency only when said with the price', () => {
+    const [draft] = checkReading(
+      reading({ quotes: [quote({ priceUnit: 'BU', currency: 'USD' })] }),
+      context(),
+    ).drafts;
+    const values = draft?.kind === 'quote' ? draft.fields.values : {};
+    expect(values.price).toBe('725.50');
+    expect(values).not.toHaveProperty('priceUnit');
+    expect(values).not.toHaveProperty('currency');
   });
 
   it('never converts: a price that is not plain digits stays blank', () => {
@@ -301,6 +340,24 @@ describe('checkReading: contacts', () => {
     ]);
   });
 
+  it('keeps an extension only when it was said (Codex, finding 2)', () => {
+    const phoneOf = (phone: string, text: string) =>
+      checkReading(
+        reading({
+          contacts: [{ contactId: null, name: 'Sam', role: null, email: null, phone, lines: [0] }],
+        }),
+        context({ lines: [{ side: 'counterparty', start: 0, text }] }),
+      ).drafts[0]?.fields.values;
+    expect(phoneOf('403 555 0177 x999', 'Sam is at 403 555 0177.')).toEqual({
+      contactName: 'Sam',
+      contactPhone: '403 555 0177',
+    });
+    expect(phoneOf('403 555 0177 x12', 'Sam is at 403 555 0177 extension 12.')).toEqual({
+      contactName: 'Sam',
+      contactPhone: '403 555 0177 x12',
+    });
+  });
+
   it('leaves out an email that is not one', () => {
     const [draft] = checkReading(
       reading({
@@ -351,7 +408,7 @@ describe('numberedTranscript', () => {
       }),
     ).toBe(
       '[0] GSS (Tom): Hi Pat, any interest in canola this week?\n' +
-        '[1] Counterparty (Pat Buyer): We can bid $725.50 a tonne delivered Lethbridge for 1,500 tonnes.\n' +
+        '[1] Counterparty (Pat Buyer): We can bid $725.50 Canadian a tonne delivered Lethbridge for 1,500 tonnes.\n' +
         '[2] Unknown side: Bye now',
     );
   });

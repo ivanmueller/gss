@@ -1,7 +1,16 @@
 import { CALL_READING_JSON_SCHEMA, type CallReading } from '@grain/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { claudeClient, claudeFailure, READING_MODEL, type ClaudeClient } from './anthropic';
+import Anthropic from '@anthropic-ai/sdk';
+
+import {
+  claudeClient,
+  claudeFailure,
+  notTakenByAnthropic,
+  READING_MODEL,
+  ReadingDeadlineError,
+  type ClaudeClient,
+} from './anthropic';
 import { RECORDINGS_JOB_BUDGET_MS } from './calls';
 import type { Database } from './db';
 import { createApp } from './index';
@@ -18,6 +27,8 @@ const PAT = '00000000-0000-4000-8000-00000000d1aa';
 const ORG = '00000000-0000-4000-8000-0000000000aa';
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}`, 'Content-Type': 'application/json' };
 const CLAUDE_ENV = { ...ENV, ANTHROPIC_API_KEY: 'sk-ant-synthetic-test-only' };
+/** A claim of a recording, with a made-up token. */
+const claimOf = (recordingId: string) => ({ recordingId, token: `token-${recordingId.slice(-4)}` });
 
 const CONTEXT: ReadingContextRow = {
   recordingId: RECORDING,
@@ -74,7 +85,7 @@ beforeEach(() => {
   db.memberships.mockResolvedValue([
     { organizationId: ORG, organizationName: 'Synthetic Org A', role: 'trader' },
   ]);
-  db.claimCallReadings.mockResolvedValueOnce([RECORDING]).mockResolvedValue([]);
+  db.claimCallReadings.mockResolvedValueOnce([claimOf(RECORDING)]).mockResolvedValue([]);
   db.callReadingContext.mockResolvedValue(CONTEXT);
   claude = {
     readCall: vi.fn<ClaudeClient['readCall']>(() =>
@@ -103,10 +114,11 @@ describe('readNewTranscripts', () => {
       schema: CALL_READING_JSON_SCHEMA,
     });
     expect(db.keepCallReading).toHaveBeenCalledTimes(1);
+    expect(db.callReadingContext).toHaveBeenCalledWith(claimOf(RECORDING));
     const [recording, model, reading, inputTokens, outputTokens] =
       db.keepCallReading.mock.calls[0] ?? [];
     expect([recording, model, inputTokens, outputTokens]).toEqual([
-      RECORDING,
+      claimOf(RECORDING),
       READING_MODEL,
       2400,
       600,
@@ -146,9 +158,9 @@ describe('readNewTranscripts', () => {
       });
     db.claimCallReadings.mockReset();
     db.claimCallReadings
-      .mockResolvedValueOnce(['00000000-0000-4000-8000-0000000ec011'])
-      .mockResolvedValueOnce(['00000000-0000-4000-8000-0000000ec012'])
-      .mockResolvedValueOnce(['00000000-0000-4000-8000-0000000ec013'])
+      .mockResolvedValueOnce([claimOf('00000000-0000-4000-8000-0000000ec011')])
+      .mockResolvedValueOnce([claimOf('00000000-0000-4000-8000-0000000ec012')])
+      .mockResolvedValueOnce([claimOf('00000000-0000-4000-8000-0000000ec013')])
       .mockResolvedValue([]);
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await readNewTranscripts(CLAUDE_ENV, openDatabase, () => claude);
@@ -160,28 +172,59 @@ describe('readNewTranscripts', () => {
     ]);
   });
 
-  it('gives the attempt back and stops the run when Anthropic does not take the request', async () => {
-    claude.readCall.mockRejectedValueOnce(new Error('transcript text that must not be logged'));
+  it('gives the attempt back and stops the run when Anthropic answers with an error', async () => {
+    claude.readCall.mockRejectedValueOnce(
+      new Anthropic.RateLimitError(
+        429,
+        undefined,
+        'transcript text that must not be logged',
+        new Headers(),
+      ),
+    );
     db.claimCallReadings.mockReset();
     db.claimCallReadings
-      .mockResolvedValueOnce(['00000000-0000-4000-8000-0000000ec011'])
-      .mockResolvedValue([RECORDING]);
+      .mockResolvedValueOnce([claimOf('00000000-0000-4000-8000-0000000ec011')])
+      .mockResolvedValue([claimOf(RECORDING)]);
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await readNewTranscripts(CLAUDE_ENV, openDatabase, () => claude);
-    expect(errors).toHaveBeenCalledWith('Call not read, reading paused until the next run: Error');
+    expect(errors).toHaveBeenCalledWith(
+      'Call not read, reading paused until the next run: status=429',
+    );
     expect(JSON.stringify(errors.mock.calls)).not.toContain('must not be logged');
-    expect(db.releaseCallReading).toHaveBeenCalledWith('00000000-0000-4000-8000-0000000ec011');
+    expect(db.releaseCallReading).toHaveBeenCalledWith(
+      claimOf('00000000-0000-4000-8000-0000000ec011'),
+    );
     expect(db.claimCallReadings).toHaveBeenCalledTimes(1);
     expect(db.keepCallReading).not.toHaveBeenCalled();
     expect(db.close).toHaveBeenCalled();
   });
 
+  it.each([
+    ['the deadline', new ReadingDeadlineError('too long'), 'deadline'],
+    ['an unknown failure', new Error('transcript text that must not be logged'), 'Error'],
+  ])(
+    'keeps the attempt and stops the run after %s: Anthropic may have read it',
+    async (_, error, logged) => {
+      claude.readCall.mockRejectedValueOnce(error);
+      db.claimCallReadings.mockReset();
+      db.claimCallReadings.mockResolvedValue([claimOf(RECORDING)]);
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await readNewTranscripts(CLAUDE_ENV, openDatabase, () => claude);
+      expect(errors).toHaveBeenCalledWith(
+        `Call not read, reading paused until the next run: ${logged}`,
+      );
+      expect(JSON.stringify(errors.mock.calls)).not.toContain('must not be logged');
+      expect(db.releaseCallReading).not.toHaveBeenCalled();
+      expect(db.claimCallReadings).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('goes on to the next call when keeping one fails', async () => {
     db.keepCallReading.mockRejectedValueOnce(new Error('connection lost'));
     db.claimCallReadings.mockReset();
     db.claimCallReadings
-      .mockResolvedValueOnce(['00000000-0000-4000-8000-0000000ec011'])
-      .mockResolvedValueOnce([RECORDING])
+      .mockResolvedValueOnce([claimOf('00000000-0000-4000-8000-0000000ec011')])
+      .mockResolvedValueOnce([claimOf(RECORDING)])
       .mockResolvedValue([]);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await readNewTranscripts(CLAUDE_ENV, openDatabase, () => claude);
@@ -191,7 +234,7 @@ describe('readNewTranscripts', () => {
 
   it('reads at most 3 calls a run, and none once the time budget is spent', async () => {
     db.claimCallReadings.mockReset();
-    db.claimCallReadings.mockResolvedValue([RECORDING]);
+    db.claimCallReadings.mockResolvedValue([claimOf(RECORDING)]);
     await readNewTranscripts(CLAUDE_ENV, openDatabase, () => claude);
     expect(claude.readCall).toHaveBeenCalledTimes(3);
 
@@ -330,6 +373,40 @@ describe('claudeClient', () => {
     const request = { system: 'S', user: 'U', schema: {} };
     expect(await client?.readCall(request)).toEqual({ status: 'refused', model: 'claude-opus-5' });
     expect(await client?.readCall(request)).toEqual({ status: 'cut_off', model: 'claude-opus-5' });
+  });
+
+  it('abandons a request at its deadline, however long Anthropic asks it to wait (Codex, finding 4)', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error' } }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '660' },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const started = Date.now();
+    const failure = await claudeClient(CLAUDE_ENV, { deadlineMs: 200 })
+      ?.readCall({ system: 'S', user: 'U', schema: {} })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ReadingDeadlineError);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(claudeFailure(failure)).toBe('deadline');
+    expect(notTakenByAnthropic(failure)).toBe(false);
+    // The SDK was still waiting to retry; the call was given up at the deadline.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells a request Anthropic answered with an error from one it may have read', () => {
+    expect(
+      notTakenByAnthropic(new Anthropic.RateLimitError(429, undefined, 'x', new Headers())),
+    ).toBe(true);
+    expect(
+      notTakenByAnthropic(new Anthropic.AuthenticationError(401, undefined, 'x', new Headers())),
+    ).toBe(true);
+    expect(notTakenByAnthropic(new Anthropic.APIConnectionError({ message: 'x' }))).toBe(true);
+    expect(notTakenByAnthropic(new Anthropic.APIConnectionTimeoutError())).toBe(false);
+    expect(notTakenByAnthropic(new Error('x'))).toBe(false);
   });
 
   it('summarizes a failure by status and error type only', async () => {

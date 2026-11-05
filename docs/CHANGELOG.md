@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Codex's review of the call readings
+
+- `docs/DECISIONS.md`: the five findings and their fixes (a price only when said as a price, a quantity only in tonnes, an extension only when said, a new contact accepted only with one's own, a deadline for each reading, a token for each claim).
+- `docs/DATA_MODEL.md`: `reading_claim_token`.
+
 ## 2026-11-05 — Claude reads each call
 
 - `docs/DECISIONS.md`: the owner's request and answers (Opus 5.5, every call and the calls already transcribed, all four kinds of draft, voicemail from the transcript, a USD 100 spend limit); how a reading is checked; who accepts drafts; Anthropic's Commercial Terms on training; retention still to be read.

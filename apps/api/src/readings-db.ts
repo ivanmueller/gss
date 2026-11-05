@@ -31,21 +31,30 @@ export interface ReadingContextRow {
   }[];
 }
 
+/** A recording claimed for reading, and the claim's token. */
+export interface ReadingClaim {
+  recordingId: string;
+  token: string;
+}
+
 export type DecideDraftResult =
   'decided' | 'not_found' | 'forbidden' | 'already_decided' | 'result_not_found';
 
 export type CorrectVoicemailResult = 'saved' | 'not_found' | 'forbidden' | 'not_read';
 
 export interface ReadingsDatabase {
-  /** Claims up to `most` recordings for Claude to read now, newest first. */
-  claimCallReadings: (most: number) => Promise<string[]>;
+  /**
+   * Claims up to `most` recordings for Claude to read now, newest first, each with its claim's
+   * token, which the calls below need (Codex's review of c9222d3, finding 5).
+   */
+  claimCallReadings: (most: number) => Promise<ReadingClaim[]>;
   /** Gives a claim back without counting its attempt (Anthropic did not take the request). */
-  releaseCallReading: (recordingId: string) => Promise<void>;
-  /** The call a claimed recording is of, for Claude to read; null when not claimed or read. */
-  callReadingContext: (recordingId: string) => Promise<ReadingContextRow | null>;
-  /** Keeps a reading and its drafts, once; false when the recording was read already. */
+  releaseCallReading: (claim: ReadingClaim) => Promise<void>;
+  /** The call a claimed recording is of, for Claude to read; null unless the claim is current. */
+  callReadingContext: (claim: ReadingClaim) => Promise<ReadingContextRow | null>;
+  /** Keeps a reading and its drafts, once; false when read already or the claim is not current. */
   keepCallReading: (
-    recordingId: string,
+    claim: ReadingClaim,
     model: string,
     reading: CheckedReading,
     inputTokens: number,
@@ -88,24 +97,24 @@ const VOICEMAIL_RESULTS: readonly CorrectVoicemailResult[] = [
 export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatabase {
   return {
     async claimCallReadings(most) {
-      const rows = await sql<{ recording_id: string }[]>`
-        select recording_id from app.claim_call_readings(${most})`;
-      return rows.map((row) => row.recording_id);
+      const rows = await sql<{ recording_id: string; claim_token: string }[]>`
+        select recording_id, claim_token from app.claim_call_readings(${most})`;
+      return rows.map((row) => ({ recordingId: row.recording_id, token: row.claim_token }));
     },
 
-    async releaseCallReading(recordingId) {
-      await sql`select app.release_call_reading(${recordingId})`;
+    async releaseCallReading(claim) {
+      await sql`select app.release_call_reading(${claim.recordingId}, ${claim.token})`;
     },
 
-    async callReadingContext(recordingId) {
+    async callReadingContext(claim) {
       const [row] = await sql<{ context: ReadingContextRow | null }[]>`
-        select app.call_reading_context(${recordingId}) as context`;
+        select app.call_reading_context(${claim.recordingId}, ${claim.token}) as context`;
       const context = row?.context ?? null;
       if (context === null) return null;
       return { ...context, calledAt: new Date(context.calledAt).toISOString() };
     },
 
-    async keepCallReading(recordingId, model, reading, inputTokens, outputTokens) {
+    async keepCallReading(claim, model, reading, inputTokens, outputTokens) {
       const drafts = reading.drafts.map((draft) => ({
         kind: draft.kind,
         contactId: draft.kind === 'contact' ? draft.contactId : null,
@@ -113,7 +122,8 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
         lines: draft.lines,
       }));
       const [row] = await sql<{ kept: boolean }[]>`
-        select app.keep_call_reading(${recordingId}, ${model}, ${reading.voicemail},
+        select app.keep_call_reading(${claim.recordingId}, ${claim.token}, ${model},
+                                     ${reading.voicemail},
                                      ${reading.summary}, ${sql.json(drafts)}::jsonb,
                                      ${inputTokens}, ${outputTokens}) as kept`;
       return row?.kept === true;
