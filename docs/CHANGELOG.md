@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Summaries: exact listed words, labels standing alone
+
+- `docs/DECISIONS.md`: Codex's review of `2f23d4b` (three P2): exact words from a fixed list only (no word forms, record words or names), ASCII only, labels standing alone, contacts and commodities by label.
+- `README.md`: the same, in a line.
+
 ## 2026-11-05 — Handoff records of #152, #153 and #154
 
 - `docs/HANDOFF.md`: the summary fixes and every company summarized (ivanmueller/gss#152), labels instead of numbers (#153), Claude's words from a closed list (#154), with their CI and Deploy staging runs (run #346 on `main` failed once in a web test).
