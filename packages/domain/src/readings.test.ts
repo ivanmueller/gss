@@ -185,12 +185,8 @@ describe('saidPrice: what was said is filled in, with where', () => {
       'MT',
       null,
     ]);
-    expect(price('$725 a tonne', 'For two loads, we agree to $725 a tonne.')).toEqual([
-      '725',
-      null,
-      'MT',
-      null,
-    ]);
+    // A number in words marks it.
+    expect(price('$725 a tonne', 'For two loads, we agree to $725 a tonne.')?.[3]).toMatch(/“two”/);
   });
 });
 
@@ -286,11 +282,58 @@ describe('saidPrice: anything unusual is filled in and marked for a second look'
     notPlain('$7', 'We bid $7½ per bushel.');
     doubtful('$1.5', 'The price is $1.5 M per tonne.', /said with “m”/);
     doubtful('$725 per tonne', 'Prices range from 700 U.S. to $725 per tonne.', /another number/);
-    doubtful('-$5 per tonne', 'The bid is -$5 per tonne.', /minus sign/);
+    doubtful('-$5 per tonne', 'The bid is -$5 per tonne.', /said with a sign/);
     doubtful('$1.5', 'We bid $1.5 million per tonne.', /said with “million”/);
     doubtful('$725', 'We bid $725 thousand.', /said with “thousand”/);
     doubtful('$725 per tonne', 'Give us $725 per tonne.', /next to it/);
     doubtful('$725 per tonne', 'We bid $725 per tonne 500 tonnes available.', /another number/);
+  });
+});
+
+describe('saidPrice and saidPhone: any word that is not ordinary marks the number (Codex, beebbf6)', () => {
+  it('marks worded fractions, worded numbers, deductions and foreign currencies', () => {
+    for (const [said, text] of [
+      ['$7', 'We bid $7 and a half per bushel.'],
+      ['$7', 'We bid $7 point five per bushel.'],
+      ['$7', 'We bid $7 and a quarter per bushel.'],
+      ['$9 per bushel', 'Offers range from seven dollars to $9 per bushel.'],
+      ['$9 per bushel', 'Seven dollars to $9 per bushel, they said.'],
+      ['$5 per tonne', 'The net bid is zero dollars after subtracting $5 per tonne.'],
+      ['$5 per tonne', 'Subtracting $5 per tonne from the bid.'],
+      ['US$725', 'Bid US$725 Australian dollars per tonne.'],
+    ] as const) {
+      // Refused (null), or filled with a reason to look twice.
+      expect(price(said, text)?.[3] !== null, text).toBe(true);
+    }
+  });
+
+  it('fills a whole signed copy, marked (Codex, beebbf6, P3)', () => {
+    expect(price('+$5 per tonne', 'The bid is +$5 per tonne.')).toEqual([
+      '5',
+      null,
+      'MT',
+      'It was said with a sign.',
+    ]);
+    expect(price('plus $5 per tonne', 'The bid is plus $5 per tonne.')?.[3]).toBe(
+      'It was said with a sign.',
+    );
+    expect(tonnes('+500 tonnes', 'Add +500 tonnes.')).toEqual(['500', 'It was said with a sign.']);
+  });
+
+  it('marks a phone number after a foreign code in words', () => {
+    expect(phone('403 555 0177', 'Our UK number is plus forty four 403 555 0177.')?.[1]).toMatch(
+      /word to check/,
+    );
+  });
+
+  it('leaves ordinary lines plain', () => {
+    expect(
+      price('$725 a tonne', 'Yeah we can do $725 a tonne delivered Lethbridge next week.'),
+    ).toEqual(['725', null, 'MT', null]);
+    expect(phone('403 555 0177', 'Talk to Sam, our new merchandiser, at 403 555 0177.')).toEqual([
+      '(403) 555-0177',
+      null,
+    ]);
   });
 });
 

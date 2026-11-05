@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Ordinary words keep a number plain
+
+- `docs/DECISIONS.md`: Codex's review of `beebbf6` and the turned-around check (any word that is not ordinary marks the number).
+
 ## 2026-11-05 — Codex's review of the fill-and-mark contract
 
 - `docs/DECISIONS.md`: the nine findings on `5d1ecfa` and their fixes (signs and other numbers anywhere in the line, NFKC digits, scale abbreviations, "per" before a quantity, signed copies, more extension forms).

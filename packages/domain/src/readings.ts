@@ -294,6 +294,9 @@ interface Found {
   after: string;
   /** The rest of the line they stand in, without them. */
   rest: string;
+  /** Where they stand in the line (squashed), and how long they are. */
+  at: number;
+  length: number;
 }
 
 /**
@@ -317,7 +320,7 @@ function find(
         (/[\p{L}\p{N}]$/u.test(before) && /^[\p{L}\p{N}]/u.test(needle)) ||
         (/[\p{L}\p{N}]$/u.test(needle) && /^[\p{L}\p{N}]/u.test(after));
       if (glued || refuse(before, after)) continue;
-      return { line, before, after, rest: `${before} ${after}` };
+      return { line, before, after, rest: `${before} ${after}`, at, length: needle.length };
     }
   }
   return null;
@@ -352,6 +355,98 @@ const PRICE_WORD_AFTER =
   /^\s*(?:usd|cad|cdn|canadian|american|us|u\.s\.|dollars?|bucks|(?:a|an|per)\s+(?:metric\s+)?(?:tonnes?|tons?|t|mts?|bushels?|bu|hundredweights?|cwt)\b|\/)/;
 
 /**
+ * The ordinary words a line may hold for its numbers to stay plain: everyday English and the
+ * trade's own words. Any other word marks them for a second look ("seven", "half", "point",
+ * "subtracting", "forty", "Australian dollars"), so a new way of saying a sign, a range, a
+ * fraction or a foreign number is marked even though nobody listed it (the owner's choice of
+ * 2026-11-05, after Codex's reviews kept finding wordings no list of risky words covered).
+ * A name in the middle of a sentence ("delivered Lethbridge", "talk to Sam") is ordinary too.
+ */
+const ORDINARY_WORDS = new Set(
+  `a about across after again agree agreed all along already also am
+an and any anything april are around as ask asked at august
+available back barley based basis be bean beans been before being best
+bid bidding bids big book booked both bought bring bushel bushels but
+buy buyer buyers buying by call called calling can canary canola cash
+cell check chickpeas close confirm confirmed contract contracts corn could crop crops
+current currently customer cwt deal december deliver delivered delivery desk did do
+dockage does doing done down durum each early either elevator else email
+end even ever every ex ext extension faba far farm february feed
+fine firm flax flaxseed fob for freight friday from get gets getting
+give go going good got grade grain grains great green guys had
+has have having he hear heard hello her here hey hi high
+him his hold how hundredweight i if in indicative inside interest interested
+into is it it's its january july june just keep kind know
+last later left lentil lentils let let's like line list little load
+loaded loads look looking lot low make malt manager march may me
+merchandiser metric might mill moisture monday month more morning most move mt
+mts much must mustard my near need new next nice no not
+november now number oat oats october of offer offering offers office ok
+okay old on one's only or order other our out outside over
+own owner pea peas phone pick picked pickup place plant please pm
+port price priced prices pricing protein put quote quoted rail reach ready
+really red right rye said same saturday say says see seed seeds
+sell seller selling send september ship shipped shipping should small so sold
+some something soon sorry soy soybean soybeans spot spring still sunday sunflower
+sure take talk tell terminal test than thank thanks that that's the
+their them then there these they they're thing think this those thursday
+tight time to today together tomorrow ton tonight tonne tonnes tons too
+trade trader truck trucks tuesday until up upon us use very wait
+want wanted was we we'll we're we've wednesday week weekend weeks weight
+well were what what's wheat when where which while who why will
+winter with without work would yard yeah year yellow yes yesterday yet
+you you're your`.split(/\s+/),
+);
+/** Numbers in words: never ordinary, even as a name. */
+const NUMBER_WORDS = new Set(
+  `billion couple double dozen eight eighteen eighty eleven few fifteen fifth fifty
+five forty four fourteen fourth half halves hundred hundreds million millions nine
+nineteen ninety oh one point quarter quarters seven seventeen seventy several six
+sixteen sixty ten tenth third thirds thirteen thirty thousand thousands three triple
+twelve twenty two zero`.split(/\s+/),
+);
+
+/**
+ * The first word in a line, other than the copied words and the draft's own filled-in amounts
+ * (`masked`), that is not ordinary, or null. A capitalized word is a name when it does not start
+ * a sentence and is not a number.
+ */
+function unusualWord(
+  line: string,
+  masked: readonly { at: number; length: number }[],
+): string | null {
+  const cased = line.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const lower = cased.toLowerCase();
+  // Lower case keeps the same positions for the letters a transcript uses; if not, no names.
+  const named = lower.length === cased.length ? cased : lower;
+  let text = named;
+  for (const { at, length } of masked) {
+    text = `${text.slice(0, at)}${' '.repeat(length)}${text.slice(at + length)}`;
+  }
+  for (const match of text.matchAll(/[\p{L}][\p{L}'\u2019]*/gu)) {
+    const word = match[0].toLowerCase().replace(/\u2019/g, "'");
+    if (NUMBER_WORDS.has(word)) return match[0];
+    if (ORDINARY_WORDS.has(word)) continue;
+    const startsSentence = /(?:^|[.!?]\s*)$/.test(
+      text.slice(0, match.index).trimEnd() === '' ? '' : text.slice(0, match.index),
+    );
+    if (/^\p{Lu}/u.test(match[0]) && !startsSentence) continue;
+    return match[0];
+  }
+  return null;
+}
+
+/** Where each of `phrases` first stands in a squashed line, to mask it. */
+function spansOf(line: string, phrases: readonly string[]): { at: number; length: number }[] {
+  const text = squash(line);
+  return phrases.flatMap((phrase) => {
+    const words = squash(phrase);
+    const at = words === '' ? -1 : text.indexOf(words);
+    return at === -1 ? [] : [{ at, length: words.length }];
+  });
+}
+
+/**
  * Why a person should look twice at an amount found in a transcript line, or null: a sign word
  * or a dash, minus or plus sign anywhere in the line, a fraction or scale after it, another
  * number anywhere in the line (other than the ones `explained`: the draft's own price and
@@ -375,11 +470,16 @@ function amountDoubt(found: Found, line: string, explained: readonly string[]): 
   if (PRICE_WORD_BEFORE.test(found.before) || PRICE_WORD_AFTER.test(found.after)) {
     return 'Words right next to it may belong to it.';
   }
+  const word = unusualWord(line, [found, ...spansOf(line, explained)]);
+  if (word !== null) return `The line has a word to check, “${word}”.`;
   return null;
 }
 
-/** A sign copied with the amount: it is read without it, and marked for a second look. */
-const SIGN_COPIED = /^(?:[-\u2212]|minus\s+|negative\s+)\s*/;
+/**
+ * A sign copied with the amount ("-$5", "+$5", "minus 5", "plus 500 tonnes"): it is read without
+ * it, and marked for a second look.
+ */
+const SIGN_COPIED = /^(?:[-\u2212+]|minus\s+|negative\s+|plus\s+)\s*/;
 
 /** A number as written: "1,500", "1 500", "725.50", ".50". */
 const NUMBER = String.raw`(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?: \d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)`;
@@ -495,7 +595,7 @@ export function saidPrice(
               line,
               explained.filter((e) => e !== null),
             )
-          : 'It was said with a minus sign.',
+          : 'It was said with a sign.',
     },
   };
 }
@@ -521,12 +621,12 @@ export function saidTonnes(
     line,
     explained.filter((e) => e !== null),
   );
-  if (sign !== null) doubt = 'It was said with a minus sign.';
-  else if (doubt === null && /\$\s*$/.test(found.before))
-    doubt = 'A dollar sign is right before it.';
   // "Per 500 tonnes" is part of a price, not a quantity on offer (Codex's review of 5d1ecfa).
-  else if (doubt === null && /(?:\b(?:per|a|an|each)|\/)\s*$/.test(found.before)) {
+  if (sign !== null) doubt = 'It was said with a sign.';
+  else if (/(?:\b(?:per|a|an|each)|\/)\s*$/.test(found.before)) {
     doubt = 'It is said after “per”: it may be part of a price.';
+  } else if (doubt === null && /\$\s*$/.test(found.before)) {
+    doubt = 'A dollar sign is right before it.';
   }
   return { amount, check: { said, line: found.line, doubt } };
 }
@@ -573,6 +673,10 @@ export function saidPhone(
     doubt = 'An extension may follow it.';
   } else if (/\p{N}/u.test(found.rest)) {
     doubt = 'The line has another number.';
+  } else {
+    const line = cited.find((c) => c.line === found.line)?.text ?? '';
+    const word = unusualWord(line, [found]);
+    if (word !== null) doubt = `The line has a word to check, “${word}”.`;
   }
   return {
     phone: extension === undefined ? written : `${written} x${extension}`,
