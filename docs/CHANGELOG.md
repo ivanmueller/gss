@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #145
+
+- `docs/HANDOFF.md`: the start of a range as a whole price (ivanmueller/gss#145), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Codex's eighth review of the call readings
 
 - `docs/DECISIONS.md`: ranges with a currency code after the number, or a unit said once.
