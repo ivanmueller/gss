@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-05 — Handoff record of #149
+
+- `docs/HANDOFF.md`: no either-or fields in the answer's schema (ivanmueller/gss#149), with its CI and Deploy staging runs; calls read on staging.
+
 ## 2026-11-05 — Calls refused on staging; the company summary planned
 
 - `docs/DECISIONS.md`: the 400 on every request (too many either-or fields in the answer's schema) and its fix; the owner's answers for a summary on each company's page.
