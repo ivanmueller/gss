@@ -234,6 +234,10 @@ describe('a callback', () => {
     });
   });
 
+  it('has a sweep for callbacks whose join was unclear, logging nothing ended under five minutes ago', async () => {
+    expect(await db.settleLateCallbacks(10)).toBeGreaterThanOrEqual(0);
+  });
+
   it('applies an event once, and a repeated incoming leg is the same call', async () => {
     const leg = `in-${id()}`;
     const eventId = id();

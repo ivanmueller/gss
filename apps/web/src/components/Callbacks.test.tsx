@@ -25,7 +25,8 @@ const CALLBACK: CallView = {
   contactName: 'Pat Buyer',
   status: 'calling_you',
   outcome: null,
-  createdAt: '2026-11-06T20:00:00.000Z',
+  // When it came in: now, as the call box's 4-hour deadline counts from it.
+  createdAt: new Date().toISOString(),
   connectedAt: null,
   endedAt: null,
   contactLogEntryId: null,
@@ -172,6 +173,39 @@ describe('IncomingCalls', () => {
       await vi.advanceTimersByTimeAsync(2500);
     });
     expect(screen.getByText(/^Call ended after .*It is in the contact history\.$/)).toBeVisible();
+  });
+
+  it('keeps the deadline of the call when the sign-in token is renewed (Codex, 9d5e57b)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // A callback taken 4 hours 10 minutes ago whose end never arrives.
+    let mine: CallView | null = {
+      ...CALLBACK,
+      createdAt: new Date(Date.now() - (4 * 60 + 10) * 60 * 1000).toISOString(),
+      status: 'connected',
+      connectedAt: new Date(Date.now() - (4 * 60 + 9) * 60 * 1000).toISOString(),
+      callback: { ...RUNG, you: 'answered' },
+    };
+    const stale = mine;
+    const calls = mockApi({
+      [`GET /callbacks/mine?organization_id=${ORG.id}`]: () => Response.json({ call: mine }),
+      [`GET /calls/${CALL}`]: () => Response.json({ call: stale }),
+    });
+    const { rerender } = render(<IncomingCalls token="token-1" organizationId={ORG.id} />);
+    expect((await screen.findAllByText('Connected'))[0]).toBeVisible();
+    mine = null;
+    for (const token of ['token-2', 'token-3']) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      });
+      rerender(<IncomingCalls token={token} organizationId={ORG.id} />);
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+    });
+    // Past 4 hours 15 minutes since it came in: the box went and the watch started again.
+    expect(screen.queryByText('Connected')).toBeNull();
+    const looks = calls.filter((call) => call.path.startsWith('/callbacks/mine'));
+    expect(looks.at(-1)?.headers.get('Authorization')).toBe('Bearer token-3');
   });
 
   it('does not ask while the page is hidden', async () => {

@@ -217,6 +217,7 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     callbackOpenCommands: vi.fn<Database['callbackOpenCommands']>(() => Promise.resolve([])),
     keepCallbackRecording: vi.fn<Database['keepCallbackRecording']>(() => Promise.resolve(false)),
+    settleLateCallbacks: vi.fn<Database['settleLateCallbacks']>(() => Promise.resolve(0)),
     getCallbackSettings: vi.fn<Database['getCallbackSettings']>(() => Promise.resolve(null)),
     saveCallbackSettings: vi.fn<Database['saveCallbackSettings']>(() => Promise.resolve('saved')),
     listCallbackReturns: vi.fn<Database['listCallbackReturns']>(() => Promise.resolve([])),

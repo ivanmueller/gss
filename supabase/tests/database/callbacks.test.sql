@@ -9,7 +9,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(116);
+select plan(122);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), olivia (operations), adam (org_admin), victor (viewer).
@@ -496,9 +496,51 @@ select is(
                         pg_temp.command_of((select j[1] from j4), 'bridge'))) ->> 'status',
   'skipped', 'a join retried after the end is not sent'
 );
+select is(
+  (select concat_ws('|', outcome, follow_up_id is null, contact_log_entry_id is null)
+     from app.calls where id = (select j[1]::uuid from j4)),
+  'missed|t|t', 'but its first sending may have worked: not logged yet (Codex''s review of 9d5e57b)'
+);
+select pg_temp.event((select j[1] from j4), 'ev-b-13', 'call.bridged', 'them', null, 'in-13');
+select is(
+  (select concat_ws('|', outcome, follow_up_id is null, contact_log_entry_id is not null)
+     from app.calls where id = (select j[1]::uuid from j4)),
+  'talked|t|t', 'so the call.bridged that comes later makes it talked'
+);
+
+-- A join sent twice, its first sending timing out and the second refused once the call ended:
+-- the first may have worked, so the call waits; with no call.bridged, the sweep logs it.
+create temp table j5 as select pg_temp.joining('in-14', 'tom-14') as j;
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''retry'', null)::text',
+                             (select j[1] from j5), pg_temp.command_of((select j[1] from j5), 'bridge'),
+                             (select j[2] from j5)));
+create temp table j5claim as
+  select pg_temp.worker(format('select app.claim_callback_command(%L, %L)::text', (select j[1] from j5),
+                               pg_temp.command_of((select j[1] from j5), 'bridge'))) as claimed;
+select pg_temp.event((select j[1] from j5), 'ev-h-14', 'call.hangup', 'them', null, 'in-14');
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''failed'', null)::text',
+                             (select j[1] from j5), pg_temp.command_of((select j[1] from j5), 'bridge'),
+                             (select claimed -> 'command' ->> 'claim' from j5claim)));
+select is(
+  (select concat_ws('|', outcome, follow_up_id is null) from app.calls where id = (select j[1]::uuid from j5)),
+  'missed|t', 'a second sending refused after the end leaves the call waiting'
+);
+select is(
+  pg_temp.worker($$select app.settle_late_callbacks(100, interval '1 hour')::text$$)::text,
+  '0', 'the sweep leaves a call that ended less than its wait ago'
+);
 select ok(
-  (select follow_up_id is not null from app.calls where id = (select j[1]::uuid from j4)),
-  'and the call is logged as it ended'
+  (pg_temp.worker($$select app.settle_late_callbacks(100, interval '0')::text$$)::text)::int >= 1,
+  'and logs it once the wait is over'
+);
+select is(
+  (select concat_ws('|', c.outcome, f.assigned_to_name) from app.calls c
+     join app.follow_ups f on f.id = c.follow_up_id where c.id = (select j[1]::uuid from j5)),
+  'missed|Tom Trader', 'as it ended: missed, with its follow-up'
+);
+select is(
+  pg_temp.worker($$select app.settle_late_callbacks(100, interval '0')::text$$)::text,
+  '0', 'and only once'
 );
 select throws_ok(
   format($$update app.calls set outcome = 'talked', connected_at = ended_at where id = %L$$, (select id from c3)),

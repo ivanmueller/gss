@@ -120,6 +120,11 @@ export interface CallbacksDatabase {
   ) => Promise<{ commands: CallbackCommand[]; unresolved: boolean }>;
   /** Every command of the callback not settled yet (pending, or being sent), oldest first. */
   callbackOpenCommands: (callId: string) => Promise<CallbackCommand[]>;
+  /**
+   * Logs the callbacks that ended while a join's outcome was unclear and got no call.bridged
+   * within five minutes (app.settle_late_callbacks); how many.
+   */
+  settleLateCallbacks: (most: number) => Promise<number>;
   /** Keeps a recording of a callback; true when it is a voicemail (made on the caller's leg). */
   keepCallbackRecording: (
     callId: string,
@@ -286,6 +291,12 @@ export function callbackQueries(asUser: AsUser, sql: postgres.Sql): CallbacksDat
       const [row] = await sql<{ commands: unknown }[]>`
         select app.callback_open_commands(${callId}) as commands`;
       return commandsOf(row?.commands);
+    },
+
+    async settleLateCallbacks(most) {
+      const [row] = await sql<{ settled: number }[]>`
+        select app.settle_late_callbacks(${most}) as settled`;
+      return row?.settled ?? 0;
     },
 
     async keepCallbackRecording(callId, recordingId, startedAt, endedAt, leg) {

@@ -564,10 +564,11 @@ export async function runRecordingsJob(
   telnyx: TelnyxFactory = telnyxClient,
   options: JobOptions = {},
 ) {
-  const parts = ['transcription', 'audio deletion'] as const;
+  const parts = ['transcription', 'audio deletion', 'late callbacks'] as const;
   const results = await Promise.allSettled([
     transcribeNewRecordings(env, openDatabase, telnyx, options),
     deleteExpiredRecordings(env, openDatabase, telnyx, options),
+    settleLateCallbacks(env, openDatabase),
   ]);
   results.forEach((result, index) => {
     if (result.status === 'fulfilled') return;
@@ -576,6 +577,22 @@ export async function runRecordingsJob(
       `Recordings job stopped (${parts[index] ?? 'part'}): ${error instanceof TelnyxError ? `status=${String(error.status)} codes=${error.codes}` : failureSummary(error)}`,
     );
   });
+}
+
+/**
+ * Logs the callbacks that ended while a join's outcome was unclear and got no word from Telnyx
+ * within five minutes (Codex's review of 9d5e57b, finding 1); run with the job every 2 minutes.
+ */
+export async function settleLateCallbacks(env: ApiEnv['Bindings'], openDatabase: DatabaseFactory) {
+  const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
+  if (!url) return;
+  const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
+  try {
+    const settled = await db.settleLateCallbacks(100);
+    if (settled > 0) console.log(`Callbacks logged after an unclear join: ${String(settled)}`);
+  } finally {
+    await db.close().catch(() => undefined);
+  }
 }
 
 /** Recordings deleted per batch, and batches per run (a backlog is worked through in one run). */

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toOurNumber } from './callbacks';
 import type { CallbackCommand, ClaimedCallbackCommand } from './callbacks-db';
 import { callbackTurn } from './calls-db';
-import { transcribeNewRecordings } from './calls';
+import { runRecordingsJob, transcribeNewRecordings } from './calls';
 import type { Database } from './db';
 import { createApp } from './index';
 import { callHeadline } from './readings';
@@ -470,6 +470,27 @@ describe('a call to GSS’s number', () => {
     );
     expect(response.status).toBe(500);
     expect(telnyx.hangUp).not.toHaveBeenCalled();
+  });
+});
+
+describe('callbacks whose join was unclear', () => {
+  it('are logged by the job every 2 minutes once Telnyx has had its five minutes (Codex, 9d5e57b)', async () => {
+    db.settleLateCallbacks.mockResolvedValue(1);
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await runRecordingsJob(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(db.settleLateCallbacks).toHaveBeenCalledWith(100);
+    expect(logs).toHaveBeenCalledWith('Callbacks logged after an unclear join: 1');
+  });
+
+  it('are left for the next run when the database cannot be reached, logged without secrets', async () => {
+    db.settleLateCallbacks.mockRejectedValue(Object.assign(new Error('down'), { code: '08006' }));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await runRecordingsJob(TELNYX_ENV, openDatabase, () => telnyx);
+    expect(
+      errors.mock.calls.some(([line]) =>
+        String(line).startsWith('Recordings job stopped (late callbacks)'),
+      ),
+    ).toBe(true);
   });
 });
 

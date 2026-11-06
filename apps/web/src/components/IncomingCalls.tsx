@@ -33,6 +33,9 @@ export function IncomingCalls({
   const [call, setCall] = useState<CallView | null>(null);
   const callId = call?.id ?? null;
   const over = call !== null && (call.status === 'ended' || call.callback?.you === 'passed');
+  // Tied to the call (when it came in), so neither a renewed sign-in token nor a reload starts it
+  // again (Codex's review of 9d5e57b, finding 2).
+  const deadline = call === null ? null : Date.parse(call.createdAt) + FOLLOW_LIMIT_MS;
 
   // Watches for a callback while none is shown.
   useEffect(() => {
@@ -70,33 +73,33 @@ export function IncomingCalls({
 
   // Follows the callback until it is over for this person.
   useEffect(() => {
-    if (callId === null || over) return;
+    if (callId === null || over || deadline === null) return;
     let cancelled = false;
-    const started = Date.now();
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Past the deadline (no end ever reported), the box goes and the watch starts again.
+    const next = () => {
+      if (Date.now() < deadline) poll();
+      else setCall(null);
+    };
     const poll = () => {
       timer = setTimeout(() => {
         apiJson<{ call: CallView }>(`/calls/${callId}`, token)
           .then((answer) => {
             if (cancelled) return;
             setCall(answer.call);
-            if (answer.call.status === 'ended') return;
-            if (Date.now() - started < FOLLOW_LIMIT_MS) poll();
-            else setCall(null);
+            if (answer.call.status !== 'ended') next();
           })
           .catch(() => {
-            if (cancelled) return;
-            if (Date.now() - started < FOLLOW_LIMIT_MS) poll();
-            else setCall(null);
+            if (!cancelled) next();
           });
       }, POLL_MS);
     };
-    poll();
+    next();
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [callId, over, token]);
+  }, [callId, over, token, deadline]);
 
   // Once over, the box stays a few seconds, then goes, and the watch starts again.
   useEffect(() => {

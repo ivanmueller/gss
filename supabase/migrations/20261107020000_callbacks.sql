@@ -897,7 +897,10 @@ begin
   -- f7a0d73, finding 2).
   deferred := how = 'missed' and c.status = 'joining' and exists (
     select 1 from app.call_commands m
-     where m.call_id = c.id and m.kind = 'bridge' and m.status = 'sending');
+     where m.call_id = c.id and m.kind = 'bridge'
+       -- On its way, or sent before with no clear answer (a timeout put it back to pending;
+       -- Codex's review of 9d5e57b, finding 1).
+       and (m.status = 'sending' or (m.status = 'pending' and m.attempts > 0)));
   update app.calls
      set status = 'ended', outcome = how::app.call_outcome,
          ended_at = greatest(at, coalesce(connected_at, at)),
@@ -949,6 +952,36 @@ begin
      set outcome = 'talked', connected_at = least(greatest(coalesce(at, c.ended_at), c.created_at), c.ended_at)
    where id = c.id;
   perform app.callback_record(c.id);
+end
+$$;
+
+-- Logs the callbacks that ended while a join's outcome was unclear and got no word from Telnyx
+-- since (no call.bridged): five minutes after their end, as they ended (missed, with its
+-- follow-up). Run by the Worker's scheduled job every 2 minutes; each call locked, so an event
+-- applied at the same moment and this never log it twice (Codex's review of 9d5e57b, finding 1).
+create function app.settle_late_callbacks(most integer, wait interval default interval '5 minutes')
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  late uuid;
+  settled integer := 0;
+begin
+  for late in
+    select c.id from app.calls c
+     where c.direction = 'incoming' and c.status = 'ended'
+       and c.ended_at <= now() - wait
+       and c.contact_log_entry_id is null and c.follow_up_id is null and c.return_status is null
+     order by c.ended_at
+     limit greatest(least(most, 100), 0)
+     for update skip locked
+  loop
+    perform app.callback_record(late);
+    settled := settled + 1;
+  end loop;
+  return settled;
 end
 $$;
 
@@ -1292,8 +1325,11 @@ begin
   end;
   if not coalesce(wanted, false) then
     update app.call_commands set status = 'cancelled' where id = m.id;
-    -- A join whose call ended meanwhile never went through: the call is logged as it ended.
-    if m.kind = 'bridge' then
+    -- A join never sent, whose call ended meanwhile, never went through: the call is logged as
+    -- it ended. One sent before with no clear answer may have worked: the call waits for
+    -- Telnyx's call.bridged, then app.settle_late_callbacks logs it (Codex's review of 9d5e57b,
+    -- finding 1).
+    if m.kind = 'bridge' and m.attempts = 0 then
       perform app.callback_record(c.id);
     end if;
     return jsonb_build_object('status', 'skipped');
@@ -1373,8 +1409,11 @@ begin
       made := made || app.callback_end(c.id, m.telnyx_event_id,
                                        case when m.kind = 'bridge' then 'failed' else 'missed' end,
                                        now(), null, null);
-      -- A join that failed after the call ended: logged as it ended.
-      if m.kind = 'bridge' and c.status = 'ended' then
+      -- A join refused on its only sending, after the call ended, did not happen: logged as it
+      -- ended. Refused when sent again, an earlier sending with no clear answer may have worked:
+      -- left to Telnyx's call.bridged, then app.settle_late_callbacks (Codex's review of 9d5e57b,
+      -- finding 1).
+      if m.kind = 'bridge' and c.status = 'ended' and m.attempts = 1 then
         perform app.callback_record(c.id);
       end if;
     end if;
@@ -1724,6 +1763,7 @@ revoke all on function
   app.callback_commands_json(uuid[]), app.callback_next(uuid, text), app.callback_record(uuid),
   app.callback_end(uuid, text, text, timestamptz, text, text),
   app.callback_joined_late(uuid, timestamptz),
+  app.settle_late_callbacks(integer, interval),
   app.receive_callback(text, text, timestamptz, text, text, text),
   app.callback_by_leg(text),
   app.apply_callback_event(uuid, text, text, text, uuid, timestamptz, text, text, text, text),
@@ -1749,6 +1789,7 @@ grant execute on function
   app.claim_callback_command(uuid, uuid),
   app.finish_callback_command(uuid, uuid, integer, text, text),
   app.keep_callback_recording(uuid, text, timestamptz, timestamptz, text),
+  app.settle_late_callbacks(integer, interval),
   app.claim_recordings_to_transcribe(integer),
   app.save_callback_settings(uuid, text, uuid),
   app.settle_callback_return(uuid, text, uuid, uuid),
