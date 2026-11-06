@@ -132,7 +132,7 @@ Test file names are short: `*.spec.ts` are browser tests in `tests/e2e/specs/`; 
 | ID | Issue | Status |
 |---|---|---|
 | T-01 | Browser test "enters an offer, records new terms, and withdraws it" failed once (CI run #331, `counterparties.spec.ts:562`): after the withdrawal, "No live bids or offers here." not seen within 5 seconds. The test's fault, not the app's; likely cause: the Bids & offers list showing its kept answer, with the offer still live, before it refreshes. | Planned: confirm the cause locally, then forget kept quote lists after a withdrawal or new terms and wait on the offer's own row. |
-| T-02 | CI's local database refused its port (runs #342, #357, #367), with nothing listening on it: the port lies in Linux's range for outgoing connections. | Retries added in #159 did not help on #367; #162 reserves ports 54320 to 54329 as the job's first step. Watch. |
+| T-02 | CI's local database refused its port (runs #342, #357, #367), with nothing listening on it: the port lies in Linux's range for outgoing connections. | Retries added in #159 did not help on #367; #162 reserves ports 54320 to 54329 as the job's first step. Its first run on `main` (#371) started the database at the first try and passed. Watch a few more runs before calling it fixed. |
 | T-03 | Browser tests missing for: Grains, calling and transcripts (needs a fake Telnyx), Claude's drafts and summaries (needs a fake Anthropic), lanes map (no Mapbox token in CI). | Planned, one area at a time. |
 
 ### Dependency updates
