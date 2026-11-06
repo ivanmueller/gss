@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Summaries: latest is the latest, notes with their own contact
+
+- `docs/DECISIONS.md`: Codex's review of `0a0d815` (three P2): "Latest contact" only the newest entry, notes part of their own contact's text, notes never cut.
+
 ## 2026-11-06 — Handoff record of #155
 
 - `docs/HANDOFF.md`: exact listed words in summaries (ivanmueller/gss#155), with its CI and Deploy staging runs.
