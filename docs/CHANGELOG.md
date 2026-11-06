@@ -1,5 +1,13 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Callbacks to GSS's number (F-132)
+
+- `docs/DECISIONS.md`: callbacks built, with the choices made while building (turned on by an admin; unknown numbers and calls nobody can be given on the Follow-ups page; the caller left ringing; the voicemail's limits; the call box asking every 5 seconds; Claude reading callbacks).
+- `docs/DATA_MODEL.md`: `20261107010000_callback_states.sql`, `20261107020000_callbacks.sql`; callbacks in the `calls` row.
+- `docs/API.md`: `/api/v1/callbacks` (settings, returns, count, mine, settle); a call's `direction` and `callback`; the webhook's callbacks.
+- `docs/PRODUCT.md`: Calls to GSS's number on Follow-ups, Callbacks on Team, the menu's count and the call box on every page.
+- `docs/FEATURES.md`: F-132 in progress.
+
 ## 2026-11-06 — Codex's review of one-click Verify (F-115)
 
 - `docs/DECISIONS.md`: Verify adds nothing that was not said; the usual form saves through Verify in one transaction; the contact version the person saw goes with it.
