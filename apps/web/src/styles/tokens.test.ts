@@ -126,7 +126,7 @@ const TEXT_PAIRS: [string, string][] = [
     [`grain-${family}`, `grain-${family}-subtle`],
     ['foreground', `grain-${family}-subtle`],
   ]),
-  // Claude's drafts (F-115).
+  // What Claude drafted (F-115, F-116).
   ['claude', 'background'],
   ['claude', 'card'],
   ['claude', 'claude-subtle'],
@@ -138,9 +138,10 @@ const TEXT_PAIRS: [string, string][] = [
 const GRAPHIC_PAIRS: [string, string][] = [
   ['ring', 'background'],
   ['ring', 'card'],
-  // A draft's dashed border.
-  ['claude-border', 'background'],
-  ['claude-border', 'card'],
+  // The Claude mark and a draft's edge.
+  ['claude-mark', 'background'],
+  ['claude-mark', 'card'],
+  ['claude-mark', 'claude-subtle'],
   // Map pins on the base map.
   ['bid', 'map-land'],
   ['bid', 'map-water'],

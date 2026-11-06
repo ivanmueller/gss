@@ -39,8 +39,9 @@
  *   grain-wheat yellow, grain-coarse orange, grain-oilseed teal, grain-pulse green,
  *   grain-special indigo. A tile always names its family in words too.
  *
- * claude violet: a draft Claude made from a call, not yet verified by a person (F-115), with
- * claude, -subtle and -border. Never a status; the card always says "Claude's draft" in words.
+ * claude clay (a warm terracotta on cream): what Claude drafted, not yet verified by a person
+ * (F-115, F-116): claude (text), claude-mark (the Claude mark and a draft's edge), claude-subtle
+ * (background) and claude-border. Never a status; always with the words "Drafted by Claude".
  *
  * Bids are green and asks red, the trading convention the owner asked for, in the softer leaf
  * green and coral of the owner's reference (2026-10-28) rather than the status ramps. A bid or
@@ -150,9 +151,10 @@
   --grain-special-subtle: var(--indigo-50);
   --grain-special-border: var(--indigo-200);
 
-  --claude: var(--violet-700);
-  --claude-subtle: var(--violet-50);
-  --claude-border: var(--violet-500);
+  --claude: var(--clay-700);
+  --claude-mark: var(--clay-500);
+  --claude-subtle: var(--clay-50);
+  --claude-border: var(--clay-200);
 
   --map-land: var(--white);
   --map-water: var(--gray-200);
@@ -258,9 +260,10 @@
   --grain-special-subtle: color-mix(in oklch, var(--indigo-500) 15%, transparent);
   --grain-special-border: color-mix(in oklch, var(--indigo-500) 35%, transparent);
 
-  --claude: var(--violet-300);
-  --claude-subtle: color-mix(in oklch, var(--violet-500) 15%, transparent);
-  --claude-border: var(--violet-400);
+  --claude: var(--clay-300);
+  --claude-mark: var(--clay-400);
+  --claude-subtle: color-mix(in oklch, var(--clay-500) 10%, transparent);
+  --claude-border: color-mix(in oklch, var(--clay-500) 30%, transparent);
 
   --map-land: var(--slate-600);
   --map-water: var(--slate-700);

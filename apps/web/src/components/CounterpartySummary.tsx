@@ -1,11 +1,11 @@
 import { formatAlberta, type CounterpartySummaryView } from '@grain/domain';
-import { Bot, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { ApiError, sendJson } from '../lib/api';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
-import { Badge } from './ui/badge';
+import { ClaudeMark } from './ClaudeMark';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
 
@@ -66,10 +66,10 @@ export function CounterpartySummary({
         <CardHeader>
           <div className="flex items-center gap-2">
             <CardTitle id="summary-heading">Summary</CardTitle>
-            <Badge variant="info">
-              <Bot aria-hidden="true" />
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-claude">
+              <ClaudeMark className="size-3.5" />
               Drafted by Claude
-            </Badge>
+            </span>
           </div>
           {canAsk && lines.length > 0 && (
             <Button
@@ -133,7 +133,7 @@ export function CounterpartySummary({
               disabled={asking}
               onClick={() => void ask()}
             >
-              <Bot aria-hidden="true" />
+              <ClaudeMark className="text-current" />
               {view.failed ? 'Try again' : 'Write one now'}
             </Button>
           )}

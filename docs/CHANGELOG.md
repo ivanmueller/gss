@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Claude's drafts in Claude's colours, folded (F-116)
+
+- `docs/FEATURES.md`: F-116, the owner's request and answers.
+- `docs/DECISIONS.md`, `docs/DESIGN_SYSTEM.md`: the `claude` roles in terracotta on cream, the Claude mark, folded draft cards.
+
 ## 2026-11-06 — Handoff record of #165
 
 - `docs/HANDOFF.md`: Claude's drafts in their own sections, verified in one click (ivanmueller/gss#165), with its CI and Deploy staging runs and Codex's clean re-review.

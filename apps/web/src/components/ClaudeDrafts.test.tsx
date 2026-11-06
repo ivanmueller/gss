@@ -136,12 +136,23 @@ afterEach(() => {
 });
 
 describe("Claude's drafts in their sections", () => {
-  it("marks each as Claude's, with its call and where each number was said", () => {
+  it("rests folded to its main information, marked as Claude's, with Check this still shown", async () => {
     mockApi({});
     show([COMPLETE_BID]);
     expect(screen.getByRole('list', { name: "Claude's drafts to verify (1)" })).toBeInTheDocument();
     const bid = card(/Bid · Flaxseed/);
-    expect(bid).toHaveTextContent('Claude’s draft');
+    expect(bid).toHaveAccessibleName('Drafted by Claude: Bid · Flaxseed');
+    expect(bid).toHaveTextContent('Drafted by Claude · CAD 725.00 /MT · 84 MT · delivered');
+    // Why to look twice is seen before Verify, even folded.
+    expect(bid).toHaveTextContent('Check this');
+    expect(bid).not.toHaveTextContent('Price from the call');
+    expect(bid).not.toHaveTextContent('From Tess Trader’s call');
+
+    await userEvent.click(within(bid).getByRole('button', { name: 'Show details' }));
+    expect(within(bid).getByRole('button', { name: 'Hide details' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
     expect(bid).toHaveTextContent('From Tess Trader’s call with Pat Buyer, 5 Nov 2026, 9:00 am MT');
     expect(bid).toHaveTextContent('Price from the call: I can pay 725 a tonne.');
     expect(within(bid).getByText('725', { selector: 'mark' })).toBeInTheDocument();
@@ -228,7 +239,7 @@ describe("Claude's drafts in their sections", () => {
     show([{ ...COMPLETE_BID, fields: { ...fieldsOf(COMPLETE_BID), values: noUnit } }]);
     const bid = card(/Bid · Flaxseed/);
     expect(within(bid).queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
-    expect(bid).toHaveTextContent('Not heard on the call: price unit.');
+    expect(bid).toHaveTextContent('Not heard on the call: price unit');
   });
 
   it('dismisses a draft without saving anything', async () => {
@@ -248,7 +259,10 @@ describe("Claude's drafts in their sections", () => {
   it('shows a viewer the draft and who verifies it, with no buttons', () => {
     mockApi({});
     show([COMPLETE_BID, PATS_ROLE], { role: 'viewer', contacts: [PAT_LISTED] });
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Verify|Edit|Dismiss|Finish/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Show details' })).toHaveLength(2);
     expect(screen.getByText('Traders and admins verify bids and offers.')).toBeInTheDocument();
     expect(screen.getByText('Operations and admins verify contacts.')).toBeInTheDocument();
   });
@@ -279,7 +293,7 @@ describe("Claude's drafts in their sections", () => {
     const draft = card(/New details for a listed contact/);
     expect(within(draft).queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
     expect(within(draft).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
-    expect(draft).toHaveTextContent('is no longer listed');
+    expect(draft).toHaveTextContent('Contact no longer listed');
   });
 
   it('names the company on the main pages, linking to it', () => {

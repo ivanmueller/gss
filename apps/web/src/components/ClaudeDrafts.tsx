@@ -20,7 +20,7 @@ import {
   type TeamMemberName,
   type VerifiedDraft,
 } from '@grain/domain';
-import { Bot, CircleAlert } from 'lucide-react';
+import { ChevronDown, CircleAlert } from 'lucide-react';
 import { useState, type SyntheticEvent } from 'react';
 
 import { ApiError, fieldIssues, sendJson, type Contact } from '../lib/api';
@@ -28,8 +28,10 @@ import { canLogContacts, defaultDueInput, noteFollowUpsChanged } from '../lib/cr
 import { canEditDirectory } from '../lib/directory';
 import { canEnterQuotes } from '../lib/quotes';
 import { Link } from '../lib/router';
+import { cn } from '../lib/utils';
 import { forgetApiAnswers, useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { ClaudeMark } from './ClaudeMark';
 import { FollowUpForm } from './CrmForms';
 import { ContactFields, FormIssues, type FormValues } from './DirectoryFields';
 import { QuoteForm } from './QuoteForm';
@@ -39,7 +41,8 @@ import { Select } from './ui/select';
 // Claude's drafts from calls, shown where they belong (the owner's request and answers of
 // 2026-11-06, docs/DECISIONS.md, F-115): bids and offers among bids and offers, follow-ups among
 // follow-ups, contacts among contacts, on a company's page and on the main Bids & offers and
-// Follow-ups pages. Each is marked as Claude's (violet, dashed, "Claude's draft") and is not a
+// Follow-ups pages. Each is marked as Claude's (Claude's warm colour and mark, "Drafted by
+// Claude"; F-116), folded to its main information until opened, and is not a
 // record until a person verifies it: Verify saves exactly what was drafted in one step, Edit or
 // Finish in the form opens the usual form filled in and saves what the person confirms through
 // Verify too (one transaction either way; Codex's review of 88e09df), and Dismiss sets it aside. Each filled-in amount shows the
@@ -113,7 +116,7 @@ function SaidLine({ text, said }: { text: string; said: string | null }) {
   return (
     <q className="italic">
       {text.slice(0, at)}
-      <mark className="rounded-inset bg-claude-subtle px-0.5 text-foreground not-italic ring-1 ring-claude-border">
+      <mark className="rounded-inset bg-claude-border px-0.5 text-foreground not-italic">
         {text.slice(at, at + said.length)}
       </mark>
       {text.slice(at + said.length)}
@@ -269,6 +272,7 @@ export function ClaudeDraftCard({
   const { session } = place;
   const contacts = place.contacts ?? [];
   const [editing, setEditing] = useState(false);
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const allowed = maySaveDraft(draft.kind, session.organization.role);
@@ -340,88 +344,136 @@ export function ClaudeDraftCard({
     place.onChanged(SAVED_AS[draft.kind], draft.kind);
   }
 
+  const doubts = evidence.filter(([, check]) => check.doubt !== null).length;
   return (
     <li
-      className="flex flex-col gap-2 rounded-control border border-dashed border-claude-border bg-claude-subtle px-3 py-2"
-      aria-label={`Claude's draft: ${draftTitle(draft, contacts)}`}
+      className="@container flex flex-col gap-2 rounded-control border border-l-[3px] border-claude-border border-l-claude-mark bg-claude-subtle px-3 py-2"
+      aria-label={`Drafted by Claude: ${draftTitle(draft, contacts)}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-claude-border bg-card px-1.5 py-0.5 text-xs font-medium text-claude">
-              <Bot aria-hidden="true" className="size-3.5" />
-              Claude’s draft
-            </span>
-            {draftTitle(draft, contacts)}
-          </p>
-          <p className="text-xs text-muted-foreground">{draftSummary(draft)}</p>
-          <p className="text-xs text-muted-foreground">
-            {showCompany && (
-              <>
-                <Link
-                  href={`/counterparties/${draft.counterpartyId}`}
-                  className="font-medium text-foreground underline-offset-4 hover:underline"
-                >
-                  {draft.counterpartyName}
-                </Link>
-                {' · '}
-              </>
+      {/* In a narrow column (Contacts) the buttons go under the text, not beside it. */}
+      <div className="flex flex-col gap-2 @xl:flex-row @xl:items-start @xl:justify-between">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <ClaudeMark className="mt-0.5" />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="text-sm font-medium">{draftTitle(draft, contacts)}</p>
+            <p className="text-xs text-muted-foreground">
+              {showCompany && (
+                <>
+                  <Link
+                    href={`/counterparties/${draft.counterpartyId}`}
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                  >
+                    {draft.counterpartyName}
+                  </Link>
+                  {' · '}
+                </>
+              )}
+              <span className="font-medium text-claude">Drafted by Claude</span>
+              {' · '}
+              {draftSummary(draft)}
+            </p>
+            {/* Seen before Verify even while folded: why to look twice, what is missing. */}
+            {(doubts > 0 || readiness?.status === 'incomplete' || contactGone) && (
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                {doubts > 0 && (
+                  <span className="inline-flex items-center gap-1 font-medium text-warning">
+                    <CircleAlert aria-hidden="true" className="size-3.5" />
+                    Check this
+                  </span>
+                )}
+                {readiness?.status === 'incomplete' && (
+                  <span className="text-foreground">
+                    Not heard on the call: {readiness.missing.join(', ')}
+                  </span>
+                )}
+                {contactGone && (
+                  <span className="text-muted-foreground">Contact no longer listed</span>
+                )}
+              </p>
             )}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 pl-6 @xl:pl-0">
+          {allowed && !editing && (
+            <>
+              {readiness?.status === 'ready' && (
+                <Button
+                  size="sm"
+                  className="h-7 px-2"
+                  disabled={busy}
+                  onClick={() => void verify()}
+                >
+                  {busy ? 'Saving…' : 'Verify'}
+                </Button>
+              )}
+              {readiness !== null && (
+                <Button
+                  size="sm"
+                  variant={readiness.status === 'ready' ? 'outline' : 'primary'}
+                  className="h-7 px-2"
+                  disabled={busy || (draft.kind === 'follow_up' && place.team === null)}
+                  onClick={() => {
+                    setError(null);
+                    setEditing(true);
+                  }}
+                >
+                  {readiness.status === 'ready' ? 'Edit' : 'Finish in the form'}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2"
+                disabled={busy}
+                onClick={() => void dismiss()}
+              >
+                Dismiss
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-1.5 text-muted-foreground"
+            aria-expanded={open}
+            aria-label={open ? 'Hide details' : 'Show details'}
+            onClick={() => {
+              setOpen((current) => !current);
+            }}
+          >
+            <ChevronDown
+              aria-hidden="true"
+              className={cn('size-4 transition-transform', open && 'rotate-180')}
+            />
+          </Button>
+        </div>
+      </div>
+      {open && (
+        <div className="flex flex-col gap-2 border-t border-claude-border pt-2">
+          <p className="text-xs text-muted-foreground">
             From {draft.callerName}’s call with {draft.contactName},{' '}
             {formatAlberta(draft.calledAt, { weekday: false })}
           </p>
+          {evidence.length > 0 ? (
+            evidence.map(([label, check]) => (
+              <Evidence key={label} label={label} check={check} draft={draft} />
+            ))
+          ) : (
+            <SourceLines draft={draft} />
+          )}
+          {readiness?.status === 'incomplete' && (
+            <p className="text-xs text-foreground">
+              <strong>Not heard on the call:</strong> {readiness.missing.join(', ')}. Finish it in
+              the form to save it.
+            </p>
+          )}
+          {contactGone && (
+            <p className="text-xs text-muted-foreground">
+              The contact these details were for is no longer listed. Dismiss this draft, or add the
+              person again.
+            </p>
+          )}
         </div>
-        {allowed && !editing && (
-          <div className="flex flex-wrap gap-2">
-            {readiness?.status === 'ready' && (
-              <Button size="sm" className="h-7 px-2" disabled={busy} onClick={() => void verify()}>
-                {busy ? 'Saving…' : 'Verify'}
-              </Button>
-            )}
-            {readiness !== null && (
-              <Button
-                size="sm"
-                variant={readiness.status === 'ready' ? 'outline' : 'primary'}
-                className="h-7 px-2"
-                disabled={busy || (draft.kind === 'follow_up' && place.team === null)}
-                onClick={() => {
-                  setError(null);
-                  setEditing(true);
-                }}
-              >
-                {readiness.status === 'ready' ? 'Edit' : 'Finish in the form'}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2"
-              disabled={busy}
-              onClick={() => void dismiss()}
-            >
-              Dismiss
-            </Button>
-          </div>
-        )}
-      </div>
-      {evidence.length > 0 ? (
-        evidence.map(([label, check]) => (
-          <Evidence key={label} label={label} check={check} draft={draft} />
-        ))
-      ) : (
-        <SourceLines draft={draft} />
-      )}
-      {readiness?.status === 'incomplete' && (
-        <p className="text-xs text-foreground">
-          <strong>Not heard on the call:</strong> {readiness.missing.join(', ')}. Finish it in the
-          form to save it.
-        </p>
-      )}
-      {contactGone && (
-        <p className="text-xs text-muted-foreground">
-          The contact these details were for is no longer listed. Dismiss this draft, or add the
-          person again.
-        </p>
       )}
       {!allowed && <p className="text-xs text-muted-foreground">{WHO_SAVES[draft.kind]}</p>}
       {error !== null && (
