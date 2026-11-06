@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #163
+
+- `docs/HANDOFF.md`: the handoff record of #162 and the F-115 tracker entry (ivanmueller/gss#163), with its CI and Deploy staging runs.
+
 ## 2026-11-06 — Claude's drafts in their own sections, verified in one click (F-115)
 
 - `docs/DECISIONS.md`: the owner's answers (option A: drafts stay drafts and are shown in Contacts, Bids and offers and Follow-ups, on the company's page and the main pages; Verify saves one as it is; same roles; no longer under the call).
