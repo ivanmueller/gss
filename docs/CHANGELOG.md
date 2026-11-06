@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #160
+
+- `docs/HANDOFF.md`: every company with history summarized again (ivanmueller/gss#160), with its CI and Deploy staging runs.
+
 ## 2026-11-06 — Every company with history summarized again
 
 - `docs/DECISIONS.md`, `docs/DATA_MODEL.md`: `20261106010000_resummarize_companies.sql`, re-queuing companies whose summary predates the final rules or failed under the stricter ones.
