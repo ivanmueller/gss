@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #158
+
+- `docs/HANDOFF.md`: the summaries' test fix (ivanmueller/gss#158), with its CI and Deploy staging runs (run #357 on `main` failed starting its database, before any test).
+
 ## 2026-11-06 — Handoff record of #157
 
 - `docs/HANDOFF.md`: latest contact and notes in summaries (ivanmueller/gss#157), with its CI and Deploy staging runs (run #354 on `main` failed in a test that met 555 in a timestamp).
