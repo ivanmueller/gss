@@ -501,6 +501,112 @@ describe('claudeClient', () => {
   });
 });
 
+describe('GET /calls/drafts', () => {
+  beforeEach(() => {
+    mockAuthServer(
+      new Response(JSON.stringify({ id: USER_ID, email: 'tess@example.test' }), { status: 200 }),
+    );
+  });
+  const app = createApp(openDatabase);
+  const list = (query: string) =>
+    app.request(`/api/v1/calls/drafts?${query}`, { headers: AUTH }, ENV);
+
+  it("lists an organization's open drafts, optionally of one company and one kind", async () => {
+    const response = await list(`organization_id=${ORG}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ drafts: [] });
+    expect(db.listOpenDrafts).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }), {
+      organizationId: ORG,
+      counterpartyId: null,
+      kind: null,
+    });
+    await list(`organization_id=${ORG}&counterparty_id=${CONTEXT.counterpartyId}&kind=quote`);
+    expect(db.listOpenDrafts).toHaveBeenLastCalledWith(expect.anything(), {
+      organizationId: ORG,
+      counterpartyId: CONTEXT.counterpartyId,
+      kind: 'quote',
+    });
+  });
+
+  it('is not taken for a call id', async () => {
+    await list(`organization_id=${ORG}`);
+    expect(db.getCall).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed query before the database', async () => {
+    expect((await list('')).status).toBe(422);
+    expect((await list('organization_id=nope')).status).toBe(422);
+    expect((await list(`organization_id=${ORG}&kind=freight`)).status).toBe(422);
+    expect(db.listOpenDrafts).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /calls/drafts/{id}/verify', () => {
+  beforeEach(() => {
+    mockAuthServer(
+      new Response(JSON.stringify({ id: USER_ID, email: 'tess@example.test' }), { status: 200 }),
+    );
+  });
+  const app = createApp(openDatabase);
+  const verify = (id = DRAFT) =>
+    app.request(`/api/v1/calls/drafts/${id}/verify`, { method: 'POST', headers: AUTH }, ENV);
+
+  it('saves the draft as it is, as the signed-in person, and says what was saved', async () => {
+    db.verifyCallDraft.mockResolvedValue({ status: 'verified', kind: 'quote', resultId: QUOTE });
+    const response = await verify();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ verified: true, kind: 'quote', resultId: QUOTE });
+    expect(db.verifyCallDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID }),
+      DRAFT,
+      expect.any(String),
+      expect.any(Date),
+    );
+  });
+
+  it('refuses a malformed id before the database', async () => {
+    expect((await verify('not-a-uuid')).status).toBe(404);
+    expect(db.verifyCallDraft).not.toHaveBeenCalled();
+  });
+
+  it('names what an incomplete draft is missing', async () => {
+    db.verifyCallDraft.mockResolvedValue({
+      status: 'incomplete',
+      missing: ['valid until', 'delivery basis'],
+    });
+    const response = await verify();
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'DRAFT_INCOMPLETE' },
+      missing: ['valid until', 'delivery basis'],
+    });
+  });
+
+  it.each([
+    ['not_found', 404, 'NOT_FOUND'],
+    ['forbidden', 403, 'FORBIDDEN'],
+    ['already_decided', 409, 'ALREADY_DECIDED'],
+    ['archived', 409, 'ARCHIVED'],
+    ['wrong_type', 422, 'WRONG_COUNTERPARTY_TYPE'],
+    ['not_a_member', 422, 'NOT_A_MEMBER'],
+    ['contact_changed', 409, 'CONTACT_CHANGED'],
+  ] as const)('answers %s as %i', async (result, status, code) => {
+    db.verifyCallDraft.mockResolvedValue({ status: result });
+    const response = await verify();
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ error: { code } });
+  });
+
+  it('needs a signed-in person', async () => {
+    const response = await app.request(
+      `/api/v1/calls/drafts/${DRAFT}/verify`,
+      { method: 'POST' },
+      ENV,
+    );
+    expect(response.status).toBe(401);
+  });
+});
+
 describe('POST /calls/drafts/{id}/decision', () => {
   beforeEach(() => {
     mockAuthServer(

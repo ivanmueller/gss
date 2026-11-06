@@ -130,8 +130,9 @@ export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: Tel
   app.route('/contact-log', contactLogRoutes(openDatabase));
   app.route('/follow-ups', followUpRoutes(openDatabase));
   app.route('/me/phone', memberPhoneRoutes(openDatabase));
-  app.route('/calls', callRoutes(openDatabase, telnyx));
+  // Claude's drafts first: GET /calls/drafts would otherwise be taken for a call's id.
   app.route('/calls', callReadingRoutes(openDatabase));
+  app.route('/calls', callRoutes(openDatabase, telnyx));
 
   return app;
 }

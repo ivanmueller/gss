@@ -719,13 +719,60 @@ async function insertContact(
   organizationId: string,
   counterpartyId: string,
   contact: ContactInput,
-) {
-  await tx`
+): Promise<string> {
+  const [row] = await tx<{ id: string }[]>`
     insert into app.counterparty_contacts
       (organization_id, counterparty_id, name, role, email, phone, created_by)
     values (${organizationId}, ${counterpartyId}, ${contact.name}, ${contact.role},
             ${contact.email}, ${contact.phone}, app.current_user_id())
+    returning id
   `;
+  if (!row) throw new Error('contact was not created');
+  return row.id;
+}
+
+/**
+ * Adds a contact inside the caller's transaction: the same checks as
+ * POST /counterparties/{id}/contacts. Used by addContact and by verifying one of Claude's drafts.
+ */
+export async function addContactIn(
+  tx: postgres.TransactionSql,
+  counterpartyId: string,
+  input: ContactInput,
+): Promise<
+  { status: 'added'; id: string } | Exclude<WriteResult, { status: 'saved' | 'changed' }>
+> {
+  const target = await editable(tx, counterpartyId);
+  if (target.status !== 'ok') return target;
+  const id = await insertContact(tx, target.organizationId, counterpartyId, input);
+  return { status: 'added', id };
+}
+
+/**
+ * Changes a contact inside the caller's transaction, refused when it changed after `version`:
+ * the same checks as PATCH /counterparties/{id}/contacts/{contactId}.
+ */
+export async function updateContactIn(
+  tx: postgres.TransactionSql,
+  counterpartyId: string,
+  contactId: string,
+  version: string,
+  input: ContactInput,
+): Promise<WriteResult> {
+  const target = await editable(tx, counterpartyId);
+  if (target.status !== 'ok') return target;
+  const rows = await tx`
+    update app.counterparty_contacts
+    set name = ${input.name}, role = ${input.role}, email = ${input.email},
+        phone = ${input.phone}
+    where id = ${contactId} and counterparty_id = ${counterpartyId}
+      and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
+    returning id
+  `;
+  if (rows.length === 1) return SAVED;
+  return (await exists(tx, 'counterparty_contacts', counterpartyId, contactId))
+    ? CHANGED
+    : NOT_FOUND;
 }
 
 async function insertFacility(
@@ -1902,30 +1949,13 @@ export function createDatabase(sql: postgres.Sql): Database {
 
     addContact(ctx, counterpartyId, input) {
       return asUser(ctx, async (tx) => {
-        const target = await editable(tx, counterpartyId);
-        if (target.status !== 'ok') return target;
-        await insertContact(tx, target.organizationId, counterpartyId, input);
-        return SAVED;
+        const added = await addContactIn(tx, counterpartyId, input);
+        return added.status === 'added' ? SAVED : added;
       });
     },
 
     updateContact(ctx, counterpartyId, contactId, version, input) {
-      return asUser(ctx, async (tx) => {
-        const target = await editable(tx, counterpartyId);
-        if (target.status !== 'ok') return target;
-        const rows = await tx`
-          update app.counterparty_contacts
-          set name = ${input.name}, role = ${input.role}, email = ${input.email},
-              phone = ${input.phone}
-          where id = ${contactId} and counterparty_id = ${counterpartyId}
-            and to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) = ${version}
-          returning id
-        `;
-        if (rows.length === 1) return SAVED;
-        return (await exists(tx, 'counterparty_contacts', counterpartyId, contactId))
-          ? CHANGED
-          : NOT_FOUND;
-      });
+      return asUser(ctx, (tx) => updateContactIn(tx, counterpartyId, contactId, version, input));
     },
 
     removeContact(ctx, counterpartyId, contactId) {
