@@ -202,6 +202,27 @@ export function fakeDatabase(): Mocked<Database> {
     requestCounterpartySummary: vi.fn<Database['requestCounterpartySummary']>(() =>
       Promise.resolve('requested'),
     ),
+    receiveCallback: vi.fn<Database['receiveCallback']>(() =>
+      Promise.resolve({ status: 'not_ours' }),
+    ),
+    callbackByLeg: vi.fn<Database['callbackByLeg']>(() => Promise.resolve(null)),
+    applyCallbackEvent: vi.fn<Database['applyCallbackEvent']>(() =>
+      Promise.resolve({ status: 'applied', commands: [] }),
+    ),
+    claimCallbackCommand: vi.fn<Database['claimCallbackCommand']>(() =>
+      Promise.resolve({ status: 'skipped' }),
+    ),
+    finishCallbackCommand: vi.fn<Database['finishCallbackCommand']>(() =>
+      Promise.resolve({ commands: [], unresolved: false }),
+    ),
+    callbackOpenCommands: vi.fn<Database['callbackOpenCommands']>(() => Promise.resolve([])),
+    keepCallbackRecording: vi.fn<Database['keepCallbackRecording']>(() => Promise.resolve(false)),
+    getCallbackSettings: vi.fn<Database['getCallbackSettings']>(() => Promise.resolve(null)),
+    saveCallbackSettings: vi.fn<Database['saveCallbackSettings']>(() => Promise.resolve('saved')),
+    listCallbackReturns: vi.fn<Database['listCallbackReturns']>(() => Promise.resolve([])),
+    countCallbackReturns: vi.fn<Database['countCallbackReturns']>(() => Promise.resolve(0)),
+    settleCallbackReturn: vi.fn<Database['settleCallbackReturn']>(() => Promise.resolve('done')),
+    myCallback: vi.fn<Database['myCallback']>(() => Promise.resolve(null)),
     close: vi.fn<Database['close']>(() => Promise.resolve()),
   };
   return db;
