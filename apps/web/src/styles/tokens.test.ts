@@ -138,10 +138,11 @@ const TEXT_PAIRS: [string, string][] = [
 const GRAPHIC_PAIRS: [string, string][] = [
   ['ring', 'background'],
   ['ring', 'card'],
-  // The Claude mark and a draft's edge.
+  // Claude's logo and a draft's edge, on the page and on cards. On a draft's own cream it is
+  // kept in the logo's exact colour (#D97757, 2.9:1): a logo, always beside the words
+  // "Drafted by Claude", which carry the meaning (F-116).
   ['claude-mark', 'background'],
   ['claude-mark', 'card'],
-  ['claude-mark', 'claude-subtle'],
   // Map pins on the base map.
   ['bid', 'map-land'],
   ['bid', 'map-water'],

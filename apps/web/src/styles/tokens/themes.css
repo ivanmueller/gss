@@ -261,7 +261,7 @@
   --grain-special-border: color-mix(in oklch, var(--indigo-500) 35%, transparent);
 
   --claude: var(--clay-300);
-  --claude-mark: var(--clay-400);
+  --claude-mark: var(--clay-500);
   --claude-subtle: color-mix(in oklch, var(--clay-500) 10%, transparent);
   --claude-border: color-mix(in oklch, var(--clay-500) 30%, transparent);
 
