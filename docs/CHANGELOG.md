@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #168
+
+- `docs/HANDOFF.md`: the join fix of the callbacks (ivanmueller/gss#168), with its CI and Deploy staging runs.
+- `docs/DECISIONS.md`: Codex's re-review of it, no findings.
+- `docs/FEATURES.md`: F-132's note.
+
 ## 2026-11-06 — Claude's own logo; handoff records of #166 and #167
 
 - `docs/DECISIONS.md`, `docs/DESIGN_SYSTEM.md`: Claude's logo, supplied by the owner, replaces the drawn mark.
