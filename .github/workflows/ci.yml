@@ -34,9 +34,21 @@ jobs:
           version: 2.122.0
       # Throwaway local Supabase with its sign-in service: every migration is applied
       # from scratch. Services the tests do not use are left out.
+      # The runner has twice refused the database's port as already in use (main runs #342 and
+      # #357, before any test ran): it says what holds the port, stops what started, and tries
+      # again, up to 3 times. A start that never succeeds still fails the job at `status`.
       - name: Start local Supabase
         run: |
-          supabase start -x studio,imgproxy,realtime,storage-api,edge-runtime,logflare,vector
+          for attempt in 1 2 3; do
+            if supabase start -x studio,imgproxy,realtime,storage-api,edge-runtime,logflare,vector; then
+              break
+            fi
+            echo "::warning::Supabase did not start (attempt $attempt of 3); what holds port 54322:"
+            sudo ss -ltnp 'sport = :54322' || true
+            docker ps -a --format '{{.Names}} {{.Status}} {{.Ports}}' || true
+            supabase stop --no-backup || true
+            sleep 15
+          done
           supabase status -o env > "$RUNNER_TEMP/supabase.env"
       # Build the web app and configure the local Worker against that Supabase.
       # These are the CLI's well-known local development keys, not secrets.
