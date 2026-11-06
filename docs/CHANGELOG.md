@@ -1,5 +1,14 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Claude's drafts in their own sections added to the tracker
+
+- `docs/FEATURES.md`: F-115, Claude's drafts from a call shown in Contacts, Bids and offers and Follow-ups with a Verify button, with the decisions it needs first.
+
+## 2026-11-06 — Handoff record of #162
+
+- `docs/HANDOFF.md`: CI's reserved database ports and callbacks to GSS's number planned as F-132 (ivanmueller/gss#162), with its CI and Deploy staging runs.
+- `docs/FEATURES.md`: T-02's status after the first run on `main` with the ports reserved.
+
 ## 2026-11-06 — Handoff record of #161
 
 - `docs/HANDOFF.md`: the features and tests tracker, `docs/FEATURES.md` (ivanmueller/gss#161), with its CI and Deploy staging runs.
