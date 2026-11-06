@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #155
+
+- `docs/HANDOFF.md`: exact listed words in summaries (ivanmueller/gss#155), with its CI and Deploy staging runs.
+
 ## 2026-11-05 — Summaries: exact listed words, labels standing alone
 
 - `docs/DECISIONS.md`: Codex's review of `2f23d4b` (three P2): exact words from a fixed list only (no word forms, record words or names), ASCII only, labels standing alone, contacts and commodities by label.
