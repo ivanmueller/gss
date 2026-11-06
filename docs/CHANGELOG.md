@@ -1,5 +1,22 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Email and texting added to the tracker
+
+- `docs/FEATURES.md`: F-114, email through the platform; F-120 widened to texting through the platform (sent and received, logged in the contact history) and callbacks, each with the decisions it needs first.
+
+## 2026-11-06 — Daily market report added to the tracker
+
+- `docs/FEATURES.md`: F-113, a daily market report and news (futures, weather, world news, crop statistics), with the decisions it needs first.
+
+## 2026-11-06 — Features and tests tracker
+
+- `docs/FEATURES.md` (new): one list of what is built, what is to build (the owner's list of 2026-11-06 and earlier open requests), owner checks on staging, open test issues and dependency updates, with stable IDs and rules for keeping it current; the read-only query counting company summaries done, waiting or stopped.
+- `AGENTS.md`: read `docs/FEATURES.md` at the start of every session; add new requests there before coding and update statuses with each merge record.
+
+## 2026-11-06 — Handoff record of #160
+
+- `docs/HANDOFF.md`: every company with history summarized again (ivanmueller/gss#160), with its CI and Deploy staging runs.
+
 ## 2026-11-06 — Every company with history summarized again
 
 - `docs/DECISIONS.md`, `docs/DATA_MODEL.md`: `20261106010000_resummarize_companies.sql`, re-queuing companies whose summary predates the final rules or failed under the stricter ones.
