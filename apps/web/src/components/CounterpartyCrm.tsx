@@ -9,7 +9,6 @@ import {
   type OpenDraftList,
 } from '@grain/domain';
 import {
-  Bot,
   Ellipsis,
   History,
   Mail,
@@ -38,6 +37,7 @@ import { useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ContactLogForm, FollowUpForm } from './CrmForms';
 import { CallReadingPanel, reachedVoicemail } from './CallDrafts';
+import { ClaudeMark } from './ClaudeMark';
 import { ClaudeDraftList, draftsOf, useOpenDrafts, type DraftPlace } from './ClaudeDrafts';
 import { CallRecordingDetails } from './Calling';
 import { FollowUpItem } from './FollowUpItem';
@@ -236,7 +236,7 @@ function Entry({
             )}
             {claudeSummary !== null && (
               <span className="min-w-0 truncate text-muted-foreground">
-                · <Bot aria-label="Claude's notes" className="inline size-3.5 align-[-2px]" />{' '}
+                · <ClaudeMark label="Claude's notes" className="inline size-3.5 align-[-2px]" />{' '}
                 {claudeSummary}
               </span>
             )}

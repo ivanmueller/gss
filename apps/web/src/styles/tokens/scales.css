@@ -184,6 +184,7 @@
   --color-grain-special-subtle: var(--grain-special-subtle);
   --color-grain-special-border: var(--grain-special-border);
   --color-claude: var(--claude);
+  --color-claude-mark: var(--claude-mark);
   --color-claude-subtle: var(--claude-subtle);
   --color-claude-border: var(--claude-border);
 }

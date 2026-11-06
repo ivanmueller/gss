@@ -1,8 +1,9 @@
 import { formatAlberta, type CallRecordingView } from '@grain/domain';
-import { Bot, Voicemail } from 'lucide-react';
+import { Voicemail } from 'lucide-react';
 import { useState } from 'react';
 
 import { ApiError, sendJson } from '../lib/api';
+import { ClaudeMark } from './ClaudeMark';
 import type { CounterpartyCrmState } from './CounterpartyCrm';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -69,10 +70,10 @@ export function CallReadingPanel({
   return (
     <section
       aria-label="Claude's reading of the call"
-      className="flex flex-col gap-2 rounded-control border border-info-border bg-info-subtle/40 px-3 py-2"
+      className="flex flex-col gap-2 rounded-control border border-l-[3px] border-claude-border border-l-claude-mark bg-claude-subtle px-3 py-2"
     >
       <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        <Bot aria-hidden="true" className="size-3.5" />
+        <ClaudeMark className="size-3.5" />
         Claude’s notes, {formatAlberta(reading.readAt, { weekday: false })}. What it drafted from
         the call waits in Contacts, Bids and offers and Follow-ups until someone verifies it.
       </p>
