@@ -1,9 +1,11 @@
 import type { Commodity, QuoteSummary } from '@grain/domain';
 import { Plus, Wheat } from 'lucide-react';
+import { useState } from 'react';
 
+import { ClaudeDraftList, draftsOf, useOpenDrafts } from '../components/ClaudeDrafts';
 import { QuoteListCard } from '../components/QuoteList';
 import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
+import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import { canEnterQuotes } from '../lib/quotes';
@@ -35,7 +37,19 @@ export function QuotesPage({ session }: { session: DirectorySession }) {
   if (side !== 'all') query.set('side', side);
   if (commodity) query.set('commodity', commodity);
   if (everything) query.set('status', 'all');
-  const [list] = useApiResource<QuoteListResponse>(`/quotes?${query.toString()}`, token);
+  const [list, reloadList] = useApiResource<QuoteListResponse>(
+    `/quotes?${query.toString()}`,
+    token,
+  );
+  // Claude's drafts of bids and offers from calls, under the same filters (F-115).
+  const [draftList, reloadDrafts] = useOpenDrafts(session, { kind: 'quote' });
+  const [notice, setNotice] = useState<string | null>(null);
+  const drafts = draftsOf(draftList, 'quote').filter((draft) => {
+    const fields = draft.fields as { side: string; commodity: string | null };
+    return (
+      (side === 'all' || fields.side === side) && (!commodity || fields.commodity === commodity)
+    );
+  });
   const [commodities] = useApiResource<{ commodities: Commodity[] }>('/commodities', token);
   const trader = canEnterQuotes(organization.role);
   const filtered = side !== 'all' || commodity !== null;
@@ -96,6 +110,36 @@ export function QuotesPage({ session }: { session: DirectorySession }) {
         )}
       </div>
 
+      {notice !== null && (
+        <p role="status" className="text-sm text-success">
+          {notice}
+        </p>
+      )}
+      {drafts.length > 0 && (
+        <Card asChild className="overflow-hidden">
+          <section aria-labelledby="quote-drafts-heading">
+            <CardHeader>
+              <CardTitle id="quote-drafts-heading">
+                Claude’s drafts to verify ({drafts.length})
+              </CardTitle>
+            </CardHeader>
+            <ClaudeDraftList
+              drafts={drafts}
+              showCompany
+              className="px-4 py-3"
+              place={{
+                session,
+                team: null,
+                onChanged: (message) => {
+                  setNotice(message);
+                  reloadDrafts();
+                  reloadList();
+                },
+              }}
+            />
+          </section>
+        </Card>
+      )}
       {list.status === 'loading' && (
         <p className="text-sm text-muted-foreground">Loading bids and offers…</p>
       )}

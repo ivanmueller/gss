@@ -31,6 +31,11 @@ export interface OpenDraftView {
   callerName: string;
   /** The contact called. */
   contactName: string;
+  /**
+   * The transcript lines the draft and its checks point to, by number (from 0), for the card to
+   * show where each amount was said.
+   */
+  sourceLines: { line: number; text: string }[];
 }
 
 export interface OpenDraftList {

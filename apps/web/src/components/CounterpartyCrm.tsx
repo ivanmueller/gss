@@ -6,6 +6,7 @@ import {
   type FollowUp,
   type TeamMemberName,
   type CallRecordingView,
+  type OpenDraftList,
 } from '@grain/domain';
 import {
   Bot,
@@ -36,7 +37,8 @@ import { albertaNowInput } from '../lib/time';
 import { useApiResource, type Resource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ContactLogForm, FollowUpForm } from './CrmForms';
-import { CallReadingPanel, openDrafts, reachedVoicemail } from './CallDrafts';
+import { CallReadingPanel, reachedVoicemail } from './CallDrafts';
+import { ClaudeDraftList, draftsOf, useOpenDrafts, type DraftPlace } from './ClaudeDrafts';
 import { CallRecordingDetails } from './Calling';
 import { FollowUpItem } from './FollowUpItem';
 import { Badge } from './ui/badge';
@@ -134,7 +136,6 @@ function Entry({
       ? (recordings.map((recording) => firstLine(recording.reading?.summary)).find(Boolean) ?? null)
       : null;
   const voicemail = reachedVoicemail(recordings);
-  const toReview = openDrafts(recordings);
   // Opening shows what the two lines leave out: all the notes (the line can cut even a single
   // paragraph short; Codex's review of ac2d085, finding 1), the call, earlier versions.
   const hasMore = recordings.length > 0 || earlier.length > 0 || summary !== null;
@@ -228,11 +229,6 @@ function Entry({
               <Badge variant="caution" className="shrink-0">
                 <Voicemail aria-hidden="true" />
                 Voicemail
-              </Badge>
-            )}
-            {toReview > 0 && (
-              <Badge variant="warning" className="shrink-0">
-                {toReview} to review
               </Badge>
             )}
             {summary !== null && (
@@ -411,6 +407,8 @@ export interface CounterpartyCrmState {
   followUps: Resource<FollowUpListResponse>;
   /** Recordings and transcripts of calls placed from the platform to this counterparty. */
   recordings: Resource<{ recordings: CallRecordingView[] }>;
+  /** Claude's open drafts from its calls, shown in Contacts, Bids and offers and Follow-ups. */
+  drafts: Resource<OpenDraftList>;
   /** The form that is open: logging a contact or planning a follow-up. */
   adding: CrmAdding;
   startAdding: (what: Exclude<CrmAdding, null>) => void;
@@ -442,6 +440,7 @@ export function useCounterpartyCrm(
     `/follow-ups?counterparty_id=${counterparty.id}&status=all`,
     token,
   );
+  const [drafts, reloadDrafts] = useOpenDrafts(session, { counterpartyId: counterparty.id });
   const [adding, setAdding] = useState<CrmAdding>(null);
   const [message, setMessage] = useState<string | null>(null);
   const writer = canLogContacts(organization.role) && !counterparty.archived;
@@ -452,6 +451,7 @@ export function useCounterpartyCrm(
     log,
     followUps,
     recordings,
+    drafts,
     adding,
     startAdding: (what) => {
       setAdding(what);
@@ -468,6 +468,20 @@ export function useCounterpartyCrm(
       reloadLog();
       reloadFollowUps();
       reloadRecordings();
+      reloadDrafts();
+    },
+  };
+}
+
+/** Where Claude's drafts are shown on a company's page: saved or dismissed, the page reloads. */
+export function crmDraftPlace(crm: CounterpartyCrmState): DraftPlace {
+  return {
+    session: crm.session,
+    contacts: crm.counterparty.contacts ?? [],
+    team: crm.team,
+    onChanged: (message, kind) => {
+      crm.changed(message);
+      if (kind !== 'follow_up') crm.counterparty.reload?.();
     },
   };
 }
@@ -569,6 +583,11 @@ export function FollowUpsCard({ crm }: { crm: CounterpartyCrmState }) {
             />
           </div>
         )}
+        <ClaudeDraftList
+          drafts={draftsOf(crm.drafts, 'follow_up')}
+          place={crmDraftPlace(crm)}
+          className="border-b px-4 py-3"
+        />
         {followUps.status === 'loading' && <Status>Loading…</Status>}
         {followUps.status === 'error' && (
           <Status alert>Could not load follow-ups: {followUps.error.message}</Status>

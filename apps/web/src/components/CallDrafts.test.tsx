@@ -14,7 +14,6 @@ const RECORDING_ID = '00000000-0000-4000-8000-0000000eec01';
 const QUOTE_DRAFT = '00000000-0000-4000-8000-0000000dd001';
 const FOLLOW_UP_DRAFT = '00000000-0000-4000-8000-0000000dd002';
 const DONE_DRAFT = '00000000-0000-4000-8000-0000000dd003';
-const FOLLOW_UP_ID = '00000000-0000-4000-8000-00000000f101';
 
 function entry(notes: string | null): ContactLogEntry {
   const current = {
@@ -158,11 +157,12 @@ afterEach(() => {
 });
 
 describe('Claude’s reading of a call', () => {
-  it('shows drafts waiting and Claude’s notes on the entry’s line, before it is opened', async () => {
+  it('shows Claude’s notes on the entry’s line, before it is opened, and no drafts', async () => {
     api(null, {});
     show();
     const { row } = await openEntry();
-    expect(await within(row).findByText('2 to review')).toBeInTheDocument();
+    expect(await within(row).findByText(/Pat bids flax/)).toBeInTheDocument();
+    expect(within(row).queryByText(/to review/)).not.toBeInTheDocument();
     expect(row).toHaveTextContent('Pat bids flax at 725 a tonne.');
     expect(within(row).queryByText('Voicemail')).not.toBeInTheDocument();
   });
@@ -180,89 +180,6 @@ describe('Claude’s reading of a call', () => {
         calls.find((call) => call.path === `/calls/recordings/${RECORDING_ID}/voicemail`)?.body,
       ).toEqual({ voicemail: false });
     });
-  });
-
-  it('shows where each number came from, the copied words marked, and why to check it', async () => {
-    api(null, {});
-    show();
-    const { row } = await openEntry();
-    await userEvent.click(row);
-    const drafts = screen.getByRole('list', { name: 'Drafts from the call' });
-    const card = within(drafts).getByText('Bid · Flaxseed').closest('li');
-    if (!card) throw new Error('No card');
-    expect(card).toHaveTextContent('Price from the call: I can pay 725 a tonne.');
-    expect(within(card).getAllByText('725', { selector: 'mark' })).toHaveLength(1);
-    expect(within(card).getByText('84', { selector: 'mark' })).toBeInTheDocument();
-    expect(within(card).getByRole('note')).toHaveTextContent(
-      'Check this: The line also says “minus freight”.',
-    );
-    // Open drafts come first; a dismissed one says who set it aside.
-    expect(drafts).toHaveTextContent('Dismissed by Adam Admin, 5 Nov 2026, 9:30 am MT');
-  });
-
-  it('opens the usual bid form filled in from the draft', async () => {
-    api(null, {});
-    show();
-    const { row } = await openEntry();
-    await userEvent.click(row);
-    const card = screen.getByText('Bid · Flaxseed').closest('li');
-    if (!card) throw new Error('No card');
-    await userEvent.click(within(card).getByRole('button', { name: 'Review' }));
-    expect(within(card).getByLabelText(/^Price/)).toHaveValue('725.00');
-    expect(within(card).getByLabelText(/^Available quantity/)).toHaveValue('84');
-    expect(within(card).getByRole('button', { name: 'Save bid' })).toBeInTheDocument();
-  });
-
-  it('plans a drafted follow-up through the usual form, then marks the draft saved', async () => {
-    const calls = api(
-      null,
-      {},
-      {
-        'POST /follow-ups': () => Response.json({ id: FOLLOW_UP_ID }, { status: 201 }),
-        [`POST /calls/drafts/${FOLLOW_UP_DRAFT}/decision`]: () =>
-          Response.json({ result: 'decided' }),
-      },
-    );
-    show();
-    const { row } = await openEntry();
-    await userEvent.click(row);
-    const card = screen.getByText('Follow-up: Call Pat back about flax').closest('li');
-    if (!card) throw new Error('No card');
-    expect(card).toHaveTextContent('Due Fri 6 Nov 2026, 10:00 am MT');
-    await userEvent.click(within(card).getByRole('button', { name: 'Review' }));
-    await userEvent.click(within(card).getByRole('button', { name: 'Plan follow-up' }));
-    await vi.waitFor(() => {
-      expect(
-        calls.find((call) => call.path === `/calls/drafts/${FOLLOW_UP_DRAFT}/decision`)?.body,
-      ).toEqual({ decision: 'accepted', resultId: FOLLOW_UP_ID });
-    });
-    const plan = calls.find((call) => call.path === '/follow-ups' && call.method === 'POST');
-    expect(plan?.body).toMatchObject({
-      counterpartyId: ID,
-      values: { task: 'Call Pat back about flax', dueAt: '2026-11-06T16:00:00.000Z' },
-    });
-  });
-
-  it('dismisses a draft without saving anything', async () => {
-    const calls = api(
-      null,
-      {},
-      {
-        [`POST /calls/drafts/${QUOTE_DRAFT}/decision`]: () => Response.json({ result: 'decided' }),
-      },
-    );
-    show();
-    const { row } = await openEntry();
-    await userEvent.click(row);
-    const card = screen.getByText('Bid · Flaxseed').closest('li');
-    if (!card) throw new Error('No card');
-    await userEvent.click(within(card).getByRole('button', { name: 'Dismiss' }));
-    await vi.waitFor(() => {
-      expect(
-        calls.find((call) => call.path === `/calls/drafts/${QUOTE_DRAFT}/decision`)?.body,
-      ).toEqual({ decision: 'dismissed' });
-    });
-    expect(calls.some((call) => call.path === '/quotes')).toBe(false);
   });
 
   it('saves Claude’s notes as the entry’s own when it has none', async () => {
@@ -292,15 +209,16 @@ describe('Claude’s reading of a call', () => {
     });
   });
 
-  it('offers no Use as notes when the entry has notes, and no Review to a viewer', async () => {
+  it('offers no Use as notes when the entry has notes, and lists no drafts under the call', async () => {
     api('Our own notes.', {});
     show('viewer');
     const { row } = await openEntry();
     expect(row).toHaveTextContent('Our own notes.');
     await userEvent.click(row);
     expect(screen.queryByRole('button', { name: 'Use as notes' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Review' })).not.toBeInTheDocument();
-    expect(screen.getAllByText('Traders and admins save bids and offers.')).toHaveLength(1);
+    const panel = screen.getByRole('region', { name: "Claude's reading of the call" });
+    expect(within(panel).queryByText('Bid · Flaxseed')).not.toBeInTheDocument();
+    expect(panel).toHaveTextContent('waits in Contacts, Bids and offers and Follow-ups');
   });
 
   it('says when Claude is still reading the call', async () => {

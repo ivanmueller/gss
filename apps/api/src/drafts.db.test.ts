@@ -177,7 +177,12 @@ describe("Claude's open drafts", () => {
       callerId: users.tess,
       callerName: 'Tess',
       contactName: 'Pat Buyer',
+      sourceLines: [{ line: 1, text: 'Pat: We bid CAD 725 a tonne.' }],
     });
+    // The lines a check points to come too, from a transcript split by side.
+    expect(listed.find((draft) => draft.id === drafts.raced)?.sourceLines).toEqual([
+      { line: 1, text: 'Pat: We bid CAD 725 a tonne.' },
+    ]);
     expect(listed[0]?.calledAt).toMatch(/Z$/);
     expect(
       await db.listOpenDrafts(as(users.tess), {

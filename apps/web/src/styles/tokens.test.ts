@@ -126,12 +126,21 @@ const TEXT_PAIRS: [string, string][] = [
     [`grain-${family}`, `grain-${family}-subtle`],
     ['foreground', `grain-${family}-subtle`],
   ]),
+  // Claude's drafts (F-115).
+  ['claude', 'background'],
+  ['claude', 'card'],
+  ['claude', 'claude-subtle'],
+  ['foreground', 'claude-subtle'],
+  ['muted-foreground', 'claude-subtle'],
 ];
 
 /** Pairs for non-text elements (focus ring), which need 3:1. */
 const GRAPHIC_PAIRS: [string, string][] = [
   ['ring', 'background'],
   ['ring', 'card'],
+  // A draft's dashed border.
+  ['claude-border', 'background'],
+  ['claude-border', 'card'],
   // Map pins on the base map.
   ['bid', 'map-land'],
   ['bid', 'map-water'],

@@ -240,14 +240,39 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
             placed_by: string;
             placed_by_name: string;
             contact_name: string;
+            source_lines: { line: number; text: string | null }[];
           }[]
         >`
           select d.id, d.kind, d.fields, d.lines, d.contact_id, d.counterparty_id,
                  p.legal_name as counterparty_name, c.id as call_id,
                  coalesce(c.connected_at, c.created_at) as called_at,
-                 c.placed_by, c.placed_by_name, c.contact_name
+                 c.placed_by, c.placed_by_name, c.contact_name,
+                 -- The lines the draft and its checks point to: from the transcript by side, or
+                 -- for one kept before it was split, its non-blank lines (as Claude read them).
+                 (select coalesce(jsonb_agg(jsonb_build_object(
+                           'line', n.line,
+                           'text', coalesce(r.transcript_lines -> n.line ->> 'text',
+                                            plain.lines[n.line + 1]))
+                           order by n.line), '[]'::jsonb)
+                    from (select distinct v::int as line
+                            from (select jsonb_array_elements_text(d.lines) as v
+                                  union all
+                                  select c2.value ->> 'line'
+                                    from jsonb_each(case jsonb_typeof(d.fields -> 'checks')
+                                                      when 'object' then d.fields -> 'checks'
+                                                      else '{}'::jsonb end) c2) x
+                           where v ~ '^[0-9]{1,4}$') n
+                 ) as source_lines
           from app.call_drafts d
           join app.calls c on c.id = d.call_id and c.organization_id = d.organization_id
+          join app.call_recordings r
+            on r.id = d.recording_id and r.organization_id = d.organization_id
+          cross join lateral (
+            select case when r.transcript_lines is null then array(
+                     select btrim(t) from unnest(string_to_array(coalesce(r.transcript, ''), E'\n'))
+                       with ordinality u(t, o)
+                      where btrim(t) <> '' order by o) end as lines
+          ) plain
           join app.counterparties p
             on p.id = d.counterparty_id and p.organization_id = d.organization_id
           where d.organization_id = ${filter.organizationId} and d.status = 'open'
@@ -269,6 +294,9 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
           callerId: row.placed_by,
           callerName: row.placed_by_name,
           contactName: row.contact_name,
+          sourceLines: row.source_lines.flatMap((line) =>
+            line.text === null ? [] : [{ line: line.line, text: line.text }],
+          ),
         }));
       });
     },

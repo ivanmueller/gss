@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Claude's drafts in their own sections, verified in one click (F-115)
+
+- `docs/DECISIONS.md`: the owner's answers (option A: drafts stay drafts and are shown in Contacts, Bids and offers and Follow-ups, on the company's page and the main pages; Verify saves one as it is; same roles; no longer under the call).
+- `docs/API.md`: `GET /api/v1/calls/drafts` and `POST /api/v1/calls/drafts/{id}/verify`.
+- `docs/DESIGN_SYSTEM.md`: the `claude` colour role (violet, dashed) for drafts.
+- `docs/FEATURES.md`: F-115 in progress.
+
 ## 2026-11-06 — Claude's drafts in their own sections added to the tracker
 
 - `docs/FEATURES.md`: F-115, Claude's drafts from a call shown in Contacts, Bids and offers and Follow-ups with a Verify button, with the decisions it needs first.
