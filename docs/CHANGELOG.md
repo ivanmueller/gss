@@ -4,6 +4,11 @@
 
 - `docs/HANDOFF.md`: exact listed words in summaries (ivanmueller/gss#155), with its CI and Deploy staging runs.
 
+## 2026-11-06 — Claude writes no words in a summary
+
+- `docs/DECISIONS.md`: Codex's review of `fdb08ce` (three P2) and the change of approach: Claude chooses topics from a fixed list and the records under each; the Worker writes every word (the topic's title, each record's own text, a contact's notes as written).
+- `README.md`, `AGENTS.md`, `docs/PRODUCT.md`: the same, in a line.
+
 ## 2026-11-05 — Summaries: exact listed words, labels standing alone
 
 - `docs/DECISIONS.md`: Codex's review of `2f23d4b` (three P2): exact words from a fixed list only (no word forms, record words or names), ASCII only, labels standing alone, contacts and commodities by label.
