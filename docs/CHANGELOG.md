@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Claude's own logo; handoff records of #166 and #167
+
+- `docs/DECISIONS.md`, `docs/DESIGN_SYSTEM.md`: Claude's logo, supplied by the owner, replaces the drawn mark.
+- `docs/HANDOFF.md`: ivanmueller/gss#166 and #167, with their CI and Deploy staging runs.
+- `docs/FEATURES.md`: F-116 status.
+
 ## 2026-11-06 — A join refused when sent again (Codex, after #164)
 
 - `docs/DECISIONS.md`: Codex's third review of the callbacks, fixed by `20261107030000_callback_join_refused.sql`.

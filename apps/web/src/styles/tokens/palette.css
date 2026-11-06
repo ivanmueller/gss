@@ -159,7 +159,7 @@
   --clay-200: oklch(0.905 0.042 52);
   --clay-300: oklch(0.83 0.075 46);
   --clay-400: oklch(0.73 0.115 42);
-  --clay-500: oklch(0.645 0.135 40);
+  --clay-500: oklch(0.672 0.131 38.8); /* Claude's logo colour, #D97757 */
   --clay-600: oklch(0.57 0.135 39);
   --clay-700: oklch(0.49 0.115 38);
   --clay-800: oklch(0.41 0.095 38);
