@@ -128,7 +128,12 @@ describe('CounterpartyPage', () => {
         id={ID}
       />,
     );
-    const quotes = await screen.findByRole('region', { name: 'Bids and offers (1)' });
+    const quotes = await screen.findByRole(
+      'region',
+      { name: 'Bids and offers (1)' },
+      // The page's first paint loads several lists; slow on CI (main run #346).
+      { timeout: 5000 },
+    );
     // A stacked list in its column, so the valid-until time is never cut off.
     const list = within(quotes).getByRole('list', {
       name: 'Bids and offers of this counterparty',
@@ -158,7 +163,12 @@ describe('CounterpartyPage', () => {
         id={ID}
       />,
     );
-    const quotes = await screen.findByRole('region', { name: 'Bids and offers (0)' });
+    const quotes = await screen.findByRole(
+      'region',
+      { name: 'Bids and offers (0)' },
+      // The page's first paint loads several lists; slow on CI (main run #346).
+      { timeout: 5000 },
+    );
     expect(quotes).toHaveTextContent('No live bids or offers.');
     expect(within(quotes).queryByRole('link', { name: 'New bid' })).toBeNull();
     expect(within(quotes).queryByRole('link', { name: 'New offer' })).toBeNull();
