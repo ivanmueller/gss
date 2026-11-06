@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Every company with history summarized again
+
+- `docs/DECISIONS.md`, `docs/DATA_MODEL.md`: `20261106010000_resummarize_companies.sql`, re-queuing companies whose summary predates the final rules or failed under the stricter ones.
+
 ## 2026-11-06 — Handoff record of #159
 
 - `docs/HANDOFF.md`: CI retries starting its database (ivanmueller/gss#159), with its CI and Deploy staging runs.
