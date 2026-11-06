@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #161
+
+- `docs/HANDOFF.md`: the features and tests tracker, `docs/FEATURES.md` (ivanmueller/gss#161), with its CI and Deploy staging runs.
+
 ## 2026-11-06 — Email and texting added to the tracker
 
 - `docs/FEATURES.md`: F-114, email through the platform; F-120 widened to texting through the platform (sent and received, logged in the contact history) and callbacks, each with the decisions it needs first.
