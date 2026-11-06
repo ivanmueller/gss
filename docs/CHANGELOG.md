@@ -1,5 +1,22 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Codex's review of one-click Verify (F-115)
+
+- `docs/DECISIONS.md`: Verify adds nothing that was not said; the usual form saves through Verify in one transaction; the contact version the person saw goes with it.
+- `docs/API.md`: `POST /api/v1/calls/drafts/{id}/verify` takes `edited` and `contactVersion`.
+- `docs/FEATURES.md`: F-115 in ivanmueller/gss#165.
+
+## 2026-11-06 — Handoff record of #163
+
+- `docs/HANDOFF.md`: the handoff record of #162 and the F-115 tracker entry (ivanmueller/gss#163), with its CI and Deploy staging runs.
+
+## 2026-11-06 — Claude's drafts in their own sections, verified in one click (F-115)
+
+- `docs/DECISIONS.md`: the owner's answers (option A: drafts stay drafts and are shown in Contacts, Bids and offers and Follow-ups, on the company's page and the main pages; Verify saves one as it is; same roles; no longer under the call).
+- `docs/API.md`: `GET /api/v1/calls/drafts` and `POST /api/v1/calls/drafts/{id}/verify`.
+- `docs/DESIGN_SYSTEM.md`: the `claude` colour role (violet, dashed) for drafts.
+- `docs/FEATURES.md`: F-115 in progress.
+
 ## 2026-11-06 — Claude's drafts in their own sections added to the tracker
 
 - `docs/FEATURES.md`: F-115, Claude's drafts from a call shown in Contacts, Bids and offers and Follow-ups with a Verify button, with the decisions it needs first.

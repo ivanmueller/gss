@@ -5,6 +5,8 @@ import {
   COMMODITIES,
   correctVoicemailSchema,
   decideDraftSchema,
+  listDraftsQuerySchema,
+  verifyDraftSchema,
   numberedTranscript,
   utcToAlberta,
   type TranscriptLine,
@@ -19,6 +21,7 @@ import {
   type ReadingAnswer,
 } from './anthropic';
 import { RECORDINGS_JOB_BUDGET_MS } from './calls';
+import { recorderName } from './quotes';
 import type { ReadingContextRow } from './readings-db';
 import {
   apiError,
@@ -183,10 +186,93 @@ export async function readNewTranscripts(
 }
 
 const MAX_BODY_BYTES = 1024;
+/** A verify with the usual form's values (a bid's notes up to 2,000 characters among them). */
+const VERIFY_BODY_BYTES = 32 * 1024;
 
 /** A person's decisions on Claude's drafts and its voicemail answer. */
 export function callReadingRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
+
+  // The open drafts of an organization, optionally of one company or one kind, newest calls
+  // first: shown, marked as Claude's, in the sections where they belong (F-115).
+  routes.get('/drafts', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const parsed = listDraftsQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+    const query = parsed.data;
+    return withDatabase(c, openDatabase, async (db, ctx) =>
+      c.json({
+        drafts: await db.listOpenDrafts(ctx, {
+          organizationId: query.organization_id,
+          counterpartyId: query.counterparty_id ?? null,
+          kind: query.kind ?? null,
+        }),
+      }),
+    );
+  });
+
+  // Verify a draft: saved exactly as drafted, or as the person edited it in the usual form, and
+  // marked as saved by this person in one transaction, or nothing saved at all (the owner's
+  // answers of 2026-11-06, F-115; Codex's review of 88e09df).
+  routes.post('/drafts/:id/verify', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such draft.');
+    const body = await readJson(c, VERIFY_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const parsed = verifyDraftSchema.safeParse(body.value);
+    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+    const name = recorderName(c.get('user'));
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.verifyCallDraft(ctx, id, name, new Date(), parsed.data);
+      switch (result.status) {
+        case 'verified':
+          return c.json({ verified: true, kind: result.kind, resultId: result.resultId });
+        case 'not_found':
+          return apiError(c, 404, 'NOT_FOUND', 'No such draft.');
+        case 'forbidden':
+          return apiError(c, 403, 'FORBIDDEN', 'Your role cannot save this kind of draft.');
+        case 'already_decided':
+          return apiError(
+            c,
+            409,
+            'ALREADY_DECIDED',
+            'Someone already saved or dismissed this draft.',
+          );
+        case 'archived':
+          return apiError(c, 409, 'ARCHIVED', 'This company is archived. Restore it first.');
+        case 'incomplete':
+          return apiError(
+            c,
+            422,
+            'DRAFT_INCOMPLETE',
+            `This cannot be saved yet. Missing or to fix: ${result.missing.join(', ')}.`,
+            { missing: result.missing, issues: result.issues },
+          );
+        case 'wrong_type':
+          return apiError(
+            c,
+            422,
+            'WRONG_COUNTERPARTY_TYPE',
+            'This company is not marked as the kind of company that makes this bid or offer.',
+          );
+        case 'not_a_member':
+          return apiError(
+            c,
+            422,
+            'NOT_A_MEMBER',
+            'This follow-up is for someone no longer on the team. Open it in the form to choose who.',
+          );
+        case 'contact_changed':
+          return apiError(
+            c,
+            409,
+            'CONTACT_CHANGED',
+            'This contact was changed or removed since you opened it. Look at it again before saving.',
+          );
+      }
+    });
+  });
 
   // Accept a draft (naming the bid or offer, follow-up or contact saved from it) or dismiss it.
   routes.post('/drafts/:id/decision', async (c) => {

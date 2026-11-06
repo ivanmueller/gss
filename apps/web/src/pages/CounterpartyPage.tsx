@@ -58,6 +58,7 @@ import { CarrierLanes, isCrossBorder } from '../components/CarrierLanes';
 import { CallingProvider, PhoneNumber } from '../components/Calling';
 import {
   ContactHistoryCard,
+  crmDraftPlace,
   CrmMessage,
   FollowUpsCard,
   lastContact,
@@ -65,6 +66,7 @@ import {
   useCounterpartyCrm,
   type CounterpartyCrmState,
 } from '../components/CounterpartyCrm';
+import { ClaudeDraftList, draftsOf } from '../components/ClaudeDrafts';
 import { CounterpartyCommodities } from '../components/CounterpartyCommodities';
 import { CounterpartyFreight } from '../components/CounterpartyFreight';
 import { CounterpartyLocationsMap } from '../components/CounterpartyLocationsMap';
@@ -923,6 +925,11 @@ function CounterpartyView({
             {mainError}
           </p>
         )}
+        <ClaudeDraftList
+          drafts={draftsOf(crm.drafts, 'contact')}
+          place={crmDraftPlace(crm)}
+          className="border-b px-4 py-3"
+        />
         {editing?.kind === 'contact' && editing.id === null && (
           <EditForm
             label="New contact"
@@ -1232,6 +1239,13 @@ function CounterpartyView({
       state={quotes}
       // In a column the table's later columns (valid until, status) would be cut off.
       stacked={trading}
+      drafts={
+        <ClaudeDraftList
+          drafts={draftsOf(crm.drafts, 'quote')}
+          place={crmDraftPlace(crm)}
+          className="border-b px-4 py-3"
+        />
+      }
     />
   );
   const freightCard = (

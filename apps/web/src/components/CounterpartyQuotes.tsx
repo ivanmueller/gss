@@ -1,6 +1,6 @@
 import { SIDE_COUNTERPARTY_TYPES, type QuoteSide } from '@grain/domain';
 import { Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { canEnterQuotes } from '../lib/quotes';
 import { Link } from '../lib/router';
@@ -57,12 +57,15 @@ export function CounterpartyQuotesCard({
   counterparty,
   state,
   stacked = false,
+  drafts,
 }: {
   session: DirectorySession;
   counterparty: { id: string; types: string[]; archived: boolean };
   state: CounterpartyQuotesState;
   /** A stacked list instead of a table, for a narrow column. */
   stacked?: boolean;
+  /** Claude's drafts of bids and offers from calls, above the list. */
+  drafts?: ReactNode;
 }) {
   const { organization } = session;
   const { list, everything, setEverything } = state;
@@ -100,6 +103,7 @@ export function CounterpartyQuotesCard({
               ))}
           </div>
         </CardHeader>
+        {drafts}
         {list.status === 'loading' && (
           <p className="px-4 py-4 text-sm text-muted-foreground">Loading…</p>
         )}

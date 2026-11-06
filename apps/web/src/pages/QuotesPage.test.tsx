@@ -86,4 +86,43 @@ describe('QuotesPage', () => {
     expect(await screen.findByText('Traders and admins enter them.')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'New bid or offer' })).toBeNull();
   });
+
+  it("shows Claude's open drafts of bids and offers above the list, under the same filters", async () => {
+    const draft = (id: string, side: 'bid' | 'offer', commodity: string) => ({
+      id,
+      kind: 'quote',
+      fields: { side, commodity, values: { price: '725.00' }, checks: {} },
+      lines: [0],
+      contactId: null,
+      counterpartyId: BID.counterparty.id,
+      counterpartyName: 'Synthetic Buyer',
+      callId: '00000000-0000-4000-8000-0000000ca111',
+      calledAt: '2026-11-05T15:00:00.000Z',
+      callerId: '00000000-0000-4000-8000-0000000044aa',
+      callerName: 'Tess Trader',
+      contactName: 'Pat Buyer',
+      sourceLines: [],
+    });
+    mockApi({
+      [LIVE]: () => Response.json({ quotes: [], truncated: false }),
+      [`${LIVE}&side=offer`]: () => Response.json({ quotes: [], truncated: false }),
+      [`GET /calls/drafts?organization_id=${ORG.id}&kind=quote`]: () =>
+        Response.json({
+          drafts: [
+            draft('00000000-0000-4000-8000-0000000dd001', 'bid', 'flaxseed'),
+            draft('00000000-0000-4000-8000-0000000dd002', 'offer', 'canola'),
+          ],
+        }),
+      ...COMMODITIES,
+    });
+    render(<QuotesPage session={SESSION} />);
+    const drafts = await screen.findByRole('region', { name: 'Claude’s drafts to verify (2)' });
+    expect(within(drafts).getAllByRole('link', { name: 'Synthetic Buyer' })).toHaveLength(2);
+    // Drafts are not live bids or offers: the list itself stays empty.
+    expect(screen.getByText('No live bids or offers here.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Offers' }));
+    expect(
+      await screen.findByRole('region', { name: 'Claude’s drafts to verify (1)' }),
+    ).toHaveTextContent('Offer · Canola');
+  });
 });

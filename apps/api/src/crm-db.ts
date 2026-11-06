@@ -317,6 +317,32 @@ async function insertFollowUp(
   return row.id;
 }
 
+/**
+ * Plans a follow-up inside the caller's transaction: the same checks as POST /follow-ups. Used
+ * by createFollowUp and by verifying one of Claude's drafts.
+ */
+export async function insertPlannedFollowUp(
+  tx: postgres.TransactionSql,
+  counterpartyId: string,
+  plan: FollowUpInput,
+  createdByName: string,
+): Promise<CreateFollowUpResult> {
+  const found = await target(tx, counterpartyId);
+  if (found.status !== 'ok') return found;
+  if (!(await isTeamMember(tx, found.organizationId, plan.assignedTo))) {
+    return { status: 'not_a_member' };
+  }
+  const id = await insertFollowUp(
+    tx,
+    found.organizationId,
+    counterpartyId,
+    null,
+    plan,
+    createdByName,
+  );
+  return { status: 'created', id };
+}
+
 export function crmQueries(asUser: AsUser): CrmDatabase {
   const revisionsOf = (tx: postgres.TransactionSql, entryIds: string[]) => tx<RevisionRow[]>`
     select r.id, r.entry_id, r.revision_number, r.occurred_at, r.channel::text as channel,
@@ -486,22 +512,7 @@ export function crmQueries(asUser: AsUser): CrmDatabase {
     },
 
     createFollowUp(ctx, counterpartyId, plan, createdByName) {
-      return asUser(ctx, async (tx): Promise<CreateFollowUpResult> => {
-        const found = await target(tx, counterpartyId);
-        if (found.status !== 'ok') return found;
-        if (!(await isTeamMember(tx, found.organizationId, plan.assignedTo))) {
-          return { status: 'not_a_member' };
-        }
-        const id = await insertFollowUp(
-          tx,
-          found.organizationId,
-          counterpartyId,
-          null,
-          plan,
-          createdByName,
-        );
-        return { status: 'created', id };
-      });
+      return asUser(ctx, (tx) => insertPlannedFollowUp(tx, counterpartyId, plan, createdByName));
     },
 
     updateFollowUp(ctx, id, version, plan) {

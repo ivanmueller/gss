@@ -1,6 +1,8 @@
 import type { FollowUp } from '@grain/domain';
+import { useState } from 'react';
 
 import { useTeam, type FollowUpListResponse } from '../components/CounterpartyCrm';
+import { ClaudeDraftList, draftsOf, useOpenDrafts } from '../components/ClaudeDrafts';
 import { FollowUpItem } from '../components/FollowUpItem';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { SegmentedControl } from '../components/ui/segmented-control';
@@ -34,6 +36,15 @@ export function FollowUpsPage({ session }: { session: DirectorySession }) {
     token,
   );
   const team = useTeam(session);
+  // Claude's drafts of follow-ups from calls: the person's own (for them) unless Everyone (F-115).
+  const [draftList, reloadDrafts] = useOpenDrafts(session, { kind: 'follow_up' });
+  const [notice, setNotice] = useState<string | null>(null);
+  const drafts = draftsOf(draftList, 'follow_up').filter(
+    (draft) =>
+      everyone ||
+      ((draft.fields as { values: { assignedTo?: string } }).values.assignedTo ??
+        draft.callerId) === session.userId,
+  );
   const now = new Date();
   const groups = GROUPS.map((group) => ({
     ...group,
@@ -74,6 +85,36 @@ export function FollowUpsPage({ session }: { session: DirectorySession }) {
         <p className="text-xs text-muted-foreground">Times in Alberta time (MT).</p>
       </div>
 
+      {notice !== null && (
+        <p role="status" className="text-sm text-success">
+          {notice}
+        </p>
+      )}
+      {drafts.length > 0 && (
+        <Card asChild className="overflow-hidden">
+          <section aria-labelledby="follow-up-drafts-heading">
+            <CardHeader>
+              <CardTitle id="follow-up-drafts-heading">
+                Claude’s drafts to verify ({drafts.length})
+              </CardTitle>
+            </CardHeader>
+            <ClaudeDraftList
+              drafts={drafts}
+              showCompany
+              className="px-4 py-3"
+              place={{
+                session,
+                team,
+                onChanged: (message) => {
+                  setNotice(message);
+                  reloadDrafts();
+                  reload();
+                },
+              }}
+            />
+          </section>
+        </Card>
+      )}
       {list.status === 'loading' && (
         <p className="text-sm text-muted-foreground">Loading follow-ups…</p>
       )}

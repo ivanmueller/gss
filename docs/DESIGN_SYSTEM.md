@@ -43,6 +43,8 @@ Status and trading roles, each with five tokens: `<role>` (text, icons, dots), `
 
 **Grain families (2026-11-05).** The Grains page's tiles use five family roles, each with `grain-<family>` (text), `-subtle` (tile) and `-border`: `grain-wheat` yellow, `grain-coarse` orange, `grain-oilseed` teal, `grain-pulse` green, `grain-special` indigo, washes of the 500 step in the night theme like the status roles. They mean a kind of crop, never a status, and every tile names its family in words; `styles/tokens.test.ts` checks their contrast in both themes.
 
+**Claude's drafts (2026-11-06, F-115).** A draft Claude made from a call, not yet verified by a person, uses the `claude` role (violet: `claude` text, `claude-subtle` background, `claude-border` dashed border), with a "Claude's draft" tag and a robot icon (`components/ClaudeDrafts.tsx`). It is never a status and never used for anything else; the card always says "Claude's draft" in words. `styles/tokens.test.ts` checks its text contrast and its border (3:1) in both themes.
+
 Severity rises from info to danger. Colour never carries meaning alone: statuses, bids and offers always show a word and usually an icon. Bids and asks follow the trading convention (green and red), in the softer leaf green and coral of a reference the owner chose on 2026-10-28 (panel tints `#f5f8f2` and `#f7f2f1`, accents `#93bf72` and `#e26768`), with ramps of their own rather than `success` and `danger`'s. Each has an `-accent` step for a hovered box's border. They always sit under a heading or carry the word "Bid" or "Ask", so they are never read as a status.
 
 ## Scales

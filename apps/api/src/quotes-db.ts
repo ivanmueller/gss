@@ -237,6 +237,47 @@ async function insertRevision(
   `;
 }
 
+/**
+ * Enters a bid or offer inside the caller's transaction (its first revision included): the
+ * same checks as POST /quotes. Used by createQuote and by verifying one of Claude's drafts.
+ */
+export async function insertQuote(
+  tx: postgres.TransactionSql,
+  quote: NewQuote,
+): Promise<CreateQuoteResult> {
+  const org = quote.organizationId;
+  const [check] = await tx<{ allowed: boolean }[]>`
+      select app.can_enter_quotes(${org}) as allowed`;
+  if (check?.allowed !== true) return { status: 'forbidden' };
+  const [counterparty] = await tx<{ types: CounterpartyType[]; archived: boolean }[]>`
+      select to_jsonb(types::text[]) as types, archived_at is not null as archived
+      from app.counterparties where id = ${quote.counterpartyId} and organization_id = ${org}`;
+  if (!counterparty) return { status: 'counterparty_not_found' };
+  if (counterparty.archived) return { status: 'archived' };
+  const allowed = SIDE_COUNTERPARTY_TYPES[quote.side];
+  if (!counterparty.types.some((type) => allowed.includes(type))) {
+    return { status: 'wrong_type', types: counterparty.types };
+  }
+  if (quote.facilityId !== null) {
+    const facilities = await tx`
+        select 1 from app.facilities
+        where id = ${quote.facilityId} and counterparty_id = ${quote.counterpartyId}`;
+    if (facilities.length !== 1) return { status: 'facility_not_found' };
+  }
+  const commodities = await tx`
+      select 1 from app.commodities where code = ${quote.commodity} and active`;
+  if (commodities.length !== 1) return { status: 'commodity_not_found' };
+  const [created] = await tx<{ id: string }[]>`
+      insert into app.quotes
+        (organization_id, counterparty_id, facility_id, side, commodity_code, created_by)
+      values (${org}, ${quote.counterpartyId}, ${quote.facilityId},
+              ${quote.side}::app.quote_side, ${quote.commodity}, app.current_user_id())
+      returning id`;
+  if (!created) throw new Error('quote was not created');
+  await insertRevision(tx, org, created.id, quote.terms, quote.recordedByName);
+  return { status: 'created', id: created.id };
+}
+
 export function quoteQueries(asUser: AsUser): QuoteDatabase {
   const quoteSelect = (tx: postgres.TransactionSql) => tx`
     select q.id, q.side::text as side, q.commodity_code, cm.display_name as commodity_name,
@@ -306,39 +347,7 @@ export function quoteQueries(asUser: AsUser): QuoteDatabase {
     },
 
     createQuote(ctx, quote) {
-      return asUser(ctx, async (tx): Promise<CreateQuoteResult> => {
-        const org = quote.organizationId;
-        const [check] = await tx<{ allowed: boolean }[]>`
-          select app.can_enter_quotes(${org}) as allowed`;
-        if (check?.allowed !== true) return { status: 'forbidden' };
-        const [counterparty] = await tx<{ types: CounterpartyType[]; archived: boolean }[]>`
-          select to_jsonb(types::text[]) as types, archived_at is not null as archived
-          from app.counterparties where id = ${quote.counterpartyId} and organization_id = ${org}`;
-        if (!counterparty) return { status: 'counterparty_not_found' };
-        if (counterparty.archived) return { status: 'archived' };
-        const allowed = SIDE_COUNTERPARTY_TYPES[quote.side];
-        if (!counterparty.types.some((type) => allowed.includes(type))) {
-          return { status: 'wrong_type', types: counterparty.types };
-        }
-        if (quote.facilityId !== null) {
-          const facilities = await tx`
-            select 1 from app.facilities
-            where id = ${quote.facilityId} and counterparty_id = ${quote.counterpartyId}`;
-          if (facilities.length !== 1) return { status: 'facility_not_found' };
-        }
-        const commodities = await tx`
-          select 1 from app.commodities where code = ${quote.commodity} and active`;
-        if (commodities.length !== 1) return { status: 'commodity_not_found' };
-        const [created] = await tx<{ id: string }[]>`
-          insert into app.quotes
-            (organization_id, counterparty_id, facility_id, side, commodity_code, created_by)
-          values (${org}, ${quote.counterpartyId}, ${quote.facilityId},
-                  ${quote.side}::app.quote_side, ${quote.commodity}, app.current_user_id())
-          returning id`;
-        if (!created) throw new Error('quote was not created');
-        await insertRevision(tx, org, created.id, quote.terms, quote.recordedByName);
-        return { status: 'created', id: created.id };
-      });
+      return asUser(ctx, (tx) => insertQuote(tx, quote));
     },
 
     reviseQuote(ctx, id, basedOnRevision, terms, recordedByName) {
