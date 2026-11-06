@@ -1,5 +1,11 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #165
+
+- `docs/HANDOFF.md`: Claude's drafts in their own sections, verified in one click (ivanmueller/gss#165), with its CI and Deploy staging runs and Codex's clean re-review.
+- `docs/FEATURES.md`: F-115 live, check pending; owner check F-211.
+- `docs/DECISIONS.md`: Codex's re-review of `c717987`.
+
 ## 2026-11-06 — Callbacks to GSS's number (F-132)
 
 - `docs/DECISIONS.md`: callbacks built, with the choices made while building (turned on by an admin; unknown numbers and calls nobody can be given on the Follow-ups page; the caller left ringing; the voicemail's limits; the call box asking every 5 seconds; Claude reading callbacks).
