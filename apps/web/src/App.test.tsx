@@ -387,6 +387,28 @@ describe('navigation', () => {
     expect(link).toHaveAttribute('href', '/follow-ups');
   });
 
+  it('adds the calls to GSS’s number waiting on the person to the count (F-132)', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url === '/api/v1/me'
+          ? Response.json(ALICE)
+          : url === '/api/v1/follow-ups/count?organization_id=org-a'
+            ? Response.json({ overdue: 1, dueToday: 0 })
+            : url === '/api/v1/callbacks/count?organization_id=org-a'
+              ? Response.json({ open: 2 })
+              : Response.json({ status: 'ok', service: 'api' }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <App account={{ email: 'session@example.test', accessToken: 'token-1', signOut: vi.fn() }} />,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(
+      await within(nav).findByRole('link', { name: 'Follow-ups, 3 overdue or due today' }),
+    ).toHaveAttribute('href', '/follow-ups');
+  });
+
   it('shows no count beside Follow-ups when nothing is due', () => {
     render(<App />);
     expect(screen.getAllByRole('link', { name: 'Follow-ups' })[0]).toHaveAttribute(

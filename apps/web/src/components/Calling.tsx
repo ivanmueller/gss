@@ -1,10 +1,12 @@
 import {
+  CALLBACK_TURN_LABELS,
   CALL_OUTCOME_LABELS,
   CALL_STATUS_LABELS,
   formatAlberta,
   type CallRecordingView,
   dialablePhone,
   formatCallLength,
+  type CallStatus,
   type CallView,
   type TranscriptLine,
 } from '@grain/domain';
@@ -43,8 +45,8 @@ interface PhoneSetting {
 }
 
 /** How often the page asks for a call's progress, and for how long at most. */
-const POLL_MS = 2000;
-const POLL_LIMIT_MS = 15 * 60 * 1000;
+export const POLL_MS = 2000;
+export const POLL_LIMIT_MS = 15 * 60 * 1000;
 /** How long the line of a call that has ended stays before it goes. */
 export const ENDED_LINE_MS = 5000;
 /**
@@ -343,6 +345,8 @@ export function CallingProvider({
 
 /** The steps of a call, as the box's progress shows them. */
 const CALL_STEPS = ['calling_you', 'confirming', 'calling_them', 'connected'] as const;
+/** The steps of a callback to GSS's number, for the person whose cell rings. */
+const CALLBACK_STEPS = ['calling_you', 'confirming', 'joining', 'connected'] as const;
 
 /** What to do now, under the call's status. */
 const CALL_HINTS: Record<(typeof CALL_STEPS)[number], (name: string) => string> = {
@@ -351,6 +355,24 @@ const CALL_HINTS: Record<(typeof CALL_STEPS)[number], (name: string) => string> 
   calling_them: (name) => `Ringing ${name}. Stay on the line.`,
   connected: () => 'Hang up on your phone to end the call.',
 };
+const CALLBACK_HINTS: Record<(typeof CALLBACK_STEPS)[number], string> = {
+  calling_you: 'Answer your cell phone.',
+  confirming: 'Press 1 on your cell to take the call.',
+  joining: 'Stay on the line.',
+  connected: 'Hang up on your phone to end the call.',
+};
+
+/**
+ * Where a callback stands for the person rung: its step (null once over for them), its
+ * headline, and whether it is over for them (they did not take it).
+ */
+function callbackStep(call: CallView): (typeof CALLBACK_STEPS)[number] | null {
+  const you = call.callback?.you ?? null;
+  if (call.status === 'ended' || you === 'passed' || you === null) return null;
+  if (you === 'ringing') return 'calling_you';
+  if (you === 'confirming') return 'confirming';
+  return call.status === 'connected' ? 'connected' : 'joining';
+}
 
 /** Seconds as m:ss (h:mm:ss past an hour). */
 function clockTime(seconds: number): string {
@@ -384,8 +406,9 @@ function useTicking(on: boolean): number {
  * The live call box in the bottom right corner (the owner's request of 2026-11-03): whom the
  * call is with, a ringing phone while it connects, each step, and once connected a running
  * clock; then how it ended, for a few seconds. Why a call could not be placed shows here too.
+ * A callback to GSS's number shows its own steps, for the person whose cell rings.
  */
-function CallBox({
+export function CallBox({
   notice,
   onDismiss,
   onAddCell,
@@ -395,7 +418,9 @@ function CallBox({
   onAddCell: () => void;
 }) {
   const call = notice.kind === 'call' ? notice.call : null;
-  const connected = call?.status === 'connected';
+  const callback = call?.direction === 'incoming' ? call.callback : undefined;
+  const connected =
+    call?.status === 'connected' && (callback === undefined || callback.you === 'answered');
   const now = useTicking(connected);
   const frame =
     'fixed right-4 bottom-4 left-4 z-(--z-floating) flex flex-col gap-3 rounded-card border bg-card p-4 text-card-foreground shadow-lg sm:left-auto sm:w-80';
@@ -421,24 +446,40 @@ function CallBox({
 
   const { name } = notice;
   const status = notice.call.status;
-  const done = status === 'ended';
+  const callbackAt = callback === undefined ? null : callbackStep(notice.call);
+  const done = callback === undefined ? status === 'ended' : callbackAt === null;
   const ringing = !done && !connected;
   let headline: string;
-  if (!done) {
+  if (callbackAt !== null) {
+    headline =
+      callbackAt === 'calling_you'
+        ? CALLBACK_TURN_LABELS.ringing
+        : callbackAt === 'confirming'
+          ? CALLBACK_TURN_LABELS.confirming
+          : CALL_STATUS_LABELS[callbackAt];
+  } else if (!done) {
     headline = CALL_STATUS_LABELS[status];
+  } else if (callback !== undefined && callback.you !== 'answered') {
+    headline = `${CALLBACK_TURN_LABELS.passed}.`;
   } else if (notice.call.outcome === 'talked') {
     const { connectedAt, endedAt } = notice.call;
     const length =
       connectedAt !== null && endedAt !== null
         ? formatCallLength((Date.parse(endedAt) - Date.parse(connectedAt)) / 1000)
         : null;
-    headline = `Call ended${length === null ? '' : ` after ${length}`}${
-      notice.call.contactLogEntryId === null ? '.' : '. It is in the contact history.'
-    }`;
+    // A callback from a number that matches no company waits on the Follow-ups page.
+    const where =
+      notice.call.contactLogEntryId !== null
+        ? '. It is in the contact history.'
+        : callback !== undefined && notice.call.counterpartyId === null
+          ? '. It is on the Follow-ups page, to link to a company.'
+          : '.';
+    headline = `Call ended${length === null ? '' : ` after ${length}`}${where}`;
   } else {
     headline = `${notice.call.outcome === null ? 'Call ended' : CALL_OUTCOME_LABELS[notice.call.outcome]}.`;
   }
-  const step = done ? -1 : CALL_STEPS.indexOf(status);
+  const steps: readonly CallStatus[] = callback === undefined ? CALL_STEPS : CALLBACK_STEPS;
+  const step = done ? -1 : steps.indexOf(callbackAt ?? status);
   const elapsed =
     connected && notice.call.connectedAt !== null
       ? clockTime((now - Date.parse(notice.call.connectedAt)) / 1000)
@@ -487,7 +528,7 @@ function CallBox({
       {!done && (
         <>
           <ol aria-label="Progress" className="flex gap-1">
-            {CALL_STEPS.map((stepName, index) => (
+            {steps.map((stepName, index) => (
               <li
                 key={stepName}
                 aria-current={index === step ? 'step' : undefined}
@@ -498,7 +539,9 @@ function CallBox({
             ))}
           </ol>
           <p className="text-xs text-muted-foreground">
-            {CALL_HINTS[CALL_STEPS[step] ?? 'calling_you'](name)}
+            {callbackAt !== null
+              ? CALLBACK_HINTS[callbackAt]
+              : CALL_HINTS[CALL_STEPS[step] ?? 'calling_you'](name)}
           </p>
         </>
       )}
