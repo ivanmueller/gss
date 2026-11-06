@@ -273,6 +273,18 @@ describe('a call to GSS’s number', () => {
     expect(telnyx.hangUp).toHaveBeenCalledWith('v3:cell-leg', 'cmd-hang');
   });
 
+  it("passes Telnyx's call.bridged on, so a join that worked is known (Codex, finding 2)", async () => {
+    const response = await webhook(
+      telnyxEvent('call.bridged', { call_control_id: 'v3:cell-leg', client_state: memberState }),
+    );
+    expect(response.status).toBe(200);
+    expect(db.applyCallbackEvent).toHaveBeenCalledWith(
+      CALL,
+      'ev-cb-1',
+      expect.objectContaining({ type: 'call.bridged', side: 'you', attemptId: ATTEMPT }),
+    );
+  });
+
   it('asks the person rung to press 1, naming the company', async () => {
     const confirm = command('confirm', 'cmd-confirm', 'v3:cell-leg');
     db.applyCallbackEvent.mockResolvedValue({ status: 'applied', commands: [confirm] });

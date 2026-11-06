@@ -362,6 +362,22 @@ begin
       raise exception 'an incoming call keeps its numbers, leg and whom it was meant for'
         using errcode = 'check_violation';
     end if;
+    -- The one correction of an ended incoming call: missed, then talked once the join is known
+    -- to have worked (app.callback_joined_late), before anything was logged.
+    if old.status = 'ended' and new.status = 'ended' and old.outcome = 'missed'
+       and new.outcome = 'talked' and old.connected_at is null and new.connected_at is not null
+       and new.connected_at <= old.ended_at and new.connected_at >= old.created_at
+       and old.placed_by is not null and old.contact_log_entry_id is null
+       and old.follow_up_id is null and old.return_status is null
+       and (new.counterparty_id, new.contact_id, new.contact_name, new.placed_by, new.placed_by_name,
+            new.staff_call_control_id, new.staff_answered_at, new.ended_at, new.hangup_cause,
+            new.contact_log_entry_id, new.follow_up_id, new.return_status, new.return_owner)
+           is not distinct from
+           (old.counterparty_id, old.contact_id, old.contact_name, old.placed_by, old.placed_by_name,
+            old.staff_call_control_id, old.staff_answered_at, old.ended_at, old.hangup_cause,
+            null::uuid, null::uuid, null::text, null::uuid) then
+      return new;
+    end if;
     if old.counterparty_id is not null
        and (new.counterparty_id, new.contact_id, new.contact_name)
            is distinct from (old.counterparty_id, old.contact_id, old.contact_name) then
@@ -703,7 +719,7 @@ begin
 end
 $$;
 
--- The commands with these ids, as the Worker sends them.
+-- The commands with these ids, in the order they were made, as the Worker sends them.
 create function app.callback_commands_json(ids uuid[])
 returns jsonb
 language sql
@@ -714,7 +730,7 @@ as $$
   select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'kind', m.kind,
                                                'callControlId', m.call_control_id,
                                                'attemptId', m.attempt_id)
-                            order by m.created_at, m.id), '[]'::jsonb)
+                            order by pg_catalog.array_position(ids, m.id)), '[]'::jsonb)
     from app.call_commands m where m.id = any (ids)
 $$;
 
@@ -870,11 +886,18 @@ declare
   c app.calls;
   a app.callback_attempts;
   made uuid[] := '{}';
+  deferred boolean;
 begin
   select * into c from app.calls where id = call;
   if c.status = 'ended' then
     return made;
   end if;
+  -- Ended while the join was on its way to Telnyx: whether they talked is known only once it
+  -- comes back (or Telnyx's call.bridged arrives), so the call is logged then (Codex's review of
+  -- f7a0d73, finding 2).
+  deferred := how = 'missed' and c.status = 'joining' and exists (
+    select 1 from app.call_commands m
+     where m.call_id = c.id and m.kind = 'bridge' and m.status = 'sending');
   update app.calls
      set status = 'ended', outcome = how::app.call_outcome,
          ended_at = greatest(at, coalesce(connected_at, at)),
@@ -895,8 +918,37 @@ begin
   if c.counterparty_call_control_id is distinct from gone then
     made := made || app.callback_command(c.id, event, 'hang_up', c.counterparty_call_control_id, null);
   end if;
-  perform app.callback_record(c.id);
+  if not deferred then
+    perform app.callback_record(c.id);
+  end if;
   return array_remove(made, null);
+end
+$$;
+
+-- A callback that ended while its join was on its way to Telnyx, once the join is known to have
+-- worked (the join came back done, or Telnyx's call.bridged happened before the end): it was
+-- talked, connected from the time given (never after it ended), and is logged as such (Codex's
+-- review of f7a0d73, finding 2). Only a call ended missed that someone took and nothing logged
+-- yet; anything else is left as it is.
+create function app.callback_joined_late(call uuid, at timestamptz)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  c app.calls;
+begin
+  select * into c from app.calls where id = call and direction = 'incoming';
+  if not found or c.status <> 'ended' or c.outcome is distinct from 'missed'
+     or c.connected_at is not null or c.placed_by is null or c.contact_log_entry_id is not null
+     or c.follow_up_id is not null or c.return_status is not null then
+    return;
+  end if;
+  update app.calls
+     set outcome = 'talked', connected_at = least(greatest(coalesce(at, c.ended_at), c.created_at), c.ended_at)
+   where id = c.id;
+  perform app.callback_record(c.id);
 end
 $$;
 
@@ -946,6 +998,13 @@ begin
     select e.call_id into existing from app.call_events e where e.telnyx_event_id = event_id;
   end if;
   if existing is not null then
+    -- A new event of a leg already kept (a hang-up that crossed the first delivery, looked up
+    -- before that delivery committed; Codex's review of f7a0d73, finding 1) is applied to its
+    -- call; the same event again changes nothing.
+    if not exists (select 1 from app.call_events e where e.telnyx_event_id = event_id) then
+      perform app.apply_callback_event(existing, event_id, event_type, 'them', null, occurred, leg,
+                                       null, null, null);
+    end if;
     return jsonb_build_object('status', 'duplicate', 'callId', existing,
                               'commands', app.callback_open_commands(existing));
   end if;
@@ -1066,6 +1125,19 @@ begin
     return jsonb_build_object('status', 'duplicate', 'commands', app.callback_open_commands(c.id));
   end if;
   select * into cur from app.callback_attempts where call_id = c.id order by position desc limit 1;
+
+  -- Telnyx joined the caller to who answered: connected (and recorded) now, or, for a call that
+  -- ended while the join was on its way, talked after all (Codex's review of f7a0d73, finding 2).
+  if event_type = 'call.bridged' then
+    if c.status = 'joining' then
+      update app.calls set status = 'connected', connected_at = occurred where id = c.id;
+      made := made || app.callback_command(c.id, event_id, 'record', c.staff_call_control_id, cur.id);
+    elsif c.status = 'ended' and occurred <= c.ended_at then
+      perform app.callback_joined_late(c.id, occurred);
+    end if;
+    return jsonb_build_object('status', 'applied',
+                              'commands', app.callback_commands_json(array_remove(made, null)));
+  end if;
 
   if side = 'you' then
     if attempt is not null then
@@ -1220,6 +1292,10 @@ begin
   end;
   if not coalesce(wanted, false) then
     update app.call_commands set status = 'cancelled' where id = m.id;
+    -- A join whose call ended meanwhile never went through: the call is logged as it ended.
+    if m.kind = 'bridge' then
+      perform app.callback_record(c.id);
+    end if;
     return jsonb_build_object('status', 'skipped');
   end if;
   claim := m.attempts + 1;
@@ -1297,6 +1373,10 @@ begin
       made := made || app.callback_end(c.id, m.telnyx_event_id,
                                        case when m.kind = 'bridge' then 'failed' else 'missed' end,
                                        now(), null, null);
+      -- A join that failed after the call ended: logged as it ended.
+      if m.kind = 'bridge' and c.status = 'ended' then
+        perform app.callback_record(c.id);
+      end if;
     end if;
     return jsonb_build_object('commands', app.callback_commands_json(array_remove(made, null)));
   else
@@ -1309,6 +1389,12 @@ begin
     update app.calls set status = 'connected', connected_at = now() where id = c.id;
     made := made || app.callback_command(c.id, m.telnyx_event_id, 'record', c.staff_call_control_id,
                                          m.attempt_id);
+  elsif m.kind = 'bridge' and c.status = 'ended' then
+    -- The join worked, but its answer came back after a hang-up ended the call: talked, from
+    -- when the caller was answered (Codex's review of f7a0d73, finding 2).
+    perform app.callback_joined_late(c.id, (
+      select max(e.occurred_at) from app.call_events e
+       where e.call_id = c.id and e.leg = 'them' and e.event_type = 'call.answered'));
   end if;
 
   -- A leg a dial returned: kept on its attempt while wanted, hung up otherwise.
@@ -1637,6 +1723,7 @@ revoke all on function
   app.callback_open_commands(uuid), app.callback_command(uuid, text, text, text, uuid),
   app.callback_commands_json(uuid[]), app.callback_next(uuid, text), app.callback_record(uuid),
   app.callback_end(uuid, text, text, timestamptz, text, text),
+  app.callback_joined_late(uuid, timestamptz),
   app.receive_callback(text, text, timestamptz, text, text, text),
   app.callback_by_leg(text),
   app.apply_callback_event(uuid, text, text, text, uuid, timestamptz, text, text, text, text),

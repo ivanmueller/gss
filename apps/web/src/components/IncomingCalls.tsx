@@ -2,7 +2,7 @@ import type { CallView } from '@grain/domain';
 import { useEffect, useState } from 'react';
 
 import { apiJson } from '../lib/api';
-import { CallBox, ENDED_LINE_MS, POLL_LIMIT_MS, POLL_MS } from './Calling';
+import { CallBox, ENDED_LINE_MS, POLL_MS } from './Calling';
 
 // Callbacks to GSS's number (the owner's request of 2026-11-06, F-132): while the app is open,
 // it asks every few seconds whether a callback is ringing the person's cell, and shows the live
@@ -11,6 +11,13 @@ import { CallBox, ENDED_LINE_MS, POLL_LIMIT_MS, POLL_MS } from './Calling';
 
 /** How often the app asks whether a callback is ringing the person's cell, while it is shown. */
 export const WATCH_MS = 5000;
+
+/**
+ * How long a callback is followed at most: Telnyx ends every leg after 4 hours, so a call the
+ * person took is followed that long, with a margin (Codex's review of f7a0d73, finding 3); past
+ * it, the box goes and the watch starts again.
+ */
+export const FOLLOW_LIMIT_MS = (4 * 60 + 15) * 60 * 1000;
 
 /**
  * The call box for a callback ringing the signed-in person's cell. Asks only while the page is
@@ -73,10 +80,14 @@ export function IncomingCalls({
           .then((answer) => {
             if (cancelled) return;
             setCall(answer.call);
-            if (answer.call.status !== 'ended' && Date.now() - started < POLL_LIMIT_MS) poll();
+            if (answer.call.status === 'ended') return;
+            if (Date.now() - started < FOLLOW_LIMIT_MS) poll();
+            else setCall(null);
           })
           .catch(() => {
-            if (!cancelled && Date.now() - started < POLL_LIMIT_MS) poll();
+            if (cancelled) return;
+            if (Date.now() - started < FOLLOW_LIMIT_MS) poll();
+            else setCall(null);
           });
       }, POLL_MS);
     };

@@ -203,6 +203,10 @@ describe('a callback', () => {
       ['record', null],
     ]);
     expect((await db.getCall(as(users.tess), callId))?.status).toBe('connected');
+    // A call Tess took is found again past 15 minutes, as long as it lasts (Codex, finding 3).
+    await admin`update app.callback_attempts set started_at = now() - interval '40 minutes'
+                where call_id = ${callId}`;
+    expect(await db.myCallback(as(users.tess), orgs.a)).toBe(callId);
 
     const ended = await db.applyCallbackEvent(callId, id(), event('call.hangup', 'them', { leg }));
     expect(ended.status === 'applied' && ended.commands.map((c) => c.kind)).toEqual(['hang_up']);

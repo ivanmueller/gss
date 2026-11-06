@@ -171,6 +171,10 @@ function ReturnItem({
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : 'That did not work. Try again.');
+      })
+      .finally(() => {
+        // An unknown number taken stays listed (now theirs), with its other actions (Codex's
+        // review of f7a0d73, finding 4).
         setBusy(false);
       });
   }

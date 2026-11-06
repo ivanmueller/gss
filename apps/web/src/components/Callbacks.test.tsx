@@ -144,6 +144,36 @@ describe('IncomingCalls', () => {
     expect(calls[0]?.headers.get('Authorization')).toBe('Bearer synthetic-token');
   });
 
+  it('follows a callback the person took past 15 minutes, to its end (Codex, finding 3)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let current: CallView = {
+      ...CALLBACK,
+      status: 'connected',
+      connectedAt: new Date().toISOString(),
+      callback: { ...RUNG, you: 'answered' },
+    };
+    mockApi({
+      [`GET /callbacks/mine?organization_id=${ORG.id}`]: () => Response.json({ call: current }),
+      [`GET /calls/${CALL}`]: () => Response.json({ call: current }),
+    });
+    render(<IncomingCalls token={SESSION.token} organizationId={ORG.id} />);
+    expect((await screen.findAllByText('Connected'))[0]).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
+    });
+    current = {
+      ...current,
+      status: 'ended',
+      outcome: 'talked',
+      endedAt: new Date().toISOString(),
+      contactLogEntryId: '00000000-0000-4000-8000-0000000e11aa',
+    };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    expect(screen.getByText(/^Call ended after .*It is in the contact history\.$/)).toBeVisible();
+  });
+
   it('does not ask while the page is hidden', async () => {
     const calls = mockApi({});
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
@@ -205,6 +235,11 @@ describe('CallbackReturns', () => {
     await vi.waitFor(() => {
       expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ action: 'take' });
     });
+    // Taken, it stays listed (now theirs) with its other actions (Codex's review, finding 4).
+    await vi.waitFor(() => {
+      expect(within(section).getByRole('button', { name: 'Link to a company' })).toBeEnabled();
+    });
+    expect(within(section).getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   });
 
   it('links an unknown number to a company and one of its contacts', async () => {

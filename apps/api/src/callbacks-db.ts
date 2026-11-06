@@ -448,9 +448,12 @@ export function callbackQueries(asUser: AsUser, sql: postgres.Sql): CallbacksDat
           select c.id from app.callback_attempts a
           join app.calls c on c.id = a.call_id
           where a.organization_id = ${organizationId} and a.member_id = app.current_user_id()
-            and c.status <> 'ended' and a.started_at > now() - interval '15 minutes'
-            and (a.status in ('ringing', 'confirming')
-                 or (a.status = 'accepted' and c.placed_by = app.current_user_id()))
+            and c.status <> 'ended'
+            -- A cell rings for minutes at most; a call they took lasts up to Telnyx's 4 hours
+            -- (Codex's review of f7a0d73, finding 3).
+            and ((a.status in ('ringing', 'confirming') and a.started_at > now() - interval '15 minutes')
+                 or (a.status = 'accepted' and c.placed_by = app.current_user_id()
+                     and a.started_at > now() - interval '4 hours 15 minutes'))
           order by a.started_at desc
           limit 1`;
         return row?.id ?? null;

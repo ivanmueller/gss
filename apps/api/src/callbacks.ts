@@ -42,6 +42,8 @@ export const CALLBACK_EVENTS = new Set([
   'call.answered',
   'call.gather.ended',
   'call.speak.ended',
+  // The caller joined to who answered (Codex's review of f7a0d73, finding 2).
+  'call.bridged',
   'call.hangup',
 ]);
 

@@ -9,7 +9,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(102);
+select plan(116);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), olivia (operations), adam (org_admin), victor (viewer).
@@ -405,6 +405,104 @@ select is(
      join app.callback_attempts a on a.call_id = c.id
     where c.id = (select id::uuid from c3)),
   'missed|Tom Trader|cancelled', 'a missed callback, with a follow-up for Tom'
+);
+
+-- A hang-up crossing the first delivery (Codex's review of f7a0d73, finding 1) ----------------
+create temp table c5 as select (pg_temp.receive('ev-80', 'in-9', '+14035550100') ->> 'callId') as id;
+select is(pg_temp.receive('ev-81', 'in-9', '+14035550100', 'call.hangup') ->> 'status', 'duplicate',
+          'a hang-up looked up before the call was kept is found by its leg');
+select is((select concat_ws('|', status, outcome) from app.calls where id = (select id::uuid from c5)),
+          'ended|missed', 'and applied: the call ends missed');
+select is((select status from app.call_commands where id = pg_temp.command_of((select id from c5), 'dial_member')::uuid),
+          'cancelled', 'so no cell is rung for a caller who left');
+select ok(exists (select 1 from app.call_events where telnyx_event_id = 'ev-81'), 'and the hang-up is kept');
+
+-- A join whose answer comes back after a hang-up (Codex's review of f7a0d73, finding 2) --------
+-- Rings Tom, who presses 1; the caller is answered; the join is claimed (on its way to Telnyx).
+-- Returns the call's id and the join's claim.
+create function pg_temp.joining(leg text, cell text) returns text[]
+language plpgsql as $fn$
+declare
+  call text := pg_temp.receive('ev-' || leg, leg, '+14035550100') ->> 'callId';
+  attempt text;
+  claimed jsonb;
+begin
+  perform pg_temp.send(call, pg_temp.command_of(call, 'dial_member'), leg => cell);
+  attempt := pg_temp.attempt_of(call, 1);
+  perform pg_temp.event(call, 'ev-a-' || leg, 'call.answered', 'you', attempt, cell);
+  perform pg_temp.send(call, pg_temp.command_of(call, 'confirm'));
+  perform pg_temp.event(call, 'ev-g-' || leg, 'call.gather.ended', 'you', attempt, cell, '1', 'valid');
+  perform pg_temp.send(call, pg_temp.command_of(call, 'answer'));
+  perform pg_temp.event(call, 'ev-t-' || leg, 'call.answered', 'them', null, leg);
+  claimed := pg_temp.worker(format('select app.claim_callback_command(%L, %L)::text', call,
+                                   pg_temp.command_of(call, 'bridge')));
+  return array[call, claimed -> 'command' ->> 'claim'];
+end
+$fn$;
+
+create temp table j1 as select pg_temp.joining('in-10', 'tom-10') as j;
+select is(pg_temp.kinds(pg_temp.event((select j[1] from j1), 'ev-h-10', 'call.hangup', 'them', null, 'in-10')),
+          'hang_up', 'the caller hangs up while the join is on its way');
+select is(
+  (select concat_ws('|', outcome, contact_log_entry_id is null, follow_up_id is null, return_status is null)
+     from app.calls where id = (select j[1]::uuid from j1)),
+  'missed|t|t|t', 'ended, but not logged until the join comes back'
+);
+select is(
+  pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''done'', null)::text',
+                        (select j[1] from j1), pg_temp.command_of((select j[1] from j1), 'bridge'),
+                        (select j[2] from j1))) -> 'commands',
+  '[]'::jsonb, 'the join comes back done'
+);
+select is(
+  (select concat_ws('|', c.outcome, c.connected_at is not null, v.recorded_by_name, c.follow_up_id is null)
+     from app.calls c join app.contact_log_revisions v on v.entry_id = c.contact_log_entry_id
+    where c.id = (select j[1]::uuid from j1)),
+  'talked|t|Tom Trader|t', 'so they talked: logged in Tom''s name, with no follow-up'
+);
+
+create temp table j2 as select pg_temp.joining('in-11', 'tom-11') as j;
+select pg_temp.event((select j[1] from j2), 'ev-h-11', 'call.hangup', 'you',
+                     pg_temp.attempt_of((select j[1] from j2), 1), 'tom-11');
+select is(
+  pg_temp.kinds(pg_temp.event((select j[1] from j2), 'ev-b-11', 'call.bridged', 'you',
+                              pg_temp.attempt_of((select j[1] from j2), 1), 'tom-11')),
+  '', 'Telnyx''s call.bridged from before the end arrives'
+);
+select is(
+  (select concat_ws('|', outcome, contact_log_entry_id is not null, follow_up_id is null)
+     from app.calls where id = (select j[1]::uuid from j2)),
+  'talked|t|t', 'and is taken as the join having worked'
+);
+
+create temp table j3 as select pg_temp.joining('in-12', 'tom-12') as j;
+select pg_temp.event((select j[1] from j3), 'ev-h-12', 'call.hangup', 'them', null, 'in-12');
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''failed'', null)::text',
+                             (select j[1] from j3), pg_temp.command_of((select j[1] from j3), 'bridge'),
+                             (select j[2] from j3)));
+select is(
+  (select concat_ws('|', c.outcome, f.assigned_to_name) from app.calls c
+     join app.follow_ups f on f.id = c.follow_up_id where c.id = (select j[1]::uuid from j3)),
+  'missed|Tom Trader', 'a join that failed: missed, with its follow-up'
+);
+
+create temp table j4 as select pg_temp.joining('in-13', 'tom-13') as j;
+select pg_temp.event((select j[1] from j4), 'ev-h-13', 'call.hangup', 'them', null, 'in-13');
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''retry'', null)::text',
+                             (select j[1] from j4), pg_temp.command_of((select j[1] from j4), 'bridge'),
+                             (select j[2] from j4)));
+select is(
+  pg_temp.worker(format('select app.claim_callback_command(%L, %L)::text', (select j[1] from j4),
+                        pg_temp.command_of((select j[1] from j4), 'bridge'))) ->> 'status',
+  'skipped', 'a join retried after the end is not sent'
+);
+select ok(
+  (select follow_up_id is not null from app.calls where id = (select j[1]::uuid from j4)),
+  'and the call is logged as it ended'
+);
+select throws_ok(
+  format($$update app.calls set outcome = 'talked', connected_at = ended_at where id = %L$$, (select id from c3)),
+  '23514', null, 'a missed call nobody took is never made talked'
 );
 
 -- An unknown number: the callbacks person, then an open return ------------------------------
