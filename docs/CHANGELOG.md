@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Daily market report added to the tracker
+
+- `docs/FEATURES.md`: F-113, a daily market report and news (futures, weather, world news, crop statistics), with the decisions it needs first.
+
 ## 2026-11-06 — Features and tests tracker
 
 - `docs/FEATURES.md` (new): one list of what is built, what is to build (the owner's list of 2026-11-06 and earlier open requests), owner checks on staging, open test issues and dependency updates, with stable IDs and rules for keeping it current; the read-only query counting company summaries done, waiting or stopped.
