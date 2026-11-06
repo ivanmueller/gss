@@ -5,6 +5,7 @@ import {
   type DraftKind,
   type OpenDraftView,
   type TranscriptLine,
+  type VerifyDraftRequest,
 } from '@grain/domain';
 import type postgres from 'postgres';
 
@@ -71,8 +72,8 @@ export type VerifyDraftResult =
   | { status: 'forbidden' }
   | { status: 'already_decided' }
   | { status: 'archived' }
-  /** It cannot be saved as it is: what is missing or wrong, in plain words. */
-  | { status: 'incomplete'; missing: string[] }
+  /** It cannot be saved as it is: what is missing or wrong, in plain words and by field. */
+  | { status: 'incomplete'; missing: string[]; issues: { field: string | null; message: string }[] }
   /** A bid from a company not marked as a buyer (or broker), an offer from a non-seller. */
   | { status: 'wrong_type' }
   /** The follow-up is for someone no longer on the team. */
@@ -108,14 +109,16 @@ export interface ReadingsDatabase {
   /** The open drafts a person may see, newest calls first, up to OPEN_DRAFTS_LIMIT. */
   listOpenDrafts: (ctx: RequestContext, filter: OpenDraftFilter) => Promise<OpenDraftView[]>;
   /**
-   * Saves a draft as it is (with the usual form's defaults) and marks it as saved by the person,
-   * in one transaction; anything refused leaves nothing saved.
+   * Saves a draft exactly as drafted, or as the person edited it in the usual form, and marks it
+   * as saved by the person, in one transaction; anything refused leaves nothing saved. New
+   * details of a listed contact are saved only over the version the person saw.
    */
   verifyCallDraft: (
     ctx: RequestContext,
     draftId: string,
     recordedByName: string,
     now: Date,
+    request?: VerifyDraftRequest,
   ) => Promise<VerifyDraftResult>;
   /** A person's answer to whether a read call reached a voicemail. */
   correctCallVoicemail: (
@@ -301,7 +304,7 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
       });
     },
 
-    verifyCallDraft(ctx, draftId, recordedByName, now) {
+    verifyCallDraft(ctx, draftId, recordedByName, now, request = {}) {
       return asUser(ctx, async (tx): Promise<VerifyDraftResult> => {
         const [draft] = await tx<
           {
@@ -319,8 +322,8 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
         if (!draft) return { status: 'not_found' };
         if (draft.status !== 'open') return { status: 'already_decided' };
 
-        // New details of a listed contact are laid over its own, as the usual form does, and
-        // saved only while it is still as read here.
+        // New details of a listed contact are laid over its own, as the card showed them, and
+        // saved only over the version the person saw (Codex's review of 88e09df, finding 2).
         let listed: ListedRow | null = null as ListedRow | null;
         if (draft.kind === 'contact' && draft.contact_id !== null) {
           const [row] = await tx<ListedRow[]>`
@@ -328,11 +331,16 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
                    to_char(updated_at at time zone 'UTC', ${VERSION_FORMAT}) as version
             from app.counterparty_contacts
             where id = ${draft.contact_id} and counterparty_id = ${draft.counterparty_id}`;
-          if (!row) return { status: 'contact_changed' };
+          if (!row || request.contactVersion !== row.version) return { status: 'contact_changed' };
           listed = row;
         }
 
-        const ready = draftReadiness({ kind: draft.kind, fields: draft.fields }, now, listed);
+        const ready = draftReadiness(
+          { kind: draft.kind, fields: draft.fields },
+          now,
+          listed,
+          request.edited,
+        );
         if (ready.status === 'incomplete') return ready;
         const { save } = ready;
 

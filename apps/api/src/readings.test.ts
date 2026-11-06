@@ -548,8 +548,12 @@ describe('POST /calls/drafts/{id}/verify', () => {
     );
   });
   const app = createApp(openDatabase);
-  const verify = (id = DRAFT) =>
-    app.request(`/api/v1/calls/drafts/${id}/verify`, { method: 'POST', headers: AUTH }, ENV);
+  const verify = (id = DRAFT, body: unknown = {}) =>
+    app.request(
+      `/api/v1/calls/drafts/${id}/verify`,
+      { method: 'POST', headers: AUTH, body: JSON.stringify(body) },
+      ENV,
+    );
 
   it('saves the draft as it is, as the signed-in person, and says what was saved', async () => {
     db.verifyCallDraft.mockResolvedValue({ status: 'verified', kind: 'quote', resultId: QUOTE });
@@ -561,24 +565,52 @@ describe('POST /calls/drafts/{id}/verify', () => {
       DRAFT,
       expect.any(String),
       expect.any(Date),
+      {},
     );
   });
 
-  it('refuses a malformed id before the database', async () => {
+  it('passes on the contact version the person saw and what they edited in the form', async () => {
+    const request = {
+      contactVersion: '2026-11-01T00:00:00.000000Z',
+      edited: { values: { contactName: 'Pat Buyer', contactPhone: '(403) 555-0177' } },
+    };
+    expect((await verify(DRAFT, request)).status).toBe(200);
+    expect(db.verifyCallDraft).toHaveBeenCalledWith(
+      expect.anything(),
+      DRAFT,
+      expect.any(String),
+      expect.any(Date),
+      request,
+    );
+  });
+
+  it('refuses a malformed id or body before the database', async () => {
     expect((await verify('not-a-uuid')).status).toBe(404);
+    expect((await verify(DRAFT, { edited: { values: { price: 725 } } })).status).toBe(422);
+    expect((await verify(DRAFT, { resultId: QUOTE })).status).toBe(422);
+    const many = Object.fromEntries(
+      Array.from({ length: 31 }, (_, n) => [`field${String(n)}`, 'x']),
+    );
+    expect((await verify(DRAFT, { edited: { values: many } })).status).toBe(422);
     expect(db.verifyCallDraft).not.toHaveBeenCalled();
   });
 
   it('names what an incomplete draft is missing', async () => {
+    const issues = [
+      { field: 'validUntil', message: 'is required' },
+      { field: 'deliveryBasis', message: 'is required' },
+    ];
     db.verifyCallDraft.mockResolvedValue({
       status: 'incomplete',
       missing: ['valid until', 'delivery basis'],
+      issues,
     });
     const response = await verify();
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({
       error: { code: 'DRAFT_INCOMPLETE' },
       missing: ['valid until', 'delivery basis'],
+      issues,
     });
   });
 
@@ -600,7 +632,7 @@ describe('POST /calls/drafts/{id}/verify', () => {
   it('needs a signed-in person', async () => {
     const response = await app.request(
       `/api/v1/calls/drafts/${DRAFT}/verify`,
-      { method: 'POST' },
+      { method: 'POST', body: '{}' },
       ENV,
     );
     expect(response.status).toBe(401);

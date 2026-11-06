@@ -12,8 +12,10 @@ const completeBid = {
     side: 'bid' as const,
     commodity: 'canola' as const,
     values: {
+      firmness: 'indicative',
       price: '725.00',
       currency: 'CAD',
+      priceUnit: 'MT',
       deliveryBasis: 'delivered',
       quantityMax: '500',
       quotedAt: '2026-11-06T19:00:00.000Z',
@@ -25,7 +27,7 @@ const completeBid = {
 };
 
 describe('draftReadiness', () => {
-  it('saves a complete bid as drafted, indicative and per tonne unless said', () => {
+  it('saves a complete bid exactly as drafted', () => {
     const ready = draftReadiness(completeBid, NOW);
     expect(ready).toMatchObject({
       status: 'ready',
@@ -38,7 +40,39 @@ describe('draftReadiness', () => {
     });
   });
 
-  it('keeps what Claude drafted over the defaults', () => {
+  it('adds no unit or firmness that was not said (Codex, 88e09df, finding 1)', () => {
+    const values: Record<string, string> = { ...completeBid.fields.values };
+    delete values.priceUnit;
+    delete values.firmness;
+    const ready = draftReadiness(
+      { ...completeBid, fields: { ...completeBid.fields, values } },
+      NOW,
+    );
+    expect(ready.status).toBe('incomplete');
+    if (ready.status === 'incomplete') {
+      expect(ready.missing).toEqual(
+        expect.arrayContaining(['price unit', 'firm or indicative']) as unknown,
+      );
+    }
+  });
+
+  it('saves what the person finished in the form instead, with nothing added', () => {
+    const values: Record<string, string> = { ...completeBid.fields.values };
+    delete values.validUntil;
+    const draft = { ...completeBid, fields: { ...completeBid.fields, values } };
+    expect(draftReadiness(draft, NOW).status).toBe('incomplete');
+    expect(
+      draftReadiness(draft, NOW, null, {
+        commodity: 'flaxseed',
+        values: { ...completeBid.fields.values, price: '730.00' },
+      }),
+    ).toMatchObject({
+      status: 'ready',
+      save: { commodity: 'flaxseed', terms: { price: '730.00' } },
+    });
+  });
+
+  it('keeps a unit and firmness Claude drafted', () => {
     const firm = {
       ...completeBid,
       fields: {
@@ -74,7 +108,7 @@ describe('draftReadiness', () => {
     expect(late.status === 'incomplete' && late.missing.includes('valid until')).toBe(true);
   });
 
-  it('plans a follow-up due tomorrow at 9:00 am MT when no time was said', () => {
+  it('adds no due time that was not said', () => {
     expect(
       draftReadiness(
         {
@@ -83,17 +117,7 @@ describe('draftReadiness', () => {
         },
         NOW,
       ),
-    ).toEqual({
-      status: 'ready',
-      save: {
-        kind: 'follow_up',
-        followUp: {
-          task: 'Send the contract',
-          dueAt: '2026-11-07T15:00:00.000Z',
-          assignedTo: CALLER,
-        },
-      },
-    });
+    ).toMatchObject({ status: 'incomplete', missing: ['due time'] });
   });
 
   it('keeps a follow-up time that was said', () => {
@@ -155,7 +179,7 @@ describe('draftReadiness', () => {
         { kind: 'contact', fields: { values: { contactRole: 'Driver' }, checks: {} } },
         NOW,
       ),
-    ).toEqual({ status: 'incomplete', missing: ['name'] });
+    ).toMatchObject({ status: 'incomplete', missing: ['name'] });
   });
 });
 

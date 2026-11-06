@@ -6,6 +6,7 @@ import {
   correctVoicemailSchema,
   decideDraftSchema,
   listDraftsQuerySchema,
+  verifyDraftSchema,
   numberedTranscript,
   utcToAlberta,
   type TranscriptLine,
@@ -185,6 +186,8 @@ export async function readNewTranscripts(
 }
 
 const MAX_BODY_BYTES = 1024;
+/** A verify with the usual form's values (a bid's notes up to 2,000 characters among them). */
+const VERIFY_BODY_BYTES = 32 * 1024;
 
 /** A person's decisions on Claude's drafts and its voicemail answer. */
 export function callReadingRoutes(openDatabase: DatabaseFactory) {
@@ -208,15 +211,20 @@ export function callReadingRoutes(openDatabase: DatabaseFactory) {
     );
   });
 
-  // Verify a draft: saved as it is and marked as saved by this person in one transaction, or
-  // nothing saved at all (the owner's answers of 2026-11-06, F-115).
+  // Verify a draft: saved exactly as drafted, or as the person edited it in the usual form, and
+  // marked as saved by this person in one transaction, or nothing saved at all (the owner's
+  // answers of 2026-11-06, F-115; Codex's review of 88e09df).
   routes.post('/drafts/:id/verify', async (c) => {
     c.header('Cache-Control', 'no-store');
     const id = c.req.param('id');
     if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such draft.');
+    const body = await readJson(c, VERIFY_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const parsed = verifyDraftSchema.safeParse(body.value);
+    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
     const name = recorderName(c.get('user'));
     return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.verifyCallDraft(ctx, id, name, new Date());
+      const result = await db.verifyCallDraft(ctx, id, name, new Date(), parsed.data);
       switch (result.status) {
         case 'verified':
           return c.json({ verified: true, kind: result.kind, resultId: result.resultId });
@@ -238,8 +246,8 @@ export function callReadingRoutes(openDatabase: DatabaseFactory) {
             c,
             422,
             'DRAFT_INCOMPLETE',
-            `This draft cannot be saved as it is. Missing or to fix: ${result.missing.join(', ')}.`,
-            { missing: result.missing },
+            `This cannot be saved yet. Missing or to fix: ${result.missing.join(', ')}.`,
+            { missing: result.missing, issues: result.issues },
           );
         case 'wrong_type':
           return apiError(
@@ -260,7 +268,7 @@ export function callReadingRoutes(openDatabase: DatabaseFactory) {
             c,
             409,
             'CONTACT_CHANGED',
-            'This contact was changed or removed since the call. Open the draft in the form.',
+            'This contact was changed or removed since you opened it. Look at it again before saving.',
           );
       }
     });

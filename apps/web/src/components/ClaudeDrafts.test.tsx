@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Contact } from '../lib/api';
 import { mockApi, ORG, SESSION } from '../test/api';
+import { choose } from '../test/select';
 import { ClaudeDraftList, type DraftPlace } from './ClaudeDrafts';
 import { CounterpartyCrm } from './CounterpartyCrm';
 
@@ -37,6 +38,7 @@ const COMPLETE_BID: OpenDraftView = {
     side: 'bid',
     commodity: 'flaxseed',
     values: {
+      firmness: 'indicative',
       price: '725.00',
       currency: 'CAD',
       priceUnit: 'MT',
@@ -74,7 +76,9 @@ const FOLLOW_UP: OpenDraftView = {
   ...CALL,
   id: FOLLOW_UP_DRAFT,
   kind: 'follow_up',
-  fields: { values: { task: 'Call Pat back about flax', assignedTo: ME } },
+  fields: {
+    values: { task: 'Call Pat back about flax', assignedTo: ME, dueAt: '2026-11-06T16:00:00.000Z' },
+  },
   lines: [3],
   sourceLines: [{ line: 3, text: 'I will call you back tomorrow.' }],
 };
@@ -156,8 +160,8 @@ describe("Claude's drafts in their sections", () => {
     await vi.waitFor(() => {
       expect(onChanged).toHaveBeenCalledWith('Verified: saved as a bid or offer.', 'quote');
     });
-    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
-      `POST /calls/drafts/${BID_DRAFT}/verify`,
+    expect(calls.map((call) => [`${call.method} ${call.path}`, call.body])).toEqual([
+      [`POST /calls/drafts/${BID_DRAFT}/verify`, {}],
     ]);
   });
 
@@ -182,10 +186,10 @@ describe("Claude's drafts in their sections", () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 
-  it('offers the form, not Verify, for a draft missing what a bid needs, and saves from it', async () => {
+  it('offers the form, not Verify, for a draft missing what a bid needs, and verifies what is saved there', async () => {
     const calls = mockApi({
-      'POST /quotes': () => Response.json({ id: QUOTE_ID }, { status: 201 }),
-      [`POST /calls/drafts/${BID_DRAFT}/decision`]: () => Response.json({ decided: true }),
+      [`POST /calls/drafts/${BID_DRAFT}/verify`]: () =>
+        Response.json({ verified: true, kind: 'quote', resultId: QUOTE_ID }),
     });
     const onChanged = show([INCOMPLETE_BID]);
     const bid = card(/Bid · Flaxseed/);
@@ -195,9 +199,36 @@ describe("Claude's drafts in their sections", () => {
     expect(bid).toHaveTextContent('valid until');
     await userEvent.click(within(bid).getByRole('button', { name: 'Finish in the form' }));
     expect(within(bid).getByLabelText(/^Price/)).toHaveValue('725.00');
-    expect(within(bid).getByRole('button', { name: 'Save bid' })).toBeInTheDocument();
-    expect(calls).toEqual([]);
-    expect(onChanged).not.toHaveBeenCalled();
+    await choose(within(bid).getByRole('combobox', { name: /^Delivery basis/ }), 'Delivered');
+    await userEvent.type(within(bid).getByLabelText(/^Valid until/), '2026-11-12T10:00');
+    await userEvent.click(within(bid).getByRole('button', { name: 'Save bid' }));
+    await vi.waitFor(() => {
+      expect(onChanged).toHaveBeenCalledWith('Verified: saved as a bid or offer.', 'quote');
+    });
+    // One request: saved and marked together, never through the ordinary route first.
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      `POST /calls/drafts/${BID_DRAFT}/verify`,
+    ]);
+    expect(calls[0]?.body).toMatchObject({
+      edited: {
+        commodity: 'flaxseed',
+        values: {
+          price: '725.00',
+          deliveryBasis: 'delivered',
+          validUntil: '2026-11-12T16:00:00.000Z',
+        },
+      },
+    });
+  });
+
+  it('never adds a unit that was not said (Codex, 88e09df, finding 1)', () => {
+    mockApi({});
+    const noUnit = { ...fieldsOf(COMPLETE_BID).values };
+    delete noUnit.priceUnit;
+    show([{ ...COMPLETE_BID, fields: { ...fieldsOf(COMPLETE_BID), values: noUnit } }]);
+    const bid = card(/Bid · Flaxseed/);
+    expect(within(bid).queryByRole('button', { name: 'Verify' })).not.toBeInTheDocument();
+    expect(bid).toHaveTextContent('Not heard on the call: price unit.');
   });
 
   it('dismisses a draft without saving anything', async () => {
@@ -236,7 +267,10 @@ describe("Claude's drafts in their sections", () => {
     await vi.waitFor(() => {
       expect(onChanged).toHaveBeenCalledWith('Verified: contact saved.', 'contact');
     });
-    expect(calls.map((call) => call.path)).toEqual([`/calls/drafts/${CONTACT_DRAFT}/verify`]);
+    // The version shown on the card goes with it (Codex's review of 88e09df, finding 2).
+    expect(calls.map((call) => [call.path, call.body])).toEqual([
+      [`/calls/drafts/${CONTACT_DRAFT}/verify`, { contactVersion: PAT_LISTED.version }],
+    ]);
   });
 
   it('cannot verify new details of a contact no longer listed', () => {
@@ -255,7 +289,7 @@ describe("Claude's drafts in their sections", () => {
       name: 'Synthetic Prairie Mills',
     });
     expect(link).toHaveAttribute('href', `/counterparties/${COMPANY}`);
-    expect(card(/Follow-up/)).toHaveTextContent('No day or time said: due tomorrow 9:00 am MT');
+    expect(card(/Follow-up/)).toHaveTextContent('Due Fri 6 Nov 2026, 10:00 am MT');
   });
 });
 

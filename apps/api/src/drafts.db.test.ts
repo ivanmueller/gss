@@ -38,6 +38,7 @@ const COMPLETE_BID = {
   side: 'bid',
   commodity: 'canola',
   values: {
+    firmness: 'indicative',
     price: '725.00',
     currency: 'CAD',
     priceUnit: 'MT',
@@ -55,7 +56,10 @@ const drafts = {
   bid: id(),
   raced: id(),
   noValidUntil: id(),
+  noUnit: id(),
+  edited: id(),
   followUp: id(),
+  followUpNoTime: id(),
   newContact: id(),
   patsRole: id(),
   archivedBid: id(),
@@ -82,6 +86,14 @@ const count = async (table: 'quotes' | 'follow_ups' | 'counterparty_contacts') =
     select count(*)::int as n from ${admin('app')}.${admin(table)}
     where counterparty_id = ${buyer}`;
   return row?.n ?? 0;
+};
+
+const contactVersion = async (contactId: string) => {
+  const [row] = await admin<{ version: string }[]>`
+    select to_char(updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as version
+    from app.counterparty_contacts where id = ${contactId}`;
+  if (!row) throw new Error('no such contact');
+  return row.version;
 };
 
 const statusOf = async (draftId: string) => {
@@ -129,8 +141,24 @@ beforeAll(async () => {
     ...COMPLETE_BID,
     values: { ...COMPLETE_BID.values, validUntil: undefined, deliveryBasis: undefined },
   });
+  // Codex's review of 88e09df, finding 1: a price said without its unit.
+  await insertDraft(drafts.noUnit, 'quote', {
+    ...COMPLETE_BID,
+    values: { ...COMPLETE_BID.values, priceUnit: undefined },
+  });
+  await insertDraft(drafts.edited, 'quote', {
+    ...COMPLETE_BID,
+    values: { ...COMPLETE_BID.values, validUntil: undefined },
+  });
   await insertDraft(drafts.followUp, 'follow_up', {
-    values: { task: 'Send Pat the contract', assignedTo: users.tess },
+    values: {
+      task: 'Send Pat the contract',
+      assignedTo: users.tess,
+      dueAt: '2026-11-10T16:30:00.000Z',
+    },
+  });
+  await insertDraft(drafts.followUpNoTime, 'follow_up', {
+    values: { task: 'Call Pat back', assignedTo: users.tess },
   });
   await insertDraft(drafts.newContact, 'contact', {
     values: { contactName: 'Sam Logistics', contactPhone: '(403) 555-0177' },
@@ -163,7 +191,10 @@ describe("Claude's open drafts", () => {
         drafts.bid,
         drafts.raced,
         drafts.noValidUntil,
+        drafts.noUnit,
+        drafts.edited,
         drafts.followUp,
+        drafts.followUpNoTime,
         drafts.newContact,
         drafts.patsRole,
       ].sort(),
@@ -190,7 +221,10 @@ describe("Claude's open drafts", () => {
         counterpartyId: null,
         kind: 'follow_up',
       }),
-    ).toEqual([expect.objectContaining({ id: drafts.followUp })]);
+    ).toEqual([
+      expect.objectContaining({ id: drafts.followUp }),
+      expect.objectContaining({ id: drafts.followUpNoTime }),
+    ]);
     // An archived company's drafts are not listed.
     const everyone = await db.listOpenDrafts(as(users.tess), {
       organizationId: orgs.a,
@@ -293,17 +327,62 @@ describe('Verify', () => {
     expect((await statusOf(drafts.noValidUntil))?.status).toBe('open');
   });
 
-  it('plans a follow-up due tomorrow at 9:00 am MT when no time was said, for an operations member', async () => {
-    const now = new Date('2026-11-06T20:00:00Z');
-    const result = await db.verifyCallDraft(as(users.olga), drafts.followUp, 'Olga', now);
+  it('adds nothing that was not said: no price unit, no due time (Codex, 88e09df, finding 1)', async () => {
+    const before = await count('quotes');
+    const noUnit = await db.verifyCallDraft(as(users.tess), drafts.noUnit, 'Tess', new Date());
+    expect(noUnit).toMatchObject({ status: 'incomplete', missing: ['price unit'] });
+    const noTime = await db.verifyCallDraft(
+      as(users.olga),
+      drafts.followUpNoTime,
+      'Olga',
+      new Date(),
+    );
+    expect(noTime).toMatchObject({ status: 'incomplete', missing: ['due time'] });
+    expect(await count('quotes')).toBe(before);
+    expect((await statusOf(drafts.noUnit))?.status).toBe('open');
+  });
+
+  it('plans a follow-up at the time said, for an operations member', async () => {
+    const result = await db.verifyCallDraft(as(users.olga), drafts.followUp, 'Olga', new Date());
     expect(result).toMatchObject({ status: 'verified', kind: 'follow_up' });
     if (result.status !== 'verified') throw new Error('not verified');
     const followUp = await db.getFollowUp(as(users.olga), result.resultId);
     expect(followUp).toMatchObject({
       task: 'Send Pat the contract',
-      dueAt: '2026-11-07T15:00:00.000Z',
+      dueAt: '2026-11-10T16:30:00.000Z',
       assignedTo: { userId: users.tess, name: 'Tess' },
     });
+  });
+
+  it('saves what the person finished in the form, and marks the draft, in one step', async () => {
+    const before = await count('quotes');
+    const edited = {
+      commodity: 'canola',
+      values: { ...COMPLETE_BID.values, price: '730.00', validUntil },
+    };
+    // Something the form would refuse is answered by field, and nothing is saved.
+    const refused = await db.verifyCallDraft(as(users.tess), drafts.edited, 'Tess', new Date(), {
+      edited: { ...edited, values: { ...edited.values, price: '' } },
+    });
+    expect(refused).toMatchObject({
+      status: 'incomplete',
+      issues: [expect.objectContaining({ field: 'price' })],
+    });
+    expect(await count('quotes')).toBe(before);
+    const result = await db.verifyCallDraft(as(users.tess), drafts.edited, 'Tess', new Date(), {
+      edited,
+    });
+    expect(result).toMatchObject({ status: 'verified', kind: 'quote' });
+    if (result.status !== 'verified') throw new Error('not verified');
+    expect(await db.getQuote(as(users.tess), result.resultId)).toMatchObject({
+      commodity: { code: 'canola' },
+      current: { price: '730.00' },
+    });
+    expect(await statusOf(drafts.edited)).toMatchObject({
+      status: 'accepted',
+      result_id: result.resultId,
+    });
+    expect(await count('quotes')).toBe(before + 1);
   });
 
   it('lets only operations and admins save contacts: a new person, and new details of a listed one', async () => {
@@ -314,7 +393,19 @@ describe('Verify', () => {
     );
     const added = await db.verifyCallDraft(as(users.olga), drafts.newContact, 'Olga', new Date());
     expect(added).toMatchObject({ status: 'verified', kind: 'contact' });
-    const updated = await db.verifyCallDraft(as(users.olga), drafts.patsRole, 'Olga', new Date());
+    // Without the version the person saw, or with an older one, nothing is overwritten.
+    const seen = await contactVersion(pat);
+    expect(await db.verifyCallDraft(as(users.olga), drafts.patsRole, 'Olga', new Date())).toEqual({
+      status: 'contact_changed',
+    });
+    expect(
+      await db.verifyCallDraft(as(users.olga), drafts.patsRole, 'Olga', new Date(), {
+        contactVersion: '2026-01-01T00:00:00.000000Z',
+      }),
+    ).toEqual({ status: 'contact_changed' });
+    const updated = await db.verifyCallDraft(as(users.olga), drafts.patsRole, 'Olga', new Date(), {
+      contactVersion: seen,
+    });
     expect(updated).toEqual({ status: 'verified', kind: 'contact', resultId: pat });
     const contacts = await admin<
       { name: string; role: string | null; email: string | null; phone: string | null }[]
@@ -339,5 +430,31 @@ describe('Verify', () => {
       await db.verifyCallDraft(as(users.tess), drafts.archivedBid, 'Tess', new Date()),
     ).toEqual({ status: 'archived' });
     expect((await statusOf(drafts.archivedBid))?.status).toBe('open');
+  });
+
+  it('never overwrites a contact corrected after the card was loaded (Codex, 88e09df, finding 2)', async () => {
+    const sam = id();
+    const draftId = id();
+    await admin`insert into app.counterparty_contacts (id, organization_id, counterparty_id, name, phone, created_by)
+      values (${sam}, ${orgs.a}, ${buyer}, 'Sam Driver', '(403) 555-0150', ${users.tess})`;
+    await insertDraft(
+      draftId,
+      'contact',
+      { values: { contactPhone: '(403) 555-0177' }, checks: {} },
+      { contactId: sam },
+    );
+    const seen = await contactVersion(sam);
+    // Another member corrects the phone after the card was loaded.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await admin`update app.counterparty_contacts set phone = '(403) 555-0199' where id = ${sam}`;
+    expect(
+      await db.verifyCallDraft(as(users.olga), draftId, 'Olga', new Date(), {
+        contactVersion: seen,
+      }),
+    ).toEqual({ status: 'contact_changed' });
+    const [row] = await admin<{ phone: string }[]>`
+      select phone from app.counterparty_contacts where id = ${sam}`;
+    expect(row?.phone).toBe('(403) 555-0199');
+    expect((await statusOf(draftId))?.status).toBe('open');
   });
 });

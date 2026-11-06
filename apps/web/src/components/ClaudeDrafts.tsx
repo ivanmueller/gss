@@ -15,7 +15,6 @@ import {
   type OpenDraftList,
   type OpenDraftView,
   type QuoteChecks,
-  type QuoteDetail,
   type QuoteFormValues,
   type SaidCheck,
   type TeamMemberName,
@@ -41,8 +40,9 @@ import { Select } from './ui/select';
 // 2026-11-06, docs/DECISIONS.md, F-115): bids and offers among bids and offers, follow-ups among
 // follow-ups, contacts among contacts, on a company's page and on the main Bids & offers and
 // Follow-ups pages. Each is marked as Claude's (violet, dashed, "Claude's draft") and is not a
-// record until a person verifies it: Verify saves it as it is in one step, Edit or Finish in the
-// form opens the usual form filled in, and Dismiss sets it aside. Each filled-in amount shows the
+// record until a person verifies it: Verify saves exactly what was drafted in one step, Edit or
+// Finish in the form opens the usual form filled in and saves what the person confirms through
+// Verify too (one transaction either way; Codex's review of 88e09df), and Dismiss sets it aside. Each filled-in amount shows the
 // transcript line it came from, and why to look twice when unusual.
 
 type QuoteFields = Extract<DraftInput, { kind: 'quote' }>['fields'];
@@ -224,9 +224,7 @@ export function draftSummary(draft: Pick<OpenDraftView, 'kind' | 'fields'>): str
   }
   if (draft.kind === 'follow_up') {
     const due = (draft.fields as FollowUpFields).values.dueAt;
-    return due === undefined
-      ? 'No day or time said: due tomorrow 9:00 am MT'
-      : `Due ${formatAlberta(due)}`;
+    return due === undefined ? 'No day or time said' : `Due ${formatAlberta(due)}`;
   }
   const values = (draft.fields as ContactFieldsValues).values;
   return [values.contactRole, values.contactEmail, values.contactPhone].filter(Boolean).join(' · ');
@@ -309,9 +307,14 @@ export function ClaudeDraftCard({
     }
   }
 
+  // New details of a listed contact are saved only over the version shown here.
+  const contactVersion = listed === null ? {} : { contactVersion: listed.version };
   const verify = () =>
     run(
-      () => sendJson<VerifiedDraft>(`/calls/drafts/${draft.id}/verify`, session.token, 'POST'),
+      () =>
+        sendJson<VerifiedDraft>(`/calls/drafts/${draft.id}/verify`, session.token, 'POST', {
+          ...contactVersion,
+        }),
       SAVED_AS[draft.kind],
     );
   const dismiss = () =>
@@ -323,21 +326,18 @@ export function ClaudeDraftCard({
       'Draft dismissed.',
     );
 
-  /** After the usual form saved it: the draft is marked as saved with what was saved. */
-  async function savedFromForm(resultId: string) {
-    try {
-      await sendJson(`/calls/drafts/${draft.id}/decision`, session.token, 'POST', {
-        decision: 'accepted',
-        resultId,
-      });
-      setEditing(false);
-      savedKind(draft.kind);
-      place.onChanged(SAVED_AS[draft.kind], draft.kind);
-    } catch (failure) {
-      setError(
-        `Saved, but the draft could not be marked as saved: ${failure instanceof ApiError ? failure.message : 'try Dismiss'}.`,
-      );
-    }
+  /**
+   * What the person confirmed in the usual form, verified like the draft itself: saved and the
+   * draft marked in one transaction. A refusal is thrown to the form, which shows it by field.
+   */
+  async function verifyEdited(edited: { commodity?: string; values: Record<string, string> }) {
+    await sendJson<VerifiedDraft>(`/calls/drafts/${draft.id}/verify`, session.token, 'POST', {
+      ...contactVersion,
+      edited,
+    });
+    setEditing(false);
+    savedKind(draft.kind);
+    place.onChanged(SAVED_AS[draft.kind], draft.kind);
   }
 
   return (
@@ -431,57 +431,60 @@ export function ClaudeDraftCard({
       )}
       {editing && draft.kind === 'quote' && (
         <QuoteReview
-          session={session}
-          counterpartyId={draft.counterpartyId}
           fields={draft.fields as QuoteFields}
           onCancel={() => {
             setEditing(false);
           }}
-          onSaved={(id) => void savedFromForm(id)}
+          onSave={verifyEdited}
         />
       )}
       {editing && draft.kind === 'follow_up' && place.team !== null && (
         <FollowUpReview
           session={session}
-          counterpartyId={draft.counterpartyId}
           team={place.team}
           fields={draft.fields as FollowUpFields}
           onCancel={() => {
             setEditing(false);
           }}
-          onSaved={(id) => void savedFromForm(id)}
+          onSave={verifyEdited}
         />
       )}
       {editing && draft.kind === 'contact' && (
         <ContactReview
-          session={session}
-          counterpartyId={draft.counterpartyId}
-          contacts={contacts}
           listed={listed}
           fields={draft.fields as ContactFieldsValues}
           onCancel={() => {
             setEditing(false);
           }}
-          onSaved={(id) => void savedFromForm(id)}
+          onSave={verifyEdited}
         />
       )}
     </li>
   );
 }
 
-/** The usual bid or offer form, filled in from the draft; times shown in Alberta time. */
+/** What a form hands back to be verified: the person's values (and a bid's commodity). */
+type SaveEdited = (edited: { commodity?: string; values: Record<string, string> }) => Promise<void>;
+
+/** The form's values without unset fields, as the API reads them. */
+function present(values: Partial<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
+/**
+ * The usual bid or offer form, filled in from the draft with the form's own defaults (indicative,
+ * per tonne), which the person sees before saving; times shown in Alberta time.
+ */
 function QuoteReview({
-  session,
-  counterpartyId,
   fields,
   onCancel,
-  onSaved,
+  onSave,
 }: {
-  session: DirectorySession;
-  counterpartyId: string;
   fields: QuoteFields;
   onCancel: () => void;
-  onSaved: (id: string) => void;
+  onSave: SaveEdited;
 }) {
   const [commodity, setCommodity] = useState<string>(fields.commodity ?? '');
   const drafted = draftQuoteValues(fields.values);
@@ -507,17 +510,7 @@ function QuoteReview({
             />
           </div>
         }
-        onSubmit={async (values) => {
-          const created = await sendJson<QuoteDetail>('/quotes', session.token, 'POST', {
-            organizationId: session.organization.id,
-            counterpartyId,
-            facilityId: null,
-            side: fields.side,
-            commodity,
-            values,
-          });
-          onSaved(created.id);
-        }}
+        onSubmit={(values) => onSave({ commodity, values: present(values) })}
         onCancel={
           <Button variant="outline" onClick={onCancel}>
             Cancel
@@ -528,21 +521,19 @@ function QuoteReview({
   );
 }
 
-/** The usual follow-up form, filled in from the draft. */
+/** The usual follow-up form, filled in from the draft (due tomorrow 9:00 am MT unless said). */
 function FollowUpReview({
   session,
-  counterpartyId,
   team,
   fields,
   onCancel,
-  onSaved,
+  onSave,
 }: {
   session: DirectorySession;
-  counterpartyId: string;
   team: TeamMemberName[];
   fields: FollowUpFields;
   onCancel: () => void;
-  onSaved: (id: string) => void;
+  onSave: SaveEdited;
 }) {
   const initial: FollowUpFormValues = {
     task: fields.values.task ?? '',
@@ -557,13 +548,7 @@ function FollowUpReview({
         team={team}
         submitLabel="Plan follow-up"
         busyLabel="Saving…"
-        onSubmit={async (values) => {
-          const created = await sendJson<{ id: string }>('/follow-ups', session.token, 'POST', {
-            counterpartyId,
-            values,
-          });
-          onSaved(created.id);
-        }}
+        onSubmit={(values) => onSave({ values: present(values) })}
         onCancel={onCancel}
       />
     </div>
@@ -572,22 +557,15 @@ function FollowUpReview({
 
 /** The usual contact fields, filled in from the draft over the contact's own when listed. */
 function ContactReview({
-  session,
-  counterpartyId,
-  contacts,
   listed,
   fields,
   onCancel,
-  onSaved,
+  onSave,
 }: {
-  session: DirectorySession;
-  counterpartyId: string;
-  /** The company's contacts before saving, to find the one added. */
-  contacts: readonly Contact[];
   listed: Contact | null;
   fields: ContactFieldsValues;
   onCancel: () => void;
-  onSaved: (id: string) => void;
+  onSave: SaveEdited;
 }) {
   const [values, setValues] = useState<FormValues>(() => {
     const merged = draftContactValues(fields.values, listed);
@@ -609,23 +587,15 @@ function ContactReview({
     setIssues(checked.status === 'invalid' ? checked.issues : []);
     if (checked.status === 'invalid') return;
     setBusy(true);
-    const path = `/counterparties/${counterpartyId}/contacts`;
     try {
-      if (listed === null) {
-        const known = new Set(contacts.map((contact) => contact.id));
-        const detail = await sendJson<{ contacts: Contact[] }>(path, session.token, 'POST', {
-          values,
-        });
-        const added = detail.contacts.find((contact) => !known.has(contact.id));
-        if (added === undefined) throw new Error('The new contact could not be found.');
-        onSaved(added.id);
-      } else {
-        await sendJson(`${path}/${listed.id}`, session.token, 'PATCH', {
-          version: listed.version,
-          values,
-        });
-        onSaved(listed.id);
-      }
+      await onSave({
+        values: {
+          contactName: values.contactName ?? '',
+          contactRole: values.contactRole ?? '',
+          contactEmail: values.contactEmail ?? '',
+          contactPhone: values.contactPhone ?? '',
+        },
+      });
     } catch (failure) {
       setIssues(fieldIssues(failure));
       setError(failure instanceof Error ? failure.message : 'Something went wrong. Try again.');
