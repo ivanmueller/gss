@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Handoff record of #157
+
+- `docs/HANDOFF.md`: latest contact and notes in summaries (ivanmueller/gss#157), with its CI and Deploy staging runs (run #354 on `main` failed in a test that met 555 in a timestamp).
+
 ## 2026-11-06 — Handoff record of #156
 
 - `docs/HANDOFF.md`: Claude writes no words in a summary (ivanmueller/gss#156), with its CI and Deploy staging runs; Codex found nothing in #157.
