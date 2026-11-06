@@ -190,7 +190,7 @@ function toCommand(value: unknown): CallbackCommand {
     id: row.id,
     kind,
     callControlId: row.callControlId,
-    attemptId: (row.attemptId) ?? null,
+    attemptId: row.attemptId ?? null,
   };
 }
 
