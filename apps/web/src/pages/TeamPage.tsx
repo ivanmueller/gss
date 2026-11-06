@@ -8,6 +8,7 @@ import {
 import { Pencil, UserPlus } from 'lucide-react';
 import { useId, useState, type SyntheticEvent } from 'react';
 
+import { CallbackSettings } from '../components/CallbackSettings';
 import { PageHeader } from '../components/PageHeader';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -511,6 +512,7 @@ export function TeamPage({ session }: { session: DirectorySession }) {
               </Table>
             </Card>
           )}
+          <CallbackSettings session={session} />
           <Card asChild>
             <section aria-labelledby="roles-heading">
               <CardHeader>

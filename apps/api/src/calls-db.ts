@@ -1,6 +1,9 @@
 import {
   callLogNotes,
   dialablePhone,
+  displayPhone,
+  type CallbackTurn,
+  type CallDirection,
   type CallDraftView,
   type CallOutcome,
   type CallRecordingView,
@@ -140,8 +143,13 @@ export interface CallsDatabase {
   ) => Promise<void>;
   /** Keeps the transcript of a call's recording (the first one Telnyx sends). */
   keepCallTranscript: (callId: string, recordingId: string, transcript: string) => Promise<void>;
-  /** Claims up to `most` recordings to transcribe by side now (app.claim_recordings_to_transcribe). */
-  claimRecordingsToTranscribe: (most: number) => Promise<string[]>;
+  /**
+   * Claims up to `most` recordings to transcribe now (app.claim_recordings_to_transcribe), each
+   * with whether it is a voicemail (one channel, the caller's).
+   */
+  claimRecordingsToTranscribe: (
+    most: number,
+  ) => Promise<{ recordingId: string; voicemail: boolean }[]>;
   /** Keeps a recording's transcript by side (the first one kept). */
   keepTranscriptLines: (
     recordingId: string,
@@ -204,7 +212,7 @@ type AsUser = <T>(
 interface CallRow {
   id: string;
   organization_id: string;
-  counterparty_id: string;
+  counterparty_id: string | null;
   contact_name: string;
   status: CallStatus;
   outcome: CallOutcome | null;
@@ -214,13 +222,14 @@ interface CallRow {
   contact_log_entry_id: string | null;
   staff_call_control_id: string | null;
   counterparty_call_control_id: string | null;
-  placed_by_name: string;
+  placed_by_name: string | null;
+  direction: CallDirection;
 }
 
 const CALL_COLUMNS = (tx: postgres.TransactionSql) => tx`
   id, organization_id, counterparty_id, contact_name, status::text as status,
   outcome::text as outcome, created_at, connected_at, ended_at, contact_log_entry_id,
-  staff_call_control_id, counterparty_call_control_id, placed_by_name`;
+  staff_call_control_id, counterparty_call_control_id, placed_by_name, direction`;
 
 function toView(row: CallRow): CallView {
   return {
@@ -233,16 +242,30 @@ function toView(row: CallRow): CallView {
     connectedAt: row.connected_at?.toISOString() ?? null,
     endedAt: row.ended_at?.toISOString() ?? null,
     contactLogEntryId: row.contact_log_entry_id,
+    direction: row.direction,
   };
 }
 
-/**
- * A call that has been ringing or waiting for 1 this long is treated as over when the caller
- * places another (the legs ring 30 and 45 seconds); a connected call blocks until its time
- * limit (CALL_TIME_LIMIT_SECONDS in calls.ts, 4 hours) has passed, with a margin.
- */
-const RINGING_WINDOW = '15 minutes';
-const CONNECTED_WINDOW = '4 hours 15 minutes';
+/** Where a callback stands for the person rung, from their attempt's status (or none). */
+export function callbackTurn(attempt: string | null): CallbackTurn | null {
+  switch (attempt) {
+    case 'ringing':
+      return 'ringing';
+    case 'confirming':
+      return 'confirming';
+    case 'accepted':
+      return 'answered';
+    case null:
+      return null;
+    default:
+      return 'passed';
+  }
+}
+
+// A call ringing or waiting for 1 for 15 minutes is treated as over when the caller places
+// another (the legs ring 30 and 45 seconds); a connected call blocks until its time limit
+// (CALL_TIME_LIMIT_SECONDS in telnyx.ts, 4 hours) has passed, with a margin: app.member_busy
+// (20261107020000_callbacks.sql), which also counts a callback ringing the person's cell.
 
 /** A claim older than this is taken again (the Worker that claimed it did not finish). */
 export const CLAIM_LEASE_SECONDS = 30;
@@ -343,18 +366,14 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           where organization_id = ${org} and user_id = app.current_user_id()`;
         if (!cell) return { status: 'no_cell' };
         // One call at a time per person; a second click while one rings is refused. The lock
-        // makes two clicks at the same moment wait for each other, so only one call is placed.
+        // makes two clicks at the same moment wait for each other, so only one call is placed;
+        // a callback ringing their cell takes the same lock and counts too (Codex's review of
+        // the callbacks design, finding 3; app.member_busy).
         await tx`select pg_catalog.pg_advisory_xact_lock(
                    pg_catalog.hashtextextended('app.calls:' || app.current_user_id()::text, 0))`;
-        const [busy] = await tx<{ id: string }[]>`
-          select id from app.calls
-          where organization_id = ${org} and placed_by = app.current_user_id()
-            and status <> 'ended'
-            and created_at > now() - case when status = 'connected'
-                                          then ${CONNECTED_WINDOW}::interval
-                                          else ${RINGING_WINDOW}::interval end
-          limit 1`;
-        if (busy) return { status: 'in_progress' };
+        const [busy] = await tx<{ busy: boolean }[]>`
+          select app.my_call_in_progress(${org}) as busy`;
+        if (busy?.busy === true) return { status: 'in_progress' };
         const [created] = await tx<{ id: string }[]>`
           insert into app.calls (organization_id, counterparty_id, contact_id, contact_name,
                                  placed_by, placed_by_name, from_phone, counterparty_phone)
@@ -373,9 +392,31 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
 
     getCall(ctx, id) {
       return asUser(ctx, async (tx) => {
-        const [row] = await tx<CallRow[]>`
-          select ${CALL_COLUMNS(tx)} from app.calls where id = ${id}`;
-        return row ? toView(row) : null;
+        const [row] = await tx<
+          (CallRow & {
+            counterparty_phone: string;
+            company_name: string | null;
+            my_attempt: string | null;
+          })[]
+        >`
+          select ${CALL_COLUMNS(tx)}, c.counterparty_phone,
+                 (select p.legal_name from app.counterparties p
+                   where p.organization_id = c.organization_id and p.id = c.counterparty_id) as company_name,
+                 (select a.status from app.callback_attempts a
+                   where a.call_id = c.id and a.member_id = app.current_user_id()
+                   order by a.position desc limit 1) as my_attempt
+          from app.calls c where c.id = ${id}`;
+        if (!row) return null;
+        const view = toView(row);
+        if (row.direction !== 'incoming') return view;
+        return {
+          ...view,
+          callback: {
+            companyName: row.company_name,
+            callerPhone: displayPhone(row.counterparty_phone),
+            you: callbackTurn(row.my_attempt),
+          },
+        };
       });
     },
 
@@ -412,9 +453,12 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
     },
 
     async claimRecordingsToTranscribe(most) {
-      const rows = await sql<{ telnyx_recording_id: string }[]>`
-        select telnyx_recording_id from app.claim_recordings_to_transcribe(${most})`;
-      return rows.map((row) => row.telnyx_recording_id);
+      const rows = await sql<{ telnyx_recording_id: string; voicemail: boolean }[]>`
+        select telnyx_recording_id, voicemail from app.claim_recordings_to_transcribe(${most})`;
+      return rows.map((row) => ({
+        recordingId: row.telnyx_recording_id,
+        voicemail: row.voicemail,
+      }));
     },
 
     async keepTranscriptLines(recordingId, lines, words) {
@@ -443,6 +487,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
             transcript_lines: TranscriptLine[] | null;
             placed_by_name: string;
             contact_name: string;
+            voicemail_recording: boolean;
             failed: boolean;
             audio_until: Date | null;
             read_at: Date | null;
@@ -457,7 +502,13 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           }[]
         >`
           select r.id, r.call_id, c.contact_log_entry_id, r.transcript, r.transcript_lines,
-                 c.placed_by_name, c.contact_name,
+                 -- A callback's side of GSS: who answered, or who has to return a voicemail
+                 -- (its follow-up), or whom it was meant for.
+                 coalesce(c.placed_by_name,
+                          (select f.assigned_to_name from app.follow_ups f
+                            where f.organization_id = c.organization_id and f.id = c.follow_up_id),
+                          c.meant_for_name, 'GSS') as placed_by_name,
+                 c.contact_name, r.voicemail_recording,
                  r.transcript is null
                    and (r.transcribe_attempts >= 5 or r.audio_deleted_at is not null) as failed,
                  case when r.audio_deleted_at is null and app.recording_audio_until(r) > now()
@@ -485,6 +536,7 @@ export function callQueries(asUser: AsUser, sql: postgres.Sql): CallsDatabase {
           lines: row.transcript_lines,
           callerName: row.placed_by_name,
           contactName: row.contact_name,
+          voicemail: row.voicemail_recording,
           transcriptFailed: row.failed,
           audioUntil: row.audio_until?.toISOString() ?? null,
           reading:

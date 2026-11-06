@@ -29,6 +29,10 @@ export interface ReadingContextRow {
   callerName: string;
   /** UTC instant: when the call connected (or was placed). */
   calledAt: string;
+  /** Placed from the platform, or a call to GSS's number (a callback); outgoing when absent. */
+  direction?: 'outgoing' | 'incoming';
+  /** A voicemail left on GSS's number. */
+  voicemail?: boolean;
   /** The transcript by side; null for a transcript kept before it was split. */
   lines: TranscriptLine[] | null;
   transcript: string;

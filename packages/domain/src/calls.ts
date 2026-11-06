@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import type { CallbackView } from './callbacks';
 import type { CallReadingView } from './readings';
 
 // Calling counterparties through Telnyx (the owner's request and decisions of 2026-11-02,
@@ -7,12 +8,18 @@ import type { CallReadingView } from './readings';
 // the web app, which shows a call's progress. The database keeps the same states
 // (20261102010000_telnyx_calls.sql).
 
-/** How far a call has got: the caller's cell rings, they press 1, the counterparty rings, they talk. */
+/**
+ * How far a call has got: the caller's cell rings, they press 1, the counterparty rings, they
+ * talk. A call to GSS's number (a callback) uses calling_you and confirming for the cell of the
+ * person rung, then joining (the caller is being answered and joined) or voicemail.
+ */
 export const CALL_STATUSES = [
   'calling_you',
   'confirming',
   'calling_them',
+  'joining',
   'connected',
+  'voicemail',
   'ended',
 ] as const;
 export type CallStatus = (typeof CALL_STATUSES)[number];
@@ -26,6 +33,10 @@ export const CALL_OUTCOMES = [
   'busy',
   'cancelled',
   'failed',
+  /** A callback: the caller left a voicemail. */
+  'voicemail',
+  /** A callback: the caller hung up before anyone took the call. */
+  'missed',
 ] as const;
 export type CallOutcome = (typeof CALL_OUTCOMES)[number];
 
@@ -34,7 +45,9 @@ export const CALL_STATUS_LABELS: Record<CallStatus, string> = {
   calling_you: 'Calling your cell…',
   confirming: 'Press 1 on your phone to connect',
   calling_them: 'Ringing them…',
+  joining: 'Connecting you…',
   connected: 'Connected',
+  voicemail: 'Leaving a voicemail',
   ended: 'Call ended',
 };
 
@@ -46,12 +59,15 @@ export const CALL_OUTCOME_LABELS: Record<CallOutcome, string> = {
   busy: 'Their line was busy',
   cancelled: 'You hung up before they answered',
   failed: 'The call could not be placed',
+  voicemail: 'They left a voicemail',
+  missed: 'They hung up before anyone took the call',
 };
 
 /** A call as the API returns it; times are UTC instants. */
 export interface CallView {
   id: string;
-  counterpartyId: string;
+  /** Null for a callback from a number that matches no company. */
+  counterpartyId: string | null;
   contactName: string;
   status: CallStatus;
   outcome: CallOutcome | null;
@@ -60,7 +76,13 @@ export interface CallView {
   endedAt: string | null;
   /** The contact log entry written for a call that connected, once it ended. */
   contactLogEntryId: string | null;
+  /** Placed from the platform (outgoing, when left out) or a call to GSS's number (incoming). */
+  direction?: CallDirection;
+  /** For a call to GSS's number: the company and number, and where it stands for the reader. */
+  callback?: CallbackView;
 }
+
+export type CallDirection = 'outgoing' | 'incoming';
 
 /**
  * A recording of a call placed from the platform, with its transcript (the owner's request of
@@ -78,6 +100,8 @@ export interface CallRecordingView {
   /** Who placed the call, and the contact called: the names the lines are shown with. */
   callerName: string;
   contactName: string;
+  /** A voicemail left on GSS's number: one channel, all the caller's. */
+  voicemail: boolean;
   /** No transcript will come (the attempts ran out, or the audio was deleted first). */
   transcriptFailed: boolean;
   /** Until when the audio can be played (UTC instant); null once deleted. */
@@ -127,6 +151,16 @@ export function transcriptLines(
     else lines.push({ ...segment });
   }
   return lines;
+}
+
+/**
+ * Speech-to-text segments of a voicemail (one channel) as transcript lines: every line is the
+ * counterparty's, who left it (Codex's review of the callbacks design, finding 7).
+ */
+export function voicemailLines(
+  segments: readonly { start: number; text: string; channel?: number | null }[],
+): TranscriptLine[] {
+  return transcriptLines(segments.map((segment) => ({ ...segment, channel: 1 })));
 }
 
 /** The label of a side in the plain transcript. */

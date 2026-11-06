@@ -122,6 +122,10 @@ beforeEach(() => {
     confirm: vi.fn<TelnyxClient['confirm']>(() => Promise.resolve()),
     hangUp: vi.fn<TelnyxClient['hangUp']>(() => Promise.resolve()),
     reject: vi.fn<TelnyxClient['reject']>(() => Promise.resolve()),
+    answer: vi.fn<TelnyxClient['answer']>(() => Promise.resolve()),
+    bridge: vi.fn<TelnyxClient['bridge']>(() => Promise.resolve()),
+    speak: vi.fn<TelnyxClient['speak']>(() => Promise.resolve()),
+    recordVoicemail: vi.fn<TelnyxClient['recordVoicemail']>(() => Promise.resolve()),
     record: vi.fn<TelnyxClient['record']>(() => Promise.resolve()),
     recordingsOfLeg: vi.fn<TelnyxClient['recordingsOfLeg']>(() => Promise.resolve([])),
     recordingAudio: vi.fn<TelnyxClient['recordingAudio']>(() => Promise.resolve(null)),
@@ -855,6 +859,7 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
         lines: [{ side: 'caller', start: 0.4, text: 'Hello.' }],
         callerName: 'Tess Trader',
         contactName: 'Pat Buyer',
+        voicemail: false,
         transcriptFailed: false,
         audioUntil: '2026-11-03T16:07:12.000Z',
         reading: null,
@@ -962,7 +967,11 @@ describe("call recordings and transcripts (owner's request, 2026-11-02)", () => 
   /** Claims one recording at a time, as the database does, from a queue. */
   function queue(...recordingIds: string[]) {
     db.claimRecordingsToTranscribe.mockImplementation((most) =>
-      Promise.resolve(recordingIds.splice(0, most)),
+      Promise.resolve(
+        recordingIds
+          .splice(0, most)
+          .map((recordingId) => ({ recordingId, voicemail: recordingId.includes('vm') })),
+      ),
     );
   }
 

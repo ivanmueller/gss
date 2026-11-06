@@ -9,6 +9,12 @@ import {
 import { Hono } from 'hono';
 
 import type { CallEvent } from './call-steps';
+import {
+  CALLBACK_EVENTS,
+  CallbackDeliverAgain,
+  handleCallbackEvent,
+  keepCallbackRecording,
+} from './callbacks';
 import type { CommandOutcome, PendingCommand } from './calls-db';
 import type { Database, RequestContext } from './db';
 import {
@@ -521,10 +527,15 @@ export async function transcribeNewRecordings(
   try {
     for (let count = 0; count < TRANSCRIBE_MOST; count += 1) {
       if (now() - started >= RECORDINGS_JOB_BUDGET_MS) break;
-      const [recordingId] = await db.claimRecordingsToTranscribe(1);
-      if (recordingId === undefined) break;
+      const [claimed] = await db.claimRecordingsToTranscribe(1);
+      if (claimed === undefined) break;
+      const { recordingId, voicemail } = claimed;
       try {
-        const found = await client.transcribeRecording(recordingId);
+        // A voicemail is one channel, all the caller's (Codex's review of the callbacks design,
+        // finding 7).
+        const found = voicemail
+          ? await client.transcribeRecording(recordingId, { voicemail })
+          : await client.transcribeRecording(recordingId);
         // Telnyx no longer has the audio: tried again until the attempts run out.
         if (found === null) continue;
         // A call where nothing was said keeps an empty transcript, so it is not tried again.
@@ -553,10 +564,11 @@ export async function runRecordingsJob(
   telnyx: TelnyxFactory = telnyxClient,
   options: JobOptions = {},
 ) {
-  const parts = ['transcription', 'audio deletion'] as const;
+  const parts = ['transcription', 'audio deletion', 'late callbacks'] as const;
   const results = await Promise.allSettled([
     transcribeNewRecordings(env, openDatabase, telnyx, options),
     deleteExpiredRecordings(env, openDatabase, telnyx, options),
+    settleLateCallbacks(env, openDatabase),
   ]);
   results.forEach((result, index) => {
     if (result.status === 'fulfilled') return;
@@ -565,6 +577,22 @@ export async function runRecordingsJob(
       `Recordings job stopped (${parts[index] ?? 'part'}): ${error instanceof TelnyxError ? `status=${String(error.status)} codes=${error.codes}` : failureSummary(error)}`,
     );
   });
+}
+
+/**
+ * Logs the callbacks that ended while a join's outcome was unclear and got no word from Telnyx
+ * within five minutes (Codex's review of 9d5e57b, finding 1); run with the job every 2 minutes.
+ */
+export async function settleLateCallbacks(env: ApiEnv['Bindings'], openDatabase: DatabaseFactory) {
+  const url = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
+  if (!url) return;
+  const db = openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
+  try {
+    const settled = await db.settleLateCallbacks(100);
+    if (settled > 0) console.log(`Callbacks logged after an unclear join: ${String(settled)}`);
+  } finally {
+    await db.close().catch(() => undefined);
+  }
 }
 
 /** Recordings deleted per batch, and batches per run (a backlog is worked through in one run). */
@@ -668,6 +696,9 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
     if (RECORDING_EVENTS.has(event.type)) {
       const recordingOf = decodeClientState(event.payload.client_state);
       if (recordingOf === null) return c.json({ received: true });
+      if (recordingOf.callback === true && event.type !== 'call.recording.saved') {
+        return c.json({ received: true });
+      }
       const url = c.env.HYPERDRIVE?.connectionString ?? c.env.DATABASE_URL;
       if (!url) return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
       let recordingDb: Database;
@@ -677,7 +708,17 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
         return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
       }
       try {
-        await keepRecording(recordingDb, client, recordingOf.call, event.type, event.payload);
+        if (recordingOf.callback === true) {
+          const kept = await keepCallbackRecording(
+            recordingDb,
+            client,
+            recordingOf.call,
+            event.payload,
+          );
+          if (!kept) throw new RecordingNotListed();
+        } else {
+          await keepRecording(recordingDb, client, recordingOf.call, event.type, event.payload);
+        }
         return c.json({ received: true });
       } catch (error) {
         // Telnyx sends the event again; keeping a recording or transcript twice changes nothing.
@@ -689,13 +730,45 @@ export function telnyxWebhookRoutes(openDatabase: DatabaseFactory, telnyx: Telny
         closeLater(c, recordingDb);
       }
     }
-    if (!CALL_EVENTS.has(event.type)) return c.json({ received: true });
+    const state: ClientState | null = decodeClientState(event.payload.client_state);
+    // A callback's event, or a leg the platform did not place: a call to GSS's number
+    // (callbacks.ts), applied without a stand-in caller.
+    if (CALLBACK_EVENTS.has(event.type) && (state === null || state.callback === true)) {
+      const url = c.env.HYPERDRIVE?.connectionString ?? c.env.DATABASE_URL;
+      if (!url) return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured.');
+      let callbackDb: Database;
+      try {
+        callbackDb = openDatabase(url, { viaHyperdrive: c.env.HYPERDRIVE !== undefined });
+      } catch {
+        return apiError(c, 500, 'MISCONFIGURED', 'The database is not configured correctly.');
+      }
+      try {
+        if (await handleCallbackEvent(c, callbackDb, client, event, state)) {
+          return c.json({ received: true });
+        }
+      } catch (error) {
+        if (error instanceof CallbackDeliverAgain) {
+          console.warn(
+            `Telnyx event in request ${c.get('requestId')}: a callback command is still being sent; asking for it again`,
+          );
+          return apiError(c, 503, 'COMMAND_IN_FLIGHT', 'Deliver this event again.');
+        }
+        console.error(
+          `Telnyx callback event not applied in request ${c.get('requestId')}: ${error instanceof TelnyxError ? `status=${String(error.status)}` : failureSummary(error)}`,
+        );
+        return apiError(c, 500, 'INTERNAL_ERROR', 'The event could not be applied.');
+      } finally {
+        closeLater(c, callbackDb);
+      }
+    }
+    if (!CALL_EVENTS.has(event.type) || state?.callback === true) {
+      return c.json({ received: true });
+    }
 
     const callControlId = text(event.payload, 'call_control_id');
-    const state: ClientState | null = decodeClientState(event.payload.client_state);
     if (state === null) {
-      // A call to GSS's number that the platform did not place: callbacks are not routed yet,
-      // so the caller hears a busy signal instead of ringing with nobody to answer.
+      // A call to another number or through another application than the Worker's: refused
+      // with a busy signal instead of ringing with nobody to answer.
       if (
         event.type === 'call.initiated' &&
         event.payload.direction === 'incoming' &&

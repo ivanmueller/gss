@@ -30,6 +30,7 @@ import type {
 } from '@grain/domain';
 import postgres from 'postgres';
 
+import { callbackQueries, type CallbacksDatabase } from './callbacks-db';
 import { callQueries, type CallsDatabase } from './calls-db';
 import { readingQueries, type ReadingsDatabase } from './readings-db';
 import { summaryQueries, type SummariesDatabase } from './summaries-db';
@@ -366,6 +367,7 @@ export interface Database
     FxDatabase,
     CrmDatabase,
     CallsDatabase,
+    CallbacksDatabase,
     ReadingsDatabase,
     SummariesDatabase {
   memberships: (userId: string) => Promise<Membership[]>;
@@ -960,6 +962,7 @@ export function createDatabase(sql: postgres.Sql): Database {
     ...crmQueries(asUser),
     ...fxQueries(asUser, sql),
     ...callQueries(asUser, sql),
+    ...callbackQueries(asUser, sql),
     ...readingQueries(asUser, sql),
     ...summaryQueries(asUser, sql),
 

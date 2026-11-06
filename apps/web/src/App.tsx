@@ -6,6 +6,8 @@ import { notePasswordChanged } from './auth/passwordNotice';
 import { AppShell, type NavSection } from './components/AppShell';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
+import { IncomingCalls } from './components/IncomingCalls';
+import { canLogContacts } from './lib/crm';
 import { useFollowUpCount } from './lib/useFollowUpCount';
 import { useMe } from './lib/useMe';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
@@ -203,6 +205,10 @@ export function App({ account }: { account?: Account }) {
       })}
     >
       {page}
+      {account && organization && canLogContacts(organization.role) && (
+        // A callback ringing the person's cell shows on every page (F-132).
+        <IncomingCalls token={account.accessToken} organizationId={organization.id} />
+      )}
     </AppShell>
   );
 }

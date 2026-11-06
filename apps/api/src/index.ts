@@ -10,6 +10,7 @@ import {
   telnyxWebhookRoutes,
 } from './calls';
 import { counterpartyRoutes } from './counterparties';
+import { callbackRoutes } from './callbacks';
 import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
 import { facilityRoutes } from './facilities';
@@ -133,6 +134,7 @@ export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: Tel
   // Claude's drafts first: GET /calls/drafts would otherwise be taken for a call's id.
   app.route('/calls', callReadingRoutes(openDatabase));
   app.route('/calls', callRoutes(openDatabase, telnyx));
+  app.route('/callbacks', callbackRoutes(openDatabase, telnyx));
 
   return app;
 }

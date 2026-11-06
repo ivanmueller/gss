@@ -287,6 +287,7 @@ describe('CallRecordingDetails', () => {
     lines: null,
     callerName: 'Tess Trader',
     contactName: 'Pat Buyer',
+    voicemail: false,
     transcriptFailed: false,
     audioUntil: '2999-01-01T00:00:00.000Z',
     reading: null,

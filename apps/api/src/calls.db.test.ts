@@ -1063,8 +1063,13 @@ describe("recordings and transcripts (owner's request, 2026-11-02)", () => {
       new Date().toISOString(),
       new Date().toISOString(),
     );
-    expect(await db.claimRecordingsToTranscribe(50)).toContain(recording);
-    expect(await db.claimRecordingsToTranscribe(50)).not.toContain(recording);
+    expect(await db.claimRecordingsToTranscribe(50)).toContainEqual({
+      recordingId: recording,
+      voicemail: false,
+    });
+    expect(
+      (await db.claimRecordingsToTranscribe(50)).map((claimed) => claimed.recordingId),
+    ).not.toContain(recording);
     const lines = [
       { side: 'caller' as const, start: 0.4, text: 'Morning Pat.' },
       { side: 'counterparty' as const, start: 2.1, text: 'Two loads at the posted price.' },

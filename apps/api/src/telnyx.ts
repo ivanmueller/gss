@@ -1,4 +1,10 @@
-import { dialablePhone, transcriptLines, type TranscriptLine } from '@grain/domain';
+import {
+  dialablePhone,
+  transcriptLines,
+  VOICEMAIL_MAX_SECONDS,
+  voicemailLines,
+  type TranscriptLine,
+} from '@grain/domain';
 
 // Telnyx, called only from the Worker (the owner's decisions of 2026-11-02, docs/DECISIONS.md).
 // The API key and the other settings are Worker secrets the owner adds in Cloudflare; none of
@@ -37,13 +43,24 @@ export function telnyxConfig(env: TelnyxBindings): TelnyxConfig | null {
 export interface ClientState {
   call: string;
   leg: 'you' | 'them';
+  /** A call to GSS's number (a callback), whose events are applied without a stand-in caller. */
+  callback?: true;
+  /** For a callback, the attempt a leg to a team member's cell belongs to. */
+  attempt?: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** client_state for Telnyx: base64 of a small JSON object. */
 export function encodeClientState(state: ClientState): string {
-  return btoa(JSON.stringify({ c: state.call, l: state.leg }));
+  return btoa(
+    JSON.stringify({
+      c: state.call,
+      l: state.leg,
+      ...(state.callback === true ? { k: 'cb' } : {}),
+      ...(state.attempt === undefined ? {} : { a: state.attempt }),
+    }),
+  );
 }
 
 /** The call and leg from a client_state, or null when it is missing or not one of ours. */
@@ -52,9 +69,16 @@ export function decodeClientState(value: unknown): ClientState | null {
   try {
     const parsed: unknown = JSON.parse(atob(value));
     if (typeof parsed !== 'object' || parsed === null) return null;
-    const { c, l } = parsed as Record<string, unknown>;
+    const { c, l, k, a } = parsed as Record<string, unknown>;
     if (typeof c !== 'string' || !UUID.test(c) || (l !== 'you' && l !== 'them')) return null;
-    return { call: c.toLowerCase(), leg: l };
+    if (k === undefined && a === undefined) return { call: c.toLowerCase(), leg: l };
+    if (k !== 'cb' || (a !== undefined && (typeof a !== 'string' || !UUID.test(a)))) return null;
+    return {
+      call: c.toLowerCase(),
+      leg: l,
+      callback: true,
+      ...(a === undefined ? {} : { attempt: a.toLowerCase() }),
+    };
   } catch {
     return null;
   }
@@ -80,6 +104,8 @@ export interface DialRequest {
   timeoutSecs: number;
   /** Join the answered call to this leg (the counterparty's leg to the caller's). */
   bridgeTo?: string;
+  /** Telnyx ignores a second dial with the same id; by default the call and leg. */
+  commandId?: string;
 }
 
 /** Every leg ends after 4 hours, Telnyx's longest; a connected call blocks a new one until then. */
@@ -91,8 +117,38 @@ export interface TelnyxClient {
    * one (a dial it had already taken: its leg is then learned from its events).
    */
   dial: (request: DialRequest) => Promise<string | null>;
-  /** Asks the person on the leg to press 1. `commandId` makes a repeat harmless. */
-  confirm: (callControlId: string, clientState: ClientState, commandId: string) => Promise<void>;
+  /**
+   * Asks the person on the leg to press 1 (with the given words, for a callback). `commandId`
+   * makes a repeat harmless.
+   */
+  confirm: (
+    callControlId: string,
+    clientState: ClientState,
+    commandId: string,
+    prompt?: string,
+  ) => Promise<void>;
+  /** Answers an incoming call (a callback), so it can be joined or hear the voicemail message. */
+  answer: (callControlId: string, clientState: ClientState, commandId: string) => Promise<void>;
+  /** Joins the leg to another (who answered a callback to its caller). */
+  bridge: (
+    callControlId: string,
+    other: string,
+    clientState: ClientState,
+    commandId: string,
+  ) => Promise<void>;
+  /** Says the words on the leg (the voicemail message). */
+  speak: (
+    callControlId: string,
+    words: string,
+    clientState: ClientState,
+    commandId: string,
+  ) => Promise<void>;
+  /** Records the caller's voicemail on their own leg, after a beep, one channel. */
+  recordVoicemail: (
+    callControlId: string,
+    clientState: ClientState,
+    commandId: string,
+  ) => Promise<void>;
   hangUp: (callControlId: string, commandId?: string) => Promise<void>;
   /** Refuses an incoming call with a busy signal. */
   reject: (callControlId: string) => Promise<void>;
@@ -106,9 +162,13 @@ export interface TelnyxClient {
   deleteRecording: (recordingId: string) => Promise<void>;
   /**
    * Transcribes a recording's two channels separately with Telnyx's speech-to-text (Deepgram
-   * Nova-3): the transcript's lines by side, or null when Telnyx no longer has the recording.
+   * Nova-3): the transcript's lines by side, or null when Telnyx no longer has the recording. A
+   * voicemail is one channel, every line the caller's.
    */
-  transcribeRecording: (recordingId: string) => Promise<TranscriptLine[] | null>;
+  transcribeRecording: (
+    recordingId: string,
+    options?: { voicemail?: boolean },
+  ) => Promise<TranscriptLine[] | null>;
 }
 
 export type TelnyxFactory = (env: TelnyxBindings) => TelnyxClient | null;
@@ -348,7 +408,7 @@ export const telnyxClient: TelnyxFactory = (env) => {
         time_limit_secs: CALL_TIME_LIMIT_SECONDS,
         client_state: encodeClientState(request.clientState),
         // Telnyx ignores a second Dial with the same command_id.
-        command_id: `${request.clientState.call}-${request.clientState.leg}`,
+        command_id: request.commandId ?? `${request.clientState.call}-${request.clientState.leg}`,
         ...(request.bridgeTo === undefined
           ? {}
           : { link_to: request.bridgeTo, bridge_on_answer: true }),
@@ -359,9 +419,9 @@ export const telnyxClient: TelnyxFactory = (env) => {
           : undefined;
       return typeof id === 'string' && id.length > 0 && id.length <= 200 ? id : null;
     },
-    async confirm(callControlId, clientState, commandId) {
+    async confirm(callControlId, clientState, commandId, prompt) {
       await action(callControlId, 'gather_using_speak', {
-        payload: CONFIRM_PROMPT,
+        payload: prompt ?? CONFIRM_PROMPT,
         voice: 'AWS.Polly.Joanna-Neural',
         language: 'en-US',
         valid_digits: '1',
@@ -382,6 +442,40 @@ export const telnyxClient: TelnyxFactory = (env) => {
     },
     async reject(callControlId) {
       await action(callControlId, 'reject', { cause: 'USER_BUSY' });
+    },
+    async answer(callControlId, clientState, commandId) {
+      await action(callControlId, 'answer', {
+        client_state: encodeClientState(clientState),
+        command_id: commandId,
+      });
+    },
+    async bridge(callControlId, other, clientState, commandId) {
+      await action(callControlId, 'bridge', {
+        call_control_id: other,
+        client_state: encodeClientState(clientState),
+        command_id: commandId,
+      });
+    },
+    async speak(callControlId, words, clientState, commandId) {
+      await action(callControlId, 'speak', {
+        payload: words,
+        voice: 'AWS.Polly.Joanna-Neural',
+        language: 'en-US',
+        client_state: encodeClientState(clientState),
+        command_id: commandId,
+      });
+    },
+    async recordVoicemail(callControlId, clientState, commandId) {
+      await action(callControlId, 'record_start', {
+        format: 'mp3',
+        channels: 'single',
+        play_beep: true,
+        max_length: VOICEMAIL_MAX_SECONDS,
+        // Stops after 10 seconds of silence.
+        timeout_secs: 10,
+        client_state: encodeClientState(clientState),
+        command_id: commandId,
+      });
     },
     async record(callControlId, clientState, commandId) {
       await action(callControlId, 'record_start', {
@@ -416,7 +510,8 @@ export const telnyxClient: TelnyxFactory = (env) => {
       if (!audio.ok) throw new TelnyxError(audio.status, 'audio_download');
       return audio;
     },
-    async transcribeRecording(recordingId) {
+    async transcribeRecording(recordingId, options = {}) {
+      const voicemail = options.voicemail === true;
       const url = await recordingUrl(recordingId);
       if (url === null) return null;
       // One limit for the download and the transcription together (the job's time budget).
@@ -447,7 +542,7 @@ export const telnyxClient: TelnyxFactory = (env) => {
           // out.
           [
             'model_config',
-            JSON.stringify({ multichannel: true, punctuate: true, smart_format: true }),
+            JSON.stringify({ multichannel: !voicemail, punctuate: true, smart_format: true }),
           ],
         ],
         {
@@ -477,8 +572,9 @@ export const telnyxClient: TelnyxFactory = (env) => {
         typeof body === 'object' && body !== null
           ? (body as { segments?: unknown; text?: unknown })
           : {};
+      const toLines = voicemail ? voicemailLines : transcriptLines;
       const lines = Array.isArray(segments)
-        ? transcriptLines(
+        ? toLines(
             segments.flatMap((segment: unknown) => {
               if (typeof segment !== 'object' || segment === null) return [];
               const { start, text: said, channel } = segment as Record<string, unknown>;
@@ -492,7 +588,7 @@ export const telnyxClient: TelnyxFactory = (env) => {
       // No usable segment, but text (Codex's review of 3571e62, finding 4): kept as one line
       // whose side is unknown, rather than lost as a call where nothing was said.
       return typeof text === 'string' && text.trim() !== ''
-        ? [{ side: null, start: 0, text: text.trim() }]
+        ? [{ side: voicemail ? 'counterparty' : null, start: 0, text: text.trim() }]
         : [];
     },
     async deleteRecording(recordingId) {

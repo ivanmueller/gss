@@ -8,9 +8,10 @@ import { FOLLOW_UPS_CHANGED } from './crm';
 const REFRESH_MS = 60_000;
 
 /**
- * The signed-in person's follow-ups overdue or due today, for the menu: asked for every
- * minute, when the page is shown again and after a follow-up changes; 0 until known or when
- * the server cannot be reached (the Follow-ups page says more).
+ * The signed-in person's follow-ups overdue or due today, and the calls to GSS's number waiting
+ * on them (theirs, and nobody's for an admin; F-132), for the menu: asked for every minute, when
+ * the page is shown again and after a follow-up changes; 0 until known or when the server cannot
+ * be reached (the Follow-ups page says more).
  */
 export function useFollowUpCount(
   session: { token: string; organizationId: string } | null,
@@ -26,11 +27,18 @@ export function useFollowUpCount(
       controller.abort();
       controller = new AbortController();
       const { signal } = controller;
-      apiJson<FollowUpCount>(`/follow-ups/count?organization_id=${organizationId}`, token, {
-        signal,
-      })
-        .then((answer) => {
-          if (!signal.aborted) setCount(answer.overdue + answer.dueToday);
+      Promise.all([
+        apiJson<FollowUpCount>(`/follow-ups/count?organization_id=${organizationId}`, token, {
+          signal,
+        }),
+        apiJson<{ open: number }>(`/callbacks/count?organization_id=${organizationId}`, token, {
+          signal,
+        }).catch(() => ({ open: 0 })),
+      ])
+        .then(([answer, callbacks]) => {
+          // An answer without a number (callbacks not set up, say) counts nothing.
+          const waiting = Number.isFinite(callbacks.open) ? callbacks.open : 0;
+          if (!signal.aborted) setCount(answer.overdue + answer.dueToday + waiting);
         })
         .catch(() => {
           // Keep the last count; the menu is a reminder, not the record.

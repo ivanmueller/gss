@@ -94,7 +94,7 @@ export function readingMessage(context: ReadingContextRow, lines: TranscriptLine
           )
           .join('\n');
   return [
-    `Call placed by ${context.callerName} (GSS) to ${context.contactName} at ${context.counterpartyName}.`,
+    callHeadline(context),
     `The counterparty is a ${context.counterpartyTypes.join(' and ')}.`,
     `The call was on ${utcToAlberta(context.calledAt)} Alberta time (MT, UTC-6).`,
     '',
@@ -104,6 +104,17 @@ export function readingMessage(context: ReadingContextRow, lines: TranscriptLine
     'Transcript (line number, who spoke, what they said):',
     numberedTranscript(lines, { caller: context.callerName, counterparty: context.contactName }),
   ].join('\n');
+}
+
+/** Who called whom: a call placed from the platform, a callback to GSS's number, or a voicemail. */
+export function callHeadline(context: ReadingContextRow): string {
+  if (context.direction !== 'incoming') {
+    return `Call placed by ${context.callerName} (GSS) to ${context.contactName} at ${context.counterpartyName}.`;
+  }
+  if (context.voicemail === true) {
+    return `Voicemail left on GSS's number by ${context.contactName} at ${context.counterpartyName}, for ${context.callerName} (GSS) to return.`;
+  }
+  return `Call from ${context.contactName} at ${context.counterpartyName} to GSS's number, answered by ${context.callerName} (GSS).`;
 }
 
 interface JobOptions {
