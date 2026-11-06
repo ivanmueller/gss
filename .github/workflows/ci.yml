@@ -18,6 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Supabase's local ports (54320 to 54329) sit inside Linux's range for outgoing connections
+      # (32768 to 60999), so a download can take 54322 just before the database binds it, and
+      # nothing is listening there (runs #342, #357 and #367: "address already in use", with no
+      # listener on the port). Reserved first, before any download, so they are never handed out.
+      - name: Keep Supabase's ports out of outgoing connections
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54329
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
@@ -44,7 +50,8 @@ jobs:
               break
             fi
             echo "::warning::Supabase did not start (attempt $attempt of 3); what holds port 54322:"
-            sudo ss -ltnp 'sport = :54322' || true
+            # Every state, not only listeners: an outgoing or closing connection can hold it too.
+            sudo ss -tanp 'sport = :54322' || true
             docker ps -a --format '{{.Names}} {{.Status}} {{.Ports}}' || true
             supabase stop --no-backup || true
             sleep 15
