@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-06 — Features and tests tracker
+
+- `docs/FEATURES.md` (new): one list of what is built, what is to build (the owner's list of 2026-11-06 and earlier open requests), owner checks on staging, open test issues and dependency updates, with stable IDs and rules for keeping it current; the read-only query counting company summaries done, waiting or stopped.
+- `AGENTS.md`: read `docs/FEATURES.md` at the start of every session; add new requests there before coding and update statuses with each merge record.
+
 ## 2026-11-06 — Handoff record of #160
 
 - `docs/HANDOFF.md`: every company with history summarized again (ivanmueller/gss#160), with its CI and Deploy staging runs.
