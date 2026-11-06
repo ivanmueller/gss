@@ -8,7 +8,7 @@ import { z } from 'zod';
 // unit, money, a date or a name). Claude chooses what matters: for each line a topic from a
 // fixed list and the labels of the records that belong under it. The Worker writes every word:
 // the topic's fixed title, then each record's own text (a bid or offer whole, a follow-up with
-// when it is due, a contact with when it happened, its notes as written), so everything shown
+// when it is due, a contact with when it happened and its own notes, whole), so everything shown
 // is a record's own, with its own record.
 
 /** Lines in a summary, at most. */
@@ -23,11 +23,11 @@ export const SUMMARY_MAX_LENGTH = 2000;
  * (a label's kind is its letters: Q1 → Q).
  */
 export const SUMMARY_TOPICS = {
-  latest: { title: 'Latest contact', kinds: ['H', 'N'] },
+  latest: { title: 'Latest contact', kinds: ['H'] },
   live: { title: 'Live bids and offers', kinds: ['Q'] },
   follow_ups: { title: 'Open follow-ups', kinds: ['F'] },
   waiting: { title: 'Waiting on GSS', kinds: ['F', 'drafts'] },
-  earlier: { title: 'Earlier contact', kinds: ['H', 'N'] },
+  earlier: { title: 'Earlier contact', kinds: ['H'] },
   done: { title: 'Follow-ups done', kinds: ['D'] },
   changes: { title: 'Recent changes', kinds: ['C'] },
   contacts: { title: 'Contacts', kinds: ['P'] },
@@ -66,8 +66,10 @@ export const counterpartySummaryAnswerSchema = z.object({
 export type CounterpartySummaryAnswer = z.infer<typeof counterpartySummaryAnswerSchema>;
 
 /**
- * What the summary may refer to: each record's label (Q1, F1, H1, N1, D1, C1, P1, buys, sells,
+ * What the summary may refer to: each record's label (Q1, F1, H1, D1, C1, P1, buys, sells,
  * drafts, tonnes, organic) with the record's own text, written by the Worker from the records.
+ * H1 is the latest contact (the history is latest first); each contact's text holds its own
+ * notes, so notes are never shown with another contact.
  */
 export interface SummaryFacts {
   values: Readonly<Record<string, string>>;
@@ -100,11 +102,17 @@ export function checkSummary(answer: CounterpartySummaryAnswer, facts: SummaryFa
     const topic = SUMMARY_TOPICS[line.topic];
     if (line.labels.length > SUMMARY_MAX_LABELS) return { status: 'unknown_reference' };
     const texts: string[] = [];
+    // The latest contact is H1 (the history is latest first) and only H1; earlier ones are the
+    // rest (Codex's review of 0a0d815, finding 1).
+    if (line.topic === 'latest' && (line.labels.length !== 1 || line.labels[0] !== 'H1')) {
+      return { status: 'unknown_reference' };
+    }
     for (const label of line.labels) {
       const kinds: readonly string[] = topic.kinds;
       if (
         !Object.hasOwn(facts.values, label) ||
         !kinds.includes(kindOf(label)) ||
+        (line.topic === 'earlier' && label === 'H1') ||
         used.has(label)
       ) {
         return { status: 'unknown_reference' };

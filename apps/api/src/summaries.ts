@@ -49,14 +49,14 @@ const SUMMARIES_MOST = 3;
 /** The instructions, the same for every company; the company's records come in the message. */
 export const SUMMARY_INSTRUCTIONS = `You choose what goes in a short summary of one company for the staff of GSS, a Canadian company that trades physical grain between Canadian sellers and U.S. buyers. The company is one of GSS's counterparties (a buyer, seller, broker or carrier). The summary sits at the top of the company's page, so someone at GSS can see in a few seconds where things stand before calling them.
 
-You write no words. Each record in the message has a label in square brackets, such as [Q1], [F1], [H1], [N1], [P1] or [drafts]. Answer only in the JSON shape given: lines, from 2 to 6, the most useful first, each a topic and the labels of the records that belong under it (at most 4, each record once in the whole summary, written without the brackets: "Q1"). GSS's system writes each line as the topic's title followed by each record's own text.
+You write no words. Each record in the message has a label in square brackets, such as [Q1], [F1], [H1], [P1] or [drafts]. Answer only in the JSON shape given: lines, from 2 to 6, the most useful first, each a topic and the labels of the records that belong under it (at most 4, each record once in the whole summary, written without the brackets: "Q1"). GSS's system writes each line as the topic's title followed by each record's own text.
 
 Topics, and the records they take:
-- latest: the latest contact (H) and its notes (N), for example ["H1", "N1"].
+- latest: the latest contact, which is always H1, and only it: ["H1"]. Its text includes its notes.
 - live: live bids and offers (Q).
 - follow_ups: open follow-ups (F).
 - waiting: what is waiting on GSS: follow-ups that are overdue or due soon (F) and drafts from calls to review (drafts).
-- earlier: earlier contacts (H) and their notes (N) worth knowing.
+- earlier: earlier contacts worth knowing (H2, H3…; never H1). Each includes its own notes.
 - done: follow-ups done (D).
 - changes: recent changes to the company's records (C).
 - contacts: contact people (P).
@@ -106,19 +106,17 @@ function plainDay(day: string): string {
   return `${String(Number(date))} ${MONTH_NAMES[Number(month) - 1] ?? month} ${year}`;
 }
 
-/** Notes longer than this are shown by their first sentence, when that is short enough. */
+/** Notes longer than this are not shown in a summary (they are never cut). */
 const NOTES_SHOWN_MAX = 300;
 
 /**
- * The notes of a contact as the summary shows them, never cut inside: all of them when short,
- * else their first sentence when that is short, else none (null).
+ * A contact's notes as the summary shows them: whole, with spaces tidied, when short; null when
+ * empty or too long to show whole (Codex's review of 0a0d815, finding 3: a cut, even at a
+ * sentence, can drop what a note means).
  */
 export function notesShown(notes: string): string | null {
   const plain = notes.replace(/\s+/g, ' ').trim();
-  if (plain === '') return null;
-  if (plain.length <= NOTES_SHOWN_MAX) return plain;
-  const first = /^.+?[.!?](?=\s)/.exec(plain)?.[0];
-  return first !== undefined && first.length <= NOTES_SHOWN_MAX ? `${first} …` : null;
+  return plain === '' || plain.length > NOTES_SHOWN_MAX ? null : plain;
 }
 
 const CHANGED_WHAT: Record<string, string> = {
@@ -172,17 +170,19 @@ export function summaryRecords(
     const key = `H${String(index + 1)}`;
     values[key] =
       `${label(CONTACT_CHANNEL_LABELS, h.channel) ?? h.channel} with ${h.contactName}, ${formatAlberta(h.occurredAt)}, logged by ${h.by}${h.voicemail === true ? ' (voicemail)' : ''}`;
+    // Its own notes, in its own text (Codex's review of 0a0d815, finding 2): a person's, else
+    // Claude's notes of the call.
     const notes = h.notes ?? h.claudeNotes;
-    const shown = notes === null ? null : notesShown(notes);
-    const notesKey = `N${String(index + 1)}`;
-    if (shown !== null) {
-      values[notesKey] = `${h.notes === null ? "Claude's notes of the call" : 'notes'}: "${shown}"`;
+    if (notes !== null && notes.trim() !== '') {
+      const whose = h.notes === null ? "Claude's notes of the call" : 'notes';
+      const shown = notesShown(notes);
+      values[key] =
+        `${values[key] ?? ''}; ${shown === null ? `${whose} too long to show here, see the contact history` : `${whose}: "${shown}"`}`;
     }
     return [
       `[${key}] ${values[key] ?? ''}.`,
-      h.notes === null ? null : `Notes: ${h.notes}`,
-      h.claudeNotes === null ? null : `Claude's notes of the call: ${h.claudeNotes}`,
-      shown === null ? null : `[${notesKey}] ${values[notesKey] ?? ''}`,
+      h.notes === null ? null : `Notes in full: ${h.notes}`,
+      h.claudeNotes === null ? null : `Claude's notes of the call in full: ${h.claudeNotes}`,
     ]
       .filter(Boolean)
       .join(' ');
