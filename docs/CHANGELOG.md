@@ -1,5 +1,17 @@
 # Documentation pack changelog
 
+## 2026-11-06 — A join refused when sent again (Codex, after #164)
+
+- `docs/DECISIONS.md`: Codex's third review of the callbacks, fixed by `20261107030000_callback_join_refused.sql`.
+- `docs/DATA_MODEL.md`: the new migration.
+- `docs/FEATURES.md`: F-132's note.
+
+## 2026-11-06 — Handoff record of #164
+
+- `docs/HANDOFF.md`: callbacks to GSS's number (ivanmueller/gss#164), with its CI and Deploy staging runs.
+- `docs/FEATURES.md`: F-132 live, check pending (F-212); F-017 among the built features.
+- `AGENTS.md`: callbacks built; texting not yet.
+
 ## 2026-11-06 — Claude's drafts in Claude's colours, folded (F-116)
 
 - `docs/FEATURES.md`: F-116, the owner's request and answers.

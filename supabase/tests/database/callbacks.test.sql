@@ -9,7 +9,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(122);
+select plan(128);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), olivia (operations), adam (org_admin), victor (viewer).
@@ -542,6 +542,54 @@ select is(
   pg_temp.worker($$select app.settle_late_callbacks(100, interval '0')::text$$)::text,
   '0', 'and only once'
 );
+-- A join timed out, then refused when sent again before the hang-up arrived (Codex's review of
+-- 5e83ea7): the first may have joined them, so nothing is ended, hung up or logged yet.
+create temp table j6 as select pg_temp.joining('in-15', 'tom-15') as j;
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''retry'', null)::text',
+                             (select j[1] from j6), pg_temp.command_of((select j[1] from j6), 'bridge'),
+                             (select j[2] from j6)));
+create temp table j6claim as
+  select pg_temp.worker(format('select app.claim_callback_command(%L, %L)::text', (select j[1] from j6),
+                               pg_temp.command_of((select j[1] from j6), 'bridge'))) as claimed;
+select is(
+  pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''failed'', null)::text',
+                        (select j[1] from j6), pg_temp.command_of((select j[1] from j6), 'bridge'),
+                        (select claimed -> 'command' ->> 'claim' from j6claim))) -> 'commands',
+  '[]'::jsonb, 'a join refused when sent again hangs nobody up'
+);
+select is((select status::text from app.calls where id = (select j[1]::uuid from j6)), 'joining',
+          'and leaves the call as it is');
+select pg_temp.event((select j[1] from j6), 'ev-h-15', 'call.hangup', 'them', null, 'in-15');
+select is(
+  (select concat_ws('|', outcome, contact_log_entry_id is null, follow_up_id is null)
+     from app.calls where id = (select j[1]::uuid from j6)),
+  'missed|t|t', 'the hang-up ends it, its log waiting'
+);
+select pg_temp.event((select j[1] from j6), 'ev-b-15', 'call.bridged', 'them', null, 'in-15');
+select is(
+  (select concat_ws('|', outcome, contact_log_entry_id is not null, follow_up_id is null)
+     from app.calls where id = (select j[1]::uuid from j6)),
+  'talked|t|t', 'and the call.bridged from before the end makes it talked'
+);
+
+create temp table j7 as select pg_temp.joining('in-16', 'tom-16') as j;
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''retry'', null)::text',
+                             (select j[1] from j7), pg_temp.command_of((select j[1] from j7), 'bridge'),
+                             (select j[2] from j7)));
+create temp table j7claim as
+  select pg_temp.worker(format('select app.claim_callback_command(%L, %L)::text', (select j[1] from j7),
+                               pg_temp.command_of((select j[1] from j7), 'bridge'))) as claimed;
+select pg_temp.worker(format('select app.finish_callback_command(%L, %L, %s, ''failed'', null)::text',
+                             (select j[1] from j7), pg_temp.command_of((select j[1] from j7), 'bridge'),
+                             (select claimed -> 'command' ->> 'claim' from j7claim)));
+select is(
+  pg_temp.kinds(pg_temp.event((select j[1] from j7), 'ev-b-16', 'call.bridged', 'you',
+                              pg_temp.attempt_of((select j[1] from j7), 1), 'tom-16')),
+  'record', 'a call.bridged while still joining connects the call and records it'
+);
+select is((select status::text from app.calls where id = (select j[1]::uuid from j7)), 'connected',
+          'connected');
+
 select throws_ok(
   format($$update app.calls set outcome = 'talked', connected_at = ended_at where id = %L$$, (select id from c3)),
   '23514', null, 'a missed call nobody took is never made talked'
