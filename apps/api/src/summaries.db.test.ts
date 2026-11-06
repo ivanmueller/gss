@@ -79,7 +79,11 @@ describe("Claude's summary of a company", () => {
       followUps: [],
       draftsWaiting: 0,
     });
-    expect(JSON.stringify(context)).not.toContain('555');
+    // The contact's phone is never sent (checked by the number itself: a timestamp's digits can
+    // hold 555, as on main run #354).
+    expect(JSON.stringify(context)).not.toContain('555-0100');
+    expect(context?.contacts[0]).not.toHaveProperty('phone');
+    expect(context?.contacts[0]).not.toHaveProperty('email');
     expect(Number.isNaN(Date.parse(context?.history[0]?.occurredAt ?? ''))).toBe(false);
 
     expect(
