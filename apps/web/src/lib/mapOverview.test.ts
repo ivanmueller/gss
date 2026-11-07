@@ -145,4 +145,30 @@ describe('prepareOverview', () => {
       prepareOverview({ id: LAYER, colourField: null }, 'token', vi.fn()),
     ).rejects.toThrow(/no lines/);
   });
+  it('reports nothing more once it has failed, though slower requests finish later (Codex’s review of d35ac90)', async () => {
+    const handlers = service(12, 3);
+    // From offset 3 the service fails at once; the page at 6 answers later.
+    handlers[`GET /map-layers/${LAYER}/pages/3`] = () =>
+      Response.json({ error: { code: 'LAYER_SERVICE_FAILED', message: 'Down.' } }, { status: 502 });
+    const slow = handlers[`GET /map-layers/${LAYER}/pages/6`];
+    let slowDone = false;
+    handlers[`GET /map-layers/${LAYER}/pages/6`] = (call) =>
+      new Promise<Response>((resolve) => {
+        setTimeout(() => {
+          slowDone = true;
+          resolve(slow?.(call) ?? new Response(null, { status: 404 }));
+        }, 30);
+      }) as unknown as Response;
+    saving(handlers);
+    const progress = vi.fn();
+    await expect(
+      prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', progress),
+    ).rejects.toThrow('Down.');
+    const reported = progress.mock.calls.length;
+    await vi.waitFor(() => {
+      expect(slowDone).toBe(true);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(progress.mock.calls).toHaveLength(reported);
+  });
 });

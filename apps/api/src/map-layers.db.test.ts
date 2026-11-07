@@ -230,6 +230,14 @@ describe('map layers as app_api', () => {
       expect(await publish(VERA, v1, 'OWNER')).toEqual({ status: 'forbidden' });
       expect(await publish(ADAM, v1, 'OWNER')).toEqual({ status: 'saved', id: added.id });
 
+      // Codex's review of d35ac90: a published preparation is sealed; a part sent to it later
+      // changes nothing.
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 2))).toEqual({
+        status: 'sealed',
+      });
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 0))).toEqual({
+        status: 'sealed',
+      });
       const read = await db.getMapLayerOverview(as(VERA), added.id);
       expect(read?.version).toBe(v1);
       expect(read?.parts.map((p) => new TextDecoder().decode(p))).toHaveLength(2);

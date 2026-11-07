@@ -802,17 +802,23 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     if (features.byteLength > MAX_STORED_PART_BYTES) {
       return apiError(c, 413, 'PART_TOO_LARGE', 'This part of the zoomed-out view is too large.');
     }
-    return withDatabase(c, openDatabase, async (db, ctx) =>
-      written(
-        c,
-        await db.saveMapLayerOverviewPart(ctx, id, {
-          version,
-          partNo,
-          features,
-          featureCount: checked.collection.features.length,
-        }),
-      ),
-    );
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const result = await db.saveMapLayerOverviewPart(ctx, id, {
+        version,
+        partNo,
+        features,
+        featureCount: checked.collection.features.length,
+      });
+      if (result.status === 'sealed') {
+        return apiError(
+          c,
+          409,
+          'SEALED',
+          'This zoomed-out view is already published. Prepare it again to change it.',
+        );
+      }
+      return written(c, result);
+    });
   });
 
   // Publishes a view once every part has arrived. The layer's colour field is checked again in

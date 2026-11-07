@@ -52,8 +52,11 @@ async function prepareWithProgress(
   say: (text: string) => void,
 ): Promise<string | null> {
   say('Preparing the zoomed-out view…');
+  // After it ends, a late message never sets the busy text again.
+  let ended = false;
   try {
     await prepareOverview(layer, token, (progress) => {
+      if (ended) return;
       const n = (value: number) => value.toLocaleString('en-CA');
       say(
         progress.stage === 'reading'
@@ -66,6 +69,8 @@ async function prepareWithProgress(
     return null;
   } catch (reason) {
     return message(reason, 'The zoomed-out view could not be prepared.');
+  } finally {
+    ended = true;
   }
 }
 

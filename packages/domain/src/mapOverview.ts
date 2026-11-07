@@ -164,10 +164,54 @@ export const MAX_OVERVIEW_PARTS = 64;
 
 type OverviewFeature = LayerFeatureCollection['features'][number];
 
+/** The length of text in UTF-8, as it is sent (Codex's review of d35ac90: not in characters). */
+export function utf8Length(text: string): number {
+  let length = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) length += 1;
+    else if (code < 0x800) length += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      length += 4;
+      i += 1;
+    } else length += 3;
+  }
+  return length;
+}
+
+const jsonBytes = (value: unknown) => utf8Length(JSON.stringify(value));
+
+/** What a part's request adds around its features: {"features":[…]}. */
+const PART_WRAPPER = jsonBytes({ features: [] });
+
 /**
- * A view split into parts of at most about `maxBytes` of JSON each, in order: features are kept
- * whole when they fit, and a big feature's lines are shared out over several parts under the
- * same value. A single line bigger than a part goes in a part of its own.
+ * A line cut into pieces that each fit `room` bytes as JSON, consecutive pieces sharing their end
+ * point so the line stays whole on the map.
+ */
+function cutLine(line: [number, number][], room: number): [number, number][][] {
+  const pieces: [number, number][][] = [];
+  let piece: [number, number][] = [];
+  let size = 2;
+  for (const point of line) {
+    const pointBytes = jsonBytes(point) + 1;
+    if (piece.length >= 2 && size + pointBytes > room) {
+      pieces.push(piece);
+      const last = piece[piece.length - 1] ?? point;
+      piece = [last];
+      size = 2 + jsonBytes(last) + 1;
+    }
+    piece.push(point);
+    size += pointBytes;
+  }
+  if (piece.length >= 2) pieces.push(piece);
+  return pieces;
+}
+
+/**
+ * A view split into parts whose requests ({"features":[…]}) each weigh at most `maxBytes` in
+ * UTF-8, in order: features are kept whole when they fit; a big feature's lines are shared out
+ * over several parts under the same value; a line too long for a part is cut into pieces that
+ * share their end points.
  */
 export function splitOverview(
   collection: LayerFeatureCollection,
@@ -175,45 +219,53 @@ export function splitOverview(
 ): OverviewFeature[][] {
   const parts: OverviewFeature[][] = [];
   let part: OverviewFeature[] = [];
-  let size = 2;
+  let size = PART_WRAPPER;
   const flush = () => {
     if (part.length > 0) parts.push(part);
     part = [];
-    size = 2;
+    size = PART_WRAPPER;
+  };
+  /** Adds a feature of `bytes` (comma included), starting a new part when it would not fit. */
+  const add = (feature: OverviewFeature, bytes: number) => {
+    if (part.length > 0 && size + bytes > maxBytes) flush();
+    part.push(feature);
+    size += bytes;
   };
   for (const feature of collection.features) {
-    const whole = JSON.stringify(feature).length + 1;
-    if (whole <= maxBytes - 2) {
-      if (size + whole > maxBytes) flush();
-      part.push(feature);
-      size += whole;
+    const whole = jsonBytes(feature) + 1;
+    if (PART_WRAPPER + whole <= maxBytes) {
+      add(feature, whole);
       continue;
     }
     // Too big for one part: its lines, shared out under the same value.
-    const lines = (feature.geometry.coordinates ?? []) as unknown[];
-    const shell =
-      JSON.stringify({ ...feature, geometry: { type: 'MultiLineString', coordinates: [] } })
-        .length + 1;
-    let taken: unknown[] = [];
+    const shellOf = (coordinates: unknown[]): OverviewFeature => ({
+      ...feature,
+      geometry: { type: 'MultiLineString', coordinates },
+    });
+    const shell = jsonBytes(shellOf([])) + 1;
+    const room = maxBytes - PART_WRAPPER - shell;
+    const coordinates = feature.geometry.coordinates;
+    const lines = (
+      feature.geometry.type === 'MultiLineString'
+        ? (coordinates as [number, number][][])
+        : feature.geometry.type === 'LineString'
+          ? [coordinates as [number, number][]]
+          : []
+    ).flatMap((line) => (jsonBytes(line) + 1 <= room ? [line] : cutLine(line, room)));
+    let taken: [number, number][][] = [];
     let takenSize = shell;
-    const add = () => {
-      if (taken.length === 0) return;
-      if (size + takenSize > maxBytes) flush();
-      part.push({ ...feature, geometry: { type: 'MultiLineString', coordinates: taken } });
-      size += takenSize;
+    const take = () => {
+      if (taken.length > 0) add(shellOf(taken), takenSize);
       taken = [];
       takenSize = shell;
     };
     for (const line of lines) {
-      const lineSize = JSON.stringify(line).length + 1;
-      if (takenSize + lineSize > maxBytes - 2) {
-        add();
-        flush();
-      }
+      const lineBytes = jsonBytes(line) + 1;
+      if (taken.length > 0 && takenSize + lineBytes > maxBytes - PART_WRAPPER) take();
       taken.push(line);
-      takenSize += lineSize;
+      takenSize += lineBytes;
     }
-    add();
+    take();
   }
   flush();
   return parts;

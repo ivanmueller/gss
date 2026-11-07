@@ -75,11 +75,12 @@ export interface MapLayersDatabase {
     id: string,
   ) => Promise<{ parts: Uint8Array[]; version: string } | null>;
   /** Keeps one part of a view being prepared; admins only. */
+  /** 'sealed': that preparation is already published, so its parts no longer change. */
   saveMapLayerOverviewPart: (
     ctx: RequestContext,
     id: string,
     part: { version: string; partNo: number; features: Uint8Array; featureCount: number },
-  ) => Promise<MapLayerWrite>;
+  ) => Promise<MapLayerWrite | { status: 'sealed' }>;
   /**
    * Publishes a prepared view once all its parts have arrived, with the layer locked and its
    * colour field checked again in the same transaction, and drops the parts of other
@@ -276,36 +277,57 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
 
     getMapLayerOverview(ctx, id) {
       return asUser(ctx, async (tx) => {
-        const [overview] = await tx<{ version: string }[]>`
-          select o.version::text as version
+        // One statement, so the version and its parts come from one snapshot: a publication
+        // committing meanwhile (which drops the old parts) is seen whole or not at all (Codex's
+        // review of d35ac90).
+        const rows = await tx<{ version: string; features: Uint8Array | null }[]>`
+          select o.version::text as version, p.features
           from app.map_layer_overviews o
           join app.map_layers l on l.id = o.layer_id
-          where o.layer_id = ${id} and l.archived_at is null`;
-        if (!overview) return null;
-        const parts = await tx<{ features: Uint8Array }[]>`
-          select features from app.map_layer_overview_parts
-          where layer_id = ${id} and version = ${overview.version}
-          order by part_no`;
-        return { parts: parts.map((p) => p.features), version: overview.version };
+          left join app.map_layer_overview_parts p
+            on p.layer_id = o.layer_id and p.version = o.version
+          where o.layer_id = ${id} and l.archived_at is null
+          order by p.part_no`;
+        const first = rows[0];
+        if (!first) return null;
+        return {
+          parts: rows.flatMap((row) => (row.features ? [row.features] : [])),
+          version: first.version,
+        };
       });
     },
 
     saveMapLayerOverviewPart(ctx, id, part) {
-      return asUser(ctx, async (tx): Promise<MapLayerWrite> => {
+      return asUser(ctx, async (tx): Promise<MapLayerWrite | { status: 'sealed' }> => {
         const [layer] = await tx<{ organization_id: string; allowed: boolean }[]>`
           select organization_id, app.can_prepare_map_overview(id, organization_id) as allowed
           from app.map_layers where id = ${id} and archived_at is null`;
         if (!layer) return { status: 'not_found' };
         if (!layer.allowed) return { status: 'forbidden' };
-        // Sent again (a retry), a part replaces itself.
-        await tx`
+        // Sent again (a retry), a part replaces itself, unless its preparation is published: the
+        // database refuses that (SQLSTATE GS007, 20261107060000_map_layer_overview_seal.sql).
+        try {
+          await tx.savepoint(async (sp) => {
+            await sp`
           delete from app.map_layer_overview_parts
           where layer_id = ${id} and version = ${part.version} and part_no = ${part.partNo}`;
-        await tx`
+            await sp`
           insert into app.map_layer_overview_parts (layer_id, organization_id, version, part_no,
             features, feature_count, created_by)
           values (${id}, ${layer.organization_id}, ${part.version}, ${part.partNo},
             ${part.features}, ${part.featureCount}, app.current_user_id())`;
+          });
+        } catch (error) {
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'GS007'
+          ) {
+            return { status: 'sealed' };
+          }
+          throw error;
+        }
         return { status: 'saved', id };
       });
     },
