@@ -1,7 +1,7 @@
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 import { bboxFromBounds, type Bbox } from '@grain/domain';
-import mapboxgl, { type GeoJSONSource } from 'mapbox-gl';
+import mapboxgl, { type FilterSpecification, type GeoJSONSource } from 'mapbox-gl';
 import { useEffect, useRef } from 'react';
 
 import {
@@ -261,7 +261,6 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
           id: fill,
           type: 'fill',
           source,
-          filter: ['==', ['geometry-type'], 'Polygon'],
           paint: { 'fill-opacity': 0.25 },
         },
         below,
@@ -271,7 +270,6 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
           id: line,
           type: 'line',
           source,
-          filter: ['in', ['geometry-type'], ['literal', ['LineString', 'Polygon']]],
           layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1, 8, 2, 12, 3] },
         },
@@ -282,7 +280,6 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
           id: point,
           type: 'circle',
           source,
-          filter: ['==', ['geometry-type'], 'Point'],
           paint: {
             'circle-radius': 4,
             'circle-stroke-width': 1,
@@ -292,6 +289,12 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
         below,
       );
     }
+    // Each kind of shape, and only the values the person shows (F-133).
+    const only = (shape: FilterSpecification): FilterSpecification =>
+      overlay.filter ? ['all', shape, overlay.filter] : shape;
+    map.setFilter(fill, only(['==', ['geometry-type'], 'Polygon']));
+    map.setFilter(line, only(['in', ['geometry-type'], ['literal', ['LineString', 'Polygon']]]));
+    map.setFilter(point, only(['==', ['geometry-type'], 'Point']));
     map.setPaintProperty(fill, 'fill-color', overlay.colour);
     map.setPaintProperty(line, 'line-color', overlay.colour);
     map.setPaintProperty(point, 'circle-color', overlay.colour);

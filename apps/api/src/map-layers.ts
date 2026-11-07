@@ -2,6 +2,10 @@ import {
   createMapLayerSchema,
   inspectLayerSchema,
   isTile,
+  MAX_OVERVIEW_SOURCE,
+  OVERVIEW_PAGE_SIZE,
+  OVERVIEW_TOLERANCE_METRES,
+  saveOverviewSchema,
   MAX_LAYER_FILE_BYTES,
   normalizeFeatureCollection,
   parseLayerSource,
@@ -16,7 +20,7 @@ import {
 } from '@grain/domain';
 import { Hono } from 'hono';
 
-import type { Database } from './db';
+import type { Database, RequestContext } from './db';
 import type { MapLayerSource, MapLayerWrite } from './map-layers-db';
 import {
   apiError,
@@ -282,6 +286,70 @@ export function pictureUrl(source: MapLayerSource, tile: Tile): string {
     f: 'image',
   });
   return `${url}/${image ? 'exportImage' : 'export'}?${params.toString()}`;
+}
+
+/** ArcGIS's compact answer (PBF), for reading a whole layer for its zoomed-out view (F-134). */
+const PBF = /^application\/(x-protobuf|octet-stream|vnd\.google\.protobuf)$/;
+const MAX_PAGE_BYTES = 20 * 1024 * 1024;
+/** A zoomed-out view arrives as checked GeoJSON inside JSON; a little over the 5 MB kept. */
+const MAX_OVERVIEW_BYTES = 6 * 1024 * 1024 + 64 * 1024;
+
+/** The whole world in web Mercator, the extent the service's simplification is measured in. */
+const WORLD_MERCATOR = {
+  xmin: -20037508.34,
+  ymin: -20037508.34,
+  xmax: 20037508.34,
+  ymax: 20037508.34,
+  spatialReference: { wkid: 102100 },
+};
+
+/**
+ * The address of one page of a whole ArcGIS layer for its zoomed-out view: OVERVIEW_PAGE_SIZE
+ * pieces from `offset`, in the order of the layer's id field, in web Mercator metres, simplified
+ * by the service to about a kilometre, with only the field its lines are grouped by.
+ */
+export function overviewPageUrl(source: MapLayerSource, offset: number): string {
+  const params = new URLSearchParams({
+    f: 'pbf',
+    where: '1=1',
+    outFields: source.colourField ?? '',
+    returnGeometry: 'true',
+    outSR: '102100',
+    orderByFields: source.idField ?? '',
+    resultOffset: String(offset),
+    resultRecordCount: String(OVERVIEW_PAGE_SIZE),
+    maxRecordCountFactor: '4',
+    quantizationParameters: JSON.stringify({
+      mode: 'view',
+      originPosition: 'upperLeft',
+      tolerance: OVERVIEW_TOLERANCE_METRES,
+      extent: WORLD_MERCATOR,
+    }),
+  });
+  return `${source.url ?? ''}/query?${params.toString()}`;
+}
+
+/** A live lines layer an admin may prepare a zoomed-out view of, or the answer refusing it. */
+async function overviewSource(
+  c: ApiContext,
+  db: Database,
+  ctx: RequestContext,
+  id: string,
+): Promise<MapLayerSource | Response> {
+  const source = await db.getMapLayerSource(ctx, id);
+  if (!source) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+  if (!(await db.isOrgAdmin(ctx, source.organizationId))) {
+    return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
+  }
+  if (source.kind !== 'arcgis_features' || source.url === null || source.idField === null) {
+    return apiError(
+      c,
+      422,
+      'NO_OVERVIEW',
+      'Only an ArcGIS layer of lines, areas or points with an id field takes a zoomed-out view.',
+    );
+  }
+  return source;
 }
 
 function tileOf(c: ApiContext): Tile | null {
@@ -617,6 +685,117 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         }
       }
       return c.json({ fields });
+    });
+  });
+
+  // A zoomed-out view (F-134): how many pieces the layer has, for an admin preparing one.
+  routes.get('/:id/count', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const source = await overviewSource(c, db, ctx, id);
+      if (source instanceof Response) return source;
+      let body: Record<string, unknown> | null;
+      try {
+        body = record(
+          await fetchJson(`${source.url ?? ''}/query?where=1%3D1&returnCountOnly=true&f=json`),
+        );
+      } catch (error) {
+        return serviceFailed(c, error, 'count');
+      }
+      const count = body?.count;
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+        return serviceFailed(c, new LayerServiceError(422), 'count');
+      }
+      if (count > MAX_OVERVIEW_SOURCE) {
+        return apiError(
+          c,
+          422,
+          'TOO_LARGE_FOR_OVERVIEW',
+          `This layer has ${count.toLocaleString('en-CA')} pieces; a zoomed-out view takes at most ${MAX_OVERVIEW_SOURCE.toLocaleString('en-CA')}.`,
+        );
+      }
+      return c.json({ count, pageSize: OVERVIEW_PAGE_SIZE });
+    });
+  });
+
+  // One page of the whole layer in ArcGIS's compact format, for an admin's browser to read.
+  routes.get('/:id/pages/:offset', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    const offset = Number(c.req.param('offset'));
+    if (!isUuid(id) || !Number.isInteger(offset) || offset < 0 || offset > MAX_OVERVIEW_SOURCE) {
+      return apiError(c, 404, 'NOT_FOUND', 'No such page.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const source = await overviewSource(c, db, ctx, id);
+      if (source instanceof Response) return source;
+      let answer: { body: ArrayBuffer };
+      try {
+        answer = await fetchService(overviewPageUrl(source, offset), PBF, MAX_PAGE_BYTES);
+      } catch (error) {
+        return serviceFailed(c, error, 'page');
+      }
+      c.header('Content-Type', 'application/x-protobuf');
+      c.header('X-Content-Type-Options', 'nosniff');
+      return c.body(answer.body, 200);
+    });
+  });
+
+  // Stores the zoomed-out view an admin's browser prepared, checked again here.
+  routes.put('/:id/overview', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+    const body = await readJson(c, MAX_OVERVIEW_BYTES);
+    if (!body.ok) return body.response;
+    const parsed = saveOverviewSchema.safeParse(body.value);
+    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+    const checked = normalizeFeatureCollection(parsed.data.geojson);
+    if (!checked.ok) return apiError(c, 422, 'NOT_A_LAYER', checked.message);
+    const geojson = new TextEncoder().encode(JSON.stringify(checked.collection));
+    if (geojson.byteLength > MAX_LAYER_FILE_BYTES) {
+      return apiError(
+        c,
+        413,
+        'OVERVIEW_TOO_LARGE',
+        'The zoomed-out view is larger than 5 MB. It is drawn by map squares instead.',
+      );
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const source = await overviewSource(c, db, ctx, id);
+      if (source instanceof Response) return source;
+      // Grouped by the field the layer is coloured by now, or it would be drawn in the wrong colours.
+      if (source.colourField !== parsed.data.colourField) {
+        return written(c, { status: 'stale' });
+      }
+      return written(
+        c,
+        await db.saveMapLayerOverview(ctx, id, {
+          colourField: parsed.data.colourField,
+          geojson,
+          featureCount: checked.collection.features.length,
+          sourceCount: parsed.data.sourceCount,
+        }),
+      );
+    });
+  });
+
+  // A layer's zoomed-out view, for every member.
+  routes.get('/:id/overview', (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const overview = await db.getMapLayerOverview(ctx, id);
+      if (overview === null) return apiError(c, 404, 'NOT_FOUND', 'No zoomed-out view.');
+      const etag = `"${overview.sha256}"`;
+      c.header('Cache-Control', 'private, no-cache');
+      c.header('ETag', etag);
+      c.header('X-Content-Type-Options', 'nosniff');
+      if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+      c.header('Content-Type', 'application/json');
+      return c.body(overview.geojson as Uint8Array<ArrayBuffer>, 200);
     });
   });
 

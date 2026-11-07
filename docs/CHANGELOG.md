@@ -1,5 +1,12 @@
 # Documentation pack changelog
 
+## 2026-11-07 — Map layers panel, zoomed-out view, colours optional (F-133 to F-135); handoff of #173 to #175
+
+- `docs/HANDOFF.md`: ivanmueller/gss#173, #174 and #175 with their CI and Deploy staging runs; Dependabot's failed update jobs explained.
+- `docs/FEATURES.md`: F-107 live, check pending (F-214); F-133, F-134 and F-135 added and in progress; D-01 closed by Dependabot.
+- `docs/DECISIONS.md`: the Layers panel, the zoomed-out view and why, the colour of anything else, Edit, and the Worker's computing time to watch.
+- `docs/DATA_MODEL.md`, `docs/API.md`: `map_layer_overviews` and its routes.
+
 ## 2026-11-07 — Map layers (F-107)
 
 - `docs/DECISIONS.md`: the owner's answers on map layers (ArcGIS, Government of Canada sites and files; admins add them; Workspace and Counterparties maps; several at once; click for details; no sign-ins), each railroad in its own colour, and the choices made while building.

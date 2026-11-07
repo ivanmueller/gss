@@ -8,15 +8,24 @@ import {
   readLayerFile,
   useLayerChoice,
   useLayerOverlays,
+  valueFilter,
   OBJECT_ID,
 } from '../lib/mapLayers';
 import { clearApiCache } from '../lib/useApiResource';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { choose } from '../test/select';
 import { MapLayerSettings } from './MapLayerSettings';
-import { MapLayersLegend, MapLayersMenu, PickedFeatureCard, useMapLayers } from './MapLayers';
+import {
+  MapLayersButton,
+  MapLayersLegend,
+  MapLayersPanel,
+  PickedFeatureCard,
+  useMapLayers,
+} from './MapLayers';
 
-// Map layers (F-107). Every layer, address and value is synthetic.
+// Map layers (F-107, F-133 to F-135). Every layer, address and value is synthetic.
+const prepare = vi.hoisted(() => vi.fn());
+vi.mock('../lib/mapOverview', () => ({ prepareOverview: prepare }));
 const RAIL = '00000000-0000-4000-8000-0000000a1a01';
 const FILE = '00000000-0000-4000-8000-0000000a1a02';
 const SERVICE = 'https://services.example.com/rest/services/Rail/FeatureServer/0';
@@ -39,6 +48,7 @@ const rail: MapLayerView = {
   createdByName: 'Adam Admin',
   createdAt: '2026-11-07T18:00:00Z',
   version: 'v1',
+  overview: null,
 };
 const elevators: MapLayerView = {
   ...rail,
@@ -190,7 +200,9 @@ describe('fetching what is on', () => {
     expect(new Set(overlay.data.features.map((f): unknown => f.properties?.[OBJECT_ID])).size).toBe(
       overlay.data.features.length,
     );
-    expect(result.current.notes.get(RAIL)).toBe('Zoom in to see every line here.');
+    expect(result.current.notes.get(RAIL)).toBe(
+      'Zoom in to see every line here. An admin can prepare its zoomed-out view on Team → Map layers.',
+    );
   });
 
   it('fetches a file once and draws a picture layer from the API', async () => {
@@ -219,11 +231,99 @@ describe('fetching what is on', () => {
   });
 });
 
+describe('the zoomed-out view and each railroad on or off', () => {
+  const withOverview: MapLayerView = {
+    ...rail,
+    overview: {
+      colourField: 'OWNER',
+      featureCount: 1,
+      sourceCount: 100,
+      preparedByName: 'Adam Admin',
+      preparedAt: '2026-11-07T19:00:00Z',
+      version: 'c'.repeat(64),
+    },
+  };
+  const overview = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [
+            [
+              [-105, 50],
+              [-104, 50],
+            ],
+          ],
+        },
+        properties: { OWNER: 'R1' },
+      },
+    ],
+  };
+
+  it('draws the zoomed-out view below zoom 7 and live squares from zoom 7', async () => {
+    const calls = mockApi({
+      [`GET /map-layers/${RAIL}/overview`]: () => Response.json(overview),
+    });
+    const wide = { bbox: { west: -130, south: 40, east: -60, north: 60 }, zoom: 4 };
+    const { result, rerender } = renderHook(
+      ({ view }) => useLayerOverlays([withOverview], view, 'token'),
+      {
+        initialProps: { view: wide },
+      },
+    );
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features).toHaveLength(1);
+    });
+    expect(calls.map((c) => c.path)).toEqual([`/map-layers/${RAIL}/overview`]);
+    expect(result.current.notes.size).toBe(0);
+    rerender({ view: { bbox: { west: -105, south: 50, east: -104, north: 50.5 }, zoom: 9 } });
+    await waitFor(() => {
+      expect(calls.some((c) => c.path.startsWith(`/map-layers/${RAIL}/features/`))).toBe(true);
+    });
+  });
+
+  it('keeps to live squares when the view was grouped by another field', () => {
+    const calls = mockApi({});
+    const stale = { ...withOverview, colourField: 'TRACKS' };
+    renderHook(() =>
+      useLayerOverlays(
+        [stale],
+        { bbox: { west: -106, south: 49, east: -104, north: 51 }, zoom: 4 },
+        'token',
+      ),
+    );
+    expect(calls.some((c) => c.path.endsWith('/overview'))).toBe(false);
+  });
+
+  it('filters the map to the values a person shows', () => {
+    expect(valueFilter(rail, undefined)).toBeNull();
+    expect(valueFilter(rail, { shown: null, others: true })).toBeNull();
+    const value = ['to-string', ['get', 'OWNER']];
+    expect(valueFilter(rail, { shown: ['R3'], others: false })).toEqual([
+      'in',
+      value,
+      ['literal', ['R3']],
+    ]);
+    expect(valueFilter(rail, { shown: [], others: true })).toEqual([
+      '!',
+      ['in', value, ['literal', rail.colours.map(([v]) => v)]],
+    ]);
+    expect(valueFilter(rail, { shown: [], others: false })).toEqual(['boolean', false]);
+    expect(
+      valueFilter({ ...rail, colourField: null, colours: [] }, { shown: [], others: false }),
+    ).toBeNull();
+  });
+});
+
 function Map() {
   const state = useMapLayers(SESSION);
   return (
     <>
-      <MapLayersMenu state={state} />
+      <MapLayersButton state={state} />
+      <MapLayersPanel state={state} />
       <MapLayersLegend state={state} />
       <button
         type="button"
@@ -251,9 +351,9 @@ describe('the Layers button', () => {
     const user = userEvent.setup();
     render(<Map />);
     await user.click(await screen.findByRole('button', { name: 'Layers' }));
-    await user.click(await screen.findByRole('menuitemcheckbox', { name: 'Synthetic rail lines' }));
-    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Synthetic elevators' }));
-    await user.keyboard('{Escape}');
+    const panel = screen.getByRole('region', { name: 'Map layers' });
+    await user.click(await within(panel).findByRole('switch', { name: 'Synthetic rail lines' }));
+    await user.click(within(panel).getByRole('switch', { name: 'Synthetic elevators' }));
     expect(screen.getByRole('button', { name: 'Layers (2)' })).toBeVisible();
     const legend = screen.getByRole('list', { name: 'Map layers shown' });
     expect(within(legend).getByText('R0')).toBeVisible();
@@ -262,6 +362,25 @@ describe('the Layers button', () => {
       'href',
       'https://example.com/terms',
     );
+
+    // One railroad alone (F-133).
+    await user.click(
+      within(panel).getByRole('button', { name: 'Choose OWNER of Synthetic rail lines' }),
+    );
+    await user.click(within(panel).getByRole('button', { name: 'Hide all' }));
+    expect(within(panel).getByText('0 of 10 shown')).toBeVisible();
+    await user.type(within(panel).getByLabelText('Search Synthetic rail lines'), 'r3');
+    const values = within(panel).getByRole('list', { name: 'Synthetic rail lines: values' });
+    expect(within(values).getAllByRole('checkbox')).toHaveLength(1);
+    await user.click(within(values).getByRole('checkbox', { name: 'R3' }));
+    expect(within(panel).getByText('1 of 10 shown')).toBeVisible();
+    expect(within(legend).getByText('R3')).toBeVisible();
+    expect(within(legend).queryByText('R0')).toBeNull();
+    expect(within(legend).getByText('(9 hidden in Layers)')).toBeVisible();
+    await user.click(within(panel).getByRole('button', { name: 'Show all' }));
+    expect(within(legend).getByText('R0')).toBeVisible();
+    await user.click(within(panel).getByRole('button', { name: 'Close layers' }));
+    expect(screen.queryByRole('region', { name: 'Map layers' })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Click a shape' }));
     const card = screen.getByRole('region', { name: 'Map layer details' });
@@ -310,6 +429,12 @@ describe('Team → Map layers', () => {
         return Response.json({ id: RAIL }, { status: 201 });
       },
     });
+    prepare.mockImplementation(
+      (_layer: unknown, _token: string, progress: (p: { read: number; total: number }) => void) => {
+        progress({ read: 8000, total: 302774 });
+        return Promise.resolve({ features: 2, pieces: 302774 });
+      },
+    );
     const user = userEvent.setup();
     render(<MapLayerSettings session={SESSION} />);
     expect(await screen.findByText(/No map layers yet/)).toBeVisible();
@@ -327,8 +452,11 @@ describe('Team → Map layers', () => {
       within(dialog).getByLabelText('Link to its terms of use'),
       'https://example.com/terms',
     );
+    expect(within(dialog).getByLabelText('Colour')).toBeVisible();
     await choose(within(dialog).getByLabelText('Colour by'), 'OWNER');
     expect(await within(dialog).findByText(/2 values, each its own colour/)).toBeVisible();
+    // Coloured by a field, the rest are grey: no colour to choose (F-135).
+    expect(within(dialog).queryByLabelText('Colour')).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: 'Add layer' }));
 
     await waitFor(() => {
@@ -340,7 +468,7 @@ describe('Team → Map layers', () => {
       sourceName: 'Synthetic publisher',
       termsUrl: 'https://example.com/terms',
       termsNote: 'Public domain.',
-      colour: '#2f6baa',
+      colour: '#9ca3af',
       colourField: 'OWNER',
       colours: [
         ['AAA', '#e6194b'],
@@ -351,6 +479,108 @@ describe('Team → Map layers', () => {
       wmsLayers: null,
     });
     expect(await screen.findByText('Synthetic rail lines')).toBeVisible();
+    // Its zoomed-out view is prepared straight away (F-134).
+    expect(prepare).toHaveBeenCalledWith(
+      { id: RAIL, colourField: 'OWNER' },
+      SESSION.token,
+      expect.any(Function),
+    );
+  });
+
+  it('says when the layer was added but its zoomed-out view could not be prepared', async () => {
+    mockApi({
+      [LIST]: () => Response.json({ layers: [] }),
+      [`POST /map-layers/inspect?organization_id=${ORG.id}`]: () => Response.json(inspection),
+      [`POST /map-layers?organization_id=${ORG.id}`]: () =>
+        Response.json({ id: RAIL }, { status: 201 }),
+    });
+    prepare.mockRejectedValueOnce(new Error('The map service could not be reached.'));
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(await screen.findByRole('button', { name: 'Add map layer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add map layer' });
+    await user.type(within(dialog).getByLabelText('Web address'), SERVICE);
+    await user.click(within(dialog).getByRole('button', { name: 'Check' }));
+    await user.type(await within(dialog).findByLabelText('Published by'), 'P');
+    await user.type(
+      within(dialog).getByLabelText('Link to its terms of use'),
+      'https://example.com/t',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Add layer' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'The layer was added. Its zoomed-out view could not be prepared: The map service could not be reached.',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+  });
+
+  it('changes what a layer is coloured by, and prepares its zoomed-out view again', async () => {
+    const tracks: MapLayerView = {
+      ...rail,
+      colourField: 'TRACKS',
+      colours: [['1', '#e6194b']],
+      overview: {
+        colourField: 'TRACKS',
+        featureCount: 3,
+        sourceCount: 300,
+        preparedByName: 'Adam Admin',
+        preparedAt: '2026-11-07T19:00:00Z',
+        version: 'a'.repeat(64),
+      },
+    };
+    const calls = mockApi({
+      [LIST]: () => Response.json({ layers: [tracks] }),
+      [`POST /map-layers/inspect?organization_id=${ORG.id}`]: ({ body }) =>
+        Response.json(
+          (body as { field: string | null }).field === null
+            ? inspection
+            : { ...inspection, values: [{ value: 'CN', count: 9 }] },
+        ),
+      [`PATCH /map-layers/${RAIL}`]: () => Response.json({ id: RAIL }),
+    });
+    prepare.mockResolvedValue({ features: 1, pieces: 300 });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    expect(await screen.findByText(/Zoomed-out view: 3 lines from 300 pieces/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Synthetic rail lines' });
+    await user.click(within(dialog).getByRole('button', { name: 'Change' }));
+    await choose(await within(dialog).findByLabelText('Colour by'), 'OWNER');
+    expect(await within(dialog).findByText(/1 values, each its own colour/)).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+      version: 'v1',
+      name: 'Synthetic rail lines',
+      sourceName: 'Synthetic publisher',
+      termsUrl: 'https://example.com/terms',
+      termsNote: 'Public domain.',
+      wmsLayers: null,
+      colour: '#9ca3af',
+      colourField: 'OWNER',
+      colours: [['CN', '#e6194b']],
+    });
+    expect(prepare).toHaveBeenCalledWith(
+      { id: RAIL, colourField: 'OWNER' },
+      SESSION.token,
+      expect.any(Function),
+    );
+  });
+
+  it('prepares a zoomed-out view from the list', async () => {
+    mockApi({ [LIST]: () => Response.json({ layers: [rail] }) });
+    prepare.mockResolvedValue({ features: 1, pieces: 300 });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    expect(await screen.findByText(/No zoomed-out view yet/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Prepare zoomed-out view' }));
+    await waitFor(() => {
+      expect(prepare).toHaveBeenCalledWith(rail, SESSION.token, expect.any(Function));
+    });
   });
 
   it('removes a layer for everyone after asking', async () => {

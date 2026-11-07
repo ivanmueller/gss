@@ -8,7 +8,8 @@ import { FacilityList } from '../components/FacilityList';
 import { FacilityTable } from '../components/FacilityTable';
 import {
   MapLayersLegend,
-  MapLayersMenu,
+  MapLayersButton,
+  MapLayersPanel,
   PickedFeatureCard,
   useMapLayers,
 } from '../components/MapLayers';
@@ -260,7 +261,13 @@ export function Workspace({
       ) : (
         <MapUnavailable refused={refused} />
       )}
-      <PickedFeatureCard state={layers} token={token} />
+      {/* Right of the zoom buttons, top left. */}
+      <MapLayersPanel state={layers} className="left-14" />
+      <PickedFeatureCard
+        state={layers}
+        token={token}
+        className={layers.panelOpen ? 'left-[22.25rem]' : 'left-3'}
+      />
       {over}
     </div>
   );
@@ -313,7 +320,7 @@ export function Workspace({
             value={roleFilter}
             onChange={setRoleFilter}
           />
-          {session && <MapLayersMenu state={layers} />}
+          {session && <MapLayersButton state={layers} />}
           <div className="lg:ml-auto">
             <Legend />
           </div>

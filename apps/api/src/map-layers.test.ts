@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { arcgisSquareUrl, pictureUrl } from './map-layers';
+import { arcgisSquareUrl, overviewPageUrl, pictureUrl } from './map-layers';
 import type { MapLayerSource } from './map-layers-db';
 import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 
@@ -110,6 +110,7 @@ const details = {
 
 const source: MapLayerSource = {
   id: LAYER,
+  organizationId: 'org-a',
   kind: 'arcgis_features',
   url: SERVICE,
   wmsLayers: null,
@@ -525,5 +526,146 @@ describe('fetching outside services safely', () => {
     });
     expect(res.status).toBe(502);
     expect(db.createMapLayer).not.toHaveBeenCalled();
+  });
+});
+
+// The zoomed-out view (F-134).
+describe('a zoomed-out view', () => {
+  const overview = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: [
+            [
+              [-110, 50],
+              [-109, 50.5],
+            ],
+          ],
+        },
+        properties: { OWNER: 'AAA' },
+      },
+    ],
+  };
+
+  it('counts the layer’s pieces for an admin', async () => {
+    db.getMapLayerSource.mockResolvedValueOnce(source);
+    service = () => Response.json({ count: 302774 });
+    const res = await send(`/${LAYER}/count`, 'GET');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ count: 302774, pageSize: 8000 });
+    expect(serviceCalls[0]).toBe(`${SERVICE}/query?where=1%3D1&returnCountOnly=true&f=json`);
+    expect(db.isOrgAdmin.mock.calls[0]?.[1]).toBe('org-a');
+  });
+
+  it('refuses a layer too big for one', async () => {
+    db.getMapLayerSource.mockResolvedValueOnce(source);
+    service = () => Response.json({ count: 1_000_001 });
+    expect((await send(`/${LAYER}/count`, 'GET')).status).toBe(422);
+  });
+
+  it('is for admins only, fetching nothing otherwise', async () => {
+    db.getMapLayerSource.mockResolvedValue(source);
+    db.isOrgAdmin.mockResolvedValue(false);
+    expect((await send(`/${LAYER}/count`, 'GET')).status).toBe(403);
+    expect((await send(`/${LAYER}/pages/0`, 'GET')).status).toBe(403);
+    expect(
+      (
+        await send(`/${LAYER}/overview`, 'PUT', {
+          colourField: 'OWNER',
+          sourceCount: 1,
+          geojson: overview,
+        })
+      ).status,
+    ).toBe(403);
+    expect(serviceCalls).toEqual([]);
+    expect(db.saveMapLayerOverview).not.toHaveBeenCalled();
+  });
+
+  it('is only for live lines layers with an id field', async () => {
+    db.getMapLayerSource.mockResolvedValueOnce({ ...source, kind: 'file', url: null });
+    expect((await send(`/${LAYER}/count`, 'GET')).status).toBe(422);
+    db.getMapLayerSource.mockResolvedValueOnce({ ...source, idField: null });
+    expect((await send(`/${LAYER}/pages/0`, 'GET')).status).toBe(422);
+    expect(serviceCalls).toEqual([]);
+  });
+
+  it('passes on one page in ArcGIS’s compact format, and nothing else', async () => {
+    db.getMapLayerSource.mockResolvedValue(source);
+    service = () =>
+      new Response(new Uint8Array([8, 1, 16, 2]), {
+        headers: { 'content-type': 'application/x-protobuf' },
+      });
+    const res = await send(`/${LAYER}/pages/16000`, 'GET');
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([8, 1, 16, 2]));
+    const asked = new URL(serviceCalls[0] ?? '');
+    expect(asked.origin + asked.pathname).toBe(`${SERVICE}/query`);
+    expect(asked.searchParams.get('resultOffset')).toBe('16000');
+    expect(asked.searchParams.get('orderByFields')).toBe('OBJECTID');
+    expect(asked.searchParams.get('f')).toBe('pbf');
+    service = () => Response.json({ error: { code: 400 } });
+    expect((await send(`/${LAYER}/pages/0`, 'GET')).status).toBe(502);
+    expect((await send(`/${LAYER}/pages/-1`, 'GET')).status).toBe(404);
+    expect((await send(`/${LAYER}/pages/1.5`, 'GET')).status).toBe(404);
+  });
+
+  it('stores a view grouped by the layer’s colour field, checked again', async () => {
+    db.getMapLayerSource.mockResolvedValueOnce(source);
+    const res = await send(`/${LAYER}/overview`, 'PUT', {
+      colourField: 'OWNER',
+      sourceCount: 302774,
+      geojson: overview,
+    });
+    expect(res.status).toBe(200);
+    const saved = db.saveMapLayerOverview.mock.calls[0]?.[2];
+    expect(saved).toMatchObject({ colourField: 'OWNER', featureCount: 1, sourceCount: 302774 });
+    const kept = JSON.parse(new TextDecoder().decode(saved?.geojson)) as {
+      features: { properties: unknown }[];
+    };
+    expect(kept.features[0]?.properties).toEqual({
+      OWNER: 'AAA',
+    });
+  });
+
+  it('refuses a view grouped by another field than the layer’s colours, or that is not GeoJSON', async () => {
+    db.getMapLayerSource.mockResolvedValueOnce(source);
+    const stale = await send(`/${LAYER}/overview`, 'PUT', {
+      colourField: 'TRACKS',
+      sourceCount: 1,
+      geojson: overview,
+    });
+    expect(stale.status).toBe(409);
+    const bad = await send(`/${LAYER}/overview`, 'PUT', {
+      colourField: 'OWNER',
+      sourceCount: 1,
+      geojson: { type: 'FeatureCollection', features: [] },
+    });
+    expect(bad.status).toBe(422);
+    expect(db.saveMapLayerOverview).not.toHaveBeenCalled();
+  });
+
+  it('sends the view to every member with its checksum', async () => {
+    db.getMapLayerOverview.mockResolvedValueOnce({
+      geojson: new TextEncoder().encode(JSON.stringify(overview)),
+      sha256: 'b'.repeat(64),
+    });
+    const res = await send(`/${LAYER}/overview`, 'GET');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('etag')).toBe(`"${'b'.repeat(64)}"`);
+    expect(await res.json()).toEqual(overview);
+    expect((await send(`/${LAYER}/overview`, 'GET')).status).toBe(404);
+  });
+
+  it('asks for the page with the colour field only, simplified to about a kilometre', () => {
+    const url = new URL(overviewPageUrl(source, 0));
+    expect(url.searchParams.get('outFields')).toBe('OWNER');
+    expect(url.searchParams.get('outSR')).toBe('102100');
+    expect(JSON.parse(url.searchParams.get('quantizationParameters') ?? '{}')).toMatchObject({
+      mode: 'view',
+      tolerance: 1000,
+    });
   });
 });

@@ -1,12 +1,13 @@
 import {
   FILE_COLOUR_FIELDS,
   normalizeFeatureCollection,
+  OVERVIEW_BELOW_ZOOM,
   tilesForView,
   type Bbox,
   type FeatureCollectionResult,
   type MapLayerView,
 } from '@grain/domain';
-import type { ExpressionSpecification } from 'mapbox-gl';
+import type { ExpressionSpecification, FilterSpecification } from 'mapbox-gl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from './api';
@@ -119,6 +120,8 @@ export type MapOverlay =
       kind: 'features';
       data: GeoJSON.FeatureCollection;
       colour: ExpressionSpecification | string;
+      /** The values the person shows (F-133); null: all. */
+      filter?: FilterSpecification | null;
     }
   | { id: string; kind: 'pictures'; tiles: string };
 
@@ -219,14 +222,124 @@ function withObjectId(feature: GeoJSON.Feature): GeoJSON.Feature {
     : feature;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Which values of a layer each person shows (each railroad on or off, F-133)
+
+/** The values of a layer a person shows: null shows every value. */
+export interface ValueChoice {
+  /** The values shown; null: all of them. */
+  shown: string[] | null;
+  /** Whether values without a colour of their own (rare ones, or none) are shown. */
+  others: boolean;
+}
+
+export const ALL_VALUES: ValueChoice = { shown: null, others: true };
+
+const VALUES_PREFIX = 'gss.mapLayerValues.';
+
+function readValues(key: string): Record<string, ValueChoice> {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? '{}');
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+    const out: Record<string, ValueChoice> = {};
+    for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+      const choice = raw as { shown?: unknown; others?: unknown };
+      const shown = Array.isArray(choice.shown)
+        ? choice.shown.filter((v): v is string => typeof v === 'string')
+        : null;
+      out[id] = { shown, others: choice.others !== false };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /**
- * The overlays for the layers that are on, in the list's order, and a note per layer when part
- * of it could not be shown (too many features at this zoom, or a square that failed).
+ * Each layer's values this person shows, remembered in this browser only (a convenience:
+ * without it, every value is shown).
+ */
+export function useValueChoices(
+  token: string,
+): [Readonly<Record<string, ValueChoice>>, (id: string, choice: ValueChoice) => void] {
+  const key = `${VALUES_PREFIX}${signedInAs(token)}`;
+  const [state, setState] = useState<{ key: string; choices: Record<string, ValueChoice> }>(() => ({
+    key,
+    choices: readValues(key),
+  }));
+  const choices = state.key === key ? state.choices : readValues(key);
+  const set = useCallback(
+    (id: string, choice: ValueChoice) => {
+      setState((current) => {
+        const before = current.key === key ? current.choices : readValues(key);
+        const all = choice.shown === null && choice.others;
+        const next = Object.fromEntries(
+          Object.entries(before).filter(([layer]) => layer !== id || !all),
+        );
+        if (!all) next[id] = choice;
+        try {
+          window.localStorage.setItem(key, JSON.stringify(next));
+        } catch {
+          // Storage refused (private window): the choice lasts until the page is closed.
+        }
+        return { key, choices: next };
+      });
+    },
+    [key],
+  );
+  return [choices, set];
+}
+
+/** Whether a value is shown under a person's choice. */
+export function valueShown(choice: ValueChoice, value: string): boolean {
+  return choice.shown === null || choice.shown.includes(value);
+}
+
+/**
+ * The map filter for a person's choice of a layer's values; null shows everything. Values with a
+ * colour of their own are shown when chosen; the rest when "Other values" is on.
+ */
+export function valueFilter(
+  layer: Pick<MapLayerView, 'colourField' | 'colours'>,
+  choice: ValueChoice | undefined,
+): FilterSpecification | null {
+  if (!choice || layer.colourField === null || layer.colours.length === 0) return null;
+  if (choice.shown === null && choice.others) return null;
+  const value: ExpressionSpecification = ['to-string', ['get', layer.colourField]];
+  const listed = layer.colours.map(([v]) => v);
+  const shown = choice.shown ?? listed;
+  const parts: ExpressionSpecification[] = [];
+  if (shown.length > 0) parts.push(['in', value, ['literal', shown]]);
+  if (choice.others) parts.push(['!', ['in', value, ['literal', listed]]]);
+  const [only, ...more] = parts;
+  if (!only) return ['boolean', false];
+  return more.length === 0 ? only : ['any', only, ...more];
+}
+
+// ---------------------------------------------------------------------------------------------
+// The features of the layers that are on
+
+/** Whether a live layer is drawn from its zoomed-out view at this zoom (F-134). */
+export function usesOverview(layer: MapLayerView, zoom: number | null): boolean {
+  return (
+    layer.kind === 'arcgis_features' &&
+    layer.overview !== null &&
+    layer.overview.colourField === layer.colourField &&
+    zoom !== null &&
+    zoom < OVERVIEW_BELOW_ZOOM
+  );
+}
+
+/**
+ * The overlays for the layers that are on, in the list's order, each with the person's choice of
+ * its values, and a note per layer when part of it could not be shown. A live layer is drawn
+ * from its zoomed-out view below zoom 7 when it has one, else one map square at a time.
  */
 export function useLayerOverlays(
   layers: readonly MapLayerView[],
   view: MapView | null,
   token: string,
+  choices: Readonly<Record<string, ValueChoice>> = {},
 ): { overlays: MapOverlay[]; notes: Map<string, string> } {
   const [files, setFiles] = useState<Map<string, GeoJSON.FeatureCollection | 'failed'>>(
     () => new Map(),
@@ -235,30 +348,38 @@ export function useLayerOverlays(
   const asked = useRef(new Set<string>());
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
+  const zoom = view?.zoom ?? null;
 
   useEffect(() => {
+    /** A whole GeoJSON document, fetched once per version and kept under `id`. */
+    const fetchWhole = (id: string, key: string, path: string) => {
+      if (asked.current.has(key)) return;
+      asked.current.add(key);
+      apiFetch(path, token)
+        .then((res) => res.json())
+        .then((body: unknown) => {
+          const collection = asCollection(body);
+          setFiles((current) =>
+            new Map(current).set(
+              id,
+              collection ? { type: 'FeatureCollection', features: collection.features } : 'failed',
+            ),
+          );
+        })
+        .catch(() => {
+          asked.current.delete(key);
+          setFiles((current) => new Map(current).set(id, 'failed'));
+        });
+    };
     for (const layer of layers) {
       if (layer.kind === 'file') {
-        const key = `${layer.id}@${layer.version}`;
-        if (asked.current.has(key)) continue;
-        asked.current.add(key);
-        apiFetch(`/map-layers/${layer.id}/file`, token)
-          .then((res) => res.json())
-          .then((body: unknown) => {
-            const collection = asCollection(body);
-            setFiles((current) =>
-              new Map(current).set(
-                layer.id,
-                collection
-                  ? { type: 'FeatureCollection', features: collection.features }
-                  : 'failed',
-              ),
-            );
-          })
-          .catch(() => {
-            asked.current.delete(key);
-            setFiles((current) => new Map(current).set(layer.id, 'failed'));
-          });
+        fetchWhole(layer.id, `${layer.id}@${layer.version}`, `/map-layers/${layer.id}/file`);
+      } else if (layer.kind === 'arcgis_features' && usesOverview(layer, zoom)) {
+        fetchWhole(
+          `${layer.id}#overview`,
+          `${layer.id}#overview@${layer.overview?.version ?? ''}`,
+          `/map-layers/${layer.id}/overview`,
+        );
       } else if (layer.kind === 'arcgis_features') {
         for (const tile of tiles) {
           const key = `${layer.id}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
@@ -289,7 +410,7 @@ export function useLayerOverlays(
         }
       }
     }
-  }, [layers, tiles, token]);
+  }, [layers, tiles, zoom, token]);
 
   return useMemo(() => {
     const overlays: MapOverlay[] = [];
@@ -300,10 +421,17 @@ export function useLayerOverlays(
         continue;
       }
       const colour = colourExpression(layer);
+      const filter = valueFilter(layer, choices[layer.id]);
+      const whole = (data: GeoJSON.FeatureCollection | 'failed' | undefined) => {
+        if (data === 'failed') notes.set(layer.id, 'This layer could not be loaded.');
+        else if (data) overlays.push({ id: layer.id, kind: 'features', data, colour, filter });
+      };
       if (layer.kind === 'file') {
-        const file = files.get(layer.id);
-        if (file === 'failed') notes.set(layer.id, 'This layer could not be loaded.');
-        else if (file) overlays.push({ id: layer.id, kind: 'features', data: file, colour });
+        whole(files.get(layer.id));
+        continue;
+      }
+      if (usesOverview(layer, zoom)) {
+        whole(files.get(`${layer.id}#overview`));
         continue;
       }
       const seen = new Set<string | number>();
@@ -335,11 +463,19 @@ export function useLayerOverlays(
         kind: 'features',
         data: { type: 'FeatureCollection', features },
         colour,
+        filter,
       });
       if (failed)
         notes.set(layer.id, 'Part of this layer could not be loaded. Move the map to try again.');
-      else if (exceeded) notes.set(layer.id, 'Zoom in to see every line here.');
+      else if (exceeded) {
+        notes.set(
+          layer.id,
+          layer.overview === null
+            ? 'Zoom in to see every line here. An admin can prepare its zoomed-out view on Team → Map layers.'
+            : 'Zoom in to see every line here.',
+        );
+      }
     }
     return { overlays, notes };
-  }, [layers, files, squares, tiles]);
+  }, [layers, files, squares, tiles, zoom, choices]);
 }

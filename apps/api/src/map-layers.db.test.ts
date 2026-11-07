@@ -56,6 +56,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await admin.begin(async (tx) => {
     await tx`set local session_replication_role = replica`;
+    await tx`delete from app.map_layer_overviews where organization_id in (${ORG_A}, ${ORG_B})`;
     await tx`delete from app.map_layer_files where organization_id in (${ORG_A}, ${ORG_B})`;
     await tx`delete from app.map_layers where organization_id in (${ORG_A}, ${ORG_B})`;
     await tx`delete from app.audit_events where organization_id in (${ORG_A}, ${ORG_B})`;
@@ -90,6 +91,7 @@ describe('map layers as app_api', () => {
       expect(await db.getMapLayerSource(as(BOB), added.id)).toBeNull();
       expect(await db.getMapLayerSource(as(VERA), added.id)).toEqual({
         id: added.id,
+        organizationId: ORG_A,
         kind: 'arcgis_features',
         url: SERVICE.url,
         wmsLayers: null,
@@ -168,8 +170,65 @@ describe('map layers as app_api', () => {
       expect(JSON.parse(new TextDecoder().decode(file?.geojson))).toEqual(checked.collection);
       expect(file?.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(await db.getMapLayerFile(as(BOB), added.id)).toBeNull();
-      const [layer] = (await db.listMapLayers(as(VERA), ORG_A)) ?? [];
+      const layer = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
       expect(layer).toMatchObject({ kind: 'file', fileName: 'elevators.geojson', featureCount: 1 });
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('keeps a zoomed-out view for a live lines layer, prepared by an admin, read by members only', async () => {
+    const db = postgresDatabase(API_URL);
+    try {
+      const added = await db.createMapLayer(as(ADAM), ORG_A, SERVICE);
+      if (added.status !== 'saved') throw new Error('not added');
+      const view = (n: number) => ({
+        colourField: 'OWNER',
+        geojson: new TextEncoder().encode(
+          JSON.stringify({
+            type: 'FeatureCollection',
+            features: Array.from({ length: n }, () => ({
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-105, 50],
+                  [-104, 50],
+                ],
+              },
+              properties: { OWNER: 'AAA' },
+            })),
+          }),
+        ),
+        featureCount: n,
+        sourceCount: 10,
+      });
+      expect(await db.saveMapLayerOverview(as(VERA), added.id, view(1))).toEqual({
+        status: 'forbidden',
+      });
+      expect(await db.saveMapLayerOverview(as(BOB), added.id, view(1))).toEqual({
+        status: 'not_found',
+      });
+      expect(await db.saveMapLayerOverview(as(ADAM), added.id, view(1))).toEqual({
+        status: 'saved',
+        id: added.id,
+      });
+      expect(await db.saveMapLayerOverview(as(ADAM), added.id, view(2))).toEqual({
+        status: 'saved',
+        id: added.id,
+      });
+      const read = await db.getMapLayerOverview(as(VERA), added.id);
+      const kept = JSON.parse(new TextDecoder().decode(read?.geojson)) as { features: unknown[] };
+      expect(kept.features).toHaveLength(2);
+      expect(await db.getMapLayerOverview(as(BOB), added.id)).toBeNull();
+      const layer = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
+      expect(layer?.overview).toMatchObject({
+        colourField: 'OWNER',
+        featureCount: 2,
+        sourceCount: 10,
+        preparedByName: 'adam.layers@example.test',
+        version: read?.sha256,
+      });
     } finally {
       await db.close();
     }

@@ -82,6 +82,10 @@ export function fakeDatabase(): Mocked<Database> {
     removeMapLayer: vi.fn<Database['removeMapLayer']>(() =>
       Promise.resolve({ status: 'saved', id: '00000000-0000-4000-8000-0000000a1a01' }),
     ),
+    getMapLayerOverview: vi.fn<Database['getMapLayerOverview']>(() => Promise.resolve(null)),
+    saveMapLayerOverview: vi.fn<Database['saveMapLayerOverview']>(() =>
+      Promise.resolve({ status: 'saved', id: '00000000-0000-4000-8000-0000000a1a01' }),
+    ),
     isOrgAdmin: vi.fn<Database['isOrgAdmin']>(() => Promise.resolve(true)),
     setMemberNames: vi.fn<Database['setMemberNames']>(() => Promise.resolve(true)),
     listMembers: vi.fn<Database['listMembers']>(() => Promise.resolve([])),
