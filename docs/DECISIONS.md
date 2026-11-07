@@ -271,6 +271,12 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Not built yet:** ArcGIS VectorTileServer layers and KMZ files; clicking a picture layer (ArcGIS map or WMS) for details; changing a layer's name, terms or colours on screen (the API has it; remove and add again meanwhile); layers on a company's small map (later, by the owner's answer).
 - **Risk to watch:** adding a large file makes the Worker read and check up to about 6 MB of JSON in one request; if Cloudflare stops it for using too much time, the error says so and a smaller file, or the layer's web address, works instead.
 
+**2026-11-07 — Codex's review of the map layers (`11c467e`, before merge): three P2, one P3, all fixed** in `apps/api/src/map-layers.ts`, each with a test that fails without the fix (`map-layers.test.ts`, "fetching outside services safely"). No findings in the migration's RLS and grants, the file constraint, the GeoJSON checks, text-only display or the sign-in sent only to the app's own addresses.
+- **P2, redirects:** a service could redirect the Worker elsewhere. Redirects are now refused, never followed (`redirect: 'manual'`); only the stored, checked address is fetched.
+- **P2, fetching before checking rights:** adding a layer read the service before checking that the person is an admin of the organization. Membership and admin rights are now checked first.
+- **P2, answers read whole before the limit:** a service sending more than it declared could fill the Worker's memory. Answers are now read piece by piece and cancelled as soon as they pass the limit.
+- **P3, a body failing on the way:** it surfaced as "database unavailable". It is now the service's failure (502 `LAYER_SERVICE_FAILED`).
+
 
 **2026-10-29 — Carrier freight rates by route (owner's priority; part of GT-050, pulled forward).** The owner asked for a Freight page with carrier rates by route, carriers kept in Counterparties with a Carriers filter. Asked how carriers quote and what a route runs between, the owner answered: "It varies by freight provider", and "One location to another so it will be a specific address". Choices:
 - **Carriers are counterparties** with the `carrier` type that already exists: added by hand like any other (a location is not needed), shown with **All / Buyers / Sellers / Carriers** on Counterparties, and on the map in blue as before. A carrier's page lists its rates with **New freight rate**; any other counterparty's page lists the rates to and from its locations.

@@ -46,6 +46,7 @@ const SQUARE = {
 
 let service: (url: string) => Response;
 let serviceCalls: string[] = [];
+let serviceInits: (RequestInit | undefined)[] = [];
 
 beforeEach(() => {
   service = (url) => {
@@ -68,13 +69,15 @@ beforeEach(() => {
     return new Response('not found', { status: 404 });
   };
   serviceCalls = [];
+  serviceInits = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: string) => {
+    vi.fn((input: string, init?: RequestInit) => {
       if (input.includes('/auth/v1/user')) {
         return Promise.resolve(Response.json({ id: USER_ID, email: 'adam@example.test' }));
       }
       serviceCalls.push(input);
+      serviceInits.push(init);
       return Promise.resolve(service(input));
     }),
   );
@@ -443,5 +446,84 @@ describe('addresses built for a map square', () => {
     );
     expect(wms.searchParams.get('LAYERS')).toBe('crops');
     expect(wms.searchParams.get('CRS')).toBe('EPSG:3857');
+  });
+});
+
+// Codex's review of 11c467e.
+describe('fetching outside services safely', () => {
+  /** A body sent in 1 MB pieces, `pieces` of them, then failing if `fail`; counts what was read. */
+  function stream(pieces: number, fail = false) {
+    const read = { pieces: 0, cancelled: false };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (read.pieces === pieces) {
+          if (fail) controller.error(new Error('connection reset'));
+          else controller.close();
+          return;
+        }
+        read.pieces += 1;
+        controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
+      },
+      cancel() {
+        read.cancelled = true;
+      },
+    });
+    return { body, read };
+  }
+
+  it('refuses a redirect instead of following it', async () => {
+    service = () =>
+      new Response(null, { status: 302, headers: { location: 'https://elsewhere.example.net/x' } });
+    const res = await send('/inspect', 'POST', { url: SERVICE, field: null });
+    expect(res.status).toBe(502);
+    expect(serviceCalls).toEqual([`${SERVICE}?f=json`]);
+    expect(serviceInits[0]?.redirect).toBe('manual');
+  });
+
+  it('asks every service with redirects refused', async () => {
+    db.getMapLayerSource.mockResolvedValueOnce(source);
+    await send(`/${LAYER}/features/6/12/21`, 'GET');
+    expect(serviceInits.map((init) => init?.redirect)).toEqual(['manual']);
+  });
+
+  it('checks who may add a layer before fetching anything', async () => {
+    const web = { ...details, source: 'web', url: SERVICE, wmsLayers: null };
+    db.isOrgAdmin.mockResolvedValueOnce(false);
+    expect((await send('', 'POST', web)).status).toBe(403);
+    expect((await send('?organization_id=org-b', 'POST', web)).status).toBe(403);
+    expect(serviceCalls).toEqual([]);
+    expect(db.createMapLayer).not.toHaveBeenCalled();
+  });
+
+  it('stops reading an answer as soon as it passes the limit, whatever its length says', async () => {
+    const { body, read } = stream(20);
+    service = () => new Response(body, { headers: { 'content-type': 'application/json' } });
+    db.getMapLayerSource.mockResolvedValueOnce(source);
+    const res = await send(`/${LAYER}/features/6/12/21`, 'GET');
+    expect(res.status).toBe(502);
+    // The 8 MB limit, plus the one piece a stream reads ahead.
+    expect(read.pieces).toBeLessThanOrEqual(10);
+    expect(read.cancelled).toBe(true);
+  });
+
+  it('treats a body that fails on the way as the service failing', async () => {
+    const { body } = stream(1, true);
+    service = () => new Response(body, { headers: { 'content-type': 'application/json' } });
+    const res = await send('/inspect', 'POST', { url: SERVICE, field: null });
+    expect(res.status).toBe(502);
+    expect((await res.json<{ error: { code: string } }>()).error.code).toBe('LAYER_SERVICE_FAILED');
+  });
+
+  it('treats a body that fails while adding a layer the same way', async () => {
+    const { body } = stream(1, true);
+    service = () => new Response(body, { headers: { 'content-type': 'application/json' } });
+    const res = await send('', 'POST', {
+      ...details,
+      source: 'web',
+      url: SERVICE,
+      wmsLayers: null,
+    });
+    expect(res.status).toBe(502);
+    expect(db.createMapLayer).not.toHaveBeenCalled();
   });
 });

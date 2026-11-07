@@ -56,7 +56,41 @@ export class LayerServiceError extends Error {
   }
 }
 
-/** Fetches a web service's answer, refusing one that is too large or not what was asked for. */
+/**
+ * Reads a body piece by piece, stopping and cancelling it as soon as it passes `maxBytes`, so a
+ * service that sends more than it says (or says nothing) never fills the Worker's memory
+ * (Codex's review of 11c467e).
+ */
+async function readLimited(res: Response, maxBytes: number): Promise<ArrayBuffer> {
+  if (!res.body) return new ArrayBuffer(0);
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const chunk = (await reader.read()) as ReadableStreamReadResult<Uint8Array>;
+    if (chunk.done) break;
+    const value = chunk.value;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new LayerServiceError(413);
+    }
+    parts.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    body.set(part, offset);
+    offset += part.byteLength;
+  }
+  return body.buffer;
+}
+
+/**
+ * Fetches a web service's answer, refusing one that is too large or not what was asked for.
+ * Redirects are refused, never followed: only the stored, checked address is ever fetched
+ * (Codex's review of 11c467e). A failure while the body arrives is the service's failure too.
+ */
 async function fetchService(
   url: string,
   accept: RegExp,
@@ -66,19 +100,32 @@ async function fetchService(
   try {
     res = await fetch(url, {
       headers: { Accept: '*/*', 'User-Agent': USER_AGENT },
+      redirect: 'manual',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
     throw new LayerServiceError(0);
   }
-  if (!res.ok) throw new LayerServiceError(res.status);
+  if (res.status >= 300 && res.status < 400) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new LayerServiceError(res.status);
+  }
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new LayerServiceError(res.status);
+  }
   const type = (res.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
-  if (!accept.test(type)) throw new LayerServiceError(415);
   const declared = Number(res.headers.get('content-length') ?? '0');
-  if (declared > maxBytes) throw new LayerServiceError(413);
-  const body = await res.arrayBuffer();
-  if (body.byteLength > maxBytes) throw new LayerServiceError(413);
-  return { body, type };
+  if (!accept.test(type) || declared > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new LayerServiceError(accept.test(type) ? 413 : 415);
+  }
+  try {
+    return { body: await readLimited(res, maxBytes), type };
+  } catch (error) {
+    if (error instanceof LayerServiceError) throw error;
+    throw new LayerServiceError(0);
+  }
 }
 
 async function fetchJson(url: string, maxBytes = MAX_DESCRIPTION_BYTES): Promise<unknown> {
@@ -373,22 +420,6 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if (source.kind === 'wms' && wmsLayers === null) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Name the WMS layers to show.');
       }
-      // An ArcGIS layer is read once now: it must answer, have the field it is coloured by,
-      // and name its id field, which clicking a feature needs.
-      let idField: string | null = null;
-      if (source.kind !== 'wms') {
-        try {
-          const described = await describeArcgis(source.url);
-          if (source.kind === 'arcgis_features') {
-            idField = described.idField;
-            if (details.colourField !== null && !described.fields.includes(details.colourField)) {
-              return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
-            }
-          }
-        } catch (error) {
-          return serviceFailed(c, error, 'description');
-        }
-      }
       if (source.kind !== 'arcgis_features' && details.colourField !== null) {
         return apiError(
           c,
@@ -397,7 +428,14 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
           'Only lines, areas and points take colours by field.',
         );
       }
-      layer = { ...details, kind: source.kind, url: source.url, wmsLayers, idField, file: null };
+      layer = {
+        ...details,
+        kind: source.kind,
+        url: source.url,
+        wmsLayers,
+        idField: null,
+        file: null,
+      };
     } else {
       const checked = normalizeFeatureCollection(input.geojson);
       if (!checked.ok) return apiError(c, 422, 'NOT_A_LAYER', checked.message);
@@ -424,8 +462,26 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       };
     }
     return withDatabase(c, openDatabase, async (db, ctx) => {
+      // Who may add layers is checked before any web service is fetched (Codex's review of
+      // 11c467e); the database checks it again when the layer is written.
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      if (!(await db.isOrgAdmin(ctx, org))) return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
+      // An ArcGIS layer is read once now: it must answer, have the field it is coloured by,
+      // and name its id field, which clicking a feature needs.
+      if (layer.kind === 'arcgis_features' || layer.kind === 'arcgis_image') {
+        try {
+          const described = await describeArcgis(layer.url ?? '');
+          if (layer.kind === 'arcgis_features') {
+            layer = { ...layer, idField: described.idField };
+            if (layer.colourField !== null && !described.fields.includes(layer.colourField)) {
+              return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
+            }
+          }
+        } catch (error) {
+          return serviceFailed(c, error, 'description');
+        }
+      }
       const result = await db.createMapLayer(ctx, org, layer);
       return result.status === 'saved' ? c.json({ id: result.id }, 201) : written(c, result);
     });
