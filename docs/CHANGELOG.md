@@ -1,5 +1,14 @@
 # Documentation pack changelog
 
+## 2026-11-07 — Handoff records of #169 and #170; documents brought up to date
+
+- `docs/HANDOFF.md`: ivanmueller/gss#169 and #170, with their CI and Deploy staging runs; the status of 2026-11-07 (Claude's drafts in their sections and colours, callbacks); the next steps (the owner's checks of callbacks and Claude's drafts, then texting, Hang up or the Dependabot updates).
+- `docs/FEATURES.md`: F-116 live, check pending (F-213); F-202 and F-211 describe the drafts as they are now; F-121 (Hang up) covers callbacks; T-03 lists callbacks among the browser tests to write.
+- `AGENTS.md`: Claude's drafts shown where they belong, verified in one click.
+- `README.md`: Callbacks to GSS's number, and how an admin turns them on; calls to GSS's number no longer said to hear a busy signal.
+- `docs/ARCHITECTURE.md`: Telnyx and Anthropic among the Worker's outside services; the calling, CRM and readings modules; recordings and transcripts in privacy.
+- `docs/DECISIONS.md`: the callbacks decision marked built.
+
 ## 2026-11-06 — Handoff record of #168
 
 - `docs/HANDOFF.md`: the join fix of the callbacks (ivanmueller/gss#168), with its CI and Deploy staging runs.
