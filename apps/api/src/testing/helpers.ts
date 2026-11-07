@@ -70,6 +70,18 @@ export function fakeDatabase(): Mocked<Database> {
         return '00000000-0000-4000-8000-0000000ba7c4';
       },
     ),
+    listMapLayers: vi.fn<Database['listMapLayers']>(() => Promise.resolve([])),
+    getMapLayerSource: vi.fn<Database['getMapLayerSource']>(() => Promise.resolve(null)),
+    getMapLayerFile: vi.fn<Database['getMapLayerFile']>(() => Promise.resolve(null)),
+    createMapLayer: vi.fn<Database['createMapLayer']>(() =>
+      Promise.resolve({ status: 'saved', id: '00000000-0000-4000-8000-0000000a1a01' }),
+    ),
+    updateMapLayer: vi.fn<Database['updateMapLayer']>(() =>
+      Promise.resolve({ status: 'saved', id: '00000000-0000-4000-8000-0000000a1a01' }),
+    ),
+    removeMapLayer: vi.fn<Database['removeMapLayer']>(() =>
+      Promise.resolve({ status: 'saved', id: '00000000-0000-4000-8000-0000000a1a01' }),
+    ),
     isOrgAdmin: vi.fn<Database['isOrgAdmin']>(() => Promise.resolve(true)),
     setMemberNames: vi.fn<Database['setMemberNames']>(() => Promise.resolve(true)),
     listMembers: vi.fn<Database['listMembers']>(() => Promise.resolve([])),

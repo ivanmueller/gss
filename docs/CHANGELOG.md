@@ -1,5 +1,15 @@
 # Documentation pack changelog
 
+## 2026-11-07 — Map layers (F-107)
+
+- `docs/DECISIONS.md`: the owner's answers on map layers (ArcGIS, Government of Canada sites and files; admins add them; Workspace and Counterparties maps; several at once; click for details; no sign-ins), each railroad in its own colour, and the choices made while building.
+- `docs/FEATURES.md`: F-107 in progress; T-03 lists map layers among the browser tests to write.
+- `docs/DATA_MODEL.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/BUILD_PLAN.md`, `AGENTS.md`: `map_layers` and `map_layer_files`, the `/api/v1/map-layers` routes, the Worker fetching live layers by map square.
+
+## 2026-11-07 — Handoff records of #171 and #172
+
+- `docs/HANDOFF.md`: ivanmueller/gss#171 and #172, documents only, with their CI and Deploy staging runs.
+
 ## 2026-11-07 — Claude's drafts in the product pages
 
 - `docs/PRODUCT.md`: the company page, Bids & offers and Follow-ups with Claude's drafts to verify (F-115, F-116); the call's reading without drafts or "N to review".

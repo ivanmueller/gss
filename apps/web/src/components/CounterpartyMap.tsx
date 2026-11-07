@@ -17,6 +17,7 @@ import { useTheme } from '../lib/theme';
 import { useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { MapLayersLegend, MapLayersMenu, PickedFeatureCard, useMapLayers } from './MapLayers';
 import { Callout } from './ui/callout';
 import { Card } from './ui/card';
 import { SegmentedControl } from './ui/segmented-control';
@@ -113,6 +114,8 @@ export function CounterpartyMap({
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Asked for only when the map is shown.
+  const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
 
   // Every located place at once; the filters only choose which are shown.
   const [result] = useApiResource<MapFacilities>(
@@ -138,17 +141,20 @@ export function CounterpartyMap({
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Legend />
-          <SegmentedControl
-            label="Map style"
-            options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
-              value: key,
-              label: BASEMAPS[key].label,
-            }))}
-            value={basemap}
-            onChange={setBasemap}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <MapLayersMenu state={layers} />
+            <SegmentedControl
+              label="Map style"
+              options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
+                value: key,
+                label: BASEMAPS[key].label,
+              }))}
+              value={basemap}
+              onChange={setBasemap}
+            />
+          </div>
         </div>
-        <div className="h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]">
+        <div className="relative h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]">
           {result.status === 'error' ? (
             <p role="alert" className="p-4 text-sm text-danger">
               The locations could not be loaded: {result.error.message}
@@ -166,13 +172,19 @@ export function CounterpartyMap({
                 {...(bounds && { start: bounds, startMaxZoom: 12 })}
                 fitTo={bounds}
                 onSelect={setSelectedId}
+                overlays={layers.overlays}
+                authToken={token}
+                onViewChange={layers.onViewChange}
+                onOverlayClick={layers.setPicked}
                 onTokenRefused={() => {
                   setRefused(true);
                 }}
               />
             </Suspense>
           )}
+          <PickedFeatureCard state={layers} token={token} />
         </div>
+        <MapLayersLegend state={layers} />
       </div>
 
       {selected && (
