@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-07 — Claude's drafts in the product pages
+
+- `docs/PRODUCT.md`: the company page, Bids & offers and Follow-ups with Claude's drafts to verify (F-115, F-116); the call's reading without drafts or "N to review".
+
 ## 2026-11-07 — Handoff records of #169 and #170; documents brought up to date
 
 - `docs/HANDOFF.md`: ivanmueller/gss#169 and #170, with their CI and Deploy staging runs; the status of 2026-11-07 (Claude's drafts in their sections and colours, callbacks); the next steps (the owner's checks of callbacks and Claude's drafts, then texting, Hang up or the Dependabot updates).
