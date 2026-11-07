@@ -17,6 +17,7 @@ import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
+import { mapLayerRoutes } from './map-layers';
 import { memberRoutes } from './members';
 import { commodityRoutes, quoteRoutes } from './quotes';
 import { callReadingRoutes, readNewTranscripts } from './readings';
@@ -135,6 +136,7 @@ export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: Tel
   app.route('/calls', callReadingRoutes(openDatabase));
   app.route('/calls', callRoutes(openDatabase, telnyx));
   app.route('/callbacks', callbackRoutes(openDatabase, telnyx));
+  app.route('/map-layers', mapLayerRoutes(openDatabase));
 
   return app;
 }

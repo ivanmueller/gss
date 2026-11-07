@@ -15,7 +15,7 @@ Ticket by ticket, with notes, in `docs/HANDOFF.md`. In short:
 | 5 (pulled forward) — Bank of Canada FX connector (GT-052) | Done (ivanmueller/gss#54, #55): the Worker stores the daily USD/CAD rate twice a day and the workspace converts USD bids and offers with it; a stored rate was seen on staging by the owner (2026-10-29). |
 | 5 (pulled forward) — Carrier freight rates (part of GT-050) | Built at the owner's request (2026-10-29, the priority after the FX connector): carriers in Counterparties with a Carriers filter, and the Freight page for carrier rates from one location to another, kept as revisions. A carrier's lanes by province and state, with its equipment, on a carrier page like a buyer's and a lane filter (owner's request, 2026-11-01); carriers added by hand with their equipment and lanes, and imported from a carrier spreadsheet whose lanes stay unverified until a rep verifies them (2026-11-01). Route geometry and routing (GT-051) are not started. |
 | 2 — CRM for counterparties (GT-027) | Built at the owner's request (2026-10-29): a contact log (calls, emails, meetings and visits, corrections kept as versions) and follow-ups (due time in Alberta time, the person responsible, marked done) on each counterparty's page, a Follow-ups page and a count in the menu. |
-| Owner's requests not started | Map overlay layers from ArcGIS (GT-026), waiting for the first layer's address. |
+| Owner's requests in progress | Map layers from ArcGIS, WMS and files (GT-026, F-107), on a pull request. |
 | 4, 5 (rest), 6 | Not started. The thin trade slice is next. |
 
 # 13. Execution plan, ordered backlog and acceptance gates

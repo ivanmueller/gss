@@ -6,6 +6,12 @@ import { NoRateContext } from '../components/CadPrice';
 import { CommodityPicker } from '../components/CommodityPicker';
 import { FacilityList } from '../components/FacilityList';
 import { FacilityTable } from '../components/FacilityTable';
+import {
+  MapLayersLegend,
+  MapLayersMenu,
+  PickedFeatureCard,
+  useMapLayers,
+} from '../components/MapLayers';
 import { OrderBook } from '../components/OrderBook';
 import { SelectedFacility } from '../components/SelectedFacility';
 import { SegmentedControl } from '../components/ui/segmented-control';
@@ -225,6 +231,9 @@ export function Workspace({
     />
   );
 
+  // Map layers are reference maps, not prices: shown with real or demo data alike.
+  const layers = useMapLayers(session);
+
   const floating = isDesktop && overlay;
   const map = (over?: ReactNode) => (
     <div className="relative size-full overflow-hidden rounded-card border bg-muted shadow-xs">
@@ -239,6 +248,10 @@ export function Workspace({
             controls="top-left"
             coveredRight={floating && bookOpen ? OVERLAY_WIDTH : 0}
             onSelect={setSelectedId}
+            overlays={layers.overlays}
+            authToken={token}
+            onViewChange={layers.onViewChange}
+            onOverlayClick={layers.setPicked}
             onTokenRefused={() => {
               setRefused(true);
             }}
@@ -247,6 +260,7 @@ export function Workspace({
       ) : (
         <MapUnavailable refused={refused} />
       )}
+      <PickedFeatureCard state={layers} token={token} />
       {over}
     </div>
   );
@@ -299,10 +313,12 @@ export function Workspace({
             value={roleFilter}
             onChange={setRoleFilter}
           />
+          {session && <MapLayersMenu state={layers} />}
           <div className="lg:ml-auto">
             <Legend />
           </div>
         </div>
+        <MapLayersLegend state={layers} />
 
         {floating ? (
           <>

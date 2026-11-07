@@ -17,6 +17,7 @@ import {
   type PinFeatureCollection,
 } from '../lib/mapbox';
 import type { LaneAreas } from '../lib/lanes';
+import { isLayerPictureUrl, type MapOverlay, type PickedFeature } from '../lib/mapLayers';
 import type { Theme } from '../lib/theme';
 
 // The only module that calls Mapbox GL JS (docs/DECISIONS.md, map decision). It is loaded
@@ -32,6 +33,8 @@ const AREAS = 'lane-areas';
 const AREA_FILL = 'lane-areas-fill';
 const AREA_OUTLINE = 'lane-areas-outline';
 const AREA_OUTLINE_QUOTED = 'lane-areas-outline-quoted';
+// Map layers from outside sources (F-107), drawn under the lanes and the pins.
+const OVERLAY = 'gss-layer-';
 const EMPTY: LaneAreas = {
   regions: { type: 'FeatureCollection', features: [] },
 };
@@ -65,8 +68,14 @@ export interface FacilityMapProps {
    * outlined with dashes where only its freight rates run (no lines between them, 2026-11-02).
    */
   areas?: LaneAreas | null;
-  /** The visible box after every move; null when none of it is on the map. */
-  onViewChange?: (bbox: Bbox | null) => void;
+  /** The visible box and zoom after every move; null when none of it is on the map. */
+  onViewChange?: (bbox: Bbox | null, zoom: number) => void;
+  /** Map layers that are switched on, in order, drawn under the lanes and the pins. */
+  overlays?: readonly MapOverlay[];
+  /** The person's sign-in, sent with a layer's pictures (they come from the app's API). */
+  authToken?: string;
+  /** A feature of a map layer was clicked (not a pin). */
+  onOverlayClick?: (picked: PickedFeature) => void;
   onSelect: (pinId: string) => void;
   /** Mapbox refused the token (wrong token or not allowed on this address). */
   onTokenRefused: () => void;
@@ -193,6 +202,102 @@ function addPinLayers(map: mapboxgl.Map, data: PinFeatureCollection, selectedId:
   });
 }
 
+function overlayLayerIds(id: string): string[] {
+  return [
+    `${OVERLAY}${id}-fill`,
+    `${OVERLAY}${id}-line`,
+    `${OVERLAY}${id}-point`,
+    `${OVERLAY}${id}-pictures`,
+  ];
+}
+
+/** Every drawn layer of the map layers that are on, for clicks. */
+function drawnOverlayLayers(map: mapboxgl.Map, overlays: readonly MapOverlay[]): string[] {
+  return overlays.flatMap((o) => overlayLayerIds(o.id)).filter((id) => map.getLayer(id));
+}
+
+/**
+ * Brings the map's layers in line with the overlays: adds the ones switched on, updates their
+ * features and colours, and removes the ones switched off. Areas are filled lightly, lines
+ * drawn on top, points as small dots; pictures slightly see-through.
+ */
+function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
+  const wanted = new Set(overlays.map((o) => `${OVERLAY}${o.id}`));
+  for (const layer of map.getStyle().layers) {
+    const source = 'source' in layer ? layer.source : undefined;
+    if (typeof source === 'string' && source.startsWith(OVERLAY) && !wanted.has(source)) {
+      map.removeLayer(layer.id);
+    }
+  }
+  for (const id of Object.keys(map.getStyle().sources)) {
+    if (id.startsWith(OVERLAY) && !wanted.has(id)) map.removeSource(id);
+  }
+  // Under the lanes and the pins, whichever is lowest.
+  const below = [AREA_FILL, SELECTED, PINS].find((id) => map.getLayer(id));
+  for (const overlay of overlays) {
+    const source = `${OVERLAY}${overlay.id}`;
+    const [fill, line, point, pictures] = overlayLayerIds(overlay.id) as [
+      string,
+      string,
+      string,
+      string,
+    ];
+    if (overlay.kind === 'pictures') {
+      if (!map.getSource(source)) {
+        map.addSource(source, { type: 'raster', tiles: [overlay.tiles], tileSize: 256 });
+        map.addLayer(
+          { id: pictures, type: 'raster', source, paint: { 'raster-opacity': 0.8 } },
+          below,
+        );
+      }
+      continue;
+    }
+    const existing = map.getSource<GeoJSONSource>(source);
+    if (existing) existing.setData(overlay.data);
+    else {
+      map.addSource(source, { type: 'geojson', data: overlay.data });
+      map.addLayer(
+        {
+          id: fill,
+          type: 'fill',
+          source,
+          filter: ['==', ['geometry-type'], 'Polygon'],
+          paint: { 'fill-opacity': 0.25 },
+        },
+        below,
+      );
+      map.addLayer(
+        {
+          id: line,
+          type: 'line',
+          source,
+          filter: ['in', ['geometry-type'], ['literal', ['LineString', 'Polygon']]],
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1, 8, 2, 12, 3] },
+        },
+        below,
+      );
+      map.addLayer(
+        {
+          id: point,
+          type: 'circle',
+          source,
+          filter: ['==', ['geometry-type'], 'Point'],
+          paint: {
+            'circle-radius': 4,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#ffffff',
+          },
+        },
+        below,
+      );
+    }
+    map.setPaintProperty(fill, 'fill-color', overlay.colour);
+    map.setPaintProperty(line, 'line-color', overlay.colour);
+    map.setPaintProperty(point, 'circle-color', overlay.colour);
+  }
+}
+
 /** A Mapbox map with the given pins. */
 export default function FacilityMap(props: FacilityMapProps) {
   const { token, basemap, theme, pins, selectedId } = props;
@@ -222,6 +327,13 @@ export default function FacilityMap(props: FacilityMapProps) {
       projection: 'mercator',
       // Added below on the same side as the zoom buttons, so a panel never hides it.
       attributionControl: false,
+      // A map layer's pictures come from the app's API, which needs the person's sign-in.
+      transformRequest: (url) => {
+        const auth = latest.current.authToken;
+        return auth && isLayerPictureUrl(url)
+          ? { url, headers: { Authorization: `Bearer ${auth}` } }
+          : { url };
+      },
     });
     const side = latest.current.controls ?? 'top-right';
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), side);
@@ -235,6 +347,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       latest.current.onViewChange?.(
         bounds &&
           bboxFromBounds(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()),
+        instance.getZoom(),
       );
     };
     instance.on('load', report);
@@ -245,6 +358,31 @@ export default function FacilityMap(props: FacilityMapProps) {
       if (latest.current.areas) addAreaLayers(instance, latest.current.areas);
       paintTheme(instance, latest.current.basemap);
       addPinLayers(instance, latest.current.data, latest.current.selectedId);
+      syncOverlays(instance, latest.current.overlays ?? []);
+    });
+    // A click on a map layer's feature, unless it is on a pin (the pin wins).
+    instance.on('click', (event) => {
+      const onClick = latest.current.onOverlayClick;
+      if (!onClick) return;
+      const layers = drawnOverlayLayers(instance, latest.current.overlays ?? []);
+      if (layers.length === 0) return;
+      if (
+        instance.getLayer(PINS) &&
+        instance.queryRenderedFeatures(event.point, { layers: [PINS] }).length > 0
+      ) {
+        return;
+      }
+      const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+        [event.point.x - 4, event.point.y - 4],
+        [event.point.x + 4, event.point.y + 4],
+      ];
+      const feature = instance.queryRenderedFeatures(box, { layers })[0];
+      const source = feature?.source;
+      if (!feature || typeof source !== 'string') return;
+      onClick({
+        layerId: source.slice(OVERLAY.length),
+        properties: { ...(feature.properties ?? {}) },
+      });
     });
     instance.on('click', PINS, (event) => {
       const id: unknown = event.features?.[0]?.properties?.id;
@@ -300,6 +438,11 @@ export default function FacilityMap(props: FacilityMapProps) {
     const areas = props.areas ?? EMPTY;
     instance.getSource<GeoJSONSource>(AREAS)?.setData(areas.regions);
   }, [props.areas]);
+
+  useEffect(() => {
+    const instance = map.current;
+    if (instance?.isStyleLoaded()) syncOverlays(instance, props.overlays ?? []);
+  }, [props.overlays]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

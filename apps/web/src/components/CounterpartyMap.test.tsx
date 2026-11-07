@@ -82,8 +82,11 @@ describe('CounterpartyMap', () => {
     render(<CounterpartyMap session={SESSION} only={BOTH} mapbox={MAPBOX} />);
     expect(await screen.findByText('Stand-in map: map, light, 2 pins')).toBeInTheDocument();
     expect(screen.getByText('Fitted to -106.670046 49 -97 52.133214')).toBeInTheDocument();
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.headers.get('Authorization')).toBe('Bearer synthetic-token');
+    const places = calls.filter((call) => call.path.startsWith('/facilities'));
+    expect(places).toHaveLength(1);
+    expect(places[0]?.headers.get('Authorization')).toBe('Bearer synthetic-token');
+    // And the team's map layers, for the Layers button (F-107).
+    expect(calls.filter((call) => call.path.startsWith('/map-layers'))).toHaveLength(1);
     // No count and no list under the map (owner's request, 2026-10-30).
     expect(screen.queryByText(/in view|no coordinates yet/)).not.toBeInTheDocument();
     expect(screen.queryByRole('list', { name: /Locations/ })).not.toBeInTheDocument();
@@ -105,7 +108,7 @@ describe('CounterpartyMap', () => {
     );
     expect(screen.getByText('Stand-in map: map, light, 1 pins')).toBeInTheDocument();
     expect(screen.getByText('Fitted to -97 49 -97 49')).toBeInTheDocument();
-    expect(calls).toHaveLength(1);
+    expect(calls.filter((call) => call.path.startsWith('/facilities'))).toHaveLength(1);
   });
 
   it('shows the selected pin’s location', async () => {
