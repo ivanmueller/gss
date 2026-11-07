@@ -15,8 +15,10 @@ Cloudflare Worker — Hono API
    |  typed repositories / outbound adapters
 Supabase Postgres — PostGIS, quote history, scenarios, audit
 Supabase Storage — private supporting documents
-External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker scheduled job, GT-052); ArcGIS map layers (requested, GT-026); routing, licensed price data (as added)
+External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker scheduled job, GT-052); Telnyx calls placed and received, recordings and speech-to-text (Worker; its webhooks accepted only with a valid Ed25519 signature); Anthropic's API, Claude reading call transcripts and writing company summaries (Worker scheduled job, every 2 minutes); ArcGIS map layers (requested, GT-026); routing, licensed price data (as added)
 ```
+
+Every outside service is called from the Worker, with its key a Worker secret the owner adds in Cloudflare; none is called from the browser (Mapbox tiles excepted, with a public token).
 
 The frontend calls one documented application API for sensitive operations. Avoid direct browser writes to commercial tables. Keep the system a **modular monolith** initially, not a distributed collection of microservices.
 
@@ -29,6 +31,9 @@ The frontend calls one documented application API for sensitive operations. Avoi
 - `trade-engine`: pure normalization, compatibility and margin functions.
 - `scenarios`: snapshots, versions, comparison and exports.
 - `freight`: manually entered quotes initially; providers later.
+- `crm`: the contact log (versions, pins, removals) and follow-ups.
+- `calling`: calls placed through Telnyx (the caller's cell first), callbacks to GSS's number (to whoever last called the number, then the callbacks person, then voicemail), recordings, transcripts by side and their 24-hour audio; each Telnyx command kept and claimed before it is sent, each event applied once.
+- `readings`: Claude's notes and drafts from a call's transcript (a person verifies each before anything is saved) and its company summaries (topics and records chosen from a fixed list; the Worker writes the words).
 - `documents`: metadata, private attachments, access checks.
 - `audit`: security- and finance-relevant event stream.
 
@@ -70,7 +75,7 @@ Map pins are facilities; eligible bid/offer indicators derive from current quote
 
 ## 10.2 Privacy and data controls
 
-Classify contact data and trade prices as confidential. Do not publish seller coordinates or phone numbers outside explicitly approved staff roles. Records belong to the shop's one organization and are visible only to its active members. Confirm vendor data residency and contractual restrictions before production rollout.
+Classify contact data and trade prices as confidential. Call recordings stay at Telnyx and are deleted there 24 hours after the call; transcripts are kept and read by every active member. Transcripts and the records of a company are sent to Anthropic only for Claude's readings and summaries (the owner's decisions, `docs/DECISIONS.md`). Do not publish seller coordinates or phone numbers outside explicitly approved staff roles. Records belong to the shop's one organization and are visible only to its active members. Confirm vendor data residency and contractual restrictions before production rollout.
 
 ## 10.3 Physical trade/compliance considerations
 
