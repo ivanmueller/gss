@@ -12,7 +12,7 @@
     "@anthropic-ai/sdk": "^1.5.0",
     "@grain/domain": "workspace:*",
     "hono": "^4.13.14",
-    "postgres": "^3.4.9"
+    "postgres": "^4.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261026.1",
