@@ -137,6 +137,12 @@ export const LAYER_PALETTE = [
 /** The colour a layer takes by default, before an admin chooses another. */
 export const DEFAULT_LAYER_COLOUR = '#2f6baa';
 
+/**
+ * The colour of a coloured-by-field layer's values without a colour of their own (rare values,
+ * or none): a quiet grey, so the form need not ask for it (the owner's request, 2026-11-07).
+ */
+export const OTHER_VALUES_COLOUR = '#9ca3af';
+
 function hslToHex(h: number, s: number, l: number): string {
   const a = s * Math.min(l, 1 - l);
   const channel = (n: number) => {
@@ -258,6 +264,22 @@ export const updateMapLayerSchema = z.strictObject({
 });
 export type UpdateMapLayer = z.infer<typeof updateMapLayerSchema>;
 
+/** PUT /api/v1/map-layers/{id}/overview/{version}/{part}: one part of a zoomed-out view. */
+export const overviewPartSchema = z.strictObject({
+  /** GeoJSON features; checked again by normalizeFeatureCollection. */
+  features: z.array(z.unknown()).min(1).max(50_000),
+});
+
+/** POST /api/v1/map-layers/{id}/overview/{version}/publish: every part has been sent. */
+export const publishOverviewSchema = z.strictObject({
+  /** The field its lines are grouped by: the layer's colour field when it was read. */
+  colourField: z.string().regex(FIELD).nullable(),
+  /** How many parts were sent, numbered from 0. */
+  partCount: z.number().int().min(1).max(64),
+  /** How many pieces the service gave. */
+  sourceCount: z.number().int().min(1).max(2_000_000),
+});
+
 /** POST /api/v1/map-layers/inspect?organization_id=…: what a web address offers. */
 export const inspectLayerSchema = z.strictObject({
   url: z.string().max(MAX_LAYER_URL_LENGTH * 2),
@@ -289,6 +311,21 @@ export interface MapLayerView {
   /** UTC instant. */
   createdAt: string;
   /** Sent back with a change; a change to a layer changed since is refused. */
+  version: string;
+  /** A live lines layer's zoomed-out view (F-134), or null before one is prepared. */
+  overview: MapLayerOverviewInfo | null;
+}
+
+export interface MapLayerOverviewInfo {
+  /** The field its lines are grouped by when it was prepared. */
+  colourField: string | null;
+  featureCount: number;
+  /** How many pieces the service gave. */
+  sourceCount: number;
+  preparedByName: string;
+  /** UTC instant. */
+  preparedAt: string;
+  /** Its checksum: a new view has a new one. */
   version: string;
 }
 

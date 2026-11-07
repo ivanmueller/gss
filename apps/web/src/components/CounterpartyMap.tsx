@@ -17,7 +17,13 @@ import { useTheme } from '../lib/theme';
 import { useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
-import { MapLayersLegend, MapLayersMenu, PickedFeatureCard, useMapLayers } from './MapLayers';
+import {
+  MapLayersButton,
+  MapLayersLegend,
+  MapLayersPanel,
+  PickedFeatureCard,
+  useMapLayers,
+} from './MapLayers';
 import { Callout } from './ui/callout';
 import { Card } from './ui/card';
 import { SegmentedControl } from './ui/segmented-control';
@@ -142,7 +148,7 @@ export function CounterpartyMap({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Legend />
           <div className="flex flex-wrap items-center gap-2">
-            <MapLayersMenu state={layers} />
+            <MapLayersButton state={layers} />
             <SegmentedControl
               label="Map style"
               options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
@@ -182,7 +188,12 @@ export function CounterpartyMap({
               />
             </Suspense>
           )}
-          <PickedFeatureCard state={layers} token={token} />
+          <MapLayersPanel state={layers} className="left-3" />
+          <PickedFeatureCard
+            state={layers}
+            token={token}
+            className={layers.panelOpen ? 'left-[19.5rem]' : 'left-3'}
+          />
         </div>
         <MapLayersLegend state={layers} />
       </div>

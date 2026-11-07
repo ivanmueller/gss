@@ -36,6 +36,7 @@ export type MapLayerChanges = Omit<NewMapLayer, 'kind' | 'url' | 'file' | 'idFie
 /** What the Worker needs to fetch a live layer for the map. */
 export interface MapLayerSource {
   id: string;
+  organizationId: string;
   kind: MapLayerKind;
   url: string | null;
   wmsLayers: string | null;
@@ -65,6 +66,36 @@ export interface MapLayersDatabase {
     changes: MapLayerChanges,
   ) => Promise<MapLayerWrite>;
   removeMapLayer: (ctx: RequestContext, id: string, version: string) => Promise<MapLayerWrite>;
+  /**
+   * A layer's published zoomed-out view (F-134): its parts in order (each a JSON array of
+   * features) and its version; null when none or not visible.
+   */
+  getMapLayerOverview: (
+    ctx: RequestContext,
+    id: string,
+  ) => Promise<{ parts: Uint8Array[]; version: string } | null>;
+  /** Keeps one part of a view being prepared; admins only. */
+  saveMapLayerOverviewPart: (
+    ctx: RequestContext,
+    id: string,
+    part: { version: string; partNo: number; features: Uint8Array; featureCount: number },
+  ) => Promise<MapLayerWrite>;
+  /**
+   * Publishes a prepared view once all its parts have arrived, with the layer locked and its
+   * colour field checked again in the same transaction, and drops the parts of other
+   * preparations. 'stale': the layer is coloured by another field now; 'incomplete': parts are
+   * missing.
+   */
+  publishMapLayerOverview: (
+    ctx: RequestContext,
+    id: string,
+    overview: {
+      version: string;
+      colourField: string | null;
+      partCount: number;
+      sourceCount: number;
+    },
+  ) => Promise<MapLayerWrite | { status: 'incomplete' }>;
 }
 
 type AsUser = <T>(
@@ -89,6 +120,12 @@ interface LayerRow {
   created_by_name: string | null;
   created_at: Date;
   version: string;
+  overview_field: string | null;
+  overview_features: number | null;
+  overview_source: number | null;
+  overview_by: string | null;
+  overview_at: Date | null;
+  overview_version: string | null;
 }
 
 /** Whether the person may change a layer and it is the version they saw (checked again by the update itself). */
@@ -118,9 +155,14 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           select l.id, l.name, l.kind, l.source_url, l.wms_layers, l.source_name, l.terms_url,
                  l.terms_note, l.colour, l.colour_field, l.colours, f.file_name, f.feature_count,
                  app.member_name(l.organization_id, l.created_by) as created_by_name,
-                 l.created_at, l.updated_at::text as version
+                 l.created_at, l.updated_at::text as version,
+                 o.colour_field as overview_field, o.feature_count as overview_features,
+                 o.source_count as overview_source,
+                 app.member_name(o.organization_id, o.prepared_by) as overview_by,
+                 o.prepared_at as overview_at, o.version::text as overview_version
           from app.map_layers l
           left join app.map_layer_files f on f.layer_id = l.id
+          left join app.map_layer_overviews o on o.layer_id = l.id
           where l.organization_id = ${organizationId} and l.archived_at is null
           order by l.created_at, l.id`;
         return rows.map((row) => ({
@@ -140,6 +182,17 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           createdByName: row.created_by_name ?? 'A former member',
           createdAt: row.created_at.toISOString(),
           version: row.version,
+          overview:
+            row.overview_at && row.overview_version
+              ? {
+                  colourField: row.overview_field,
+                  featureCount: row.overview_features ?? 0,
+                  sourceCount: row.overview_source ?? 0,
+                  preparedByName: row.overview_by ?? 'A former member',
+                  preparedAt: row.overview_at.toISOString(),
+                  version: row.overview_version,
+                }
+              : null,
         }));
       });
     },
@@ -147,7 +200,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
     getMapLayerSource(ctx, id) {
       return asUser(ctx, async (tx) => {
         const [row] = await tx<MapLayerSource[]>`
-          select id, kind, source_url as url, wms_layers as "wmsLayers", id_field as "idField",
+          select id, organization_id as "organizationId", kind, source_url as url,
+                 wms_layers as "wmsLayers", id_field as "idField",
                  colour_field as "colourField"
           from app.map_layers where id = ${id} and archived_at is null`;
         return row ?? null;
@@ -217,6 +271,88 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             updated_by = app.current_user_id()
           where id = ${id} and updated_at::text = ${version} and archived_at is null`;
         return updated.count === 1 ? { status: 'saved', id } : { status: 'stale' };
+      });
+    },
+
+    getMapLayerOverview(ctx, id) {
+      return asUser(ctx, async (tx) => {
+        const [overview] = await tx<{ version: string }[]>`
+          select o.version::text as version
+          from app.map_layer_overviews o
+          join app.map_layers l on l.id = o.layer_id
+          where o.layer_id = ${id} and l.archived_at is null`;
+        if (!overview) return null;
+        const parts = await tx<{ features: Uint8Array }[]>`
+          select features from app.map_layer_overview_parts
+          where layer_id = ${id} and version = ${overview.version}
+          order by part_no`;
+        return { parts: parts.map((p) => p.features), version: overview.version };
+      });
+    },
+
+    saveMapLayerOverviewPart(ctx, id, part) {
+      return asUser(ctx, async (tx): Promise<MapLayerWrite> => {
+        const [layer] = await tx<{ organization_id: string; allowed: boolean }[]>`
+          select organization_id, app.can_prepare_map_overview(id, organization_id) as allowed
+          from app.map_layers where id = ${id} and archived_at is null`;
+        if (!layer) return { status: 'not_found' };
+        if (!layer.allowed) return { status: 'forbidden' };
+        // Sent again (a retry), a part replaces itself.
+        await tx`
+          delete from app.map_layer_overview_parts
+          where layer_id = ${id} and version = ${part.version} and part_no = ${part.partNo}`;
+        await tx`
+          insert into app.map_layer_overview_parts (layer_id, organization_id, version, part_no,
+            features, feature_count, created_by)
+          values (${id}, ${layer.organization_id}, ${part.version}, ${part.partNo},
+            ${part.features}, ${part.featureCount}, app.current_user_id())`;
+        return { status: 'saved', id };
+      });
+    },
+
+    publishMapLayerOverview(ctx, id, overview) {
+      return asUser(ctx, async (tx) => {
+        const [allowed] = await tx<{ organization_id: string; allowed: boolean }[]>`
+          select organization_id, app.can_prepare_map_overview(id, organization_id) as allowed
+          from app.map_layers where id = ${id} and archived_at is null`;
+        if (!allowed) return { status: 'not_found' as const };
+        if (!allowed.allowed) return { status: 'forbidden' as const };
+        // The layer is locked until this commits, so a change of its colour field made meanwhile
+        // waits, and a view grouped by an older field never replaces the current one (Codex's
+        // review of 8e0fd95).
+        const [layer] = await tx<{ colour_field: string | null }[]>`
+          select colour_field from app.map_layers
+          where id = ${id} and archived_at is null
+          for update`;
+        if (!layer) return { status: 'not_found' as const };
+        if (layer.colour_field !== overview.colourField) return { status: 'stale' as const };
+        const [parts] = await tx<{ parts: number; features: number; numbered: boolean }[]>`
+          select count(*)::int as parts, coalesce(sum(feature_count), 0)::int as features,
+                 coalesce(max(part_no), -1) = count(*) - 1 as numbered
+          from app.map_layer_overview_parts
+          where layer_id = ${id} and version = ${overview.version}`;
+        if (
+          parts?.parts !== overview.partCount ||
+          !parts.numbered ||
+          parts.features < 1 ||
+          parts.features > 50000
+        ) {
+          return { status: 'incomplete' as const };
+        }
+        await tx`
+          insert into app.map_layer_overviews (layer_id, organization_id, version, colour_field,
+            part_count, feature_count, source_count, prepared_by)
+          values (${id}, ${allowed.organization_id}, ${overview.version}, ${overview.colourField},
+            ${parts.parts}, ${parts.features}, ${overview.sourceCount}, app.current_user_id())
+          on conflict (layer_id) do update set
+            version = excluded.version, colour_field = excluded.colour_field,
+            part_count = excluded.part_count, feature_count = excluded.feature_count,
+            source_count = excluded.source_count, prepared_by = excluded.prepared_by,
+            prepared_at = now()`;
+        await tx`
+          delete from app.map_layer_overview_parts
+          where layer_id = ${id} and version <> ${overview.version}`;
+        return { status: 'saved' as const, id };
       });
     },
   };

@@ -19,3 +19,4 @@ export * from './summaries';
 export * from './drafts';
 export * from './callbacks';
 export * from './mapLayers';
+export * from './mapOverview';
