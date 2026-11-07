@@ -264,14 +264,20 @@ export const updateMapLayerSchema = z.strictObject({
 });
 export type UpdateMapLayer = z.infer<typeof updateMapLayerSchema>;
 
-/** PUT /api/v1/map-layers/{id}/overview: a zoomed-out view prepared in the browser. */
-export const saveOverviewSchema = z.strictObject({
+/** PUT /api/v1/map-layers/{id}/overview/{version}/{part}: one part of a zoomed-out view. */
+export const overviewPartSchema = z.strictObject({
+  /** GeoJSON features; checked again by normalizeFeatureCollection. */
+  features: z.array(z.unknown()).min(1).max(50_000),
+});
+
+/** POST /api/v1/map-layers/{id}/overview/{version}/publish: every part has been sent. */
+export const publishOverviewSchema = z.strictObject({
   /** The field its lines are grouped by: the layer's colour field when it was read. */
   colourField: z.string().regex(FIELD).nullable(),
+  /** How many parts were sent, numbered from 0. */
+  partCount: z.number().int().min(1).max(64),
   /** How many pieces the service gave. */
   sourceCount: z.number().int().min(1).max(2_000_000),
-  /** A GeoJSON FeatureCollection; checked again by normalizeFeatureCollection. */
-  geojson: z.unknown(),
 });
 
 /** POST /api/v1/map-layers/inspect?organization_id=…: what a web address offers. */

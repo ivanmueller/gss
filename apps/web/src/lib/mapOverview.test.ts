@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { mockApi } from '../test/api';
+import { mockApi, type Call } from '../test/api';
 import { prepareOverview } from './mapOverview';
 
-// Preparing a zoomed-out view (F-134). The service's pages are stood in for by the decoder's
-// answers; every value is synthetic.
+// Preparing a zoomed-out view (F-134, Codex's review of 8e0fd95). The service's pages are stood
+// in for by the decoder's answers, keyed by the first byte the page route sends; synthetic.
 const pages = vi.hoisted(() => new Map<number, unknown>());
 vi.mock('arcgis-pbf-parser', () => ({
   default: (data: Uint8Array) => pages.get(data[0] ?? -1),
@@ -12,75 +12,123 @@ vi.mock('arcgis-pbf-parser', () => ({
 
 const LAYER = '00000000-0000-4000-8000-0000000a1a01';
 
-/** A page of `n` two-point lines in web Mercator metres, owner `owner`, starting at `x`. */
-function page(n: number, owner: string, x: number) {
+/** The longitude (three places) of the end of piece n - 1. */
+const lon = (n: number) =>
+  Math.round(((-11_000_000 + n * 5000) / 6378137) * (180 / Math.PI) * 1000) / 1000;
+
+/** Pieces `from` to `to` (not included): two-point lines end to end, owner `owner`. */
+function pieces(from: number, to: number, owner = 'AAA') {
   return {
     featureCollection: {
       type: 'FeatureCollection',
-      features: Array.from({ length: n }, (_, i) => ({
-        type: 'Feature',
-        properties: { OWNER: owner },
-        geometry: {
-          type: 'LineString',
-          coordinates: [
-            [x + i * 5000, 6_500_000],
-            [x + (i + 1) * 5000, 6_500_000],
-          ],
-        },
-      })),
+      features: Array.from({ length: to - from }, (_, k) => {
+        const i = from + k;
+        return {
+          type: 'Feature',
+          properties: { OWNER: owner },
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [-11_000_000 + i * 5000, 6_500_000],
+              [-11_000_000 + (i + 1) * 5000, 6_500_000],
+            ],
+          },
+        };
+      }),
     },
   };
 }
 
+/** The service: `count` pieces, giving at most `size` from any offset (`short` gives fewer). */
+function service(count: number, size: number, short: Record<number, number> = {}) {
+  const handlers: Record<string, (call: Call) => Response> = {
+    [`GET /map-layers/${LAYER}/count`]: () => Response.json({ count, pageSize: size }),
+    [`PUT /map-layers/${LAYER}/overview/__/__`]: () => Response.json({}),
+  };
+  for (let offset = 0; offset < count; offset += 1) {
+    const key = offset % 250;
+    const n = Math.min(short[offset] ?? size, count - offset);
+    pages.set(key, pieces(offset, offset + n));
+    handlers[`GET /map-layers/${LAYER}/pages/${String(offset)}`] = () => {
+      pages.set(key, pieces(offset, offset + n));
+      return new Response(new Uint8Array([key]));
+    };
+  }
+  return handlers;
+}
+
+/** Answers every part and the publishing. */
+function saving(handlers: Record<string, (call: Call) => Response>) {
+  vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-00000000f001');
+  const base = `/map-layers/${LAYER}/overview/00000000-0000-4000-8000-00000000f001`;
+  for (let i = 0; i < 64; i += 1) handlers[`PUT ${base}/${String(i)}`] = () => Response.json({});
+  handlers[`POST ${base}/publish`] = () => Response.json({ id: LAYER });
+  return mockApi(handlers);
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   pages.clear();
 });
 
 describe('prepareOverview', () => {
-  it('reads every page, joins each value’s pieces and saves the view', async () => {
-    pages.set(0, page(3, 'AAA', -11_000_000));
-    pages.set(1, page(3, 'AAA', -10_985_000));
-    pages.set(2, page(1, 'BBB', -10_000_000));
-    const calls = mockApi({
-      [`GET /map-layers/${LAYER}/count`]: () => Response.json({ count: 7, pageSize: 3 }),
-      [`GET /map-layers/${LAYER}/pages/0`]: () => new Response(new Uint8Array([0])),
-      [`GET /map-layers/${LAYER}/pages/3`]: () => new Response(new Uint8Array([1])),
-      [`GET /map-layers/${LAYER}/pages/6`]: () => new Response(new Uint8Array([2])),
-      [`PUT /map-layers/${LAYER}/overview`]: () => Response.json({ id: LAYER }),
-    });
+  it('reads every page, joins the pieces, sends the parts and publishes the view', async () => {
+    const calls = saving(service(7, 3));
     const progress = vi.fn();
     const done = await prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', progress);
-    expect(done).toEqual({ features: 2, pieces: 7 });
-    expect(progress).toHaveBeenLastCalledWith({ read: 7, total: 7 });
-    const saved = calls.find((c) => c.method === 'PUT')?.body as {
-      colourField: string;
-      sourceCount: number;
-      geojson: { features: { properties: unknown; geometry: { coordinates: unknown[] } }[] };
-    };
-    expect(saved.colourField).toBe('OWNER');
-    expect(saved.sourceCount).toBe(7);
-    expect(saved.geojson.features.map((f) => f.properties)).toEqual([
-      { OWNER: 'AAA' },
-      { OWNER: 'BBB' },
-    ]);
-    // The six AAA pieces meet end to end: one line.
-    expect(saved.geojson.features[0]?.geometry.coordinates).toHaveLength(1);
+    expect(done).toEqual({ features: 1, pieces: 7 });
+    expect(progress).toHaveBeenCalledWith({ stage: 'reading', done: 7, total: 7 });
+    expect(progress).toHaveBeenCalledWith({ stage: 'joining' });
+    const parts = calls.filter((c) => c.method === 'PUT');
+    expect(parts).toHaveLength(1);
+    const [feature] = (
+      parts[0]?.body as {
+        features: { properties: unknown; geometry: { coordinates: unknown[][] } }[];
+      }
+    ).features;
+    expect(feature?.properties).toEqual({ OWNER: 'AAA' });
+    // The seven pieces meet end to end: one line, from the first piece's start to the last's end.
+    expect(feature?.geometry.coordinates).toHaveLength(1);
+    expect(feature?.geometry.coordinates[0]?.at(-1)).toEqual([lon(7), expect.any(Number)]);
+    expect(calls.at(-1)).toMatchObject({
+      method: 'POST',
+      body: { colourField: 'OWNER', partCount: 1, sourceCount: 7 },
+    });
   });
 
-  it('says when the service gives nothing, saving nothing', async () => {
-    pages.set(0, { featureCollection: { type: 'FeatureCollection', features: [] } });
-    const calls = mockApi({
-      [`GET /map-layers/${LAYER}/count`]: () => Response.json({ count: 5, pageSize: 8000 }),
-      [`GET /map-layers/${LAYER}/pages/0`]: () => new Response(new Uint8Array([0])),
-    });
+  it('fills in a page that came back short, so every piece is read once', async () => {
+    // From offset 3 the service gives only 1 piece: 4 and 5 are read from where it stopped.
+    const calls = saving(service(9, 3, { 3: 1, 4: 1 }));
+    const done = await prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', vi.fn());
+    expect(done.pieces).toBe(9);
+    const asked = calls
+      .filter((c) => c.path.includes('/pages/'))
+      .map((c) => c.path.split('/').pop());
+    expect(asked).toEqual(expect.arrayContaining(['0', '3', '4', '5', '6']));
+    const [feature] = (
+      calls.find((c) => c.method === 'PUT')?.body as {
+        features: { geometry: { coordinates: unknown[][] } }[];
+      }
+    ).features;
+    expect(feature?.geometry.coordinates).toHaveLength(1);
+    expect(feature?.geometry.coordinates[0]?.at(-1)).toEqual([lon(9), expect.any(Number)]);
+  });
+
+  it('refuses to publish when the service stops giving pieces', async () => {
+    const handlers = service(7, 3, { 3: 0 });
+    const calls = saving(handlers);
+    await expect(
+      prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', vi.fn()),
+    ).rejects.toThrow('The map service stopped giving pieces at 3 of 7. Try again.');
+    expect(calls.some((c) => c.method === 'PUT' || c.method === 'POST')).toBe(false);
+  });
+
+  it('says when the service gives nothing, or no lines', async () => {
+    saving(service(5, 0));
     await expect(
       prepareOverview({ id: LAYER, colourField: null }, 'token', vi.fn()),
     ).rejects.toThrow('The map service gave nothing to draw.');
-    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
-  });
-
-  it('refuses a layer without lines', async () => {
     pages.set(0, {
       featureCollection: {
         type: 'FeatureCollection',
@@ -89,7 +137,7 @@ describe('prepareOverview', () => {
         ],
       },
     });
-    mockApi({
+    saving({
       [`GET /map-layers/${LAYER}/count`]: () => Response.json({ count: 1, pageSize: 8000 }),
       [`GET /map-layers/${LAYER}/pages/0`]: () => new Response(new Uint8Array([0])),
     });

@@ -1,10 +1,11 @@
--- A map layer's zoomed-out view (F-134): who may prepare and read it, cross-organization
--- denials, the kinds of layer that take one, replacing it, and the audit trail. Runs in one
+-- A map layer's zoomed-out view (F-134): who may add its parts and publish it, who reads them,
+-- cross-organization denials, the kinds of layer that take one, replacing and dropping parts,
+-- and the audit trail. Runs in one
 -- transaction that is rolled back. All fixtures are synthetic.
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(33);
 
 insert into auth.users (id, email) values
   ('00000000-0000-4000-8000-0000000022aa', 'adam@example.test'),
@@ -77,13 +78,22 @@ begin
 end
 $fn$;
 
--- Prepares a view of `layer` in `org` as `uid`, in that user's name.
-create function pg_temp.prepare(layer text, org text, uid text, body text default '{"type":"FeatureCollection","features":[]}')
+-- Adds part `n` of preparation `v` of `layer` in `org` as `uid`.
+create function pg_temp.part(layer text, org text, uid text, v text, n int default 0, body text default '[{"type":"Feature"}]')
 returns text
 language sql as $fn$
-  select format($$insert into app.map_layer_overviews (layer_id, organization_id, geojson,
-      colour_field, feature_count, source_count, prepared_by)
-    values (%L, %L, convert_to(%L, 'UTF8'), 'OWNER', 1, 10, %L)$$, layer, org, body, uid)
+  select format($$insert into app.map_layer_overview_parts (layer_id, organization_id, version,
+      part_no, features, feature_count, created_by)
+    values (%L, %L, %L, %s, convert_to(%L, 'UTF8'), 1, %L)$$, layer, org, v, n, body, uid)
+$fn$;
+
+-- Publishes preparation `v` of `layer` in `org` as `uid`.
+create function pg_temp.publish(layer text, org text, uid text, v text)
+returns text
+language sql as $fn$
+  select format($$insert into app.map_layer_overviews (layer_id, organization_id, version,
+      colour_field, part_count, feature_count, source_count, prepared_by)
+    values (%L, %L, %L, 'OWNER', 1, 1, 10, %L)$$, layer, org, v, uid)
 $fn$;
 
 \set adam '''00000000-0000-4000-8000-0000000022aa'''
@@ -96,72 +106,94 @@ $fn$;
 \set soil '''00000000-0000-4000-8000-0000000a1a02'''
 \set old '''00000000-0000-4000-8000-0000000a1a03'''
 \set brail '''00000000-0000-4000-8000-0000000b1b01'''
+\set v1 '''00000000-0000-4000-8000-00000000f001'''
+\set v2 '''00000000-0000-4000-8000-00000000f002'''
 
-select ok((select relrowsecurity from pg_class where oid = 'app.map_layer_overviews'::regclass),
-  'map_layer_overviews has row level security');
-select ok(not has_table_privilege('anon', 'app.map_layer_overviews', 'select')
+select ok((select relrowsecurity from pg_class where oid = 'app.map_layer_overviews'::regclass)
+  and (select relrowsecurity from pg_class where oid = 'app.map_layer_overview_parts'::regclass),
+  'views and their parts have row level security');
+select ok(not has_table_privilege('anon', 'app.map_layer_overview_parts', 'select')
   and not has_table_privilege('authenticated', 'app.map_layer_overviews', 'select')
-  and not has_table_privilege('service_role', 'app.map_layer_overviews', 'select'),
-  'the Supabase API roles cannot read zoomed-out views');
+  and not has_table_privilege('service_role', 'app.map_layer_overview_parts', 'select'),
+  'the Supabase API roles cannot read views or parts');
 select ok(not has_table_privilege('app_api', 'app.map_layer_overviews', 'delete')
+  and not has_table_privilege('app_api', 'app.map_layer_overview_parts', 'update')
   and not has_column_privilege('app_api', 'app.map_layer_overviews', 'layer_id', 'update')
   and not has_column_privilege('app_api', 'app.map_layer_overviews', 'organization_id', 'update'),
-  'app_api cannot delete a view or move it to another layer or organization');
+  'app_api cannot delete a view, change a part, or move a view to another layer or organization');
 select ok(not has_function_privilege('anon', 'app.can_prepare_map_overview(uuid, uuid)', 'execute')
   and not has_function_privilege('authenticated', 'app.can_prepare_map_overview(uuid, uuid)', 'execute'),
   'the Supabase API roles cannot call can_prepare_map_overview');
 
--- Who may prepare one.
-select is(pg_temp.api_run(:olivia, pg_temp.prepare(:rail, :orga, :olivia)), '42501',
-  'operations cannot prepare a view');
-select is(pg_temp.api_run(:victor, pg_temp.prepare(:rail, :orga, :victor)), '42501',
-  'a viewer cannot prepare a view');
-select is(pg_temp.api_run(:bob, pg_temp.prepare(:rail, :orga, :bob)), '42501',
-  'another organization''s admin cannot prepare this organization''s view');
-select is(pg_temp.api_run(:bob, pg_temp.prepare(:rail, :orgb, :bob)), '42501',
+-- Who may add parts.
+select is(pg_temp.api_run(:olivia, pg_temp.part(:rail, :orga, :olivia, :v1)), '42501',
+  'operations cannot add a part');
+select is(pg_temp.api_run(:victor, pg_temp.part(:rail, :orga, :victor, :v1)), '42501',
+  'a viewer cannot add a part');
+select is(pg_temp.api_run(:bob, pg_temp.part(:rail, :orga, :bob, :v1)), '42501',
+  'another organization''s admin cannot add a part to this organization''s layer');
+select is(pg_temp.api_run(:bob, pg_temp.part(:rail, :orgb, :bob, :v1)), '42501',
   'nor pass it off as their own organization''s');
-select is(pg_temp.api_run(:adam, pg_temp.prepare(:rail, :orga, :victor)), '42501',
-  'an admin prepares a view only in their own name');
-select is(pg_temp.api_run(:adam, pg_temp.prepare(:soil, :orga, :adam)), '42501',
+select is(pg_temp.api_run(:adam, pg_temp.part(:rail, :orga, :victor, :v1)), '42501',
+  'an admin adds a part only in their own name');
+select is(pg_temp.api_run(:adam, pg_temp.part(:soil, :orga, :adam, :v1)), '42501',
   'a pictures layer takes no view');
-select is(pg_temp.api_run(:adam, pg_temp.prepare(:old, :orga, :adam)), '42501',
+select is(pg_temp.api_run(:adam, pg_temp.part(:old, :orga, :adam, :v1)), '42501',
   'a removed layer takes no view');
-select is(pg_temp.api_run(:adam, pg_temp.prepare(:rail, :orga, :adam, '[1]')), '23514',
-  'a view must be a JSON object');
-select is(pg_temp.api_run(:adam, pg_temp.prepare(:rail, :orga, :adam)), 'ok 1',
-  'an admin prepares a view of a live lines layer');
-select is(pg_temp.api_run(:adam, pg_temp.prepare(:rail, :orga, :adam)), '23505',
-  'a layer has one view');
-select is(pg_temp.api_run(:bob, pg_temp.prepare(:brail, :orgb, :bob)), 'ok 1',
-  'org B''s admin prepares org B''s view');
+select is(pg_temp.api_run(:adam, pg_temp.part(:rail, :orga, :adam, :v1, 0, '{"a":1}')), '23514',
+  'a part must be a JSON array');
+select is(pg_temp.api_run(:adam, pg_temp.part(:rail, :orga, :adam, :v1, 64)), '23514',
+  'a view has at most 64 parts');
+select is(pg_temp.api_run(:adam, pg_temp.part(:rail, :orga, :adam, :v1)), 'ok 1',
+  'an admin adds a part of a live lines layer''s view');
+select is(pg_temp.api_run(:adam, pg_temp.part(:rail, :orga, :adam, :v1)), '23505',
+  'each part of a preparation once');
 
--- Who sees it.
+-- Who may publish.
+select is(pg_temp.api_run(:olivia, pg_temp.publish(:rail, :orga, :olivia, :v1)), '42501',
+  'operations cannot publish a view');
+select is(pg_temp.api_run(:bob, pg_temp.publish(:rail, :orga, :bob, :v1)), '42501',
+  'another organization''s admin cannot publish this organization''s view');
+select is(pg_temp.api_run(:adam, pg_temp.publish(:soil, :orga, :adam, :v1)), '42501',
+  'a pictures layer has no view to publish');
+select is(pg_temp.api_run(:adam, pg_temp.publish(:rail, :orga, :adam, :v1)), 'ok 1',
+  'an admin publishes it');
+select is(pg_temp.api_run(:adam, pg_temp.publish(:rail, :orga, :adam, :v2)), '23505',
+  'a layer has one published view');
+select is(pg_temp.api_run(:bob, pg_temp.part(:brail, :orgb, :bob, :v1)), 'ok 1',
+  'org B''s admin adds a part of org B''s view');
+
+-- Who reads them.
+select is(pg_temp.api_count(:victor, 'select 1 from app.map_layer_overview_parts'), 1,
+  'a viewer reads their organization''s parts and not another''s');
 select is(pg_temp.api_count(:victor, 'select 1 from app.map_layer_overviews'), 1,
-  'a viewer reads their organization''s view and not another''s');
+  'a viewer reads their organization''s view');
 select is(pg_temp.api_count(:bob, format('select 1 from app.map_layer_overviews where layer_id = %L', :rail)), 0,
   'another organization''s admin does not read it');
-select is(pg_temp.api_count(null, 'select 1 from app.map_layer_overviews'), 0,
+select is(pg_temp.api_count(null, 'select 1 from app.map_layer_overview_parts'), 0,
   'nobody signed in reads nothing');
 
--- Replacing it.
-select is(pg_temp.api_run(:adam, format($$update app.map_layer_overviews set
-    geojson = convert_to('{"type":"FeatureCollection","features":[1]}', 'UTF8'), feature_count = 2,
-    prepared_by = %L, prepared_at = now() where layer_id = %L$$, :adam, :rail)), 'ok 1',
+-- Replacing it, and dropping parts.
+select is(pg_temp.api_run(:adam, pg_temp.part(:rail, :orga, :adam, :v2)), 'ok 1',
   'an admin prepares it again');
-select is(pg_temp.api_run(:olivia, format($$update app.map_layer_overviews set feature_count = 3,
-    prepared_by = %L where layer_id = %L$$, :olivia, :rail)), 'ok 0',
-  'operations cannot replace it');
-select is(pg_temp.api_run(:bob, format($$update app.map_layer_overviews set feature_count = 3,
-    prepared_by = %L where layer_id = %L$$, :bob, :rail)), 'ok 0',
-  'another organization''s admin cannot replace it');
+select is(pg_temp.api_run(:adam, format($$update app.map_layer_overviews set version = %L,
+    prepared_by = %L, prepared_at = now() where layer_id = %L$$, :v2, :adam, :rail)), 'ok 1',
+  'and publishes the new preparation');
+select is(pg_temp.api_run(:olivia, format($$update app.map_layer_overviews set version = %L,
+    prepared_by = %L where layer_id = %L$$, :v1, :olivia, :rail)), 'ok 0',
+  'operations cannot publish another');
+select is(pg_temp.api_run(:bob, format($$delete from app.map_layer_overview_parts where layer_id = %L$$, :rail)),
+  'ok 0', 'another organization''s admin cannot drop its parts');
+select is(pg_temp.api_run(:adam, format($$delete from app.map_layer_overview_parts where layer_id = %L and version = %L$$, :rail, :v1)),
+  'ok 1', 'an admin drops the earlier preparation''s parts');
 select is(pg_temp.api_run(:adam, format($$delete from app.map_layer_overviews where layer_id = %L$$, :rail)),
-  '42501', 'a view cannot be deleted');
+  '42501', 'a published view cannot be deleted');
 
 -- Audit trail.
 select ok(exists (select 1 from app.audit_events where entity = 'map_layer_overviews' and action = 'insert'
-  and organization_id = :orga::uuid), 'preparing a view is audited');
+  and organization_id = :orga::uuid), 'publishing a view is audited');
 select ok(exists (select 1 from app.audit_events where entity = 'map_layer_overviews' and action = 'update'
-  and 'geojson' = any(changed_fields)), 'preparing it again is audited');
+  and 'version' = any(changed_fields)), 'publishing it again is audited');
 
 select * from finish();
 rollback;

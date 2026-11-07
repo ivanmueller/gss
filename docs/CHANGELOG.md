@@ -5,7 +5,8 @@
 - `docs/HANDOFF.md`: ivanmueller/gss#173, #174 and #175 with their CI and Deploy staging runs; Dependabot's failed update jobs explained.
 - `docs/FEATURES.md`: F-107 live, check pending (F-214); F-133, F-134 and F-135 added and in progress; D-01 closed by Dependabot.
 - `docs/DECISIONS.md`: the Layers panel, the zoomed-out view and why, the colour of anything else, Edit, and the Worker's computing time to watch.
-- `docs/DATA_MODEL.md`, `docs/API.md`: `map_layer_overviews` and its routes.
+- `docs/DATA_MODEL.md`, `docs/API.md`: `map_layer_overviews`, `map_layer_overview_parts` and their routes.
+- `docs/DECISIONS.md`: Codex's review of `8e0fd95` (four P2, fixed); views sent in parts for Cloudflare's free plan. `docs/FEATURES.md`: F-136 offered (large file layers on the free plan).
 
 ## 2026-11-07 — Map layers (F-107)
 

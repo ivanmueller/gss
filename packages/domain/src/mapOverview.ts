@@ -58,26 +58,35 @@ export function joinLines(lines: readonly MercatorLine[]): MercatorLine[] {
     const start = lines[i];
     if (used[i] || !start || start.length < 2) continue;
     used[i] = 1;
-    const chain: MercatorLine = start.slice();
     // Forward from its end, then backward from its start; a chain always has 2 points or more.
+    // Points are only ever appended, and the pieces found backward are put in front once at the
+    // end, so a long chain is joined in time proportional to its length (Codex's review of
+    // 8e0fd95: adding each piece to the front of a growing chain took 21 s for 320,000 pieces).
+    const chain: MercatorLine = start.slice();
     let end = chain[chain.length - 1] ?? [0, 0];
     for (let j = next(end); j >= 0; j = next(end)) {
       used[j] = 1;
       const line = lines[j] ?? [];
       const piece = line[0] && endKey(line[0]) === endKey(end) ? line : line.slice().reverse();
-      chain.push(...piece.slice(1));
+      for (let k = 1; k < piece.length; k += 1) chain.push(piece[k] ?? end);
       end = chain[chain.length - 1] ?? end;
     }
+    const before: MercatorLine[] = [];
     let first = chain[0] ?? [0, 0];
     for (let j = next(first); j >= 0; j = next(first)) {
       used[j] = 1;
       const line = lines[j] ?? [];
       const last = line[line.length - 1];
       const piece = last && endKey(last) === endKey(first) ? line : line.slice().reverse();
-      chain.unshift(...piece.slice(0, -1));
-      first = chain[0] ?? first;
+      before.push(piece.slice(0, -1));
+      first = piece[0] ?? first;
     }
-    joined.push(chain);
+    const whole: MercatorLine = [];
+    for (let k = before.length - 1; k >= 0; k -= 1) {
+      for (const point of before[k] ?? []) whole.push(point);
+    }
+    for (const point of chain) whole.push(point);
+    joined.push(whole);
   }
   return joined;
 }
@@ -146,4 +155,66 @@ export function buildOverview(
     });
   }
   return { type: 'FeatureCollection', features };
+}
+
+/** The most a part of a view may weigh as JSON, so the Worker checks it within Cloudflare's free plan. */
+export const OVERVIEW_PART_BYTES = 96 * 1024;
+/** The most parts a view may have (about 6 MB). */
+export const MAX_OVERVIEW_PARTS = 64;
+
+type OverviewFeature = LayerFeatureCollection['features'][number];
+
+/**
+ * A view split into parts of at most about `maxBytes` of JSON each, in order: features are kept
+ * whole when they fit, and a big feature's lines are shared out over several parts under the
+ * same value. A single line bigger than a part goes in a part of its own.
+ */
+export function splitOverview(
+  collection: LayerFeatureCollection,
+  maxBytes = OVERVIEW_PART_BYTES,
+): OverviewFeature[][] {
+  const parts: OverviewFeature[][] = [];
+  let part: OverviewFeature[] = [];
+  let size = 2;
+  const flush = () => {
+    if (part.length > 0) parts.push(part);
+    part = [];
+    size = 2;
+  };
+  for (const feature of collection.features) {
+    const whole = JSON.stringify(feature).length + 1;
+    if (whole <= maxBytes - 2) {
+      if (size + whole > maxBytes) flush();
+      part.push(feature);
+      size += whole;
+      continue;
+    }
+    // Too big for one part: its lines, shared out under the same value.
+    const lines = (feature.geometry.coordinates ?? []) as unknown[];
+    const shell =
+      JSON.stringify({ ...feature, geometry: { type: 'MultiLineString', coordinates: [] } })
+        .length + 1;
+    let taken: unknown[] = [];
+    let takenSize = shell;
+    const add = () => {
+      if (taken.length === 0) return;
+      if (size + takenSize > maxBytes) flush();
+      part.push({ ...feature, geometry: { type: 'MultiLineString', coordinates: taken } });
+      size += takenSize;
+      taken = [];
+      takenSize = shell;
+    };
+    for (const line of lines) {
+      const lineSize = JSON.stringify(line).length + 1;
+      if (takenSize + lineSize > maxBytes - 2) {
+        add();
+        flush();
+      }
+      taken.push(line);
+      takenSize += lineSize;
+    }
+    add();
+  }
+  flush();
+  return parts;
 }

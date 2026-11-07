@@ -14,6 +14,7 @@ const app = createApp(openDatabase);
 
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}`, 'Content-Type': 'application/json' };
 const LAYER = '00000000-0000-4000-8000-0000000a1a01';
+const VERSION = '00000000-0000-4000-8000-00000000f001';
 const SERVICE = 'https://services.example.com/rest/services/Rail/FeatureServer/0';
 const DESCRIPTION = {
   name: 'Synthetic Rail Lines',
@@ -571,17 +572,22 @@ describe('a zoomed-out view', () => {
     db.isOrgAdmin.mockResolvedValue(false);
     expect((await send(`/${LAYER}/count`, 'GET')).status).toBe(403);
     expect((await send(`/${LAYER}/pages/0`, 'GET')).status).toBe(403);
+    db.saveMapLayerOverviewPart.mockResolvedValueOnce({ status: 'forbidden' });
+    expect(
+      (await send(`/${LAYER}/overview/${VERSION}/0`, 'PUT', { features: overview.features }))
+        .status,
+    ).toBe(403);
+    db.publishMapLayerOverview.mockResolvedValueOnce({ status: 'forbidden' });
     expect(
       (
-        await send(`/${LAYER}/overview`, 'PUT', {
+        await send(`/${LAYER}/overview/${VERSION}/publish`, 'POST', {
           colourField: 'OWNER',
+          partCount: 1,
           sourceCount: 1,
-          geojson: overview,
         })
       ).status,
     ).toBe(403);
     expect(serviceCalls).toEqual([]);
-    expect(db.saveMapLayerOverview).not.toHaveBeenCalled();
   });
 
   it('is only for live lines layers with an id field', async () => {
@@ -612,50 +618,71 @@ describe('a zoomed-out view', () => {
     expect((await send(`/${LAYER}/pages/1.5`, 'GET')).status).toBe(404);
   });
 
-  it('stores a view grouped by the layer’s colour field, checked again', async () => {
-    db.getMapLayerSource.mockResolvedValueOnce(source);
-    const res = await send(`/${LAYER}/overview`, 'PUT', {
-      colourField: 'OWNER',
-      sourceCount: 302774,
-      geojson: overview,
+  it('keeps a part of a view, checked again', async () => {
+    const res = await send(`/${LAYER}/overview/${VERSION}/3`, 'PUT', {
+      features: overview.features,
     });
     expect(res.status).toBe(200);
-    const saved = db.saveMapLayerOverview.mock.calls[0]?.[2];
-    expect(saved).toMatchObject({ colourField: 'OWNER', featureCount: 1, sourceCount: 302774 });
-    const kept = JSON.parse(new TextDecoder().decode(saved?.geojson)) as {
-      features: { properties: unknown }[];
-    };
-    expect(kept.features[0]?.properties).toEqual({
-      OWNER: 'AAA',
-    });
+    const [, layer, part] = db.saveMapLayerOverviewPart.mock.calls[0] ?? [];
+    expect(layer).toBe(LAYER);
+    expect(part).toMatchObject({ version: VERSION, partNo: 3, featureCount: 1 });
+    const kept = JSON.parse(new TextDecoder().decode(part?.features)) as { properties: unknown }[];
+    expect(kept[0]?.properties).toEqual({ OWNER: 'AAA' });
   });
 
-  it('refuses a view grouped by another field than the layer’s colours, or that is not GeoJSON', async () => {
-    db.getMapLayerSource.mockResolvedValueOnce(source);
-    const stale = await send(`/${LAYER}/overview`, 'PUT', {
-      colourField: 'TRACKS',
-      sourceCount: 1,
-      geojson: overview,
-    });
-    expect(stale.status).toBe(409);
-    const bad = await send(`/${LAYER}/overview`, 'PUT', {
-      colourField: 'OWNER',
-      sourceCount: 1,
-      geojson: { type: 'FeatureCollection', features: [] },
-    });
-    expect(bad.status).toBe(422);
-    expect(db.saveMapLayerOverview).not.toHaveBeenCalled();
+  it('refuses a part that is not GeoJSON, too big, or misnumbered', async () => {
+    expect(
+      (await send(`/${LAYER}/overview/${VERSION}/0`, 'PUT', { features: [{ type: 'Feature' }] }))
+        .status,
+    ).toBe(422);
+    expect((await send(`/${LAYER}/overview/${VERSION}/64`, 'PUT', { features: [] })).status).toBe(
+      404,
+    );
+    expect((await send(`/${LAYER}/overview/not-a-uuid/0`, 'PUT', { features: [] })).status).toBe(
+      404,
+    );
+    const big = await app.request(
+      `/api/v1/map-layers/${LAYER}/overview/${VERSION}/0`,
+      { method: 'PUT', headers: AUTH, body: JSON.stringify({ features: ['x'.repeat(200_000)] }) },
+      ENV,
+    );
+    expect(big.status).toBe(413);
+    expect(db.saveMapLayerOverviewPart).not.toHaveBeenCalled();
   });
 
-  it('sends the view to every member with its checksum', async () => {
+  it('publishes a view, or says why not', async () => {
+    const publish = () =>
+      send(`/${LAYER}/overview/${VERSION}/publish`, 'POST', {
+        colourField: 'OWNER',
+        partCount: 2,
+        sourceCount: 302774,
+      });
+    expect((await publish()).status).toBe(200);
+    expect(db.publishMapLayerOverview.mock.calls[0]?.slice(1)).toEqual([
+      LAYER,
+      { version: VERSION, colourField: 'OWNER', partCount: 2, sourceCount: 302774 },
+    ]);
+    db.publishMapLayerOverview.mockResolvedValueOnce({ status: 'stale' });
+    expect((await publish()).status).toBe(409);
+    db.publishMapLayerOverview.mockResolvedValueOnce({ status: 'incomplete' });
+    const incomplete = await publish();
+    expect(incomplete.status).toBe(409);
+    expect((await incomplete.json<{ error: { code: string } }>()).error.code).toBe('INCOMPLETE');
+  });
+
+  it('sends the published view to every member as one document', async () => {
+    const encode = (features: unknown[]) => new TextEncoder().encode(JSON.stringify(features));
     db.getMapLayerOverview.mockResolvedValueOnce({
-      geojson: new TextEncoder().encode(JSON.stringify(overview)),
-      sha256: 'b'.repeat(64),
+      parts: [encode(overview.features), encode(overview.features)],
+      version: VERSION,
     });
     const res = await send(`/${LAYER}/overview`, 'GET');
     expect(res.status).toBe(200);
-    expect(res.headers.get('etag')).toBe(`"${'b'.repeat(64)}"`);
-    expect(await res.json()).toEqual(overview);
+    expect(res.headers.get('etag')).toBe(`"${VERSION}"`);
+    expect(await res.json()).toEqual({
+      type: 'FeatureCollection',
+      features: [...overview.features, ...overview.features],
+    });
     expect((await send(`/${LAYER}/overview`, 'GET')).status).toBe(404);
   });
 

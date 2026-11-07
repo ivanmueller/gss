@@ -388,6 +388,39 @@ describe('the Layers button', () => {
     expect(within(card).queryByText('3')).toBeNull();
   });
 
+  it('shows the railroad of a line clicked in the zoomed-out view (Codex’s review of 8e0fd95)', async () => {
+    mockApi({ [LIST]: () => Response.json({ layers: [rail] }) });
+    const user = userEvent.setup();
+    function Overview() {
+      const state = useMapLayers(SESSION);
+      return (
+        <>
+          <MapLayersButton state={state} />
+          <MapLayersPanel state={state} />
+          <button
+            type="button"
+            onClick={() => {
+              state.setPicked({ layerId: RAIL, properties: { OWNER: 'R3' } });
+            }}
+          >
+            Click a line
+          </button>
+          <PickedFeatureCard state={state} token={SESSION.token} />
+        </>
+      );
+    }
+    const calls = mockApi({ [LIST]: () => Response.json({ layers: [rail] }) });
+    render(<Overview />);
+    await user.click(await screen.findByRole('button', { name: 'Layers' }));
+    await user.click(await screen.findByRole('switch', { name: 'Synthetic rail lines' }));
+    await user.click(screen.getByRole('button', { name: 'Click a line' }));
+    const card = screen.getByRole('region', { name: 'Map layer details' });
+    expect(within(card).getByText('OWNER')).toBeVisible();
+    expect(within(card).getByText('R3')).toBeVisible();
+    expect(within(card).queryByText('Loading…')).toBeNull();
+    expect(calls.some((c) => c.path.includes('/details/'))).toBe(false);
+  });
+
   it('says when there are no layers yet', async () => {
     mockApi({ [LIST]: () => Response.json({ layers: [] }) });
     const user = userEvent.setup();
@@ -430,8 +463,12 @@ describe('Team → Map layers', () => {
       },
     });
     prepare.mockImplementation(
-      (_layer: unknown, _token: string, progress: (p: { read: number; total: number }) => void) => {
-        progress({ read: 8000, total: 302774 });
+      (
+        _layer: unknown,
+        _token: string,
+        progress: (p: { stage: 'reading'; done: number; total: number }) => void,
+      ) => {
+        progress({ stage: 'reading', done: 8000, total: 302774 });
         return Promise.resolve({ features: 2, pieces: 302774 });
       },
     );

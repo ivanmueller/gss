@@ -53,9 +53,14 @@ async function prepareWithProgress(
 ): Promise<string | null> {
   say('Preparing the zoomed-out view…');
   try {
-    await prepareOverview(layer, token, ({ read, total }) => {
+    await prepareOverview(layer, token, (progress) => {
+      const n = (value: number) => value.toLocaleString('en-CA');
       say(
-        `Preparing the zoomed-out view: ${read.toLocaleString('en-CA')} of ${total.toLocaleString('en-CA')} pieces read…`,
+        progress.stage === 'reading'
+          ? `Preparing the zoomed-out view: ${n(progress.done)} of ${n(progress.total)} pieces read…`
+          : progress.stage === 'joining'
+            ? 'Preparing the zoomed-out view: joining the lines…'
+            : `Preparing the zoomed-out view: saving part ${n(progress.done)} of ${n(progress.total)}…`,
       );
     });
     return null;

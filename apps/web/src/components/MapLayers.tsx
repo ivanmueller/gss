@@ -421,7 +421,11 @@ export function PickedFeatureCard({
   const { picked, setPicked } = state;
   const layer = picked ? state.layers.find((l) => l.id === picked.layerId) : undefined;
   const objectId = picked?.properties[OBJECT_ID];
-  const live = layer?.kind === 'arcgis_features';
+  // A live feature has its id and its details are asked for; a line of a zoomed-out view (no
+  // id) shows the field it carries (Codex's review of 8e0fd95).
+  const live =
+    layer?.kind === 'arcgis_features' &&
+    (typeof objectId === 'number' || typeof objectId === 'string');
   const [details, setDetails] = useState<{ key: string; fields: Fields | 'failed' } | null>(null);
   const key = `${picked?.layerId ?? ''}/${String(objectId)}`;
 

@@ -57,6 +57,7 @@ afterAll(async () => {
   await admin.begin(async (tx) => {
     await tx`set local session_replication_role = replica`;
     await tx`delete from app.map_layer_overviews where organization_id in (${ORG_A}, ${ORG_B})`;
+    await tx`delete from app.map_layer_overview_parts where organization_id in (${ORG_A}, ${ORG_B})`;
     await tx`delete from app.map_layer_files where organization_id in (${ORG_A}, ${ORG_B})`;
     await tx`delete from app.map_layers where organization_id in (${ORG_A}, ${ORG_B})`;
     await tx`delete from app.audit_events where organization_id in (${ORG_A}, ${ORG_B})`;
@@ -177,17 +178,18 @@ describe('map layers as app_api', () => {
     }
   });
 
-  it('keeps a zoomed-out view for a live lines layer, prepared by an admin, read by members only', async () => {
+  it('publishes a zoomed-out view only when complete and grouped by the layer’s field now', async () => {
     const db = postgresDatabase(API_URL);
     try {
       const added = await db.createMapLayer(as(ADAM), ORG_A, SERVICE);
       if (added.status !== 'saved') throw new Error('not added');
-      const view = (n: number) => ({
-        colourField: 'OWNER',
-        geojson: new TextEncoder().encode(
-          JSON.stringify({
-            type: 'FeatureCollection',
-            features: Array.from({ length: n }, () => ({
+      const part = (version: string, partNo: number) => ({
+        version,
+        partNo,
+        featureCount: 1,
+        features: new TextEncoder().encode(
+          JSON.stringify([
+            {
               type: 'Feature',
               geometry: {
                 type: 'LineString',
@@ -196,39 +198,73 @@ describe('map layers as app_api', () => {
                   [-104, 50],
                 ],
               },
-              properties: { OWNER: 'AAA' },
-            })),
-          }),
+              properties: { OWNER: `P${String(partNo)}` },
+            },
+          ]),
         ),
-        featureCount: n,
-        sourceCount: 10,
       });
-      expect(await db.saveMapLayerOverview(as(VERA), added.id, view(1))).toEqual({
+      const v1 = crypto.randomUUID();
+      const v2 = crypto.randomUUID();
+      expect(await db.saveMapLayerOverviewPart(as(VERA), added.id, part(v1, 0))).toEqual({
         status: 'forbidden',
       });
-      expect(await db.saveMapLayerOverview(as(BOB), added.id, view(1))).toEqual({
+      expect(await db.saveMapLayerOverviewPart(as(BOB), added.id, part(v1, 0))).toEqual({
         status: 'not_found',
       });
-      expect(await db.saveMapLayerOverview(as(ADAM), added.id, view(1))).toEqual({
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 0))).toMatchObject({
         status: 'saved',
-        id: added.id,
       });
-      expect(await db.saveMapLayerOverview(as(ADAM), added.id, view(2))).toEqual({
+      // Sent again, a part replaces itself.
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 0))).toMatchObject({
         status: 'saved',
-        id: added.id,
       });
+      const publish = (who: string, version: string, colourField: string | null, partCount = 2) =>
+        db.publishMapLayerOverview(as(who), added.id, {
+          version,
+          colourField,
+          partCount,
+          sourceCount: 10,
+        });
+      expect(await publish(ADAM, v1, 'OWNER')).toEqual({ status: 'incomplete' });
+      await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 1));
+      expect(await publish(VERA, v1, 'OWNER')).toEqual({ status: 'forbidden' });
+      expect(await publish(ADAM, v1, 'OWNER')).toEqual({ status: 'saved', id: added.id });
+
       const read = await db.getMapLayerOverview(as(VERA), added.id);
-      const kept = JSON.parse(new TextDecoder().decode(read?.geojson)) as { features: unknown[] };
-      expect(kept.features).toHaveLength(2);
+      expect(read?.version).toBe(v1);
+      expect(read?.parts.map((p) => new TextDecoder().decode(p))).toHaveLength(2);
       expect(await db.getMapLayerOverview(as(BOB), added.id)).toBeNull();
-      const layer = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
-      expect(layer?.overview).toMatchObject({
+      const listed = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
+      expect(listed?.overview).toMatchObject({
         colourField: 'OWNER',
         featureCount: 2,
         sourceCount: 10,
         preparedByName: 'adam.layers@example.test',
-        version: read?.sha256,
+        version: v1,
       });
+
+      // Codex's review of 8e0fd95: another admin colours the layer by TRACKS; a view grouped by
+      // OWNER, prepared before that, can no longer be published over the current one.
+      const version = listed?.version ?? '';
+      await db.updateMapLayer(as(ADAM), added.id, version, {
+        name: SERVICE.name,
+        wmsLayers: null,
+        sourceName: SERVICE.sourceName,
+        termsUrl: SERVICE.termsUrl,
+        termsNote: SERVICE.termsNote,
+        colour: '#9ca3af',
+        colourField: 'TRACKS',
+        colours: [['1', '#e6194b']],
+      });
+      await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v2, 0));
+      expect(await publish(ADAM, v2, 'OWNER', 1)).toEqual({ status: 'stale' });
+      expect(await publish(ADAM, v2, 'TRACKS', 1)).toEqual({ status: 'saved', id: added.id });
+      expect((await db.getMapLayerOverview(as(VERA), added.id))?.version).toBe(v2);
+      // The earlier preparation's parts are dropped.
+      const [left] = await admin<{ n: number }[]>`
+        select count(*)::int as n from app.map_layer_overview_parts
+        where layer_id = ${added.id} and version = ${v1}`;
+      expect(left?.n).toBe(0);
     } finally {
       await db.close();
     }
