@@ -253,6 +253,15 @@ Proposed by the implementing agent; the owner accepts or reverses each one.
 - **Data rights first:** a layer is shown only once its owner and terms of use are recorded here (MASTER_PROJECT_SPECIFICATION.md §15 item 7). A layer that needs an ArcGIS sign-in is fetched by the Worker with a Worker secret; no ArcGIS key goes into the browser or Git. A server that does not allow our site to load it directly is also fetched through the Worker.
 - **Waiting for:** the first layer's service address (it ends in `/MapServer`, `/FeatureServer` or `/VectorTileServer`), what it shows, and whether it needs a sign-in.
 
+**2026-11-07 — Map layers widened to Government of Canada sites and files; the owner's answers (F-107, GT-026).** The owner asked to pull map layers found on ArcGIS and Government of Canada sites into the maps, and answered the open questions the same day:
+1. **First layer:** North American Rail Network Lines (NTAD, published by the U.S. Bureau of Transportation Statistics with the Federal Railroad Administration; covers Canada, the United States and Mexico). It is offered as a live ArcGIS FeatureServer as well as GeoJSON, shapefile, KML and other downloads. Proposed: use the live service, not a file: the whole network is far larger as a file than the app should store or send to a browser, and the live service sends only the visible area. Its terms of use are to be read on its own page and recorded here before it is shown.
+2. **Who adds layers:** an **Add map layer** form for admins (option B): a web address or a file, a name, a colour, the source's owner and a link to its terms of use; every member can see and switch the layers.
+3. **Which maps:** the Workspace map and Counterparties → map view; a company's small map possibly later. Several layers can be on at once (a multiple choice).
+4. **One list for the team**, each person switching layers on and off for themselves.
+5. **Web addresses and files**, mostly files: GeoJSON, KML and zipped shapefiles to start; files kept in private Storage and sent through the Worker.
+6. **Clicking a shape shows its details.**
+7. **No layer needs a sign-in** for now; no ArcGIS key.
+
 
 **2026-10-29 — Carrier freight rates by route (owner's priority; part of GT-050, pulled forward).** The owner asked for a Freight page with carrier rates by route, carriers kept in Counterparties with a Carriers filter. Asked how carriers quote and what a route runs between, the owner answered: "It varies by freight provider", and "One location to another so it will be a specific address". Choices:
 - **Carriers are counterparties** with the `carrier` type that already exists: added by hand like any other (a location is not needed), shown with **All / Buyers / Sellers / Carriers** on Counterparties, and on the map in blue as before. A carrier's page lists its rates with **New freight rate**; any other counterparty's page lists the rates to and from its locations.
