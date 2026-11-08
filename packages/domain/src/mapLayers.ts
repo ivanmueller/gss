@@ -240,9 +240,34 @@ const layerDetails = {
   onlyValues: z.array(z.string().regex(ONLY_VALUE)).max(20).default([]),
 };
 
+/**
+ * A layer as ArcGIS presents it (F-138), set when it is added and not changed afterwards: its
+ * line width in points, opacity, zoom range, whether values without a colour of their own are
+ * drawn, and the ArcGIS map it came from. A layer added by hand takes the defaults.
+ */
+const presentation = {
+  lineWidth: z.number().positive().max(50).nullable().default(null),
+  opacity: z.number().gt(0).max(1).default(1),
+  minZoom: z.number().min(0).max(24).nullable().default(null),
+  maxZoom: z.number().min(0).max(24).nullable().default(null),
+  othersShown: z.boolean().default(true),
+  map: z
+    .strictObject({ itemId: z.string().regex(/^[0-9a-f]{32}$/), title: label(200) })
+    .nullable()
+    .default(null),
+};
+
+/**
+ * The publisher's filter on a live layer's features (an ArcGIS where clause from its map), sent
+ * only to the layer's own service: no statement separators, comments or control characters.
+ */
+export const DEFINITION_EXPRESSION = /^(?!.*--)(?!.*\/\*)[^\p{Cc};]{1,2000}$/u;
+
 /** POST /api/v1/map-layers?organization_id=… : a web service. */
 export const createServiceLayerSchema = z.strictObject({
   ...layerDetails,
+  ...presentation,
+  definitionExpression: z.string().regex(DEFINITION_EXPRESSION).nullable().default(null),
   source: z.literal('web'),
   url: z.string().max(MAX_LAYER_URL_LENGTH * 2),
   wmsLayers: z.string().regex(WMS_LAYERS).nullable(),
@@ -251,6 +276,7 @@ export const createServiceLayerSchema = z.strictObject({
 /** POST /api/v1/map-layers?organization_id=… : a file, already turned into GeoJSON. */
 export const createFileLayerSchema = z.strictObject({
   ...layerDetails,
+  ...presentation,
   source: z.literal('file'),
   fileName: label(200),
   /** A GeoJSON FeatureCollection; checked again by normalizeFeatureCollection. */
@@ -329,6 +355,17 @@ export interface MapLayerView {
   onlyValues: string[];
   /** A live lines layer's zoomed-out view (F-134), or null before one is prepared. */
   overview: MapLayerOverviewInfo | null;
+  /** As ArcGIS presents it (F-138): line width in points (null: GSS's usual), opacity, zooms. */
+  lineWidth: number | null;
+  opacity: number;
+  minZoom: number | null;
+  maxZoom: number | null;
+  /** The publisher's filter on its features, from its ArcGIS map. */
+  definitionExpression: string | null;
+  /** Whether values without a colour of their own are drawn. */
+  othersShown: boolean;
+  /** The ArcGIS map it was added from. */
+  map: { itemId: string; title: string } | null;
 }
 
 export interface MapLayerOverviewInfo {
@@ -365,6 +402,13 @@ export interface LayerInspection {
   values: ValueCount[] | null;
   /** How many features it has (within its limit, when one was given); null for pictures. */
   count: number | null;
+  /** The service's own drawing and scale range (F-138); null for WMS. */
+  drawing: {
+    renderer: unknown;
+    transparency: number;
+    minScale: number | null;
+    maxScale: number | null;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -678,13 +722,24 @@ export function groupingOf(layer: LayerGrouping): string {
 }
 
 /**
- * The ArcGIS where clause for a layer's limit ("NET IN ('M','I')"), or 1=1 without one. Values
- * can hold no quote (ONLY_VALUE), so they cannot change the query.
+ * The ArcGIS where clause for a layer's limit ("NET IN ('M','I')"), or 1=1 without one, with the
+ * publisher's filter from its map (F-138) when it has one. Values can hold no quote
+ * (ONLY_VALUE), so they cannot change the query; the filter is the publisher's own, checked by
+ * DEFINITION_EXPRESSION and sent only to its service.
  */
-export function whereOf(layer: Pick<LayerGrouping, 'onlyField' | 'onlyValues'>): string {
-  if (layer.onlyField === null || layer.onlyValues.length === 0) return '1=1';
+export function whereOf(
+  layer: Pick<LayerGrouping, 'onlyField' | 'onlyValues'> & {
+    definitionExpression?: string | null;
+  },
+): string {
+  const definition = layer.definitionExpression ?? null;
+  const filter =
+    definition !== null && DEFINITION_EXPRESSION.test(definition) ? `(${definition})` : null;
+  if (definition !== null && filter === null) return '1=0';
+  if (layer.onlyField === null || layer.onlyValues.length === 0) return filter ?? '1=1';
   const values = layer.onlyValues.filter((v) => ONLY_VALUE.test(v)).map((v) => `'${v}'`);
-  return values.length === 0 ? '1=0' : `${layer.onlyField} IN (${values.join(',')})`;
+  const limit = values.length === 0 ? '1=0' : `${layer.onlyField} IN (${values.join(',')})`;
+  return filter === null ? limit : `${filter} AND ${limit}`;
 }
 
 /**

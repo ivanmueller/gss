@@ -135,6 +135,46 @@ export function colourExpression(
   return layer.colour;
 }
 
+/**
+ * How a layer is drawn as ArcGIS presents it (F-138): its line width in screen pixels (null:
+ * GSS's usual, widening with the zoom), opacity and the zooms it shows between.
+ */
+export interface OverlayLook {
+  lineWidth: number | null;
+  opacity: number;
+  minZoom: number | null;
+  maxZoom: number | null;
+}
+
+/** GSS's usual look, for layers added by hand. */
+export const USUAL_LOOK: OverlayLook = {
+  lineWidth: null,
+  opacity: 1,
+  minZoom: null,
+  maxZoom: null,
+};
+
+/** A layer's look: ArcGIS's line width is in points, 4/3 of a pixel each. */
+export function lookOf(
+  layer: Pick<MapLayerView, 'lineWidth' | 'opacity' | 'minZoom' | 'maxZoom' | 'map'>,
+): OverlayLook {
+  if (
+    layer.map === null &&
+    layer.lineWidth === null &&
+    layer.opacity === 1 &&
+    layer.minZoom === null &&
+    layer.maxZoom === null
+  ) {
+    return USUAL_LOOK;
+  }
+  return {
+    lineWidth: layer.lineWidth === null ? null : Math.round(layer.lineWidth * (4 / 3) * 100) / 100,
+    opacity: layer.opacity,
+    minZoom: layer.minZoom,
+    maxZoom: layer.maxZoom,
+  };
+}
+
 /** A layer as FacilityMap draws it. */
 export type MapOverlay =
   | {
@@ -144,8 +184,9 @@ export type MapOverlay =
       colour: ExpressionSpecification | string;
       /** The values the person shows (F-133); null: all. */
       filter?: FilterSpecification | null;
+      look?: OverlayLook;
     }
-  | { id: string; kind: 'pictures'; tiles: string };
+  | { id: string; kind: 'pictures'; tiles: string; look?: OverlayLook };
 
 /** The property FacilityMap reads to say which feature of a live layer was clicked. */
 export const OBJECT_ID = '__gss_object_id';
@@ -174,7 +215,9 @@ function readChoice(key: string): string[] {
  * The layers this person has switched on, remembered in this browser only (a convenience:
  * without it, every layer starts off).
  */
-export function useLayerChoice(token: string): [ReadonlySet<string>, (id: string) => void] {
+export function useLayerChoice(
+  token: string,
+): [ReadonlySet<string>, (id: string) => void, (ids: readonly string[], on: boolean) => void] {
   const key = `${STORAGE_PREFIX}${signedInAs(token)}`;
   const [chosen, setChosen] = useState<{ key: string; ids: string[] }>(() => ({
     key,
@@ -196,7 +239,25 @@ export function useLayerChoice(token: string): [ReadonlySet<string>, (id: string
     },
     [key],
   );
-  return [useMemo(() => new Set(ids), [ids]), toggle];
+  /** Switches several layers on or off at once (a map's layers, F-138). */
+  const setMany = useCallback(
+    (many: readonly string[], on: boolean) => {
+      setChosen((current) => {
+        const before = current.key === key ? current.ids : readChoice(key);
+        const next = on
+          ? [...before, ...many.filter((id) => !before.includes(id))]
+          : before.filter((id) => !many.includes(id));
+        try {
+          window.localStorage.setItem(key, JSON.stringify(next));
+        } catch {
+          // Storage refused (private window): the choice lasts until the page is closed.
+        }
+        return { key, ids: next };
+      });
+    },
+    [key],
+  );
+  return [useMemo(() => new Set(ids), [ids]), toggle, setMany];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -274,6 +335,18 @@ export interface ValueChoice {
 }
 
 export const ALL_VALUES: ValueChoice = { shown: null, others: true };
+
+/**
+ * A person's choice of a layer's values, or the layer's own until they choose: every value, and
+ * values without a colour of their own only when the layer draws them (ArcGIS draws none when
+ * its symbols have no default, F-138).
+ */
+export function choiceOf(
+  layer: Pick<MapLayerView, 'id' | 'othersShown'>,
+  choices: Readonly<Record<string, ValueChoice>>,
+): ValueChoice {
+  return choices[layer.id] ?? (layer.othersShown ? ALL_VALUES : { shown: null, others: false });
+}
 
 const VALUES_PREFIX = 'gss.mapLayerValues.';
 
@@ -390,6 +463,18 @@ export function usesOverview(layer: MapLayerView, zoom: number | null): boolean 
   );
 }
 
+/** Whether a layer shows at this zoom (its ArcGIS scale range, F-138); unknown zoom: yes. */
+export function shownAtZoom(
+  layer: Pick<MapLayerView, 'minZoom' | 'maxZoom'>,
+  zoom: number | null,
+): boolean {
+  if (zoom === null) return true;
+  return (
+    (layer.minZoom === null || zoom >= layer.minZoom) &&
+    (layer.maxZoom === null || zoom < layer.maxZoom)
+  );
+}
+
 /**
  * The overlays for the layers that are on, in the list's order, each with the person's choice of
  * its values, and a note per layer when part of it could not be shown. A live layer is drawn
@@ -432,6 +517,8 @@ export function useLayerOverlays(
         });
     };
     for (const layer of layers) {
+      // Nothing is fetched for a layer out of its zoom range (F-138).
+      if (!shownAtZoom(layer, zoom)) continue;
       if (layer.kind === 'file') {
         fetchWhole(layer.id, `${layer.id}@${layer.version}`, `/map-layers/${layer.id}/file`);
       } else if (layer.kind === 'arcgis_features' && usesOverview(layer, zoom)) {
@@ -479,15 +566,23 @@ export function useLayerOverlays(
     const notes = new Map<string, string>();
     for (const layer of layers) {
       if (layer.kind === 'arcgis_image' || layer.kind === 'wms') {
-        overlays.push({ id: layer.id, kind: 'pictures', tiles: picturesUrl(layer.id) });
+        overlays.push({
+          id: layer.id,
+          kind: 'pictures',
+          tiles: picturesUrl(layer.id),
+          look: lookOf(layer),
+        });
         continue;
       }
-      const colour = colourExpression(layer, choices[layer.id]);
-      const filter = valueFilter(layer, choices[layer.id]);
+      const choice = choiceOf(layer, choices);
+      const colour = colourExpression(layer, choice);
+      const filter = valueFilter(layer, choice);
+      const look = lookOf(layer);
       const fields = [layer.colourField ?? '', ...layer.alsoFields];
       const whole = (data: GeoJSON.FeatureCollection | 'failed' | undefined) => {
         if (data === 'failed') notes.set(layer.id, 'This layer could not be loaded.');
-        else if (data) overlays.push({ id: layer.id, kind: 'features', data, colour, filter });
+        else if (data)
+          overlays.push({ id: layer.id, kind: 'features', data, colour, filter, look });
       };
       if (layer.kind === 'file') {
         whole(files.get(layer.id));
@@ -529,6 +624,7 @@ export function useLayerOverlays(
         data: { type: 'FeatureCollection', features },
         colour,
         filter,
+        look,
       });
       if (failed)
         notes.set(layer.id, 'Part of this layer could not be loaded. Move the map to try again.');

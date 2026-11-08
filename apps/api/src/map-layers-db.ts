@@ -31,11 +31,32 @@ export interface NewMapLayer {
   alsoFields: string[];
   onlyField: string | null;
   onlyValues: string[];
+  /** As ArcGIS presents it (F-138), kept as added. */
+  lineWidth: number | null;
+  opacity: number;
+  minZoom: number | null;
+  maxZoom: number | null;
+  definitionExpression: string | null;
+  othersShown: boolean;
+  map: { itemId: string; title: string } | null;
   /** A file layer's file: its name, its checked GeoJSON as UTF-8 and how many features. */
   file: { name: string; geojson: Uint8Array; featureCount: number } | null;
 }
 
-export type MapLayerChanges = Omit<NewMapLayer, 'kind' | 'url' | 'file' | 'idField'>;
+export type MapLayerChanges = Omit<
+  NewMapLayer,
+  | 'kind'
+  | 'url'
+  | 'file'
+  | 'idField'
+  | 'lineWidth'
+  | 'opacity'
+  | 'minZoom'
+  | 'maxZoom'
+  | 'definitionExpression'
+  | 'othersShown'
+  | 'map'
+>;
 
 /** What the Worker needs to fetch a live layer for the map. */
 export interface MapLayerSource {
@@ -49,6 +70,8 @@ export interface MapLayerSource {
   alsoFields: string[];
   onlyField: string | null;
   onlyValues: string[];
+  /** The publisher's filter from its ArcGIS map (F-138). */
+  definitionExpression: string | null;
 }
 
 export interface MapLayersDatabase {
@@ -139,6 +162,14 @@ interface LayerRow {
   overview_by: string | null;
   overview_at: Date | null;
   overview_version: string | null;
+  line_width: number | null;
+  opacity: number;
+  min_zoom: number | null;
+  max_zoom: number | null;
+  definition_expression: string | null;
+  others_shown: boolean;
+  map_item_id: string | null;
+  map_title: string | null;
 }
 
 /** Whether the person may change a layer and it is the version they saw (checked again by the update itself). */
@@ -174,7 +205,9 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
                  o.feature_count as overview_features,
                  o.source_count as overview_source,
                  app.member_name(o.organization_id, o.prepared_by) as overview_by,
-                 o.prepared_at as overview_at, o.version::text as overview_version
+                 o.prepared_at as overview_at, o.version::text as overview_version,
+                 l.line_width, l.opacity, l.min_zoom, l.max_zoom, l.definition_expression,
+                 l.others_shown, l.map_item_id, l.map_title
           from app.map_layers l
           left join app.map_layer_files f on f.layer_id = l.id
           left join app.map_layer_overviews o on o.layer_id = l.id
@@ -212,6 +245,16 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
                   version: row.overview_version,
                 }
               : null,
+          lineWidth: row.line_width,
+          opacity: row.opacity,
+          minZoom: row.min_zoom,
+          maxZoom: row.max_zoom,
+          definitionExpression: row.definition_expression,
+          othersShown: row.others_shown,
+          map:
+            row.map_item_id !== null && row.map_title !== null
+              ? { itemId: row.map_item_id, title: row.map_title }
+              : null,
         }));
       });
     },
@@ -222,7 +265,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           select id, organization_id as "organizationId", kind, source_url as url,
                  wms_layers as "wmsLayers", id_field as "idField",
                  colour_field as "colourField", to_jsonb(also_fields) as "alsoFields",
-                 only_field as "onlyField", to_jsonb(only_values) as "onlyValues"
+                 only_field as "onlyField", to_jsonb(only_values) as "onlyValues",
+                 definition_expression as "definitionExpression"
           from app.map_layers where id = ${id} and archived_at is null`;
         return row ?? null;
       });
@@ -247,12 +291,16 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
         const [saved] = await tx<{ id: string }[]>`
           insert into app.map_layers (organization_id, name, kind, source_url, wms_layers,
             id_field, source_name, terms_url, terms_note, colour, colour_field, colours,
-            also_fields, only_field, only_values, created_by, updated_by)
+            also_fields, only_field, only_values, line_width, opacity, min_zoom, max_zoom,
+            definition_expression, others_shown, map_item_id, map_title, created_by, updated_by)
           values (${organizationId}, ${layer.name}, ${layer.kind}, ${layer.url},
             ${layer.wmsLayers}, ${layer.idField}, ${layer.sourceName}, ${layer.termsUrl}, ${layer.termsNote},
             ${layer.colour}, ${layer.colourField}, ${tx.json(layer.colours)},
             array(select jsonb_array_elements_text(${tx.json(layer.alsoFields)}::jsonb)), ${layer.onlyField},
-            array(select jsonb_array_elements_text(${tx.json(layer.onlyValues)}::jsonb)), app.current_user_id(), app.current_user_id())
+            array(select jsonb_array_elements_text(${tx.json(layer.onlyValues)}::jsonb)),
+            ${layer.lineWidth}, ${layer.opacity}, ${layer.minZoom}, ${layer.maxZoom},
+            ${layer.definitionExpression}, ${layer.othersShown}, ${layer.map?.itemId ?? null},
+            ${layer.map?.title ?? null}, app.current_user_id(), app.current_user_id())
           returning id`;
         if (!saved) throw new Error('map layer was not saved');
         if (layer.file) {

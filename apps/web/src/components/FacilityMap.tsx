@@ -17,7 +17,13 @@ import {
   type PinFeatureCollection,
 } from '../lib/mapbox';
 import type { LaneAreas } from '../lib/lanes';
-import { isLayerPictureUrl, type MapOverlay, type PickedFeature } from '../lib/mapLayers';
+import {
+  isLayerPictureUrl,
+  USUAL_LOOK,
+  type MapOverlay,
+  type OverlayLook,
+  type PickedFeature,
+} from '../lib/mapLayers';
 import type { Theme } from '../lib/theme';
 
 // The only module that calls Mapbox GL JS (docs/DECISIONS.md, map decision). It is loaded
@@ -216,6 +222,36 @@ function drawnOverlayLayers(map: mapboxgl.Map, overlays: readonly MapOverlay[]):
   return overlays.flatMap((o) => overlayLayerIds(o.id)).filter((id) => map.getLayer(id));
 }
 
+/** GSS's usual line width, widening with the zoom. */
+const USUAL_LINE_WIDTH: mapboxgl.ExpressionSpecification = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  3,
+  1,
+  8,
+  2,
+  12,
+  3,
+];
+
+/** A layer's look as ArcGIS presents it (F-138): width, opacity and the zooms it shows between. */
+function applyLook(map: mapboxgl.Map, ids: readonly string[], look: OverlayLook) {
+  const [fill, line, point, pictures] = ids as [string, string, string, string];
+  for (const id of ids) {
+    if (map.getLayer(id)) map.setLayerZoomRange(id, look.minZoom ?? 0, look.maxZoom ?? 24);
+  }
+  if (map.getLayer(pictures)) {
+    map.setPaintProperty(pictures, 'raster-opacity', look === USUAL_LOOK ? 0.8 : look.opacity);
+    return;
+  }
+  map.setPaintProperty(line, 'line-width', look.lineWidth ?? USUAL_LINE_WIDTH);
+  map.setPaintProperty(line, 'line-opacity', look.opacity);
+  map.setPaintProperty(fill, 'fill-opacity', 0.25 * look.opacity);
+  map.setPaintProperty(point, 'circle-opacity', look.opacity);
+  map.setPaintProperty(point, 'circle-stroke-opacity', look.opacity);
+}
+
 /**
  * Brings the map's layers in line with the overlays: adds the ones switched on, updates their
  * features and colours, and removes the ones switched off. Areas are filled lightly, lines
@@ -242,6 +278,11 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
       string,
       string,
     ];
+    // In the list's order, each above the one before (a map's layers as ArcGIS stacks them,
+    // F-138), all under the lanes and the pins.
+    for (const id of [fill, line, point, pictures]) {
+      if (map.getLayer(id)) map.moveLayer(id, below);
+    }
     if (overlay.kind === 'pictures') {
       if (!map.getSource(source)) {
         map.addSource(source, { type: 'raster', tiles: [overlay.tiles], tileSize: 256 });
@@ -250,6 +291,7 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
           below,
         );
       }
+      applyLook(map, [fill, line, point, pictures], overlay.look ?? USUAL_LOOK);
       continue;
     }
     const existing = map.getSource<GeoJSONSource>(source);
@@ -271,7 +313,7 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
           type: 'line',
           source,
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1, 8, 2, 12, 3] },
+          paint: { 'line-width': USUAL_LINE_WIDTH },
         },
         below,
       );
@@ -298,6 +340,7 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
     map.setPaintProperty(fill, 'fill-color', overlay.colour);
     map.setPaintProperty(line, 'line-color', overlay.colour);
     map.setPaintProperty(point, 'circle-color', overlay.colour);
+    applyLook(map, [fill, line, point, pictures], overlay.look ?? USUAL_LOOK);
   }
 }
 

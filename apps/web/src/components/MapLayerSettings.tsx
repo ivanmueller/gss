@@ -17,11 +17,12 @@ import {
 import { Layers, Pencil, Plus } from 'lucide-react';
 import { useId, useState, type ChangeEvent, type SubmitEvent } from 'react';
 
-import { ApiError, apiJson, sendJson } from '../lib/api';
+import { apiJson, sendJson } from '../lib/api';
 import { hasFileColours, readLayerFile } from '../lib/mapLayers';
-import { prepareOverview, type OverviewLayer } from '../lib/mapOverview';
+import { message, prepareWithProgress, takesOverview } from '../lib/mapLayerPrepare';
 import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { ImportArcgisMapForm } from './ArcgisMapImport';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
@@ -39,48 +40,6 @@ import { Select } from './ui/select';
 const NO_FIELD = '';
 const PREVIEW = 8;
 
-/** A live lines layer takes a zoomed-out view (F-134). */
-function takesOverview(kind: MapLayerView['kind']): boolean {
-  return kind === 'arcgis_features';
-}
-
-/**
- * Prepares a layer's zoomed-out view, saying how far it has got; resolves to an error message, or
- * null when done.
- */
-async function prepareWithProgress(
-  layer: OverviewLayer,
-  token: string,
-  say: (text: string) => void,
-): Promise<string | null> {
-  say('Preparing the zoomed-out view…');
-  // After it ends, a late message never sets the busy text again.
-  let ended = false;
-  try {
-    await prepareOverview(layer, token, (progress) => {
-      if (ended) return;
-      const n = (value: number) => value.toLocaleString('en-CA');
-      say(
-        progress.stage === 'reading'
-          ? `Preparing the zoomed-out view: ${n(progress.done)} of ${n(progress.total)} pieces read…`
-          : progress.stage === 'joining'
-            ? 'Preparing the zoomed-out view: joining the lines…'
-            : `Preparing the zoomed-out view: saving part ${n(progress.done)} of ${n(progress.total)}…`,
-      );
-    });
-    return null;
-  } catch (reason) {
-    return message(reason, 'The zoomed-out view could not be prepared.');
-  } finally {
-    ended = true;
-  }
-}
-
-function message(reason: unknown, fallback: string): string {
-  return reason instanceof ApiError || reason instanceof Error ? reason.message : fallback;
-}
-
-/** The colours chosen for a layer's values, previewed. */
 function ColourPreview({ colours }: { colours: [string, string][] }) {
   if (colours.length === 0) return null;
   return (
@@ -577,7 +536,7 @@ function EditMapLayerForm({
   );
 }
 
-type Source = 'web' | 'file';
+type Source = 'web' | 'map' | 'file';
 
 function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAdded: () => void }) {
   const { token, organization } = session;
@@ -755,22 +714,37 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     );
   }
 
+  const sourceControl = (
+    <SegmentedControl
+      label="Where the layer comes from"
+      options={[
+        { value: 'web', label: 'Web address' },
+        { value: 'map', label: 'ArcGIS map' },
+        { value: 'file', label: 'File' },
+      ]}
+      value={source}
+      onChange={(value) => {
+        setSource(value);
+        setProblem(null);
+        setColourField(NO_FIELD);
+        setColours([]);
+      }}
+    />
+  );
+
+  // A whole ArcGIS map's layers, as ArcGIS presents them (F-138).
+  if (source === 'map') {
+    return (
+      <div className="flex flex-col gap-4 text-sm">
+        {sourceControl}
+        <ImportArcgisMapForm session={session} onAdded={onAdded} />
+      </div>
+    );
+  }
+
   return (
     <form className="flex flex-col gap-4 text-sm" onSubmit={save}>
-      <SegmentedControl
-        label="Where the layer comes from"
-        options={[
-          { value: 'web', label: 'Web address' },
-          { value: 'file', label: 'File' },
-        ]}
-        value={source}
-        onChange={(value) => {
-          setSource(value);
-          setProblem(null);
-          setColourField(NO_FIELD);
-          setColours([]);
-        }}
-      />
+      {sourceControl}
 
       {source === 'web' ? (
         <div className="flex flex-col gap-1.5">
@@ -1105,7 +1079,27 @@ function LayerRow({
         {layer.alsoFields.length > 0 && ` · also counts ${layer.alsoFields.join(', ')}`}
         {layer.onlyField !== null &&
           ` · only where ${layer.onlyField} is ${layer.onlyValues.join(' or ')}`}
+        {layer.definitionExpression !== null && ` · only where ${layer.definitionExpression}`}
       </span>
+      {layer.map !== null && (
+        <span className="text-xs text-muted-foreground">
+          From the ArcGIS map{' '}
+          <a
+            href={`https://www.arcgis.com/home/item.html?id=${layer.map.itemId}`}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {layer.map.title}
+          </a>
+          , drawn as ArcGIS shows it
+          {layer.lineWidth !== null && ` (lines ${String(layer.lineWidth)} pt`}
+          {layer.lineWidth !== null && layer.opacity < 1 && ', '}
+          {layer.lineWidth === null && layer.opacity < 1 && ' ('}
+          {layer.opacity < 1 && `${String(Math.round(layer.opacity * 100))}% opaque`}
+          {(layer.lineWidth !== null || layer.opacity < 1) && ')'}.
+        </span>
+      )}
       {layer.url !== null && (
         // Which service exactly: a publisher's per-railroad views share one name (2026-11-07).
         <span className="text-xs break-all text-muted-foreground">{layer.url}</span>

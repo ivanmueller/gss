@@ -7,6 +7,7 @@ import {
   colourExpression,
   readLayerFile,
   useLayerChoice,
+  USUAL_LOOK,
   useLayerOverlays,
   valueFilter,
   settingsTag,
@@ -53,6 +54,13 @@ const rail: MapLayerView = {
   onlyField: null,
   onlyValues: [],
   overview: null,
+  lineWidth: null,
+  opacity: 1,
+  minZoom: null,
+  maxZoom: null,
+  definitionExpression: null,
+  othersShown: true,
+  map: null,
 };
 const elevators: MapLayerView = {
   ...rail,
@@ -230,6 +238,7 @@ describe('fetching what is on', () => {
       id: RAIL,
       kind: 'pictures',
       tiles: `${window.location.origin}/api/v1/map-layers/${RAIL}/tiles/{z}/{x}/{y}.png`,
+      look: USUAL_LOOK,
     });
     expect(calls.filter((c) => c.path.endsWith('/file'))).toHaveLength(1);
   });
@@ -448,6 +457,7 @@ describe('Team → Map layers', () => {
     title: 'Synthetic Rail Lines',
     copyright: 'Public domain.',
     fields: ['OWNER', 'TRACKS'],
+    drawing: null,
     values: null,
     count: 302774,
   };
@@ -806,6 +816,7 @@ describe('shared track and limits', () => {
               ? null
               : [{ value: 'CPKC', count: 9 }],
           count: 300000,
+          drawing: null,
         } satisfies LayerInspection),
       [`PATCH /map-layers/${RAIL}`]: () => Response.json({ id: RAIL }),
     });

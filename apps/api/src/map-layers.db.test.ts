@@ -41,6 +41,13 @@ const SERVICE: NewMapLayer = {
   alsoFields: [],
   onlyField: null,
   onlyValues: [],
+  lineWidth: null,
+  opacity: 1,
+  minZoom: null,
+  maxZoom: null,
+  definitionExpression: null,
+  othersShown: true,
+  map: null,
   file: null,
 };
 
@@ -104,6 +111,7 @@ describe('map layers as app_api', () => {
         alsoFields: [],
         onlyField: null,
         onlyValues: [],
+        definitionExpression: null,
       });
 
       const version = layer?.version ?? '';
@@ -394,6 +402,51 @@ describe('map layers as app_api', () => {
       await expect(retry).resolves.toMatchObject({ status: 'saved' });
     } finally {
       await publisher.end();
+      await db.close();
+    }
+  });
+
+  it('keeps a layer from an ArcGIS map as ArcGIS presents it, in the order added (F-138)', async () => {
+    const db = postgresDatabase(API_URL);
+    try {
+      const map = { itemId: '96ec03e4fc8546bd8a864e39a2c3fc41', title: 'Synthetic rail map' };
+      const presented = {
+        ...SERVICE,
+        name: 'Synthetic CPKC',
+        colourField: null,
+        colours: [],
+        lineWidth: 0.998,
+        opacity: 0.8,
+        minZoom: 3,
+        maxZoom: 18,
+        definitionExpression: "NET IN ('M','I')",
+        othersShown: false,
+        map,
+      };
+      expect(await db.createMapLayer(as(BOB), ORG_A, presented)).toEqual({ status: 'forbidden' });
+      const bottom = await db.createMapLayer(as(ADAM), ORG_A, { ...presented, name: 'Bottom' });
+      const top = await db.createMapLayer(as(ADAM), ORG_A, { ...presented, name: 'Top' });
+      if (bottom.status !== 'saved' || top.status !== 'saved') throw new Error('not added');
+      const listed = ((await db.listMapLayers(as(VERA), ORG_A)) ?? []).filter(
+        (l) => l.map !== null,
+      );
+      expect(listed.map((l) => l.name)).toEqual(['Bottom', 'Top']);
+      expect(listed[0]).toMatchObject({
+        lineWidth: 0.998,
+        opacity: 0.8,
+        minZoom: 3,
+        maxZoom: 18,
+        definitionExpression: "NET IN ('M','I')",
+        othersShown: false,
+        map,
+      });
+      expect((await db.getMapLayerSource(as(VERA), top.id))?.definitionExpression).toBe(
+        "NET IN ('M','I')",
+      );
+      expect(await db.listMapLayers(as(BOB), ORG_B)).toEqual(
+        expect.not.arrayContaining([expect.objectContaining({ map })]),
+      );
+    } finally {
       await db.close();
     }
   });

@@ -1,4 +1,5 @@
 import {
+  arcgisItemSchema,
   createMapLayerSchema,
   inspectLayerSchema,
   cleanValue,
@@ -40,6 +41,11 @@ import {
 // off in the browser. A web service is fetched by the Worker, never by the browser: its
 // address stays here, the app's content security policy stays as it is, and the request is
 // built from the layer's stored address and a map square only, never from the browser's text.
+
+/** ArcGIS Online's items, where a map's description and data are read (F-138). */
+const ARCGIS_ITEMS = 'https://www.arcgis.com/sharing/rest/content/items';
+/** The largest map read: its layers, drawing and any features kept in it. */
+const MAX_ITEM_BYTES = 12 * 1024 * 1024;
 
 /** A file arrives as checked GeoJSON inside JSON; a little over the 5 MB kept. */
 const MAX_CREATE_BYTES = 6 * 1024 * 1024 + 64 * 1024;
@@ -171,12 +177,16 @@ const COLOUR_FIELD_TYPES = new Set([
   'esriFieldTypeInteger',
 ]);
 
-/** An ArcGIS layer's own description: its name, terms text and the fields that can colour it. */
+/**
+ * An ArcGIS layer's own description: its name, terms text, the fields that can colour it, and
+ * its own drawing and scale range (F-138), used when its map and item give none.
+ */
 export async function describeArcgis(url: string): Promise<{
   title: string | null;
   copyright: string | null;
   fields: string[];
   idField: string | null;
+  drawing: LayerInspection['drawing'];
 }> {
   const body = record(await fetchJson(`${url}?f=json`));
   if (!body || record(body.error)) throw new LayerServiceError(422);
@@ -197,7 +207,16 @@ export async function describeArcgis(url: string): Promise<{
     ? body.fields.map(record).find((f) => f?.type === 'esriFieldTypeOID')?.name
     : undefined;
   const idField = typeof body.objectIdField === 'string' ? body.objectIdField : oid;
+  const drawingInfo = record(body.drawingInfo);
+  const scale = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
   return {
+    drawing: {
+      renderer: drawingInfo?.renderer ?? null,
+      transparency: typeof drawingInfo?.transparency === 'number' ? drawingInfo.transparency : 0,
+      minScale: scale(body.minScale),
+      maxScale: scale(body.maxScale),
+    },
     title: plainText(body.name ?? body.mapName ?? body.serviceDescription, 200),
     copyright: plainText(body.copyrightText, 2000),
     fields,
@@ -517,12 +536,14 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         fields: [],
         values: null,
         count: null,
+        drawing: null,
       };
       if (source.kind === 'wms') return c.json(answer);
       try {
         const described = await describeArcgis(source.url);
         answer.title = described.title;
         answer.copyright = described.copyright;
+        answer.drawing = described.drawing;
         if (source.kind === 'arcgis_features') {
           answer.fields = described.fields;
           const { field, alsoFields, onlyField, onlyValues } = parsed.data;
@@ -554,6 +575,36 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     });
   });
 
+  // An ArcGIS map's item, for an admin adding its layers (F-138): its description or its data,
+  // read from www.arcgis.com by the Worker and passed on as ArcGIS gives it. Only the item's id
+  // comes from the browser; the address is always ArcGIS Online's own.
+  routes.post('/arcgis-item', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const body = await readJson(c, MAX_BODY_BYTES);
+    if (!body.ok) return body.response;
+    const parsed = arcgisItemSchema.safeParse(body.value);
+    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+    const { itemId, part } = parsed.data;
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      if (!(await db.isOrgAdmin(ctx, org))) return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
+      try {
+        const { body: json } = await fetchService(
+          `${ARCGIS_ITEMS}/${itemId}${part === 'data' ? '/data' : ''}?f=json`,
+          /^(application|text)\/(json|plain)$/,
+          MAX_ITEM_BYTES,
+        );
+        return c.body(json, 200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        });
+      } catch (error) {
+        return serviceFailed(c, error, 'ArcGIS item');
+      }
+    });
+  });
+
   routes.post('/', async (c) => {
     c.header('Cache-Control', 'no-store');
     const body = await readJson(c, MAX_CREATE_BYTES);
@@ -574,7 +625,21 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       alsoFields: input.alsoFields,
       onlyField: input.onlyField,
       onlyValues: input.onlyField === null ? [] : input.onlyValues,
+      // As ArcGIS presents it (F-138); defaults for a layer added by hand.
+      lineWidth: input.lineWidth,
+      opacity: input.opacity,
+      minZoom: input.minZoom,
+      maxZoom: input.maxZoom,
+      othersShown: input.othersShown,
+      map: input.map,
     };
+    if (
+      details.minZoom !== null &&
+      details.maxZoom !== null &&
+      details.minZoom >= details.maxZoom
+    ) {
+      return apiError(c, 422, 'VALIDATION_FAILED', 'The zoom range is out of order.');
+    }
     const shared = details.alsoFields.length > 0 || details.onlyField !== null;
     let layer: Parameters<Database['createMapLayer']>[2];
     if (input.source === 'web') {
@@ -584,7 +649,10 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if (source.kind === 'wms' && wmsLayers === null) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Name the WMS layers to show.');
       }
-      if (source.kind !== 'arcgis_features' && (details.colourField !== null || shared)) {
+      if (
+        source.kind !== 'arcgis_features' &&
+        (details.colourField !== null || shared || input.definitionExpression !== null)
+      ) {
         return apiError(
           c,
           422,
@@ -598,6 +666,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         url: source.url,
         wmsLayers,
         idField: null,
+        definitionExpression: input.definitionExpression,
         file: null,
       };
     } else {
@@ -626,6 +695,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         url: null,
         wmsLayers: null,
         idField: null,
+        definitionExpression: null,
         file: {
           name: input.fileName,
           geojson,
@@ -651,6 +721,11 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
             }
             const problem = sharedProblem(described.fields, layer);
             if (problem !== null) return apiError(c, 422, 'VALIDATION_FAILED', problem);
+            // The publisher's filter from its map is tried once, so one the service refuses is
+            // never kept (F-138).
+            if (layer.definitionExpression !== null) {
+              await arcgisCount(layer.url ?? '', whereOf(layer));
+            }
           }
         } catch (error) {
           return serviceFailed(c, error, 'description');
