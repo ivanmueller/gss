@@ -24,12 +24,11 @@ import {
   Truck,
   Wheat,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { ADD_TABS, AddCounterpartiesDialog } from '../components/AddCounterpartiesDialog';
 import { CounterpartyLogo } from '../components/CounterpartyLogo';
 import { CounterpartyMap } from '../components/CounterpartyMap';
-import { FindMissingCoordinates } from '../components/FindMissingCoordinates';
 import { MultiPicker } from '../components/MultiPicker';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
@@ -322,7 +321,6 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
     token,
   );
   const editor = canEditDirectory(organization.role);
-  const [mapVersion, setMapVersion] = useState(0);
   const wide = useMediaQuery(WIDE_QUERY, true);
 
   // The view and the type filter live in the address (?view=map&type=seller), so a
@@ -570,16 +568,9 @@ export function CounterpartiesPage({ session }: { session: DirectorySession }) {
               <LogoGrid items={shown} token={token} />
             </TabsContent>
             <TabsContent value="map" className="flex flex-col gap-3">
-              {editor && (
-                <FindMissingCoordinates
-                  session={session}
-                  onDone={() => {
-                    setMapVersion((version) => version + 1);
-                  }}
-                />
-              )}
-              {/* Loaded again after coordinates are found, so the new places show. */}
-              <CounterpartyMap key={mapVersion} session={session} only={shownIds} />
+              {/* No Find missing coordinates here (the owner's request of 2026-11-08, F-139):
+                  locations are looked up after every import and on a company's page. */}
+              <CounterpartyMap session={session} only={shownIds} />
             </TabsContent>
           </>
         )}

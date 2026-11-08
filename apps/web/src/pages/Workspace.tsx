@@ -261,12 +261,12 @@ export function Workspace({
       ) : (
         <MapUnavailable refused={refused} />
       )}
-      {/* Right of the zoom buttons, top left. */}
-      <MapLayersPanel state={layers} className="left-14" />
+      {/* Below the zoom buttons, top left (F-139). */}
+      <MapLayersPanel state={layers} side="left" />
       <PickedFeatureCard
         state={layers}
         token={token}
-        className={layers.panelOpen ? 'left-[22.25rem]' : 'left-3'}
+        className={layers.panelOpen ? 'left-[19.5rem]' : 'left-3'}
       />
       {over}
     </div>
