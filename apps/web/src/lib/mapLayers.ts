@@ -242,13 +242,15 @@ function withValues(
   colourField: string | null,
   fields: readonly string[] | null,
 ): GeoJSON.Feature {
-  const properties: Record<string, unknown> = { ...feature.properties };
+  const original = feature.properties ?? {};
+  const properties: Record<string, unknown> = { ...original };
   // The colour field's value tidied as in a checked view, so it colours and filters the same at
-  // every zoom.
+  // every zoom; its values from the original properties, as a view builds them (Codex's review
+  // of 2693859).
   if (colourField !== null && colourField in properties) {
-    properties[colourField] = cleanValue(properties[colourField]) || null;
+    properties[colourField] = cleanValue(original[colourField]) || null;
   }
-  if (fields !== null) properties[VALUES_PROPERTY] = valuesOf(properties, fields);
+  if (fields !== null) properties[VALUES_PROPERTY] = valuesOf(original, fields);
   return { ...feature, properties };
 }
 

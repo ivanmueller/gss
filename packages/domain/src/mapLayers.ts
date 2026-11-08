@@ -698,6 +698,9 @@ export function cleanValue(raw: unknown): string {
         .replace(/\p{Cc}/gu, ' ')
         .trim()
         .slice(0, MAX_FIELD_TEXT)
+        // Trimmed again after the cut, so tidying a tidied value changes nothing (Codex's review
+        // of 2693859: a cut ending in a space was tidied differently the second time).
+        .trimEnd()
     : '';
 }
 

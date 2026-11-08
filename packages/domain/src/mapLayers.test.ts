@@ -497,3 +497,13 @@ describe('values tidied the same everywhere (Codex’s review of da6c543)', () =
     expect(cleanValue(null)).toBe('');
   });
 });
+
+describe('tidying twice changes nothing (Codex’s review of 2693859)', () => {
+  it('gives the same value for a cut that ends in a space', () => {
+    const raw = `${'A'.repeat(499)} B`;
+    const once = cleanValue(raw);
+    expect(once).toBe('A'.repeat(499));
+    expect(cleanValue(once)).toBe(once);
+    expect(valuesOf({ OWNER: once }, ['OWNER'])).toBe(valuesOf({ OWNER: raw }, ['OWNER']));
+  });
+});

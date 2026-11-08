@@ -937,6 +937,19 @@ describe('shared track and limits', () => {
               },
               properties: { RROWNER1: 'A\tB', TRKRGHTS1: 'CPKC' },
             },
+            {
+              type: 'Feature',
+              id: 6,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-95.4, 29.85],
+                  [-95.3, 29.95],
+                ],
+              },
+              // Codex's review of 2693859: a cut ending in a space.
+              properties: { RROWNER1: `${'A'.repeat(499)} B`, TRKRGHTS1: 'CPKC' },
+            },
           ],
         }),
       ),
@@ -948,6 +961,10 @@ describe('shared track and limits', () => {
       expect(first?.kind === 'features' && first.data.features[0]?.properties).toMatchObject({
         RROWNER1: 'A B',
         __values: '|A B|CPKC|',
+      });
+      expect(first?.kind === 'features' && first.data.features[1]?.properties).toMatchObject({
+        RROWNER1: 'A'.repeat(499),
+        __values: `|${'A'.repeat(499)}|CPKC|`,
       });
     });
   });
