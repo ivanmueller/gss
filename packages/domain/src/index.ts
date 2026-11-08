@@ -20,3 +20,4 @@ export * from './drafts';
 export * from './callbacks';
 export * from './mapLayers';
 export * from './mapOverview';
+export * from './arcgisMaps';

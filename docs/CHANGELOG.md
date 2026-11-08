@@ -1,5 +1,10 @@
 # Documentation pack changelog
 
+## 2026-11-08 — Map layers from an ArcGIS map, as ArcGIS presents them (F-138)
+
+- `docs/DECISIONS.md`: Codex's review of `1f328f9` (four P2, three P3) and their fixes.
+- `docs/FEATURES.md`: F-138 with the owner's answers and what is built. `docs/DECISIONS.md`: how a map is read and drawn, and what is not built. `docs/DATA_MODEL.md`: `20261108020000_map_layer_arcgis_maps.sql`. `docs/API.md`: `POST /api/v1/map-layers/arcgis-item`, the new fields of adding a layer and of inspect.
+
 ## 2026-11-08 — A railroad's lines as on ArcGIS (F-137)
 
 - `docs/FEATURES.md`: F-137 with the owner's answers. `docs/DECISIONS.md`: what the publisher's railroad views count, and how GSS does the same. `docs/DATA_MODEL.md`, `docs/API.md`: `20261108010000_map_layer_shared_values.sql`, the inspect and publish bodies.

@@ -131,6 +131,18 @@ const source: MapLayerSource = {
   alsoFields: [],
   onlyField: null,
   onlyValues: [],
+  definitionExpression: null,
+};
+
+/** How a layer added by hand is presented (F-138). */
+const PLAIN = {
+  lineWidth: null,
+  opacity: 1,
+  minZoom: null,
+  maxZoom: null,
+  othersShown: true,
+  map: null,
+  definitionExpression: null,
 };
 
 describe('GET /api/v1/map-layers', () => {
@@ -171,6 +183,7 @@ describe('POST /api/v1/map-layers/inspect', () => {
         { value: 'BBB', count: 5 },
       ],
       count: 42,
+      drawing: { renderer: null, transparency: 0, minScale: null, maxScale: null },
     } satisfies LayerInspection);
   });
 
@@ -223,6 +236,7 @@ describe('POST /api/v1/map-layers', () => {
       alsoFields: [],
       onlyField: null,
       onlyValues: [],
+      ...PLAIN,
     });
   });
 
@@ -821,5 +835,150 @@ describe('shared fields and a limit', () => {
     const page = new URL(overviewPageUrl(shared, 0));
     expect(page.searchParams.get('where')).toBe("NET IN ('M','I')");
     expect(page.searchParams.get('outFields')).toBe('OWNER,OWNER2');
+  });
+});
+
+describe('layers from an ArcGIS map (F-138)', () => {
+  const ITEM = '96ec03e4fc8546bd8a864e39a2c3fc41';
+  const FROM_MAP = {
+    lineWidth: 0.998,
+    opacity: 0.8,
+    minZoom: 3,
+    maxZoom: 18,
+    othersShown: false,
+    map: { itemId: ITEM, title: 'Synthetic rail map' },
+  };
+
+  it('passes on a map’s item from ArcGIS Online, for admins', async () => {
+    service = (url) =>
+      url.startsWith('https://www.arcgis.com/')
+        ? Response.json({ operationalLayers: [] })
+        : new Response('no', { status: 404 });
+    const res = await send('/arcgis-item', 'POST', { itemId: ITEM, part: 'data' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(await res.json()).toEqual({ operationalLayers: [] });
+    expect(serviceCalls).toEqual([
+      `https://www.arcgis.com/sharing/rest/content/items/${ITEM}/data?f=json`,
+    ]);
+    const info = await send('/arcgis-item', 'POST', { itemId: ITEM, part: 'info' });
+    expect(info.status).toBe(200);
+    expect(serviceCalls[1]).toBe(
+      `https://www.arcgis.com/sharing/rest/content/items/${ITEM}?f=json`,
+    );
+  });
+
+  it('fetches nothing for a member who is not an admin, or an id that is not one', async () => {
+    db.isOrgAdmin.mockResolvedValueOnce(false);
+    expect((await send('/arcgis-item', 'POST', { itemId: ITEM, part: 'data' })).status).toBe(403);
+    for (const itemId of ['../../x', `${ITEM}/data?x=`, ITEM.toUpperCase()]) {
+      const res = await send('/arcgis-item', 'POST', { itemId, part: 'data' });
+      expect(res.status).toBe(422);
+    }
+    expect((await send('/arcgis-item', 'POST', { itemId: ITEM, part: 'other' })).status).toBe(422);
+    expect(serviceCalls).toEqual([]);
+  });
+
+  it('passes on nothing that is not JSON, or a refusal', async () => {
+    service = () => new Response('<html>', { headers: { 'Content-Type': 'text/html' } });
+    expect((await send('/arcgis-item', 'POST', { itemId: ITEM, part: 'data' })).status).toBe(502);
+    service = () => new Response('', { status: 302, headers: { Location: 'https://x.example' } });
+    expect((await send('/arcgis-item', 'POST', { itemId: ITEM, part: 'data' })).status).toBe(502);
+  });
+
+  it('adds a layer as ArcGIS presents it, with the map’s filter tried on the service first', async () => {
+    const res = await send('', 'POST', {
+      ...details,
+      ...FROM_MAP,
+      source: 'web',
+      url: SERVICE,
+      wmsLayers: null,
+      definitionExpression: "STATE = 'TX'",
+    });
+    expect(res.status).toBe(201);
+    expect(db.createMapLayer.mock.calls[0]?.[2]).toMatchObject({
+      ...FROM_MAP,
+      definitionExpression: "STATE = 'TX'",
+    });
+    const count = serviceCalls.find((url) => url.includes('returnCountOnly=true'));
+    expect(new URL(count ?? 'https://x').searchParams.get('where')).toBe("(STATE = 'TX')");
+  });
+
+  it('refuses a filter the service does not take, keeping nothing', async () => {
+    const before = service;
+    service = (url) =>
+      url.includes('returnCountOnly=true')
+        ? Response.json({ error: { code: 400, message: 'Invalid query' } })
+        : before(url);
+    const res = await send('', 'POST', {
+      ...details,
+      source: 'web',
+      url: SERVICE,
+      wmsLayers: null,
+      definitionExpression: 'NOPE = 1',
+    });
+    expect(res.status).toBe(502);
+    expect(db.createMapLayer).not.toHaveBeenCalled();
+  });
+
+  it('refuses a filter that could change the query, on a picture layer, or zooms out of order', async () => {
+    for (const body of [
+      { definitionExpression: '1=1; drop table x' },
+      { definitionExpression: '1=1 -- x' },
+      // Unbalanced, it would undo the layer's limit (Codex's review of 1f328f9).
+      { definitionExpression: '1=1) OR (1=1' },
+      { definitionExpression: '1=1\u0085' },
+      { minZoom: 9, maxZoom: 4 },
+      { opacity: 0 },
+      { map: { itemId: '../x', title: 'M' } },
+    ]) {
+      const res = await send('', 'POST', {
+        ...details,
+        ...body,
+        source: 'web',
+        url: SERVICE,
+        wmsLayers: null,
+      });
+      expect(res.status).toBe(422);
+    }
+    const picture = await send('', 'POST', {
+      ...details,
+      colourField: null,
+      colours: [],
+      source: 'web',
+      url: 'https://services.example.com/rest/services/Elevation/MapServer',
+      wmsLayers: null,
+      definitionExpression: '1=1',
+    });
+    expect(picture.status).toBe(422);
+    expect(db.createMapLayer).not.toHaveBeenCalled();
+  });
+
+  it('adds a map’s own features as a file layer with its drawing', async () => {
+    const res = await send('', 'POST', {
+      ...details,
+      ...FROM_MAP,
+      colourField: null,
+      colours: [],
+      othersShown: true,
+      source: 'file',
+      fileName: 'Amtrak Lines (from the ArcGIS map)',
+      geojson: SQUARE,
+    });
+    expect(res.status).toBe(201);
+    expect(db.createMapLayer.mock.calls[0]?.[2]).toMatchObject({
+      kind: 'file',
+      lineWidth: 0.998,
+      map: FROM_MAP.map,
+      definitionExpression: null,
+    });
+  });
+
+  it('asks the service for its squares and pages within the map’s filter', () => {
+    const filtered = { ...source, definitionExpression: "STATE = 'TX'" };
+    const square = new URL(arcgisSquareUrl(filtered, { z: 5, x: 5, y: 11 }));
+    expect(square.searchParams.get('where')).toBe("(STATE = 'TX')");
+    const page = new URL(overviewPageUrl({ ...filtered, onlyField: 'NET', onlyValues: ['M'] }, 0));
+    expect(page.searchParams.get('where')).toBe("(STATE = 'TX') AND NET IN ('M')");
   });
 });

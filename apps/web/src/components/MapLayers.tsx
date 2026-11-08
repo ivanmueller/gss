@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { apiJson } from '../lib/api';
 import {
   ALL_VALUES,
+  choiceOf,
   OBJECT_ID,
   useLayerChoice,
   useLayerOverlays,
@@ -33,9 +34,12 @@ export interface MapLayersState {
   layers: MapLayerView[];
   chosen: ReadonlySet<string>;
   toggle: (id: string) => void;
+  /** Switches several layers on or off at once (a map's layers, F-138). */
+  setMany: (ids: readonly string[], on: boolean) => void;
   /** Each layer's values this person shows; a layer not listed shows all. */
   values: Readonly<Record<string, ValueChoice>>;
-  setValues: (id: string, choice: ValueChoice) => void;
+  /** Sets a layer's choice; the layer's own (layerDefault) is forgotten rather than kept. */
+  setValues: (id: string, choice: ValueChoice, layerDefault?: ValueChoice) => void;
   /** Whether the Layers panel is open. */
   panelOpen: boolean;
   setPanelOpen: (open: boolean) => void;
@@ -60,7 +64,7 @@ export function useMapLayers(
     () => (list.status === 'ok' && Array.isArray(list.data.layers) ? list.data.layers : []),
     [list],
   );
-  const [chosen, toggle] = useLayerChoice(token);
+  const [chosen, toggle, setMany] = useLayerChoice(token);
   const on = useMemo(() => layers.filter((layer) => chosen.has(layer.id)), [layers, chosen]);
   const [values, setValues] = useValueChoices(token);
   const [view, setView] = useState<MapView | null>(null);
@@ -71,6 +75,7 @@ export function useMapLayers(
     layers,
     chosen,
     toggle,
+    setMany,
     values,
     setValues,
     panelOpen,
@@ -221,6 +226,153 @@ function LayerValues({
   );
 }
 
+type PanelEntry =
+  | { kind: 'layer'; layer: MapLayerView }
+  | { kind: 'map'; itemId: string; title: string; layers: MapLayerView[] };
+
+/**
+ * The panel's entries in the list's order: a layer alone, or an ArcGIS map's layers together
+ * where its first one is, top-most first as ArcGIS lists them (F-138).
+ */
+export function panelEntries(layers: readonly MapLayerView[]): PanelEntry[] {
+  const entries: PanelEntry[] = [];
+  const maps = new Map<string, MapLayerView[]>();
+  for (const layer of layers) {
+    if (layer.map === null) {
+      entries.push({ kind: 'layer', layer });
+      continue;
+    }
+    const group = maps.get(layer.map.itemId);
+    if (group) group.unshift(layer);
+    else {
+      const first = [layer];
+      maps.set(layer.map.itemId, first);
+      entries.push({
+        kind: 'map',
+        itemId: layer.map.itemId,
+        title: layer.map.title,
+        layers: first,
+      });
+    }
+  }
+  return entries;
+}
+
+type OpenState = [
+  ReadonlySet<string>,
+  (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void,
+];
+
+/** A layer's switch in the panel, and under one coloured by a field, its values. */
+function LayerSwitch({
+  state,
+  layer,
+  open,
+  setOpen,
+}: {
+  state: MapLayersState;
+  layer: MapLayerView;
+  open: OpenState[0];
+  setOpen: OpenState[1];
+}) {
+  const on = state.chosen.has(layer.id);
+  const expandable = on && layer.colourField !== null && layer.colours.length > 0;
+  const expanded = expandable && open.has(layer.id);
+  return (
+    <li className="py-2">
+      <div className="flex items-center gap-2">
+        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            role="switch"
+            className="size-4 accent-primary"
+            checked={on}
+            onChange={() => {
+              state.toggle(layer.id);
+            }}
+          />
+          <span
+            aria-hidden="true"
+            className="size-3 shrink-0 rounded-full"
+            style={{ backgroundColor: layer.colours[0]?.[1] ?? layer.colour }}
+          />
+          <span className="truncate">{layer.name}</span>
+        </label>
+        {expandable && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Hide' : 'Choose'} ${layer.colourField ?? 'values'} of ${layer.name}`}
+            onClick={() => {
+              setOpen((current) => {
+                const next = new Set(current);
+                if (next.has(layer.id)) next.delete(layer.id);
+                else next.add(layer.id);
+                return next;
+              });
+            }}
+          >
+            {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+          </Button>
+        )}
+      </div>
+      {expanded && (
+        <LayerValues
+          layer={layer}
+          choice={choiceOf(layer, state.values)}
+          onChange={(choice) => {
+            state.setValues(layer.id, choice, choiceOf(layer, {}));
+          }}
+        />
+      )}
+    </li>
+  );
+}
+
+/** An ArcGIS map's layers under its title, with one switch for all of them (F-138). */
+function MapGroup({
+  state,
+  title,
+  layers,
+  open,
+  setOpen,
+}: {
+  state: MapLayersState;
+  title: string;
+  layers: MapLayerView[];
+  open: OpenState[0];
+  setOpen: OpenState[1];
+}) {
+  const onCount = layers.filter((layer) => state.chosen.has(layer.id)).length;
+  const ids = layers.map((layer) => layer.id);
+  return (
+    <li className="py-2">
+      <label className="flex min-w-0 cursor-pointer items-center gap-2 font-medium">
+        <input
+          type="checkbox"
+          role="switch"
+          className="size-4 accent-primary"
+          checked={onCount === layers.length}
+          aria-checked={onCount === layers.length ? 'true' : onCount === 0 ? 'false' : 'mixed'}
+          onChange={() => {
+            state.setMany(ids, onCount < layers.length);
+          }}
+        />
+        <span className="truncate">{title}</span>
+        <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground">
+          {onCount} of {layers.length}
+        </span>
+      </label>
+      <ul aria-label={`${title}: layers`} className="flex flex-col pl-6">
+        {layers.map((layer) => (
+          <LayerSwitch key={layer.id} state={state} layer={layer} open={open} setOpen={setOpen} />
+        ))}
+      </ul>
+    </li>
+  );
+}
+
 /**
  * The Layers panel over the map (F-133): each layer with a switch, and under one coloured by a
  * field, each of its values with a tick box, so one railroad can be looked at alone.
@@ -264,65 +416,26 @@ export function MapLayersPanel({
           </p>
         ) : (
           <ul className="flex flex-col divide-y">
-            {state.layers.map((layer) => {
-              const on = state.chosen.has(layer.id);
-              const expandable = on && layer.colourField !== null && layer.colours.length > 0;
-              const expanded = expandable && open.has(layer.id);
-              return (
-                <li key={layer.id} className="py-2">
-                  <div className="flex items-center gap-2">
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        className="size-4 accent-primary"
-                        checked={on}
-                        onChange={() => {
-                          state.toggle(layer.id);
-                        }}
-                      />
-                      <span
-                        aria-hidden="true"
-                        className="size-3 shrink-0 rounded-full"
-                        style={{ backgroundColor: layer.colours[0]?.[1] ?? layer.colour }}
-                      />
-                      <span className="truncate">{layer.name}</span>
-                    </label>
-                    {expandable && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-expanded={expanded}
-                        aria-label={`${expanded ? 'Hide' : 'Choose'} ${layer.colourField ?? 'values'} of ${layer.name}`}
-                        onClick={() => {
-                          setOpen((current) => {
-                            const next = new Set(current);
-                            if (next.has(layer.id)) next.delete(layer.id);
-                            else next.add(layer.id);
-                            return next;
-                          });
-                        }}
-                      >
-                        {expanded ? (
-                          <ChevronDown aria-hidden="true" />
-                        ) : (
-                          <ChevronRight aria-hidden="true" />
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                  {expanded && (
-                    <LayerValues
-                      layer={layer}
-                      choice={state.values[layer.id] ?? ALL_VALUES}
-                      onChange={(choice) => {
-                        state.setValues(layer.id, choice);
-                      }}
-                    />
-                  )}
-                </li>
-              );
-            })}
+            {panelEntries(state.layers).map((entry) =>
+              entry.kind === 'layer' ? (
+                <LayerSwitch
+                  key={entry.layer.id}
+                  state={state}
+                  layer={entry.layer}
+                  open={open}
+                  setOpen={setOpen}
+                />
+              ) : (
+                <MapGroup
+                  key={`map-${entry.itemId}`}
+                  state={state}
+                  title={entry.title}
+                  layers={entry.layers}
+                  open={open}
+                  setOpen={setOpen}
+                />
+              ),
+            )}
           </ul>
         )}
       </div>
@@ -341,7 +454,7 @@ export function MapLayersLegend({ state }: { state: MapLayersState }) {
     >
       {on.map((layer) => {
         const note = state.notes.get(layer.id);
-        const choice = state.values[layer.id] ?? ALL_VALUES;
+        const choice = choiceOf(layer, state.values);
         const shown = layer.colours.filter(([value]) => valueShown(choice, value));
         const more = shown.length - LEGEND_VALUES;
         const hidden = layer.colours.length - shown.length;
