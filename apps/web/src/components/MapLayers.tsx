@@ -38,7 +38,8 @@ export interface MapLayersState {
   setMany: (ids: readonly string[], on: boolean) => void;
   /** Each layer's values this person shows; a layer not listed shows all. */
   values: Readonly<Record<string, ValueChoice>>;
-  setValues: (id: string, choice: ValueChoice) => void;
+  /** Sets a layer's choice; the layer's own (layerDefault) is forgotten rather than kept. */
+  setValues: (id: string, choice: ValueChoice, layerDefault?: ValueChoice) => void;
   /** Whether the Layers panel is open. */
   panelOpen: boolean;
   setPanelOpen: (open: boolean) => void;
@@ -321,7 +322,7 @@ function LayerSwitch({
           layer={layer}
           choice={choiceOf(layer, state.values)}
           onChange={(choice) => {
-            state.setValues(layer.id, choice);
+            state.setValues(layer.id, choice, choiceOf(layer, {}));
           }}
         />
       )}

@@ -263,11 +263,41 @@ const presentation = {
  */
 export const DEFINITION_EXPRESSION = /^(?!.*--)(?!.*\/\*)[^\p{Cc};]{1,2000}$/u;
 
+/**
+ * Whether a filter's parentheses and quotes are balanced (parentheses inside quoted text not
+ * counted; '' is a quote within quoted text), so wrapped in parentheses it stays one condition
+ * and cannot undo the layer's own limit (Codex's review of 1f328f9: "1=1) OR (1=1").
+ */
+export function balancedFilter(text: string): boolean {
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quoted) {
+      if (c === "'") {
+        if (text[i + 1] === "'") i += 1;
+        else quoted = false;
+      }
+    } else if (c === "'") quoted = true;
+    else if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0 && !quoted;
+}
+
+/** A publisher's filter GSS sends: DEFINITION_EXPRESSION and balanced. */
+export function safeFilter(text: string): boolean {
+  return DEFINITION_EXPRESSION.test(text) && balancedFilter(text);
+}
+
 /** POST /api/v1/map-layers?organization_id=… : a web service. */
 export const createServiceLayerSchema = z.strictObject({
   ...layerDetails,
   ...presentation,
-  definitionExpression: z.string().regex(DEFINITION_EXPRESSION).nullable().default(null),
+  definitionExpression: z.string().refine(safeFilter).nullable().default(null),
   source: z.literal('web'),
   url: z.string().max(MAX_LAYER_URL_LENGTH * 2),
   wmsLayers: z.string().regex(WMS_LAYERS).nullable(),
@@ -725,7 +755,7 @@ export function groupingOf(layer: LayerGrouping): string {
  * The ArcGIS where clause for a layer's limit ("NET IN ('M','I')"), or 1=1 without one, with the
  * publisher's filter from its map (F-138) when it has one. Values can hold no quote
  * (ONLY_VALUE), so they cannot change the query; the filter is the publisher's own, checked by
- * DEFINITION_EXPRESSION and sent only to its service.
+ * safeFilter (balanced, so it cannot undo the limit) and sent only to its service.
  */
 export function whereOf(
   layer: Pick<LayerGrouping, 'onlyField' | 'onlyValues'> & {
@@ -733,8 +763,7 @@ export function whereOf(
   },
 ): string {
   const definition = layer.definitionExpression ?? null;
-  const filter =
-    definition !== null && DEFINITION_EXPRESSION.test(definition) ? `(${definition})` : null;
+  const filter = definition !== null && safeFilter(definition) ? `(${definition})` : null;
   if (definition !== null && filter === null) return '1=0';
   if (layer.onlyField === null || layer.onlyValues.length === 0) return filter ?? '1=1';
   const values = layer.onlyValues.filter((v) => ONLY_VALUE.test(v)).map((v) => `'${v}'`);

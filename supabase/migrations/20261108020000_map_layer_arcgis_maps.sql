@@ -10,6 +10,51 @@
 -- presented differently is removed and added again. Changing them on GSS is left for later (the
 -- owner: "some map customization… can always be added later").
 
+-- Whether a filter's parentheses and quotes are balanced (parentheses inside quoted text not
+-- counted; '' is a quote within quoted text), so wrapped in parentheses it stays one condition and
+-- cannot undo the layer's own limit ("1=1) OR (1=1"; Codex's review of 1f328f9). The same check as
+-- balancedFilter in @grain/domain.
+create function app.balanced_filter(filter text)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  depth int := 0;
+  quoted boolean := false;
+  i int := 1;
+  c text;
+begin
+  while i <= length(filter) loop
+    c := substr(filter, i, 1);
+    if quoted then
+      if c = '''' then
+        if substr(filter, i + 1, 1) = '''' then
+          i := i + 1;
+        else
+          quoted := false;
+        end if;
+      end if;
+    elsif c = '''' then
+      quoted := true;
+    elsif c = '(' then
+      depth := depth + 1;
+    elsif c = ')' then
+      depth := depth - 1;
+      if depth < 0 then
+        return false;
+      end if;
+    end if;
+    i := i + 1;
+  end loop;
+  return depth = 0 and not quoted;
+end
+$$;
+
+revoke all on function app.balanced_filter(text) from public, anon, authenticated, service_role;
+grant execute on function app.balanced_filter(text) to app_api;
+
 alter table app.map_layers
   -- Line width in points, as ArcGIS gives it; null: GSS's usual width.
   add column line_width double precision check (line_width > 0 and line_width <= 50),
@@ -22,9 +67,11 @@ alter table app.map_layers
   -- layer's own service, with the layer's limit. No statement separators or comments.
   add column definition_expression text check (
     length(definition_expression) between 1 and 2000
-    and definition_expression !~ '[\x01-\x1f\x7f;]'
+    -- Control characters, C0 and C1 alike, as the API's \p{Cc} (Codex's review of 1f328f9).
+    and definition_expression !~ '[\x01-\x1f\x7f-\x9f;]'
     and position('--' in definition_expression) = 0
     and position('/*' in definition_expression) = 0
+    and app.balanced_filter(definition_expression)
   ),
   -- Whether values without a colour of their own are drawn (ArcGIS draws none when its symbols
   -- have no default).
@@ -32,7 +79,7 @@ alter table app.map_layers
   -- The ArcGIS map it came from: its item id and title.
   add column map_item_id text check (map_item_id ~ '^[0-9a-f]{32}$'),
   add column map_title text check (
-    length(map_title) between 1 and 200 and map_title !~ '[\x01-\x1f\x7f]'
+    length(map_title) between 1 and 200 and map_title !~ '[\x01-\x1f\x7f-\x9f]'
   ),
   add constraint map_layers_zoom_range check (
     min_zoom is null or max_zoom is null or min_zoom < max_zoom

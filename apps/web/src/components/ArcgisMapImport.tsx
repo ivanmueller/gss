@@ -1,4 +1,5 @@
 import {
+  FILTER_REFUSED,
   itemLayerDrawing,
   itemTerms,
   mapOfApp,
@@ -136,17 +137,22 @@ async function planLayers(
           count = checked.collection.features.length;
         } else problem = checked.message;
       } else {
-        // The layer's own item gives its drawing when the map does not.
-        if (layer.itemId !== null && (renderer === null || renderer === undefined)) {
+        // The layer's own item gives its drawing and filter where the map gives none, as on
+        // ArcGIS; it is read even when the map has a drawing, for its filter (Codex's review of
+        // 1f328f9: a filter dropped there widened the layer).
+        if (layer.itemId !== null) {
           if (!itemData.has(layer.itemId)) {
             itemData.set(layer.itemId, await readItem(token, query, layer.itemId, 'data'));
           }
           const own = itemLayerDrawing(itemData.get(layer.itemId), layer.layerIndex);
           if (own) {
-            renderer = own.renderer;
-            transparency = own.transparency;
+            if (renderer === null || renderer === undefined) {
+              renderer = own.renderer;
+              transparency = own.transparency;
+            }
             minScale ??= own.minScale;
             maxScale ??= own.maxScale;
+            if (definitionExpression === null && own.definitionRefused) problem = FILTER_REFUSED;
             definitionExpression ??= own.definitionExpression;
           }
         }

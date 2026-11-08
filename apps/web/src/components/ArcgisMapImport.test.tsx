@@ -1,9 +1,16 @@
 import type { MapLayerView } from '@grain/domain';
-import { render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { lookOf, shownAtZoom, USUAL_LOOK, useLayerOverlays } from '../lib/mapLayers';
+import {
+  choiceOf,
+  lookOf,
+  shownAtZoom,
+  USUAL_LOOK,
+  useLayerOverlays,
+  useValueChoices,
+} from '../lib/mapLayers';
 import { clearApiCache } from '../lib/useApiResource';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { MapLayerSettings } from './MapLayerSettings';
@@ -359,5 +366,63 @@ describe('how a map’s layers are shown', () => {
         ['literal', ['CN']],
       ]);
     });
+  });
+});
+
+describe('Codex’s review of 1f328f9', () => {
+  it('does not add a layer whose own item has a filter GSS cannot send', async () => {
+    mockApi({
+      [`GET /map-layers${Q}`]: () => Response.json({ layers: [] }),
+      [`POST /map-layers/arcgis-item${Q}`]: ({ body }) => {
+        const { itemId, part } = body as { itemId: string; part: string };
+        if (itemId === MAP && part === 'info') {
+          return Response.json({ id: MAP, title: 'Synthetic rail map', type: 'Web Map' });
+        }
+        if (itemId === MAP) {
+          return Response.json({
+            operationalLayers: [
+              {
+                layerType: 'ArcGISFeatureLayer',
+                title: 'Synthetic filtered lines',
+                url: OTHER,
+                itemId: OTHER_ITEM,
+                layerDefinition: {
+                  drawingInfo: { renderer: { type: 'simple', symbol: { type: 'esriSLS' } } },
+                },
+              },
+            ],
+          });
+        }
+        return Response.json({
+          layers: [{ id: 0, layerDefinition: { definitionExpression: '1=1) OR (1=1' } }],
+        });
+      },
+      [`POST /map-layers/inspect${Q}`]: ({ body }) =>
+        Response.json(inspection((body as { url: string }).url)),
+    });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(await screen.findByRole('button', { name: 'Add map layer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add map layer' });
+    await user.click(within(dialog).getByRole('button', { name: 'ArcGIS map' }));
+    await user.type(within(dialog).getByLabelText('ArcGIS map link'), MAP);
+    await user.click(within(dialog).getByRole('button', { name: 'Read map' }));
+    const list = await within(dialog).findByRole('list', { name: 'The map’s layers' });
+    expect(list).toHaveTextContent('Its filter on ArcGIS is not one GSS can send.');
+    expect(within(dialog).getByRole('button', { name: 'Add 0 layers' })).toBeDisabled();
+  });
+
+  it('keeps "Other values" on for a layer that hides them by default', () => {
+    window.localStorage.clear();
+    const layer = { ...base, othersShown: false };
+    const { result } = renderHook(() => useValueChoices('token'));
+    act(() => {
+      result.current[1](layer.id, { shown: null, others: true }, choiceOf(layer, {}));
+    });
+    expect(choiceOf(layer, result.current[0])).toEqual({ shown: null, others: true });
+    act(() => {
+      result.current[1](layer.id, { shown: null, others: false }, choiceOf(layer, {}));
+    });
+    expect(result.current[0]).toEqual({});
   });
 });

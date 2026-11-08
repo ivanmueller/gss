@@ -11,9 +11,16 @@ import {
   scaleToZoom,
   styleOfRenderer,
   webMapLayers,
+  withoutTags,
   zoomRange,
 } from './arcgisMaps';
-import { DEFINITION_EXPRESSION, normalizeFeatureCollection, whereOf } from './mapLayers';
+import {
+  balancedFilter,
+  DEFINITION_EXPRESSION,
+  normalizeFeatureCollection,
+  safeFilter,
+  whereOf,
+} from './mapLayers';
 
 const ID = '96ec03e4fc8546bd8a864e39a2c3fc41';
 
@@ -512,5 +519,104 @@ describe('whereOf with a map’s filter', () => {
     expect(DEFINITION_EXPRESSION.test('a -- b')).toBe(false);
     expect(DEFINITION_EXPRESSION.test('a /* b')).toBe(false);
     expect(DEFINITION_EXPRESSION.test("NET IN ('M','I')")).toBe(true);
+  });
+});
+
+describe('Codex’s review of 1f328f9', () => {
+  it('refuses a filter that could undo the layer’s limit, wherever it is checked', () => {
+    expect(balancedFilter("NET IN ('M','I')")).toBe(true);
+    expect(balancedFilter("NAME = 'a)' AND (X = 1)")).toBe(true);
+    expect(balancedFilter("NAME = 'it''s'")).toBe(true);
+    for (const bad of ['1=1) OR (1=1', '(1=1', "NAME = 'a", ')(']) {
+      expect(balancedFilter(bad)).toBe(false);
+      expect(safeFilter(bad)).toBe(false);
+      expect(whereOf({ onlyField: 'NET', onlyValues: ['M'], definitionExpression: bad })).toBe(
+        '1=0',
+      );
+    }
+    expect(safeFilter('1=1\u0085')).toBe(false);
+  });
+
+  it('strips markup in time growing with the length, not its square', () => {
+    expect(withoutTags('a<b>c<d')).toBe('a c<d');
+    expect(withoutTags('<<<x>y')).toBe(' y');
+    const hostile = '<'.repeat(2_000_000);
+    const started = Date.now();
+    expect(arcgisPlainText(hostile, 200)?.length).toBeLessThanOrEqual(200);
+    expect(withoutTags(hostile)).toHaveLength(hostile.length);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('does not add a layer whose filter it cannot keep', () => {
+    const fc = {
+      layers: [
+        {
+          layerDefinition: {
+            geometryType: 'esriGeometryPoint',
+            definitionExpression: "STATE = 'TX'",
+            extent: { spatialReference: { wkid: 4326 } },
+          },
+          featureSet: { features: [{ geometry: { x: 1, y: 2 } }] },
+        },
+      ],
+    };
+    const [kept] = webMapLayers({
+      operationalLayers: [{ layerType: 'ArcGISFeatureLayer', title: 'F', featureCollection: fc }],
+    });
+    expect(kept).toMatchObject({ kind: null, collection: null });
+    expect(kept?.problem).toMatch(/filter GSS cannot apply/);
+    const own = itemLayerDrawing(
+      { layers: [{ id: 0, layerDefinition: { definitionExpression: '1=1) OR (1=1' } }] },
+      0,
+    );
+    expect(own).toMatchObject({ definitionExpression: null, definitionRefused: true });
+    expect(
+      itemLayerDrawing({ layers: [{ id: 0, layerDefinition: {} }] }, 0)?.definitionRefused,
+    ).toBe(false);
+  });
+
+  it('puts each hole in the outer ring around it, in any order', () => {
+    const square = (x: number, y: number, size: number, clockwise: boolean) => {
+      const ring = [
+        [x, y],
+        [x, y + size],
+        [x + size, y + size],
+        [x + size, y],
+        [x, y],
+      ];
+      return clockwise ? ring : ring.reverse();
+    };
+    const a = square(0, 0, 10, true);
+    const b = square(20, 0, 10, true);
+    const holeInA = square(2, 2, 2, false);
+    const result = featureSetToGeoJSON(
+      { geometryType: 'esriGeometryPolygon', features: [{ geometry: { rings: [holeInA, a, b] } }] },
+      { wkid: 4326 },
+    );
+    expect(result?.features[0]).toMatchObject({
+      geometry: { type: 'MultiPolygon', coordinates: [[a, holeInA], [b]] },
+    });
+  });
+
+  it('keeps a group’s zoom range for its layers', () => {
+    const [inGroup] = webMapLayers({
+      operationalLayers: [
+        {
+          layerType: 'GroupLayer',
+          minScale: 2_311_162.217,
+          maxScale: 1000,
+          layers: [
+            {
+              layerType: 'ArcGISFeatureLayer',
+              title: 'L',
+              url: SERVICE,
+              minScale: 5_000_000,
+            },
+          ],
+        },
+      ],
+    });
+    // The group's narrower outward limit wins; its inward limit applies.
+    expect(inGroup).toMatchObject({ minScale: 2_311_162.217, maxScale: 1000 });
   });
 });

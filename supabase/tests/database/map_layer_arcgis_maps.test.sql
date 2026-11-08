@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(20);
+select plan(28);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: adam (org_admin), olivia (operations). Org B: bob (org_admin).
@@ -69,6 +69,7 @@ $fn$;
 \set layer1 '''00000000-0000-4000-8000-0000000a2a01'''
 \set layer2 '''00000000-0000-4000-8000-0000000a2a02'''
 \set layer3 '''00000000-0000-4000-8000-0000000a2a03'''
+\set layer4 '''00000000-0000-4000-8000-0000000a2a04'''
 \set full_cols '''line_width, opacity, min_zoom, max_zoom, definition_expression, others_shown, map_item_id, map_title'''
 \set full_vals '''0.998, 0.8, 3, 18, ''''NET IN (''''''''M'''''''',''''''''I'''''''')'''', false, ''''96ec03e4fc8546bd8a864e39a2c3fc41'''', ''''Synthetic rail map'''''''
 
@@ -104,6 +105,22 @@ select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'de
   $$'1=1; drop table app.map_layers'$$)), '23514', 'a filter with a statement separator is refused');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
   $$'1=1 -- x'$$)), '23514', 'a filter with a comment is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'1=1 /* x'$$)), '23514', 'a filter with a block comment is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'1=1' || chr(133) || 'x'$$)), '23514', 'a filter with a C1 control character is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'1=1' || chr(9) || 'x'$$)), '23514', 'a filter with a tab is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'1=1) OR (1=1'$$)), '23514', 'a filter that could undo the layer''s limit is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'NAME = ''it''''s'' OR (1=1'$$)), '23514', 'a filter with an open parenthesis is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer4, :orga, :adam, 'definition_expression',
+  $$'NAME = ''a)'''$$)), 'ok 1', 'a parenthesis inside quoted text is not counted');
+select is(pg_temp.api_run(:adam, format('delete from app.map_layers where id = %L', :layer2)), '42501',
+  'app_api deletes no layer');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer3, :orga, :adam, 'map_item_id, map_title',
+  $$'96ec03e4fc8546bd8a864e39a2c3fc41', 'M' || chr(133)$$)), '23514', 'a map title with a C1 control character is refused');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'map_item_id', $$'96ec03e4fc8546bd8a864e39a2c3fc41'$$)),
   '23514', 'a map is kept with its title');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'map_item_id, map_title',

@@ -7,6 +7,7 @@ import {
   OTHER_VALUES_COLOUR,
   cleanValue,
   parseLayerSource,
+  safeFilter,
   type MapLayerKind,
 } from './mapLayers';
 import { websiteProblem, writtenAddressProblem, type WebAddress } from './website';
@@ -89,11 +90,32 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/** The most of a description read: enough for any text kept, after its markup. */
+const MAX_DESCRIPTION_READ = 100_000;
+
+/**
+ * Text without its markup, in one pass: a tag (from < to the next >) becomes a space; a < with no
+ * > after it, and the rest, are kept. A regular expression took time growing with the square of
+ * the length on many <s without >s (Codex's review of 1f328f9).
+ */
+export function withoutTags(text: string): string {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<', at);
+    if (open === -1) return out + text.slice(at);
+    const close = text.indexOf('>', open + 1);
+    // No > after it: none after any later < either.
+    if (close === -1) return out + text.slice(at);
+    out += `${text.slice(at, open)} `;
+    at = close + 1;
+  }
+}
+
 /** Plain text from ArcGIS's descriptions: no markup, no control characters, cut short. */
 export function arcgisPlainText(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
-  const text = value
-    .replace(/<[^>]*>/g, ' ')
+  const text = withoutTags(value.slice(0, MAX_DESCRIPTION_READ))
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -455,6 +477,18 @@ function clockwise(ring: readonly Position[]): boolean {
   return sum > 0;
 }
 
+/** Whether a point is inside a ring (crossings of a ray to its right). */
+function ringContains(ring: readonly Position[], [x, y]: Position): boolean {
+  let inside = false;
+  ring.forEach(([x2, y2], i) => {
+    const before = ring[i - 1];
+    if (!before) return;
+    const [x1, y1] = before;
+    if (y1 > y !== y2 > y && x < ((x2 - x1) * (y - y1)) / (y2 - y1) + x1) inside = !inside;
+  });
+  return inside;
+}
+
 function geometryOf(
   geometry: unknown,
   geometryType: string,
@@ -484,12 +518,17 @@ function geometryOf(
     const rings = (Array.isArray(g.rings) ? g.rings : [])
       .map((p) => path(p, convert))
       .filter((p) => p.length >= 4);
-    // An outer ring runs clockwise and the holes after it run the other way.
-    const polygons: Position[][][] = [];
+    // An outer ring runs clockwise and a hole the other way, in any order; each hole goes with
+    // the outer ring around it (Codex's review of 1f328f9: not merely the last one before it).
+    const outer = rings.filter((ring) => clockwise(ring));
+    const polygons: Position[][][] = (outer.length > 0 ? outer : rings.slice(0, 1)).map((r) => [r]);
     for (const ring of rings) {
-      const last = polygons[polygons.length - 1];
-      if (clockwise(ring) || !last) polygons.push([ring]);
-      else last.push(ring);
+      if (polygons.some(([o]) => o === ring)) continue;
+      const [point] = ring;
+      const around =
+        polygons.find(([o]) => o !== undefined && point !== undefined && ringContains(o, point)) ??
+        polygons[polygons.length - 1];
+      around?.push(ring);
     }
     const [only, ...more] = polygons;
     if (!only) return null;
@@ -586,21 +625,25 @@ function numberOr<T>(value: unknown, fallback: T): number | T {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-/** The map's filter on a layer, when it is one GSS takes (the database's own check). */
-function definitionOf(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
+/**
+ * The map's filter on a layer: none, one GSS sends (safeFilter, as the API and the database
+ * check it), or refused, so a layer whose filter cannot be kept is never added unfiltered
+ * (Codex's review of 1f328f9).
+ */
+function filterOf(value: unknown): { filter: string | null; refused: boolean } {
+  if (typeof value !== 'string' || value.trim() === '') return { filter: null, refused: false };
   const text = value.trim();
-  if (
-    text === '' ||
-    text.length > 2000 ||
-    /[\p{Cc};]/u.test(text) ||
-    text.includes('--') ||
-    text.includes('/*')
-  ) {
-    return null;
-  }
-  return text;
+  return safeFilter(text) ? { filter: text, refused: false } : { filter: null, refused: true };
 }
+
+/** The narrower of two ArcGIS scale limits (0 or none: no limit). */
+function narrower(a: number | null, b: number | null, pick: (x: number, y: number) => number) {
+  const ok = (v: number | null): v is number => v !== null && v > 0;
+  if (ok(a) && ok(b)) return pick(a, b);
+  return ok(a) ? a : ok(b) ? b : null;
+}
+
+export const FILTER_REFUSED = 'Its filter on ArcGIS is not one GSS can send.';
 
 /**
  * A map's layers, bottom to top (the order ArcGIS draws them in): from its data
@@ -609,19 +652,38 @@ function definitionOf(value: unknown): string | null {
 export function webMapLayers(data: unknown): WebMapLayer[] {
   const body = record(data);
   const out: WebMapLayer[] = [];
-  const visit = (layers: unknown, groupOpacity: number, depth: number) => {
+  /** A group's opacity and scale range apply to its layers too. */
+  interface Group {
+    opacity: number;
+    minScale: number | null;
+    maxScale: number | null;
+  }
+  const visit = (layers: unknown, group: Group, depth: number) => {
     if (!Array.isArray(layers) || depth > 4) return;
     for (const raw of layers) {
       const layer = record(raw);
       if (!layer) continue;
       const title = arcgisPlainText(layer.title, 200) ?? 'Untitled layer';
-      const opacity = groupOpacity * Math.min(1, Math.max(0, numberOr(layer.opacity, 1)));
+      const opacity = group.opacity * Math.min(1, Math.max(0, numberOr(layer.opacity, 1)));
+      const definition = record(layer.layerDefinition);
+      // The farthest out it shows is the nearer of its own and its group's; likewise inwards
+      // (Codex's review of 1f328f9: a group's range was dropped).
+      const minScale = narrower(
+        numberOr(layer.minScale ?? definition?.minScale, null),
+        group.minScale,
+        Math.min,
+      );
+      const maxScale = narrower(
+        numberOr(layer.maxScale ?? definition?.maxScale, null),
+        group.maxScale,
+        Math.max,
+      );
       const type = typeof layer.layerType === 'string' ? layer.layerType : '';
       if (type === 'GroupLayer') {
-        visit(layer.layers, opacity, depth + 1);
+        visit(layer.layers, { opacity, minScale, maxScale }, depth + 1);
         continue;
       }
-      const definition = record(layer.layerDefinition);
+      const filter = filterOf(definition?.definitionExpression);
       const drawing = record(definition?.drawingInfo);
       const base: WebMapLayer = {
         title,
@@ -636,14 +698,14 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
         renderer: drawing?.renderer ?? null,
         transparency: numberOr(drawing?.transparency, 0),
         opacity,
-        definitionExpression: definitionOf(definition?.definitionExpression),
-        minScale: numberOr(layer.minScale ?? definition?.minScale, null),
-        maxScale: numberOr(layer.maxScale ?? definition?.maxScale, null),
+        definitionExpression: filter.filter,
+        minScale,
+        maxScale,
         collection: null,
         problem: null,
       };
-      if (typeof definition?.definitionExpression === 'string' && !base.definitionExpression) {
-        out.push({ ...base, problem: 'Its filter on ArcGIS is not one GSS can send.' });
+      if (filter.refused) {
+        out.push({ ...base, problem: FILTER_REFUSED });
         continue;
       }
       const collection = record(layer.featureCollection);
@@ -663,20 +725,28 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
             sr,
           );
           const name = arcgisPlainText(innerDefinition?.name, 200);
+          // GSS cannot filter features kept in the map as ArcGIS does, so a filtered one is not
+          // added with all of them (Codex's review of 1f328f9).
+          const filtered =
+            base.definitionExpression !== null ||
+            filterOf(innerDefinition?.definitionExpression).filter !== null ||
+            filterOf(innerDefinition?.definitionExpression).refused;
           out.push({
             ...base,
             title: inner.length > 1 && name ? `${title}: ${name}` : title,
-            kind: geojson ? 'file' : null,
             url: null,
             renderer: innerDrawing?.renderer ?? base.renderer,
             transparency: numberOr(innerDrawing?.transparency, base.transparency),
-            minScale: numberOr(innerDefinition?.minScale, base.minScale),
-            maxScale: numberOr(innerDefinition?.maxScale, base.maxScale),
+            minScale: narrower(numberOr(innerDefinition?.minScale, null), base.minScale, Math.min),
+            maxScale: narrower(numberOr(innerDefinition?.maxScale, null), base.maxScale, Math.max),
             definitionExpression: null,
-            collection: geojson,
-            problem: geojson
-              ? null
-              : 'Its features are in a coordinate system GSS does not convert.',
+            kind: geojson && !filtered ? 'file' : null,
+            collection: filtered ? null : geojson,
+            problem: filtered
+              ? 'Its features are kept in the map with a filter GSS cannot apply to them.'
+              : geojson
+                ? null
+                : 'Its features are in a coordinate system GSS does not convert.',
           });
         }
         if (inner.length === 0) {
@@ -742,7 +812,7 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
       });
     }
   };
-  visit(body?.operationalLayers, 1, 0);
+  visit(body?.operationalLayers, { opacity: 1, minScale: null, maxScale: null }, 0);
   return out;
 }
 
@@ -757,6 +827,8 @@ export function itemLayerDrawing(
   renderer: unknown;
   transparency: number;
   definitionExpression: string | null;
+  /** The item has a filter GSS cannot send: the layer is not added (Codex's review of 1f328f9). */
+  definitionRefused: boolean;
   minScale: number | null;
   maxScale: number | null;
 } | null {
@@ -771,7 +843,8 @@ export function itemLayerDrawing(
   return {
     renderer: drawing?.renderer ?? null,
     transparency: numberOr(drawing?.transparency, 0),
-    definitionExpression: definitionOf(definition.definitionExpression),
+    definitionExpression: filterOf(definition.definitionExpression).filter,
+    definitionRefused: filterOf(definition.definitionExpression).refused,
     minScale: numberOr(definition.minScale ?? entry.minScale, null),
     maxScale: numberOr(definition.maxScale ?? entry.maxScale, null),
   };

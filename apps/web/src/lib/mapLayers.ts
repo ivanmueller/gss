@@ -374,7 +374,10 @@ function readValues(key: string): Record<string, ValueChoice> {
  */
 export function useValueChoices(
   token: string,
-): [Readonly<Record<string, ValueChoice>>, (id: string, choice: ValueChoice) => void] {
+): [
+  Readonly<Record<string, ValueChoice>>,
+  (id: string, choice: ValueChoice, layerDefault?: ValueChoice) => void,
+] {
   const key = `${VALUES_PREFIX}${signedInAs(token)}`;
   const [state, setState] = useState<{ key: string; choices: Record<string, ValueChoice> }>(() => ({
     key,
@@ -382,10 +385,15 @@ export function useValueChoices(
   }));
   const choices = state.key === key ? state.choices : readValues(key);
   const set = useCallback(
-    (id: string, choice: ValueChoice) => {
+    (id: string, choice: ValueChoice, layerDefault: ValueChoice = ALL_VALUES) => {
       setState((current) => {
         const before = current.key === key ? current.choices : readValues(key);
-        const all = choice.shown === null && choice.others;
+        // Forgotten only when it is the layer's own choice: "every value and other values" is
+        // kept for a layer that hides other values by default (Codex's review of 1f328f9).
+        const all =
+          choice.shown === null &&
+          layerDefault.shown === null &&
+          choice.others === layerDefault.others;
         const next = Object.fromEntries(
           Object.entries(before).filter(([layer]) => layer !== id || !all),
         );

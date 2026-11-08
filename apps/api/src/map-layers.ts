@@ -17,6 +17,7 @@ import {
   tileBounds,
   tileBoundsMercator,
   updateMapLayerSchema,
+  withoutTags,
   type LayerInspection,
   type MapLayerList,
   type Tile,
@@ -163,8 +164,9 @@ function record(value: unknown): Record<string, unknown> | null {
 /** Plain text from a service's description: no markup, no control characters, cut short. */
 function plainText(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
-  const text = value
-    .replace(/<[^>]*>/g, ' ')
+  // Markup removed in one pass, on at most 100,000 characters (Codex's review of 1f328f9: the
+  // regular expression slowed with the square of the length on many <s).
+  const text = withoutTags(value.slice(0, 100_000))
     .replace(/&nbsp;/g, ' ')
     .replace(/[\p{Cc}\s]+/gu, ' ')
     .trim();
