@@ -432,6 +432,16 @@ export function scaleToZoom(scale: unknown): number | null {
  * The zooms a layer shows between: its minScale (the farthest out it shows) as the lowest zoom,
  * its maxScale (the closest in) as the highest. Null for no limit.
  */
+/**
+ * Whether ArcGIS never draws a layer: its farthest-out scale is not beyond its closest-in one
+ * (a group's range and its own that do not overlap; Codex's re-review of 1a5f81c).
+ */
+export function neverShown(minScale: number | null, maxScale: number | null): boolean {
+  return (
+    minScale !== null && maxScale !== null && minScale > 0 && maxScale > 0 && minScale <= maxScale
+  );
+}
+
 export function zoomRange(
   minScale: unknown,
   maxScale: unknown,
@@ -468,6 +478,15 @@ function path(points: unknown, convert: (p: unknown) => Position | null): Positi
 }
 
 /** Twice a ring's signed area with y up: positive when it runs clockwise (ArcGIS's outer rings). */
+function ringArea(ring: readonly Position[]): number {
+  let sum = 0;
+  ring.forEach(([x2, y2], i) => {
+    const before = ring[i - 1];
+    if (before) sum += (x2 - before[0]) * (y2 + before[1]);
+  });
+  return Math.abs(sum);
+}
+
 function clockwise(ring: readonly Position[]): boolean {
   let sum = 0;
   ring.forEach(([x2, y2], i) => {
@@ -525,9 +544,20 @@ function geometryOf(
     for (const ring of rings) {
       if (polygons.some(([o]) => o === ring)) continue;
       const [point] = ring;
+      // The innermost outer ring around it: an island inside a hole has its own holes (Codex's
+      // re-review of 1a5f81c).
+      const containing = polygons.filter(
+        ([o]) => o !== undefined && point !== undefined && ringContains(o, point),
+      );
       const around =
-        polygons.find(([o]) => o !== undefined && point !== undefined && ringContains(o, point)) ??
-        polygons[polygons.length - 1];
+        containing.reduce<Position[][] | undefined>(
+          (best, candidate) =>
+            best?.[0] === undefined ||
+            (candidate[0] !== undefined && ringArea(candidate[0]) < ringArea(best[0]))
+              ? candidate
+              : best,
+          undefined,
+        ) ?? polygons[polygons.length - 1];
       around?.push(ring);
     }
     const [only, ...more] = polygons;

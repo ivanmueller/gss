@@ -259,9 +259,13 @@ const presentation = {
 
 /**
  * The publisher's filter on a live layer's features (an ArcGIS where clause from its map), sent
- * only to the layer's own service: no statement separators, comments or control characters.
+ * only to the layer's own service: ASCII letters and digits, spaces, _ ' ( ) , . = < > ! + * / %
+ * : - and characters from U+00A0 up (accented letters) only, without -- or /*. No other quoting ($$, double quotes, backslashes, brackets or
+ * backticks), whose text could hide a parenthesis from balancedFilter on a service taking its
+ * database's own SQL (Codex's re-review of 1a5f81c), and no ; or control characters.
  */
-export const DEFINITION_EXPRESSION = /^(?!.*--)(?!.*\/\*)[^\p{Cc};]{1,2000}$/u;
+export const DEFINITION_EXPRESSION =
+  /^(?!.*--)(?!.*\/\*)[A-Za-z0-9_ '(),.=<>!+*/%:\u{a0}-\u{10ffff}-]{1,2000}$/u;
 
 /**
  * Whether a filter's parentheses and quotes are balanced (parentheses inside quoted text not

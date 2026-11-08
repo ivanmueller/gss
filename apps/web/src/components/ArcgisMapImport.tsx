@@ -3,6 +3,7 @@ import {
   itemLayerDrawing,
   itemTerms,
   mapOfApp,
+  neverShown,
   MAP_LAYER_KIND_LABELS,
   normalizeFeatureCollection,
   OVERVIEW_BELOW_ZOOM,
@@ -193,6 +194,12 @@ async function planLayers(
       definitionExpression: layer.kind === 'arcgis_features' ? definitionExpression : null,
       count,
       problem,
+      // A layer ArcGIS never draws is not added drawn at every zoom (Codex's re-review of
+      // 1a5f81c).
+      ...(neverShown(minScale, maxScale) && {
+        kind: null,
+        problem: 'ArcGIS never shows it: its zoom range and its group’s do not overlap.',
+      }),
     });
   }
   return planned;

@@ -6,6 +6,7 @@ import {
   itemLayerDrawing,
   itemTerms,
   mapOfApp,
+  neverShown,
   parseArcgisMapLink,
   readItemInfo,
   scaleToZoom,
@@ -618,5 +619,80 @@ describe('Codex’s review of 1f328f9', () => {
     });
     // The group's narrower outward limit wins; its inward limit applies.
     expect(inGroup).toMatchObject({ minScale: 2_311_162.217, maxScale: 1000 });
+  });
+});
+
+describe('Codex’s re-review of 1a5f81c', () => {
+  it('refuses quoting that could hide a parenthesis', () => {
+    const dollar = '$'.repeat(2);
+    for (const bad of [
+      `${dollar}(${dollar} IS NOT NULL) OR (${dollar})${dollar} IS NOT NULL`,
+      '"a(" = 1',
+      "E'\\'' = 1",
+      '[a(] = 1',
+      '`a(` = 1',
+      'a = 1 # (',
+      '{fn x()}',
+    ]) {
+      expect(safeFilter(bad)).toBe(false);
+    }
+    for (const good of [
+      "NET IN ('M','I')",
+      "NAME LIKE 'Québec%' AND MILES >= 2.5",
+      "UPDATED > DATE '2024-01-01'",
+    ]) {
+      expect(safeFilter(good)).toBe(true);
+    }
+  });
+
+  it('puts an island’s hole in the island, not the shell around it', () => {
+    const square = (x: number, size: number, clockwise: boolean) => {
+      const ring = [
+        [x, x],
+        [x, x + size],
+        [x + size, x + size],
+        [x + size, x],
+        [x, x],
+      ];
+      return clockwise ? ring : ring.reverse();
+    };
+    const shell = square(0, 100, true);
+    const hole = square(10, 80, false);
+    const island = square(20, 60, true);
+    const islandHole = square(40, 10, false);
+    const result = featureSetToGeoJSON(
+      {
+        geometryType: 'esriGeometryPolygon',
+        features: [{ geometry: { rings: [shell, hole, island, islandHole] } }],
+      },
+      { wkid: 4326 },
+    );
+    expect(result?.features[0]).toMatchObject({
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: [
+          [shell, hole],
+          [island, islandHole],
+        ],
+      },
+    });
+  });
+
+  it('knows a layer ArcGIS never draws', () => {
+    expect(neverShown(10_000, 100_000)).toBe(true);
+    expect(neverShown(100_000, 10_000)).toBe(false);
+    expect(neverShown(null, 10_000)).toBe(false);
+    const [layer] = webMapLayers({
+      operationalLayers: [
+        {
+          layerType: 'GroupLayer',
+          minScale: 10_000,
+          layers: [
+            { layerType: 'ArcGISFeatureLayer', title: 'L', url: SERVICE, maxScale: 100_000 },
+          ],
+        },
+      ],
+    });
+    expect(neverShown(layer?.minScale ?? null, layer?.maxScale ?? null)).toBe(true);
   });
 });

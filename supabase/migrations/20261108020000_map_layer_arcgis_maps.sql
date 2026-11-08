@@ -67,7 +67,13 @@ alter table app.map_layers
   -- layer's own service, with the layer's limit. No statement separators or comments.
   add column definition_expression text check (
     length(definition_expression) between 1 and 2000
-    -- Control characters, C0 and C1 alike, as the API's \p{Cc} (Codex's review of 1f328f9).
+    -- Letters, digits, spaces and _ ' ( ) , . = < > ! + * / % : - only, as the API's
+    -- DEFINITION_EXPRESSION: no other quoting ($$, double quotes, backslashes, brackets), which
+    -- could hide a parenthesis from app.balanced_filter (Codex's re-review of 1a5f81c), and no
+    -- semicolons or control characters (C0 and C1, Codex's review of 1f328f9).
+    -- By code point, whatever the database's locale: ASCII letters and digits, the symbols
+    -- listed, and characters from U+00A0 up (accented letters).
+    and definition_expression ~ '^[A-Za-z0-9_ ''(),.=<>!+*/%: -\U0010ffff-]+$'
     and definition_expression !~ '[\x01-\x1f\x7f-\x9f;]'
     and position('--' in definition_expression) = 0
     and position('/*' in definition_expression) = 0

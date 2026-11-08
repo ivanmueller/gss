@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(28);
+select plan(31);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: adam (org_admin), olivia (operations). Org B: bob (org_admin).
@@ -70,6 +70,7 @@ $fn$;
 \set layer2 '''00000000-0000-4000-8000-0000000a2a02'''
 \set layer3 '''00000000-0000-4000-8000-0000000a2a03'''
 \set layer4 '''00000000-0000-4000-8000-0000000a2a04'''
+\set layer5 '''00000000-0000-4000-8000-0000000a2a05'''
 \set full_cols '''line_width, opacity, min_zoom, max_zoom, definition_expression, others_shown, map_item_id, map_title'''
 \set full_vals '''0.998, 0.8, 3, 18, ''''NET IN (''''''''M'''''''',''''''''I'''''''')'''', false, ''''96ec03e4fc8546bd8a864e39a2c3fc41'''', ''''Synthetic rail map'''''''
 
@@ -117,6 +118,13 @@ select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'de
   $$'NAME = ''it''''s'' OR (1=1'$$)), '23514', 'a filter with an open parenthesis is refused');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer4, :orga, :adam, 'definition_expression',
   $$'NAME = ''a)'''$$)), 'ok 1', 'a parenthesis inside quoted text is not counted');
+-- Only plain quoting: other quoting could hide a parenthesis (Codex's re-review of 1a5f81c).
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $q$'$$($$ IS NOT NULL) OR ($$)$$ IS NOT NULL'$q$)), '23514', 'a filter with dollar quoting is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'"a(" = 1'$$)), '23514', 'a filter with a quoted name is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer5, :orga, :adam, 'definition_expression',
+  $$'NAME = ''Québec'' AND MILES >= 2.5'$$)), 'ok 1', 'an accented value and comparisons are taken');
 select is(pg_temp.api_run(:adam, format('delete from app.map_layers where id = %L', :layer2)), '42501',
   'app_api deletes no layer');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer3, :orga, :adam, 'map_item_id, map_title',
