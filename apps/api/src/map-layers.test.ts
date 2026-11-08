@@ -132,6 +132,7 @@ const source: MapLayerSource = {
   onlyField: null,
   onlyValues: [],
   definitionExpression: null,
+  tileLevels: null,
 };
 
 /** How a layer added by hand is presented (F-138). */
@@ -142,6 +143,8 @@ const PLAIN = {
   maxZoom: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
   definitionExpression: null,
 };
 
@@ -983,5 +986,129 @@ describe('layers from an ArcGIS map (F-138)', () => {
     expect(square.searchParams.get('where')).toBe("(STATE = 'TX')");
     const page = new URL(overviewPageUrl({ ...filtered, onlyField: 'NET', onlyValues: ['M'] }, 0));
     expect(page.searchParams.get('where')).toBe("(STATE = 'TX') AND NET IN ('M')");
+  });
+});
+
+describe('pre-drawn ArcGIS maps (F-141)', () => {
+  const TILED = 'https://tiles.example.com/tiles/x/arcgis/rest/services/Crop_Density/MapServer';
+  const lods = Array.from({ length: 24 }, (_, level) => ({
+    level,
+    scale: 591_657_527.591555 / 2 ** level,
+  }));
+  const tiled = {
+    name: 'Synthetic crop density',
+    capabilities: 'Map,TilesOnly,Tilemap',
+    singleFusedMapCache: true,
+    minLOD: 3,
+    maxLOD: 10,
+    tileInfo: {
+      rows: 256,
+      cols: 256,
+      origin: { x: -20037508.342787, y: 20037508.342787 },
+      spatialReference: { wkid: 102100, latestWkid: 3857 },
+      lods,
+    },
+  };
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const picture: MapLayerSource = {
+    ...source,
+    kind: 'arcgis_tiles',
+    url: TILED,
+    idField: null,
+    colourField: null,
+    tileLevels: { min: 3, max: 10 },
+  };
+
+  it('takes a pre-drawn map as such, with its levels', async () => {
+    service = (url) =>
+      url.startsWith(`${TILED}?f=json`)
+        ? Response.json(tiled)
+        : new Response('no', { status: 404 });
+    const inspected = await send('/inspect', 'POST', { url: TILED, field: null });
+    expect(inspected.status).toBe(200);
+    expect((await inspected.json<LayerInspection>()).kind).toBe('arcgis_tiles');
+    const res = await send('', 'POST', {
+      ...details,
+      colourField: null,
+      colours: [],
+      source: 'web',
+      url: TILED,
+      wmsLayers: null,
+      mapVisible: false,
+    });
+    expect(res.status).toBe(201);
+    expect(db.createMapLayer.mock.calls[0]?.[2]).toMatchObject({
+      kind: 'arcgis_tiles',
+      url: TILED,
+      tileLevels: { min: 3, max: 10 },
+      mapVisible: false,
+    });
+  });
+
+  it('refuses a pre-drawn map whose squares are not the standard ones', async () => {
+    service = () =>
+      Response.json({ ...tiled, tileInfo: { ...tiled.tileInfo, rows: 512, cols: 512 } });
+    const res = await send('/inspect', 'POST', { url: TILED, field: null });
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(await res.json())).toContain('cannot place');
+  });
+
+  it('passes on a pre-drawn square by level, row and column, checked as a picture', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    service = () => new Response(PNG, { headers: { 'Content-Type': 'application/octet-stream' } });
+    const res = await send(`/${LAYER}/tiles/5/7/11.png`, 'GET');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(serviceCalls).toEqual([`${TILED}/tile/5/11/7`]);
+  });
+
+  it('asks for nothing outside its levels, and gives an empty square where it has none', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    expect((await send(`/${LAYER}/tiles/11/7/11.png`, 'GET')).status).toBe(404);
+    expect((await send(`/${LAYER}/tiles/2/1/1.png`, 'GET')).status).toBe(404);
+    expect(serviceCalls).toEqual([]);
+    service = () => new Response('Page Not Found', { status: 404 });
+    expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(204);
+  });
+
+  it('passes on nothing that is not a picture', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    service = () =>
+      new Response('<html>', { headers: { 'Content-Type': 'application/octet-stream' } });
+    expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(502);
+  });
+
+  it('gives a picture layer’s legend, small pictures only', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    service = (url) =>
+      url === `${TILED}/legend?f=json`
+        ? Response.json({
+            layers: [
+              {
+                layerName: 'All Annual Crops',
+                legend: [
+                  {
+                    label: 'Most Dense - <b>Least</b> Dense',
+                    contentType: 'image/png',
+                    imageData: 'iVBORw0KGgo=',
+                  },
+                  { label: 'Too big', contentType: 'image/png', imageData: 'A'.repeat(30_000) },
+                  { label: 'Not a picture', contentType: 'text/html', imageData: 'PGI+' },
+                ],
+              },
+            ],
+          })
+        : new Response('no', { status: 404 });
+    const res = await send(`/${LAYER}/legend`, 'GET');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      entries: [
+        { label: 'Most Dense - Least Dense', image: 'data:image/png;base64,iVBORw0KGgo=' },
+        { label: 'Too big', image: null },
+        { label: 'Not a picture', image: null },
+      ],
+    });
+    db.getMapLayerSource.mockResolvedValue(source);
+    expect((await send(`/${LAYER}/legend`, 'GET')).status).toBe(404);
   });
 });

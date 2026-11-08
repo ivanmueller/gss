@@ -187,7 +187,14 @@ export type MapOverlay =
       filter?: FilterSpecification | null;
       look?: OverlayLook;
     }
-  | { id: string; kind: 'pictures'; tiles: string; look?: OverlayLook };
+  | {
+      id: string;
+      kind: 'pictures';
+      tiles: string;
+      look?: OverlayLook;
+      /** A pre-drawn layer's levels: no squares asked below, the last enlarged above (F-141). */
+      levels?: { min: number; max: number } | null;
+    };
 
 /** The property FacilityMap reads to say which feature of a live layer was clicked. */
 export const OBJECT_ID = '__gss_object_id';
@@ -603,12 +610,13 @@ export function useLayerOverlays(
     const overlays: MapOverlay[] = [];
     const notes = new Map<string, string>();
     for (const layer of layers) {
-      if (layer.kind === 'arcgis_image' || layer.kind === 'wms') {
+      if (layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' || layer.kind === 'wms') {
         overlays.push({
           id: layer.id,
           kind: 'pictures',
           tiles: picturesUrl(layer.id),
           look: lookOf(layer),
+          levels: layer.tileLevels,
         });
         continue;
       }

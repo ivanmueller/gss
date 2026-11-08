@@ -1,4 +1,4 @@
-import type { MapLayerList, MapLayerView } from '@grain/domain';
+import type { LayerLegend, MapLayerList, MapLayerView } from '@grain/domain';
 import { ChevronDown, ChevronRight, Layers, Search, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 
@@ -31,6 +31,8 @@ import { Input } from './ui/input';
 const LEGEND_VALUES = 8;
 
 export interface MapLayersState {
+  /** The person's sign-in, for a picture layer's legend (F-141). */
+  token: string;
   layers: MapLayerView[];
   chosen: ReadonlySet<string>;
   toggle: (id: string) => void;
@@ -72,6 +74,7 @@ export function useMapLayers(
   const [picked, setPicked] = useState<PickedFeature | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   return {
+    token,
     layers,
     chosen,
     toggle,
@@ -353,10 +356,16 @@ function MapGroup({
           type="checkbox"
           role="switch"
           className="size-4 accent-primary"
-          checked={onCount === layers.length}
+          checked={onCount > 0}
           aria-checked={onCount === layers.length ? 'true' : onCount === 0 ? 'false' : 'mixed'}
           onChange={() => {
-            state.setMany(ids, onCount < layers.length);
+            // On: the layers the ArcGIS map shows at first (all when it names none, F-141);
+            // off: all of them.
+            if (onCount > 0) state.setMany(ids, false);
+            else {
+              const first = layers.filter((layer) => layer.mapVisible).map((layer) => layer.id);
+              state.setMany(first.length > 0 ? first : ids, true);
+            }
           }}
         />
         <span className="truncate">{title}</span>
@@ -448,6 +457,26 @@ export function MapLayersPanel({
 }
 
 /**
+ * A picture layer's legend from ArcGIS (F-141): each entry's small picture and words, as ArcGIS
+ * shows it (a heat map's scale from most to least dense). Nothing while it loads or if ArcGIS
+ * gives none.
+ */
+function PictureLegend({ layerId, token }: { layerId: string; token: string }) {
+  const [legend] = useApiResource<LayerLegend>(`/map-layers/${layerId}/legend`, token);
+  if (legend.status !== 'ok') return null;
+  return (
+    <>
+      {legend.data.entries.map((entry, i) => (
+        <span key={`${String(i)}-${entry.label}`} className="flex items-center gap-1">
+          {entry.image && <img src={entry.image} alt="" className="h-4 max-w-16 object-contain" />}
+          {entry.label}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
  * Under the map: each layer that is on, the colours shown and any note. Its source and terms are
  * on Team → Map layers, not here (the owner's request of 2026-11-08, F-139).
  */
@@ -485,6 +514,8 @@ export function MapLayersLegend({ state }: { state: MapLayersState }) {
                 )}
                 {hidden > 0 && <span>({hidden.toLocaleString('en-CA')} hidden in Layers)</span>}
               </>
+            ) : layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' ? (
+              <PictureLegend layerId={layer.id} token={state.token} />
             ) : (
               <span
                 aria-hidden="true"

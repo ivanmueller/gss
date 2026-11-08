@@ -48,6 +48,8 @@ const SERVICE: NewMapLayer = {
   definitionExpression: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
   file: null,
 };
 
@@ -112,6 +114,7 @@ describe('map layers as app_api', () => {
         onlyField: null,
         onlyValues: [],
         definitionExpression: null,
+        tileLevels: null,
       });
 
       const version = layer?.version ?? '';
@@ -446,6 +449,41 @@ describe('map layers as app_api', () => {
       expect(await db.listMapLayers(as(BOB), ORG_B)).toEqual(
         expect.not.arrayContaining([expect.objectContaining({ map })]),
       );
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('keeps a pre-drawn layer with its levels and whether its map shows it at first (F-141)', async () => {
+    const db = postgresDatabase(API_URL);
+    try {
+      const tiles = {
+        ...SERVICE,
+        name: 'Synthetic crop density',
+        kind: 'arcgis_tiles' as const,
+        url: 'https://tiles.example.com/tiles/x/arcgis/rest/services/Crops/MapServer',
+        idField: null,
+        colourField: null,
+        colours: [],
+        tileLevels: { min: 3, max: 10 },
+        mapVisible: false,
+      };
+      expect(await db.createMapLayer(as(BOB), ORG_A, tiles)).toEqual({ status: 'forbidden' });
+      const added = await db.createMapLayer(as(ADAM), ORG_A, tiles);
+      if (added.status !== 'saved') throw new Error('not added');
+      const listed = ((await db.listMapLayers(as(VERA), ORG_A)) ?? []).find(
+        (l) => l.id === added.id,
+      );
+      expect(listed).toMatchObject({
+        kind: 'arcgis_tiles',
+        tileLevels: { min: 3, max: 10 },
+        mapVisible: false,
+      });
+      expect((await db.getMapLayerSource(as(VERA), added.id))?.tileLevels).toEqual({
+        min: 3,
+        max: 10,
+      });
+      expect(await db.getMapLayerSource(as(BOB), added.id)).toBeNull();
     } finally {
       await db.close();
     }

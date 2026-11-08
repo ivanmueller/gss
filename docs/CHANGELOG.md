@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-08 — ArcGIS maps of pre-drawn pictures (F-141)
+
+- `docs/FEATURES.md`: F-141. `docs/DECISIONS.md`: why the crop density map did not show, and what is built. `docs/DATA_MODEL.md`: `20261109010000_map_layer_tiles.sql`. `docs/API.md`: the legend route; pre-drawn squares on the picture route.
+
 ## 2026-11-08 — Map layers steady while zooming (F-140); handoff of #181
 
 - `docs/FEATURES.md`: F-140 and F-218 (the owner's check of #181). `docs/DECISIONS.md`: why lines came and went while zooming, and what the map draws now. `docs/HANDOFF.md`: ivanmueller/gss#181.

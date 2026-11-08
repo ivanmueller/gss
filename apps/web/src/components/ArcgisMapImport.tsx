@@ -20,7 +20,7 @@ import {
 } from '@grain/domain';
 import { useId, useState, type SubmitEvent } from 'react';
 
-import { sendJson } from '../lib/api';
+import { ApiError, sendJson } from '../lib/api';
 import { message, prepareWithProgress, takesOverview } from '../lib/mapLayerPrepare';
 import { forgetApiAnswers } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
@@ -50,6 +50,8 @@ interface PlannedLayer {
   count: number | null;
   /** Why it is not added. */
   problem: string | null;
+  /** Whether the ArcGIS map shows it at first (F-141). */
+  visible: boolean;
 }
 
 interface Plan {
@@ -117,6 +119,7 @@ async function planLayers(
       definitionExpression: layer.definitionExpression,
       count: null,
       problem: layer.problem,
+      visible: layer.visible,
     };
     if (layer.kind === null) {
       planned.push({ ...base, style: styleOfRenderer(null), minZoom: null, maxZoom: null });
@@ -130,6 +133,7 @@ async function planLayers(
     let count: number | null = null;
     let collection: LayerFeatureCollection | null = null;
     let problem: string | null = null;
+    let kind = layer.kind;
     try {
       if (layer.kind === 'file') {
         const checked = normalizeFeatureCollection(layer.collection);
@@ -173,21 +177,29 @@ async function planLayers(
           maxScale ??= inspection.drawing?.maxScale ?? null;
           fields = inspection.fields;
           count = inspection.count;
+          // A picture map drawn ahead of time in squares is drawn from them (F-141).
+          kind = inspection.kind;
         }
       }
     } catch (reason) {
-      problem = `Its service did not answer: ${message(reason, 'no answer.')}`;
+      // A service that answered but is not one GSS can draw says why; one that did not answer, so.
+      problem =
+        reason instanceof ApiError && reason.status === 422
+          ? reason.message
+          : `Its service did not answer: ${message(reason, 'no answer.')}`;
     }
     let style = styleOfRenderer(renderer, transparency, layer.opacity);
     // Coloured by a field the service does not give: one colour, shown roughly.
     if (style.colourField !== null && fields !== null && !fields.includes(style.colourField)) {
       style = { ...style, colourField: null, colours: [], othersShown: true, approximate: true };
     }
-    if (layer.kind !== 'arcgis_features' && layer.kind !== 'file') {
-      style = { ...style, colourField: null, colours: [], othersShown: true };
+    if (kind !== 'arcgis_features' && kind !== 'file') {
+      // Pictures are ArcGIS's own drawing: nothing to approximate.
+      style = { ...style, colourField: null, colours: [], othersShown: true, approximate: false };
     }
     planned.push({
       ...base,
+      kind,
       collection,
       style,
       ...zoomRange(minScale, maxScale),
@@ -224,6 +236,7 @@ function Swatch({ style }: { style: LayerStyle }) {
 
 function plannedDetails(layer: PlannedLayer): string {
   const parts: string[] = [layer.kind ? MAP_LAYER_KIND_LABELS[layer.kind] : 'Not added'];
+  if (layer.kind !== null && !layer.visible) parts.push('off at first, as on ArcGIS');
   if (layer.count !== null) {
     parts.push(
       `${layer.count.toLocaleString('en-CA')} ${layer.kind === 'file' ? 'shapes, kept in the map' : 'pieces'}`,
@@ -330,6 +343,7 @@ export function ImportArcgisMapForm({
             minZoom: layer.minZoom,
             maxZoom: layer.maxZoom,
             othersShown: layer.style.othersShown,
+            mapVisible: layer.visible,
             map: { itemId: plan.map.id, title: plan.map.title },
           };
           const body =
@@ -480,7 +494,9 @@ export function ImportArcgisMapForm({
                           });
                         }}
                       />
-                      {takes && <Swatch style={layer.style} />}
+                      {takes && (layer.kind === 'arcgis_features' || layer.kind === 'file') && (
+                        <Swatch style={layer.style} />
+                      )}
                       <span className="truncate">{layer.title}</span>
                     </label>
                     <span className="pl-6 text-xs text-muted-foreground">

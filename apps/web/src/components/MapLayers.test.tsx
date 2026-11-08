@@ -61,6 +61,8 @@ const rail: MapLayerView = {
   definitionExpression: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
 };
 const elevators: MapLayerView = {
   ...rail,
@@ -239,6 +241,7 @@ describe('fetching what is on', () => {
       kind: 'pictures',
       tiles: `${window.location.origin}/api/v1/map-layers/${RAIL}/tiles/{z}/{x}/{y}.png`,
       look: USUAL_LOOK,
+      levels: null,
     });
     expect(calls.filter((c) => c.path.endsWith('/file'))).toHaveLength(1);
   });

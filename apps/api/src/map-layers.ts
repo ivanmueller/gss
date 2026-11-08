@@ -17,8 +17,11 @@ import {
   tileBounds,
   tileBoundsMercator,
   updateMapLayerSchema,
+  standardTileLevels,
+  tilesOnly,
   withoutTags,
   type LayerInspection,
+  type LayerLegend,
   type MapLayerList,
   type Tile,
   type ValueCount,
@@ -42,6 +45,56 @@ import {
 // off in the browser. A web service is fetched by the Worker, never by the browser: its
 // address stays here, the app's content security policy stays as it is, and the request is
 // built from the layer's stored address and a map square only, never from the browser's text.
+
+/** A picture's type from its first bytes: PNG or JPEG, or null for anything else. */
+export function pictureType(body: ArrayBuffer): 'image/png' | 'image/jpeg' | null {
+  const b = new Uint8Array(body, 0, Math.min(8, body.byteLength));
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  return null;
+}
+
+/** The largest legend read: a few small pictures. */
+const MAX_LEGEND_BYTES = 1024 * 1024;
+
+/**
+ * A legend's entries as ArcGIS gives them (…/legend?f=json): each layer's entries in order, the
+ * layer's name before its entries when there are several, each with plain words and its picture
+ * when it is a small PNG or JPEG (at most 40 entries, each picture at most 20 KB).
+ */
+export function legendEntries(body: unknown): LayerLegend['entries'] {
+  const layers = record(body)?.layers;
+  if (!Array.isArray(layers)) return [];
+  const entries: LayerLegend['entries'] = [];
+  const several = layers.length > 1;
+  for (const layer of layers) {
+    const l = record(layer);
+    const items = Array.isArray(l?.legend) ? l.legend : [];
+    const name = plainText(l?.layerName, 200);
+    for (const item of items) {
+      const i = record(item);
+      const type = i?.contentType;
+      const data = i?.imageData;
+      const image =
+        (type === 'image/png' || type === 'image/jpeg') &&
+        typeof data === 'string' &&
+        data.length <= 27_000 &&
+        /^[A-Za-z0-9+/]+=*$/.test(data)
+          ? `data:${type};base64,${data}`
+          : null;
+      const label = plainText(i?.label, 200);
+      const words = several && name ? (label ? `${name}: ${label}` : name) : (label ?? name);
+      if (words === null && image === null) continue;
+      entries.push({ label: words ?? '', image });
+      if (entries.length >= 40) return entries;
+    }
+  }
+  return entries;
+}
+
+/** A service of pre-drawn squares that are not the standard web Mercator ones (F-141). */
+const TILES_NOT_STANDARD =
+  'This ArcGIS map is drawn ahead of time in squares GSS cannot place on its map (not the standard web map squares).';
 
 /** ArcGIS Online's items, where a map's description and data are read (F-138). */
 const ARCGIS_ITEMS = 'https://www.arcgis.com/sharing/rest/content/items';
@@ -189,6 +242,10 @@ export async function describeArcgis(url: string): Promise<{
   fields: string[];
   idField: string | null;
   drawing: LayerInspection['drawing'];
+  /** Its pre-drawn squares' levels, when they are the standard ones (F-141). */
+  tileLevels: { min: number; max: number } | null;
+  /** Whether it only gives pre-drawn squares, drawing no picture on request (F-141). */
+  tilesOnly: boolean;
 }> {
   const body = record(await fetchJson(`${url}?f=json`));
   if (!body || record(body.error)) throw new LayerServiceError(422);
@@ -213,6 +270,8 @@ export async function describeArcgis(url: string): Promise<{
   const scale = (value: unknown) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
   return {
+    tileLevels: standardTileLevels(body),
+    tilesOnly: tilesOnly(body),
     drawing: {
       renderer: drawingInfo?.renderer ?? null,
       transparency: typeof drawingInfo?.transparency === 'number' ? drawingInfo.transparency : 0,
@@ -319,6 +378,10 @@ export function arcgisSquareUrl(source: MapLayerSource, tile: Tile): string {
 
 /** The address of one map square's picture from an ArcGIS map or a WMS service. */
 export function pictureUrl(source: MapLayerSource, tile: Tile): string {
+  // A pre-drawn layer's own square: ArcGIS numbers them level/row/column (F-141).
+  if (source.kind === 'arcgis_tiles') {
+    return `${source.url ?? ''}/tile/${String(tile.z)}/${String(tile.y)}/${String(tile.x)}`;
+  }
   const bbox = tileBoundsMercator(tile)
     .map((n) => n.toFixed(2))
     .join(',');
@@ -546,6 +609,14 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         answer.title = described.title;
         answer.copyright = described.copyright;
         answer.drawing = described.drawing;
+        // A picture layer drawn ahead of time in standard squares is drawn from them, as ArcGIS
+        // does (F-141); one that draws nothing on request and has other squares is refused.
+        if (source.kind === 'arcgis_image') {
+          if (described.tileLevels !== null) answer.kind = 'arcgis_tiles';
+          else if (described.tilesOnly) {
+            return apiError(c, 422, 'NOT_A_LAYER', TILES_NOT_STANDARD);
+          }
+        }
         if (source.kind === 'arcgis_features') {
           answer.fields = described.fields;
           const { field, alsoFields, onlyField, onlyValues } = parsed.data;
@@ -634,6 +705,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       maxZoom: input.maxZoom,
       othersShown: input.othersShown,
       map: input.map,
+      mapVisible: input.mapVisible,
     };
     if (
       details.minZoom !== null &&
@@ -668,6 +740,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         url: source.url,
         wmsLayers,
         idField: null,
+        tileLevels: null,
         definitionExpression: input.definitionExpression,
         file: null,
       };
@@ -697,6 +770,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         url: null,
         wmsLayers: null,
         idField: null,
+        tileLevels: null,
         definitionExpression: null,
         file: {
           name: input.fileName,
@@ -716,6 +790,12 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if (layer.kind === 'arcgis_features' || layer.kind === 'arcgis_image') {
         try {
           const described = await describeArcgis(layer.url ?? '');
+          // Pre-drawn squares are drawn from the squares themselves (F-141).
+          if (layer.kind === 'arcgis_image' && described.tileLevels !== null) {
+            layer = { ...layer, kind: 'arcgis_tiles', tileLevels: described.tileLevels };
+          } else if (layer.kind === 'arcgis_image' && described.tilesOnly) {
+            return apiError(c, 422, 'NOT_A_LAYER', TILES_NOT_STANDARD);
+          }
           if (layer.kind === 'arcgis_features') {
             layer = { ...layer, idField: described.idField };
             if (layer.colourField !== null && !described.fields.includes(layer.colourField)) {
@@ -1029,27 +1109,78 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   });
 
   // One map square's picture of an ArcGIS map or a WMS service.
+  // A picture layer's legend from ArcGIS (F-141): each entry's words and its small picture, so
+  // the colours of a heat map are explained under the map as on ArcGIS.
+  routes.get('/:id/legend', (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const source = await db.getMapLayerSource(ctx, id);
+      if (
+        (source?.kind !== 'arcgis_image' && source?.kind !== 'arcgis_tiles') ||
+        source.url === null
+      ) {
+        return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      }
+      let body: unknown;
+      try {
+        body = await fetchJson(`${source.url}/legend?f=json`, MAX_LEGEND_BYTES);
+      } catch (error) {
+        return serviceFailed(c, error, 'legend');
+      }
+      c.header('Cache-Control', LIVE_CACHE);
+      return c.json({ entries: legendEntries(body) } satisfies LayerLegend);
+    });
+  });
+
   routes.get('/:id/tiles/:z/:x/:y', (c) => {
     const id = c.req.param('id');
     const tile = tileOf(c);
     if (!isUuid(id) || tile === null) return apiError(c, 404, 'NOT_FOUND', 'No such map square.');
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const source = await db.getMapLayerSource(ctx, id);
-      if ((source?.kind !== 'arcgis_image' && source?.kind !== 'wms') || source.url === null) {
+      if (
+        (source?.kind !== 'arcgis_image' &&
+          source?.kind !== 'arcgis_tiles' &&
+          source?.kind !== 'wms') ||
+        source.url === null
+      ) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      }
+      // A pre-drawn layer has squares only at its own levels; the map enlarges its last level.
+      const levels = source.tileLevels;
+      if (
+        source.kind === 'arcgis_tiles' &&
+        (levels === null || tile.z < levels.min || tile.z > levels.max)
+      ) {
+        return apiError(c, 404, 'NOT_FOUND', 'This layer has no square at this zoom.');
       }
       let answer: { body: ArrayBuffer; type: string };
       try {
         answer = await fetchService(
           pictureUrl(source, tile),
-          /^image\/(png|jpeg)$/,
+          // ArcGIS's pre-drawn squares come without a picture type; the bytes are checked below.
+          source.kind === 'arcgis_tiles'
+            ? /^(image\/(png|jpeg)|application\/octet-stream)$/
+            : /^image\/(png|jpeg)$/,
           MAX_PICTURE_BYTES,
         );
       } catch (error) {
+        // A pre-drawn layer has no square where it has nothing to show: an empty square.
+        if (
+          source.kind === 'arcgis_tiles' &&
+          error instanceof LayerServiceError &&
+          error.status === 404
+        ) {
+          c.header('Cache-Control', LIVE_CACHE);
+          return c.body(null, 204);
+        }
         return serviceFailed(c, error, 'picture');
       }
+      const type = pictureType(answer.body);
+      if (type === null) return serviceFailed(c, new LayerServiceError(415), 'picture');
       c.header('Cache-Control', LIVE_CACHE);
-      c.header('Content-Type', answer.type);
+      c.header('Content-Type', type);
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);
     });

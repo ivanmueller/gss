@@ -37,6 +37,8 @@ const live: MapLayerView = {
   definitionExpression: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
 };
 
 const withOverview: MapLayerView = {

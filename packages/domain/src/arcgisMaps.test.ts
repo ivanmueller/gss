@@ -20,6 +20,8 @@ import {
   DEFINITION_EXPRESSION,
   normalizeFeatureCollection,
   safeFilter,
+  standardTileLevels,
+  tilesOnly,
   whereOf,
 } from './mapLayers';
 
@@ -790,5 +792,78 @@ describe('Codex’s re-review of 7d0382e', () => {
       (geometry.geometry.coordinates[polygon]?.[1]?.[0] as number[] | undefined)?.[0];
     expect(firstX(0)).toBeCloseTo(5);
     expect(firstX(1)).toBeCloseTo(35);
+  });
+});
+
+describe('pre-drawn picture maps (F-141)', () => {
+  const lods = Array.from({ length: 24 }, (_, level) => ({
+    level,
+    scale: 591_657_527.591555 / 2 ** level,
+  }));
+  const tiled = {
+    capabilities: 'Map,TilesOnly,Tilemap',
+    singleFusedMapCache: true,
+    minLOD: 3,
+    maxLOD: 10,
+    tileInfo: {
+      rows: 256,
+      cols: 256,
+      origin: { x: -20037508.342787, y: 20037508.342787 },
+      spatialReference: { wkid: 102100, latestWkid: 3857 },
+      lods,
+    },
+  };
+
+  it('finds the levels of standard web map squares', () => {
+    expect(standardTileLevels(tiled)).toEqual({ min: 3, max: 10 });
+    expect(standardTileLevels({ ...tiled, minLOD: undefined, maxLOD: undefined })).toEqual({
+      min: 0,
+      max: 23,
+    });
+    expect(tilesOnly(tiled)).toBe(true);
+    expect(tilesOnly({ capabilities: 'Map,Query,Data' })).toBe(false);
+  });
+
+  it('refuses squares GSS cannot place', () => {
+    expect(standardTileLevels({ ...tiled, singleFusedMapCache: false })).toBeNull();
+    for (const tileInfo of [
+      { ...tiled.tileInfo, rows: 512, cols: 512 },
+      { ...tiled.tileInfo, spatialReference: { wkid: 3978 } },
+      { ...tiled.tileInfo, origin: { x: -5_000_000, y: 10_000_000 } },
+      { ...tiled.tileInfo, lods: [{ level: 0, scale: 100_000 }] },
+      { ...tiled.tileInfo, lods: [] },
+    ]) {
+      expect(standardTileLevels({ ...tiled, tileInfo })).toBeNull();
+    }
+    expect(standardTileLevels(null)).toBeNull();
+  });
+
+  it('keeps which layers the map shows at first, with their groups', () => {
+    const layers = webMapLayers({
+      operationalLayers: [
+        {
+          layerType: 'ArcGISTiledMapServiceLayer',
+          title: 'Wheat',
+          url: SERVICE.replace('FeatureServer/0', 'MapServer'),
+          visibility: false,
+        },
+        {
+          layerType: 'ArcGISTiledMapServiceLayer',
+          title: 'All crops',
+          url: SERVICE.replace('FeatureServer/0', 'MapServer'),
+          visibility: true,
+        },
+        {
+          layerType: 'GroupLayer',
+          visibility: false,
+          layers: [{ layerType: 'ArcGISFeatureLayer', title: 'Inside', url: SERVICE }],
+        },
+      ],
+    });
+    expect(layers.map((l) => [l.title, l.kind, l.visible])).toEqual([
+      ['Wheat', 'arcgis_image', false],
+      ['All crops', 'arcgis_image', true],
+      ['Inside', 'arcgis_features', false],
+    ]);
   });
 });
