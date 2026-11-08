@@ -304,6 +304,10 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           from app.map_layers where id = ${id} and archived_at is null`;
         if (!layer) return { status: 'not_found' };
         if (!layer.allowed) return { status: 'forbidden' };
+        // The layer first, then its parts, the order publishing takes them too: a re-sent part
+        // that deleted its old row before waiting for the layer could deadlock with a publication
+        // dropping that row (Codex's review of d0e8463).
+        await tx`select 1 from app.map_layers where id = ${id} for share`;
         // Sent again (a retry), a part replaces itself, unless its preparation is published: the
         // database refuses that (SQLSTATE GS007, 20261107060000_map_layer_overview_seal.sql).
         try {

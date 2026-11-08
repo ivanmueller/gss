@@ -278,6 +278,55 @@ describe('map layers as app_api', () => {
     }
   });
 
+  it('re-sends a part while a publication drops it, without a deadlock (Codex’s review of d0e8463)', async () => {
+    const db = postgresDatabase(API_URL);
+    const publisher = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    try {
+      const added = await db.createMapLayer(as(ADAM), ORG_A, SERVICE);
+      if (added.status !== 'saved') throw new Error('not added');
+      const old = crypto.randomUUID();
+      const part = {
+        version: old,
+        partNo: 0,
+        featureCount: 1,
+        features: new TextEncoder().encode(
+          JSON.stringify([
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-105, 50],
+                  [-104, 50],
+                ],
+              },
+              properties: { OWNER: 'AAA' },
+            },
+          ]),
+        ),
+      };
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part)).toMatchObject({
+        status: 'saved',
+      });
+      // A publication: it holds the layer, then drops other preparations' parts. Meanwhile the
+      // browser re-sends part 0 of the old preparation.
+      let retry: Promise<unknown> | undefined;
+      await publisher.begin(async (tx) => {
+        await tx`select set_config('app.user_id', ${ADAM}, true)`;
+        await tx`select 1 from app.map_layers where id = ${added.id} for update`;
+        retry = db.saveMapLayerOverviewPart(as(ADAM), added.id, part);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await tx`delete from app.map_layer_overview_parts
+                 where layer_id = ${added.id} and version = ${old}`;
+      });
+      // The re-sent part waited for the publication and then went in; nothing was aborted.
+      await expect(retry).resolves.toMatchObject({ status: 'saved' });
+    } finally {
+      await publisher.end();
+      await db.close();
+    }
+  });
+
   it('accepts every address parseLayerSource takes', async () => {
     const pasted = [
       'https://services.example.com/abc/ArcGIS/rest/services/NTAD_Rail_Lines/FeatureServer/0',
