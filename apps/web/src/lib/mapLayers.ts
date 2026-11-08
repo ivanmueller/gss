@@ -11,6 +11,7 @@ import {
   type Bbox,
   type FeatureCollectionResult,
   type MapLayerView,
+  type Tile,
 } from '@grain/domain';
 import type { ExpressionSpecification, FilterSpecification } from 'mapbox-gl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -460,15 +461,40 @@ function squareKey(layer: MapLayerView, tile: { z: number; x: number; y: number 
   return `${layer.id}@${settingsTag(layer)}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
 }
 
-/** Whether a live layer is drawn from its zoomed-out view at this zoom (F-134). */
-export function usesOverview(layer: MapLayerView, zoom: number | null): boolean {
+/** Whether a live layer has a zoomed-out view prepared under its current settings (F-134). */
+export function hasOverview(layer: MapLayerView): boolean {
   return (
     layer.kind === 'arcgis_features' &&
     layer.overview !== null &&
-    layer.overview.grouping === groupingOf(layer) &&
-    zoom !== null &&
-    zoom < OVERVIEW_BELOW_ZOOM
+    layer.overview.grouping === groupingOf(layer)
   );
+}
+
+/** Whether a live layer is drawn from its zoomed-out view at this zoom (F-134). */
+export function usesOverview(layer: MapLayerView, zoom: number | null): boolean {
+  return hasOverview(layer) && zoom !== null && zoom < OVERVIEW_BELOW_ZOOM;
+}
+
+/**
+ * Below this zoom a live layer whose squares the service cut short (too many pieces in one
+ * square) is drawn whole from its zoomed-out view, so no lines go missing (F-140).
+ */
+export const OVERVIEW_WHEN_CUT_BELOW_ZOOM = 10;
+
+/** Whether two map squares overlap: one holds the other, whatever their zooms. */
+export function squaresOverlap(a: Tile, b: Tile): boolean {
+  const z = Math.min(a.z, b.z);
+  const up = (tile: Tile, axis: number) => Math.floor(axis / 2 ** (tile.z - z));
+  return up(a, a.x) === up(b, b.x) && up(a, a.y) === up(b, b.y);
+}
+
+/** A square's place from its key (layer@settings/z/x/y). */
+function tileOfKey(key: string): Tile | null {
+  const parts = key.split('/').slice(-3).map(Number);
+  const [z, x, y] = parts;
+  return z !== undefined && x !== undefined && y !== undefined && parts.every(Number.isInteger)
+    ? { z, x, y }
+    : null;
 }
 
 /** Whether a layer shows at this zoom (its ArcGIS scale range, F-138); unknown zoom: yes. */
@@ -529,13 +555,17 @@ export function useLayerOverlays(
       if (!shownAtZoom(layer, zoom)) continue;
       if (layer.kind === 'file') {
         fetchWhole(layer.id, `${layer.id}@${layer.version}`, `/map-layers/${layer.id}/file`);
-      } else if (layer.kind === 'arcgis_features' && usesOverview(layer, zoom)) {
-        fetchWhole(
-          `${layer.id}#overview`,
-          `${layer.id}#overview@${layer.overview?.version ?? ''}`,
-          `/map-layers/${layer.id}/overview`,
-        );
       } else if (layer.kind === 'arcgis_features') {
+        // The zoomed-out view is fetched once, at any zoom, so it is ready to fill in while
+        // squares load and when zooming out (F-140: no blank map between zooms).
+        if (hasOverview(layer)) {
+          fetchWhole(
+            `${layer.id}#overview`,
+            `${layer.id}#overview@${layer.overview?.version ?? ''}`,
+            `/map-layers/${layer.id}/overview`,
+          );
+        }
+        if (usesOverview(layer, zoom)) continue;
         for (const tile of tiles) {
           const key = squareKey(layer, tile);
           if (asked.current.has(key)) continue;
@@ -596,22 +626,24 @@ export function useLayerOverlays(
         whole(files.get(layer.id));
         continue;
       }
-      if (usesOverview(layer, zoom)) {
-        whole(files.get(`${layer.id}#overview`));
+      // What a live layer draws (F-140, the owner's report of 2026-11-08: lines came and went
+      // while zooming, unlike ArcGIS). Never a blank while squares load: a square not yet here is
+      // filled in by squares already loaded at other zooms over the same place; where none is,
+      // or below zoom 7, or below zoom 10 where the service cut squares short, the zoomed-out
+      // view is drawn whole when it is ready.
+      const overview = hasOverview(layer) ? files.get(`${layer.id}#overview`) : undefined;
+      const overviewReady = overview !== undefined && overview !== 'failed';
+      if (overviewReady && usesOverview(layer, zoom)) {
+        whole(overview);
         continue;
       }
+      const prefix = `${layer.id}@${settingsTag(layer)}/`;
       const seen = new Set<string | number>();
       const features: GeoJSON.Feature[] = [];
       let exceeded = false;
       let failed = false;
-      for (const tile of tiles) {
-        const square = squares.get(squareKey(layer, tile));
-        if (square === undefined) continue;
-        if (square === 'failed') {
-          failed = true;
-          continue;
-        }
-        exceeded ||= square.exceeded;
+      let uncovered = 0;
+      const add = (square: { features: GeoJSON.Feature[] }) => {
         for (const feature of square.features) {
           const marked = withValues(
             withObjectId(feature),
@@ -625,6 +657,44 @@ export function useLayerOverlays(
           }
           features.push(marked);
         }
+      };
+      // The squares of this zoom first: finer, and each feature taken once.
+      const missing: Tile[] = [];
+      for (const tile of tiles) {
+        const square = usesOverview(layer, zoom) ? undefined : squares.get(squareKey(layer, tile));
+        if (square === undefined) {
+          missing.push(tile);
+          continue;
+        }
+        if (square === 'failed') {
+          failed = true;
+          continue;
+        }
+        exceeded ||= square.exceeded;
+        add(square);
+      }
+      // Then, for the squares still loading, those already loaded at the nearest other zooms.
+      if (missing.length > 0) {
+        const loaded: { tile: Tile; square: { features: GeoJSON.Feature[] } }[] = [];
+        for (const [key, square] of squares) {
+          if (!key.startsWith(prefix) || square === 'failed') continue;
+          const tile = tileOfKey(key);
+          if (tile) loaded.push({ tile, square });
+        }
+        const near = (tile: Tile) => Math.abs(tile.z - (missing[0]?.z ?? tile.z));
+        loaded.sort((a, b) => near(a.tile) - near(b.tile));
+        for (const tile of missing) {
+          const over = loaded.filter((l) => squaresOverlap(l.tile, tile));
+          if (over.length === 0) uncovered += 1;
+          for (const l of over) add(l.square);
+        }
+      }
+      if (
+        overviewReady &&
+        (uncovered > 0 || (exceeded && zoom !== null && zoom < OVERVIEW_WHEN_CUT_BELOW_ZOOM))
+      ) {
+        whole(overview);
+        continue;
       }
       overlays.push({
         id: layer.id,
