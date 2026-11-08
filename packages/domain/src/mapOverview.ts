@@ -16,6 +16,15 @@ export const MAX_OVERVIEW_SOURCE = 1_000_000;
 /** How much the service simplifies the pieces, and this simplifies the lines, in metres. */
 export const OVERVIEW_TOLERANCE_METRES = 1000;
 
+/**
+ * Pieces sharing the same properties (a railroad, and the railroads that share its track), joined
+ * together into one feature of the view.
+ */
+export interface OverviewGroup {
+  properties: Record<string, string | null>;
+  lines: MercatorLine[];
+}
+
 /** A line in web Mercator metres. */
 export type MercatorLine = [number, number][];
 
@@ -126,16 +135,15 @@ export function simplifyLine(points: MercatorLine, tolerance: number): MercatorL
 }
 
 /**
- * The zoomed-out view of a layer: one feature per value of `field` (all in one when null), its
- * pieces joined, simplified and in longitude and latitude, with the value under `field`.
+ * The zoomed-out view of a layer: one feature per group (its pieces joined, simplified and in
+ * longitude and latitude) carrying the group's properties.
  */
 export function buildOverview(
-  groups: ReadonlyMap<string | null, readonly MercatorLine[]>,
-  field: string | null,
+  groups: ReadonlyMap<string, OverviewGroup>,
   tolerance = OVERVIEW_TOLERANCE_METRES,
 ): LayerFeatureCollection {
   const features: LayerFeatureCollection['features'] = [];
-  for (const [value, lines] of groups) {
+  for (const { properties, lines } of groups.values()) {
     const coordinates: [number, number][][] = [];
     for (const line of joinLines(lines)) {
       const points: [number, number][] = [];
@@ -151,7 +159,7 @@ export function buildOverview(
       type: 'Feature',
       id: features.length + 1,
       geometry: { type: 'MultiLineString', coordinates },
-      properties: field === null ? {} : { [field]: value },
+      properties: { ...properties },
     });
   }
   return { type: 'FeatureCollection', features };

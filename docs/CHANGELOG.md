@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-08 — A railroad's lines as on ArcGIS (F-137)
+
+- `docs/FEATURES.md`: F-137 with the owner's answers. `docs/DECISIONS.md`: what the publisher's railroad views count, and how GSS does the same. `docs/DATA_MODEL.md`, `docs/API.md`: `20261108010000_map_layer_shared_values.sql`, the inspect and publish bodies.
+
 ## 2026-11-07 — Codex's review of the zoomed-out view in parts
 
 - `docs/DECISIONS.md`: Codex's review of `d35ac90` (four P2) and their fixes; its re-review of `d0e8463` (one P2, a deadlock, fixed). `docs/DATA_MODEL.md`: `20261107060000_map_layer_overview_seal.sql`. `docs/API.md`: 409 `SEALED`.

@@ -1,12 +1,11 @@
-import { buildOverview, splitOverview, type MercatorLine } from '@grain/domain';
+import { buildOverview, splitOverview, type OverviewGroup } from '@grain/domain';
 
 // Joins a layer's pieces into its zoomed-out view and splits it into parts, away from the page's
 // own thread so the page stays responsive while it runs (Codex's review of 8e0fd95; see
 // lib/mapOverview.ts).
 
 export interface OverviewJob {
-  groups: [string | null, MercatorLine[]][];
-  field: string | null;
+  groups: [string, OverviewGroup][];
 }
 
 export interface OverviewResult {
@@ -16,7 +15,7 @@ export interface OverviewResult {
 
 /** The work itself, also run in place where the browser has no workers (tests). */
 export function runOverviewJob(job: OverviewJob): OverviewResult {
-  const overview = buildOverview(new Map(job.groups), job.field);
+  const overview = buildOverview(new Map(job.groups));
   return { parts: splitOverview(overview), features: overview.features.length };
 }
 

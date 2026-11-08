@@ -2,6 +2,7 @@ import {
   createMapLayerSchema,
   inspectLayerSchema,
   isTile,
+  whereOf,
   MAX_OVERVIEW_SOURCE,
   OVERVIEW_PAGE_SIZE,
   OVERVIEW_TOLERANCE_METRES,
@@ -207,30 +208,67 @@ export async function describeArcgis(url: string): Promise<{
 }
 
 /** How often each value of an ArcGIS layer's field occurs, most common first. */
-export async function arcgisValueCounts(url: string, field: string): Promise<ValueCount[]> {
-  const params = new URLSearchParams({
-    where: '1=1',
-    groupByFieldsForStatistics: field,
-    outStatistics: JSON.stringify([
-      { statisticType: 'count', onStatisticField: field, outStatisticFieldName: 'gss_count' },
-    ]),
-    f: 'json',
-  });
-  const body = record(await fetchJson(`${url}/query?${params.toString()}`));
-  if (!body || record(body.error) || !Array.isArray(body.features)) {
-    throw new LayerServiceError(422);
-  }
-  const counts: ValueCount[] = [];
-  for (const feature of body.features) {
-    const attributes = record(record(feature)?.attributes);
-    const value = attributes?.[field];
-    const count = attributes?.gss_count;
-    if ((typeof value === 'string' || typeof value === 'number') && typeof count === 'number') {
-      const text = String(value).trim().slice(0, 500);
-      if (text !== '') counts.push({ value: text, count });
+/**
+ * How often each value occurs in an ArcGIS layer's fields, most common first: the colour field and
+ * those that also count (F-137), summed, within the layer's limit (where).
+ */
+export async function arcgisValueCounts(
+  url: string,
+  fields: readonly string[],
+  where = '1=1',
+): Promise<ValueCount[]> {
+  const counts = new Map<string, number>();
+  for (const field of fields) {
+    const params = new URLSearchParams({
+      where,
+      groupByFieldsForStatistics: field,
+      outStatistics: JSON.stringify([
+        { statisticType: 'count', onStatisticField: field, outStatisticFieldName: 'gss_count' },
+      ]),
+      f: 'json',
+    });
+    const body = record(await fetchJson(`${url}/query?${params.toString()}`));
+    if (!body || record(body.error) || !Array.isArray(body.features)) {
+      throw new LayerServiceError(422);
+    }
+    for (const feature of body.features) {
+      const attributes = record(record(feature)?.attributes);
+      const value = attributes?.[field];
+      const count = attributes?.gss_count;
+      if ((typeof value === 'string' || typeof value === 'number') && typeof count === 'number') {
+        const text = String(value).trim().slice(0, 500);
+        if (text !== '') counts.set(text, (counts.get(text) ?? 0) + count);
+      }
     }
   }
-  return counts.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  return [...counts]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+/** How many features an ArcGIS layer has within a limit (where). */
+async function arcgisCount(url: string, where = '1=1'): Promise<number> {
+  const params = new URLSearchParams({ where, returnCountOnly: 'true', f: 'json' });
+  const count = record(await fetchJson(`${url}/query?${params.toString()}`))?.count;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+    throw new LayerServiceError(422);
+  }
+  return count;
+}
+
+/** Why a layer's shared fields and limit do not fit its fields (F-137), or null. */
+function sharedProblem(
+  fields: readonly string[],
+  layer: { colourField: string | null; alsoFields: readonly string[]; onlyField: string | null },
+): string | null {
+  if (layer.alsoFields.length > 0 && layer.colourField === null) {
+    return 'Choose the field it is coloured by before fields that also count.';
+  }
+  if (layer.alsoFields.some((f) => !fields.includes(f))) return 'This layer has no such field.';
+  if (layer.onlyField !== null && !fields.includes(layer.onlyField)) {
+    return 'This layer has no such field.';
+  }
+  return null;
 }
 
 /** The address of one map square's features from an ArcGIS layer, simplified to its zoom. */
@@ -238,9 +276,12 @@ export function arcgisSquareUrl(source: MapLayerSource, tile: Tile): string {
   const b = tileBounds(tile);
   const params = new URLSearchParams({
     f: 'geojson',
-    where: '1=1',
+    where: whereOf(source),
     // The id, to ask for a clicked feature's details, and the field it is coloured by.
-    outFields: [source.idField, source.colourField].filter((f) => f !== null).join(','),
+    // The id, to ask for a clicked feature's details, and the fields it is coloured by.
+    outFields: [source.idField, source.colourField, ...source.alsoFields]
+      .filter((f) => f !== null)
+      .join(','),
     returnGeometry: 'true',
     geometry: [b.west, b.south, b.east, b.north].map((n) => n.toFixed(6)).join(','),
     geometryType: 'esriGeometryEnvelope',
@@ -346,8 +387,8 @@ const WORLD_MERCATOR = {
 export function overviewPageUrl(source: MapLayerSource, offset: number): string {
   const params = new URLSearchParams({
     f: 'pbf',
-    where: '1=1',
-    outFields: source.colourField ?? '',
+    where: whereOf(source),
+    outFields: [source.colourField, ...source.alsoFields].filter((f) => f !== null).join(','),
     returnGeometry: 'true',
     outSR: '102100',
     orderByFields: source.idField ?? '',
@@ -474,6 +515,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         copyright: null,
         fields: [],
         values: null,
+        count: null,
       };
       if (source.kind === 'wms') return c.json(answer);
       try {
@@ -482,12 +524,26 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         answer.copyright = described.copyright;
         if (source.kind === 'arcgis_features') {
           answer.fields = described.fields;
-          const field = parsed.data.field;
+          const { field, alsoFields, onlyField, onlyValues } = parsed.data;
+          const problem = sharedProblem(described.fields, {
+            colourField: field,
+            alsoFields,
+            onlyField,
+          });
+          if (problem !== null || (field !== null && !described.fields.includes(field))) {
+            return apiError(
+              c,
+              422,
+              'VALIDATION_FAILED',
+              problem ?? 'This layer has no such field.',
+            );
+          }
+          const where = whereOf({ onlyField, onlyValues });
+          // How many pieces it has, so a layer of one railroad is not taken for the whole
+          // network (the owner's, 2026-11-07).
+          answer.count = await arcgisCount(source.url, where);
           if (field !== null) {
-            if (!described.fields.includes(field)) {
-              return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
-            }
-            answer.values = await arcgisValueCounts(source.url, field);
+            answer.values = await arcgisValueCounts(source.url, [field, ...alsoFields], where);
           }
         }
       } catch (error) {
@@ -514,7 +570,11 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       colour: input.colour,
       colourField: input.colourField,
       colours: input.colourField === null ? [] : input.colours,
+      alsoFields: input.alsoFields,
+      onlyField: input.onlyField,
+      onlyValues: input.onlyField === null ? [] : input.onlyValues,
     };
+    const shared = details.alsoFields.length > 0 || details.onlyField !== null;
     let layer: Parameters<Database['createMapLayer']>[2];
     if (input.source === 'web') {
       const source = parseLayerSource(input.url);
@@ -523,7 +583,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if (source.kind === 'wms' && wmsLayers === null) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Name the WMS layers to show.');
       }
-      if (source.kind !== 'arcgis_features' && details.colourField !== null) {
+      if (source.kind !== 'arcgis_features' && (details.colourField !== null || shared)) {
         return apiError(
           c,
           422,
@@ -540,6 +600,14 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         file: null,
       };
     } else {
+      if (shared) {
+        return apiError(
+          c,
+          422,
+          'VALIDATION_FAILED',
+          'Only a live ArcGIS layer takes these settings.',
+        );
+      }
       const checked = normalizeFeatureCollection(input.geojson);
       if (!checked.ok) return apiError(c, 422, 'NOT_A_LAYER', checked.message);
       const geojson = new TextEncoder().encode(JSON.stringify(checked.collection));
@@ -580,6 +648,8 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
             if (layer.colourField !== null && !described.fields.includes(layer.colourField)) {
               return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
             }
+            const problem = sharedProblem(described.fields, layer);
+            if (problem !== null) return apiError(c, 422, 'VALIDATION_FAILED', problem);
           }
         } catch (error) {
           return serviceFailed(c, error, 'description');
@@ -607,10 +677,33 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if ((current.kind === 'wms') !== (changes.wmsLayers !== null)) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Only a WMS layer names WMS layers.');
       }
+      const onlyValues = changes.onlyField === null ? [] : changes.onlyValues;
+      if (changes.alsoFields.length > 0 || changes.onlyField !== null) {
+        if (current.kind !== 'arcgis_features' || current.url === null) {
+          return apiError(
+            c,
+            422,
+            'VALIDATION_FAILED',
+            'Only a live ArcGIS layer takes these settings.',
+          );
+        }
+        // The service is read only for an admin (Codex's review of 11c467e).
+        if (!(await db.isOrgAdmin(ctx, current.organizationId))) {
+          return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
+        }
+        try {
+          const { fields } = await describeArcgis(current.url);
+          const problem = sharedProblem(fields, changes);
+          if (problem !== null) return apiError(c, 422, 'VALIDATION_FAILED', problem);
+        } catch (error) {
+          return serviceFailed(c, error, 'description');
+        }
+      }
       return written(
         c,
         await db.updateMapLayer(ctx, id, version, {
           ...changes,
+          onlyValues,
           colours: changes.colourField === null ? [] : changes.colours,
         }),
       );
@@ -731,17 +824,11 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const source = await overviewSource(c, db, ctx, id);
       if (source instanceof Response) return source;
-      let body: Record<string, unknown> | null;
+      let count: number;
       try {
-        body = record(
-          await fetchJson(`${source.url ?? ''}/query?where=1%3D1&returnCountOnly=true&f=json`),
-        );
+        count = await arcgisCount(source.url ?? '', whereOf(source));
       } catch (error) {
         return serviceFailed(c, error, 'count');
-      }
-      const count = body?.count;
-      if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
-        return serviceFailed(c, new LayerServiceError(422), 'count');
       }
       if (count > MAX_OVERVIEW_SOURCE) {
         return apiError(

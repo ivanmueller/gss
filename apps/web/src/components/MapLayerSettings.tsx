@@ -7,6 +7,8 @@ import {
   MAP_LAYER_KIND_LABELS,
   normalizeFeatureCollection,
   OTHER_VALUES_COLOUR,
+  groupingOf,
+  railroadPreset,
   type LayerInspection,
   type LayerFeatureCollection,
   type MapLayerList,
@@ -17,7 +19,7 @@ import { useId, useState, type ChangeEvent, type SubmitEvent } from 'react';
 
 import { ApiError, apiJson, sendJson } from '../lib/api';
 import { hasFileColours, readLayerFile } from '../lib/mapLayers';
-import { prepareOverview } from '../lib/mapOverview';
+import { prepareOverview, type OverviewLayer } from '../lib/mapOverview';
 import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { Button } from './ui/button';
@@ -47,7 +49,7 @@ function takesOverview(kind: MapLayerView['kind']): boolean {
  * null when done.
  */
 async function prepareWithProgress(
-  layer: Pick<MapLayerView, 'id' | 'colourField'>,
+  layer: OverviewLayer,
   token: string,
   say: (text: string) => void,
 ): Promise<string | null> {
@@ -129,6 +131,162 @@ function ColourPicker({
   );
 }
 
+/** A layer's shared fields and limit (F-137). */
+interface Shared {
+  alsoFields: string[];
+  onlyField: string | null;
+  onlyValues: string[];
+}
+
+const NO_SHARED: Shared = { alsoFields: [], onlyField: null, onlyValues: [] };
+
+/** The limit's values as typed ("M, I"), tidied. */
+function parseOnlyValues(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split(',')
+        .map((v) => v.trim())
+        .filter((v) => v !== ''),
+    ),
+  ];
+}
+
+/**
+ * Lines counted for more than their first owner, and a limit to some features (F-137): a button
+ * for the publisher's own railroad settings when the layer has their fields, and the fields to
+ * choose from otherwise.
+ */
+function SharedSettings({
+  id,
+  fields,
+  colourField,
+  shared,
+  disabled,
+  onChange,
+  onPreset,
+}: {
+  id: string;
+  fields: readonly string[];
+  colourField: string | null;
+  shared: Shared;
+  disabled: boolean;
+  onChange: (shared: Shared) => void;
+  onPreset: (preset: NonNullable<ReturnType<typeof railroadPreset>>) => void;
+}) {
+  const preset = railroadPreset(fields);
+  const [values, setValues] = useState(shared.onlyValues.join(', '));
+  const others = fields.filter((f) => f !== colourField);
+  const summary = [
+    shared.alsoFields.length > 0 ? `also counts ${shared.alsoFields.join(', ')}` : null,
+    shared.onlyField !== null
+      ? `only where ${shared.onlyField} is ${shared.onlyValues.join(' or ')}`
+      : null,
+  ].filter((part) => part !== null);
+  return (
+    <fieldset className="flex flex-col gap-2 rounded-control border p-3">
+      <legend className="px-1 font-medium">Shared track and limits (optional)</legend>
+      {preset && (
+        <div className="flex flex-col gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="w-fit"
+            disabled={disabled}
+            onClick={() => {
+              setValues(preset.onlyValues.join(', '));
+              onPreset(preset);
+            }}
+          >
+            Use ArcGIS’s railroad settings
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            As the publisher’s own railroad maps: a railroad’s lines include track it co-owns
+            (RROWNER2, RROWNER3) or has the right to run on (TRKRGHTS1 to 9); main lines and
+            industry track only (NET is M or I).
+          </p>
+        </div>
+      )}
+      <p className="text-xs">
+        {summary.length > 0
+          ? `Now: ${summary.join('; ')}.`
+          : 'Now: each line counts for its colour field only.'}
+      </p>
+      <details className="text-xs">
+        <summary className="cursor-pointer">Choose the fields yourself</summary>
+        <div className="flex flex-col gap-2 pt-2">
+          {colourField !== null && (
+            <div className="flex flex-col gap-1">
+              <span className="font-medium">Also count lines under</span>
+              <div className="grid max-h-40 grid-cols-2 gap-x-3 overflow-y-auto">
+                {others.map((f) => (
+                  <label key={f} className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      className="accent-primary"
+                      disabled={disabled}
+                      checked={shared.alsoFields.includes(f)}
+                      onChange={() => {
+                        const also = shared.alsoFields.includes(f)
+                          ? shared.alsoFields.filter((x) => x !== f)
+                          : [...shared.alsoFields, f];
+                        onChange({ ...shared, alsoFields: also.slice(0, 16) });
+                      }}
+                    />
+                    {f}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1" htmlFor={`${id}-only-field`}>
+              <span className="font-medium">Only where</span>
+              <Select
+                id={`${id}-only-field`}
+                className="w-40"
+                value={shared.onlyField ?? NO_FIELD}
+                disabled={disabled}
+                onValueChange={(value) => {
+                  const onlyField = value === NO_FIELD ? null : value;
+                  onChange({
+                    ...shared,
+                    onlyField,
+                    onlyValues: onlyField === null ? [] : parseOnlyValues(values),
+                  });
+                }}
+                options={[
+                  { value: NO_FIELD, label: 'Every feature' },
+                  ...fields.map((f) => ({ value: f, label: f })),
+                ]}
+              />
+            </label>
+            {shared.onlyField !== null && (
+              <label className="flex flex-col gap-1" htmlFor={`${id}-only-values`}>
+                <span className="font-medium">is one of</span>
+                <Input
+                  id={`${id}-only-values`}
+                  className="h-8 w-32"
+                  value={values}
+                  placeholder="M, I"
+                  disabled={disabled}
+                  onChange={(event) => {
+                    setValues(event.target.value);
+                  }}
+                  onBlur={() => {
+                    onChange({ ...shared, onlyValues: parseOnlyValues(values) });
+                  }}
+                />
+              </label>
+            )}
+          </div>
+        </div>
+      </details>
+    </fieldset>
+  );
+}
+
 /**
  * Changing a layer (F-135): its name, source and terms, and its colours. Changing Colour by
  * counts the new field's values; a live lines layer's zoomed-out view is prepared again for it.
@@ -154,6 +312,11 @@ function EditMapLayerForm({
   const [colour, setColour] = useState(layer.colour);
   const [colourField, setColourField] = useState(layer.colourField ?? NO_FIELD);
   const [colours, setColours] = useState<[string, string][]>(layer.colours);
+  const [shared, setShared] = useState<Shared>({
+    alsoFields: layer.alsoFields,
+    onlyField: layer.onlyField,
+    onlyValues: layer.onlyValues,
+  });
   const [fields, setFields] = useState<string[] | null>(null);
   const [file, setFile] = useState<LayerFeatureCollection | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -186,8 +349,8 @@ function EditMapLayerForm({
       });
   }
 
-  function chooseField(value: string) {
-    setColourField(value);
+  /** Counts the values to colour by, with the fields that also count, within the limit. */
+  function recount(value: string, settings: Shared) {
     setColours([]);
     if (value === NO_FIELD) return;
     if (layer.kind === 'file' && file) {
@@ -198,6 +361,7 @@ function EditMapLayerForm({
     sendJson<LayerInspection>(`/map-layers/inspect${query}`, token, 'POST', {
       url: layer.url,
       field: value,
+      ...settings,
     })
       .then((answer) => {
         setColours(assignColours(answer.values ?? []));
@@ -208,6 +372,18 @@ function EditMapLayerForm({
       .finally(() => {
         setBusy(null);
       });
+  }
+
+  function chooseField(value: string) {
+    setColourField(value);
+    const settings = value === NO_FIELD ? NO_SHARED : shared;
+    setShared(settings);
+    recount(value, settings);
+  }
+
+  function changeShared(settings: Shared, field = colourField) {
+    setShared(settings);
+    recount(field, settings);
   }
 
   function save(event: SubmitEvent<HTMLFormElement>) {
@@ -225,16 +401,18 @@ function EditMapLayerForm({
       colour: chosen === null ? colour : OTHER_VALUES_COLOUR,
       colourField: chosen,
       colours: chosen === null ? [] : colours,
+      ...(chosen === null ? NO_SHARED : shared),
     })
       .then(async () => {
         forgetApiAnswers('/map-layers');
-        // Its zoomed-out view is grouped by the field it is coloured by: prepared again.
-        if (takesOverview(layer.kind) && layer.overview?.colourField !== chosen) {
-          const failed = await prepareWithProgress(
-            { id: layer.id, colourField: chosen },
-            token,
-            setBusy,
-          );
+        // Its zoomed-out view is built under its settings: prepared again when they change.
+        const saved = {
+          id: layer.id,
+          colourField: chosen,
+          ...(chosen === null ? NO_SHARED : shared),
+        };
+        if (takesOverview(layer.kind) && layer.overview?.grouping !== groupingOf(saved)) {
+          const failed = await prepareWithProgress(saved, token, setBusy);
           if (failed !== null) {
             setProblem(
               `Saved. Its zoomed-out view could not be prepared again: ${failed} Try again with Prepare zoomed-out view in the list.`,
@@ -351,6 +529,22 @@ function EditMapLayerForm({
           <ColourPreview colours={colourField === NO_FIELD ? [] : colours} />
         </div>
       )}
+      {layer.kind === 'arcgis_features' && fields !== null && (
+        <SharedSettings
+          id={field('shared')}
+          fields={fields}
+          colourField={colourField === NO_FIELD ? null : colourField}
+          shared={shared}
+          disabled={busy !== null}
+          onChange={(settings) => {
+            changeShared(settings);
+          }}
+          onPreset={({ colourField: presetField, ...settings }) => {
+            setColourField(presetField);
+            changeShared(settings, presetField);
+          }}
+        />
+      )}
       {colourField === NO_FIELD && (
         <ColourPicker id={field('colour')} colour={colour} onChange={setColour} />
       )}
@@ -407,6 +601,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   const [colour, setColour] = useState(DEFAULT_LAYER_COLOUR);
   const [colourField, setColourField] = useState(NO_FIELD);
   const [colours, setColours] = useState<[string, string][]>([]);
+  const [shared, setShared] = useState<Shared>(NO_SHARED);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [addedWithProblem, setAddedWithProblem] = useState<string | null>(null);
@@ -415,12 +610,13 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     source === 'web' ? (inspection?.fields ?? []) : file ? featureFields(file.collection) : [];
   const ready = source === 'web' ? inspection !== null : file !== null;
 
-  function inspect(chosenField: string | null) {
+  function inspect(chosenField: string | null, settings: Shared = NO_SHARED) {
     setBusy(chosenField === null ? 'Checking the address…' : 'Counting its values…');
     setProblem(null);
     return sendJson<LayerInspection>(`/map-layers/inspect${query}`, token, 'POST', {
       url,
       field: chosenField,
+      ...settings,
     })
       .then((answer) => {
         setInspection(answer);
@@ -430,6 +626,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
           if (answer.wmsLayers) setWmsLayers(answer.wmsLayers);
           setColourField(NO_FIELD);
           setColours([]);
+          setShared(NO_SHARED);
         } else {
           setColours(assignColours(answer.values ?? []));
         }
@@ -446,9 +643,17 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   function chooseField(value: string) {
     setColourField(value);
     setColours([]);
+    const settings = value === NO_FIELD ? NO_SHARED : shared;
+    setShared(settings);
     if (value === NO_FIELD) return;
-    if (source === 'web') void inspect(value);
+    if (source === 'web') void inspect(value, settings);
     else if (file) setColours(assignColours(featureValueCounts(file.collection, value)));
+  }
+
+  function changeShared(settings: Shared, field = colourField) {
+    setShared(settings);
+    setColours([]);
+    void inspect(field === NO_FIELD ? null : field, settings);
   }
 
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
@@ -491,6 +696,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
       colour: colourField === NO_FIELD ? colour : OTHER_VALUES_COLOUR,
       colourField: colourField === NO_FIELD ? null : colourField,
       colours: colourField === NO_FIELD ? [] : colours,
+      ...(colourField === NO_FIELD && shared.onlyField === null ? NO_SHARED : shared),
     };
     const body =
       source === 'web'
@@ -509,7 +715,13 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
         // A live lines layer gets its zoomed-out view straight away (F-134).
         if (source === 'web' && inspection && takesOverview(inspection.kind)) {
           const failed = await prepareWithProgress(
-            { id: added, colourField: details.colourField },
+            {
+              id: added,
+              colourField: details.colourField,
+              alsoFields: details.alsoFields,
+              onlyField: details.onlyField,
+              onlyValues: details.onlyValues,
+            },
             token,
             setBusy,
           );
@@ -591,7 +803,11 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
           {inspection && (
             <p role="status" className="text-xs">
               Found: {MAP_LAYER_KIND_LABELS[inspection.kind]}
-              {inspection.title ? `, “${inspection.title}”` : ''}.
+              {inspection.title ? `, “${inspection.title}”` : ''}
+              {inspection.count !== null
+                ? `, ${inspection.count.toLocaleString('en-CA')} pieces${shared.onlyField !== null ? ' within its limit' : ''}`
+                : ''}
+              .
             </p>
           )}
         </div>
@@ -726,6 +942,23 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
             </div>
           )}
 
+          {source === 'web' && inspection?.kind === 'arcgis_features' && (
+            <SharedSettings
+              id={field('shared')}
+              fields={fields}
+              colourField={colourField === NO_FIELD ? null : colourField}
+              shared={shared}
+              disabled={busy !== null}
+              onChange={(settings) => {
+                changeShared(settings);
+              }}
+              onPreset={({ colourField: presetField, ...settings }) => {
+                setColourField(presetField);
+                changeShared(settings, presetField);
+              }}
+            />
+          )}
+
           {colourField === NO_FIELD && (
             <ColourPicker id={field('colour')} colour={colour} onChange={setColour} />
           )}
@@ -776,7 +1009,7 @@ function LayerRow({
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const overview = layer.overview?.colourField === layer.colourField ? layer.overview : null;
+  const overview = layer.overview?.grouping === groupingOf(layer) ? layer.overview : null;
 
   function prepare() {
     setProblem(null);
@@ -869,7 +1102,14 @@ function LayerRow({
           ` · ${layer.fileName}, ${(layer.featureCount ?? 0).toLocaleString('en-CA')} shapes`}
         {layer.colourField !== null &&
           ` · coloured by ${layer.colourField} (${layer.colours.length.toLocaleString('en-CA')} values)`}
+        {layer.alsoFields.length > 0 && ` · also counts ${layer.alsoFields.join(', ')}`}
+        {layer.onlyField !== null &&
+          ` · only where ${layer.onlyField} is ${layer.onlyValues.join(' or ')}`}
       </span>
+      {layer.url !== null && (
+        // Which service exactly: a publisher's per-railroad views share one name (2026-11-07).
+        <span className="text-xs break-all text-muted-foreground">{layer.url}</span>
+      )}
       <span className="text-xs text-muted-foreground">
         Source:{' '}
         <a

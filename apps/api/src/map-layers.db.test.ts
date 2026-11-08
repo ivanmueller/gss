@@ -1,4 +1,4 @@
-import { normalizeFeatureCollection, parseLayerSource } from '@grain/domain';
+import { groupingOf, normalizeFeatureCollection, parseLayerSource } from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -38,6 +38,9 @@ const SERVICE: NewMapLayer = {
     ['AAA', '#e6194b'],
     ['BBB', '#3cb44b'],
   ],
+  alsoFields: [],
+  onlyField: null,
+  onlyValues: [],
   file: null,
 };
 
@@ -98,6 +101,9 @@ describe('map layers as app_api', () => {
         wmsLayers: null,
         idField: 'OBJECTID',
         colourField: 'OWNER',
+        alsoFields: [],
+        onlyField: null,
+        onlyValues: [],
       });
 
       const version = layer?.version ?? '';
@@ -110,6 +116,9 @@ describe('map layers as app_api', () => {
         colour: '#000000',
         colourField: null,
         colours: [] as [string, string][],
+        alsoFields: [],
+        onlyField: null,
+        onlyValues: [],
       };
       expect(await db.updateMapLayer(as(VERA), added.id, version, changes)).toEqual({
         status: 'forbidden',
@@ -221,7 +230,7 @@ describe('map layers as app_api', () => {
       const publish = (who: string, version: string, colourField: string | null, partCount = 2) =>
         db.publishMapLayerOverview(as(who), added.id, {
           version,
-          colourField,
+          grouping: groupingOf({ colourField, alsoFields: [], onlyField: null, onlyValues: [] }),
           partCount,
           sourceCount: 10,
         });
@@ -263,6 +272,9 @@ describe('map layers as app_api', () => {
         colour: '#9ca3af',
         colourField: 'TRACKS',
         colours: [['1', '#e6194b']],
+        alsoFields: [],
+        onlyField: null,
+        onlyValues: [],
       });
       await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v2, 0));
       expect(await publish(ADAM, v2, 'OWNER', 1)).toEqual({ status: 'stale' });
@@ -273,6 +285,65 @@ describe('map layers as app_api', () => {
         select count(*)::int as n from app.map_layer_overview_parts
         where layer_id = ${added.id} and version = ${v1}`;
       expect(left?.n).toBe(0);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('keeps the shared fields and limit, and publishes a view only under the layer’s current settings (F-137)', async () => {
+    const db = postgresDatabase(API_URL);
+    try {
+      const shared = {
+        ...SERVICE,
+        alsoFields: ['OWNER2'],
+        onlyField: 'NET',
+        onlyValues: ['M', 'I'],
+      };
+      const added = await db.createMapLayer(as(ADAM), ORG_A, shared);
+      if (added.status !== 'saved') throw new Error('not added');
+      expect(await db.getMapLayerSource(as(VERA), added.id)).toMatchObject({
+        alsoFields: ['OWNER2'],
+        onlyField: 'NET',
+        onlyValues: ['M', 'I'],
+      });
+      const v = crypto.randomUUID();
+      await db.saveMapLayerOverviewPart(as(ADAM), added.id, {
+        version: v,
+        partNo: 0,
+        featureCount: 1,
+        features: new TextEncoder().encode(
+          JSON.stringify([
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-105, 50],
+                  [-104, 50],
+                ],
+              },
+              properties: { OWNER: 'AAA', __values: '|AAA|BBB|' },
+            },
+          ]),
+        ),
+      });
+      const publish = (grouping: string) =>
+        db.publishMapLayerOverview(as(ADAM), added.id, {
+          version: v,
+          grouping,
+          partCount: 1,
+          sourceCount: 1,
+        });
+      // Built without the shared fields: refused.
+      expect(await publish(groupingOf({ ...shared, alsoFields: [] }))).toEqual({ status: 'stale' });
+      expect(await publish(groupingOf(shared))).toEqual({ status: 'saved', id: added.id });
+      const listed = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
+      expect(listed).toMatchObject({
+        alsoFields: ['OWNER2'],
+        onlyField: 'NET',
+        onlyValues: ['M', 'I'],
+      });
+      expect(listed?.overview?.grouping).toBe(groupingOf(shared));
     } finally {
       await db.close();
     }

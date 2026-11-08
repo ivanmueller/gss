@@ -12,6 +12,10 @@ import {
   MAX_TILES_PER_VIEW,
   normalizeFeatureCollection,
   parseLayerSource,
+  railroadPreset,
+  groupingOf,
+  valuesOf,
+  whereOf,
   simplifyDegrees,
   tileBounds,
   tileBoundsMercator,
@@ -361,5 +365,70 @@ describe('map squares', () => {
   it('simplifies lines by about a pixel', () => {
     expect(simplifyDegrees(0)).toBeCloseTo(360 / 512);
     expect(simplifyDegrees(10)).toBeLessThan(0.001);
+  });
+});
+
+describe('shared values and limits (F-137)', () => {
+  it('builds the service’s where clause from the limit, never from a quote', () => {
+    expect(whereOf({ onlyField: null, onlyValues: [] })).toBe('1=1');
+    expect(whereOf({ onlyField: 'NET', onlyValues: ['M', 'I'] })).toBe("NET IN ('M','I')");
+    expect(whereOf({ onlyField: 'NET', onlyValues: ["M' OR '1'='1"] })).toBe('1=0');
+  });
+
+  it('lists a feature’s values once each, in field order', () => {
+    expect(
+      valuesOf({ RROWNER1: 'UP', RROWNER2: null, TRKRGHTS1: 'CPKC', TRKRGHTS2: 'UP', N: 5 }, [
+        'RROWNER1',
+        'RROWNER2',
+        'TRKRGHTS1',
+        'TRKRGHTS2',
+      ]),
+    ).toBe('|UP|CPKC|');
+    expect(valuesOf({ RROWNER1: ' ' }, ['RROWNER1'])).toBe('');
+  });
+
+  it('offers the publisher’s railroad settings when the layer has their fields', () => {
+    const fields = ['RROWNER1', 'RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2', 'NET'];
+    expect(railroadPreset(fields)).toEqual({
+      colourField: 'RROWNER1',
+      alsoFields: ['RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect(railroadPreset(['OWNER', 'NET'])).toBeNull();
+  });
+
+  it('changes its grouping text with any setting that changes the lines', () => {
+    const base = {
+      colourField: 'RROWNER1',
+      alsoFields: ['RROWNER2'],
+      onlyField: 'NET',
+      onlyValues: ['M'],
+    };
+    expect(groupingOf(base)).toBe(groupingOf({ ...base }));
+    expect(groupingOf(base)).not.toBe(groupingOf({ ...base, alsoFields: [] }));
+    expect(groupingOf(base)).not.toBe(groupingOf({ ...base, onlyValues: ['M', 'I'] }));
+  });
+
+  it('refuses a limit value that could change the service’s query', () => {
+    const layer = {
+      name: 'Rail',
+      sourceName: 'P',
+      termsUrl: 'https://example.com/t',
+      termsNote: 'T',
+      colour: '#9ca3af',
+      colourField: 'RROWNER1',
+      colours: [],
+      source: 'web',
+      url: 'https://x.example.com/FeatureServer/0',
+      wmsLayers: null,
+    };
+    expect(
+      createMapLayerSchema.safeParse({ ...layer, onlyField: 'NET', onlyValues: ["M'"] }).success,
+    ).toBe(false);
+    expect(
+      createMapLayerSchema.safeParse({ ...layer, onlyField: 'NET', onlyValues: ['M', 'I'] })
+        .success,
+    ).toBe(true);
   });
 });
