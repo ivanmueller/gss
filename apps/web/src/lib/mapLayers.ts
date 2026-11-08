@@ -2,6 +2,7 @@ import {
   FILE_COLOUR_FIELDS,
   normalizeFeatureCollection,
   OVERVIEW_BELOW_ZOOM,
+  cleanValue,
   groupingOf,
   type LayerGrouping,
   valuesOf,
@@ -236,15 +237,19 @@ function asCollection(value: unknown): { features: GeoJSON.Feature[]; exceeded: 
 }
 
 /** A live feature with its values from every field that counts (F-137), as views carry them. */
-function withValues(feature: GeoJSON.Feature, fields: readonly string[] | null): GeoJSON.Feature {
-  if (fields === null) return feature;
-  return {
-    ...feature,
-    properties: {
-      ...feature.properties,
-      [VALUES_PROPERTY]: valuesOf(feature.properties ?? {}, fields),
-    },
-  };
+function withValues(
+  feature: GeoJSON.Feature,
+  colourField: string | null,
+  fields: readonly string[] | null,
+): GeoJSON.Feature {
+  const properties: Record<string, unknown> = { ...feature.properties };
+  // The colour field's value tidied as in a checked view, so it colours and filters the same at
+  // every zoom.
+  if (colourField !== null && colourField in properties) {
+    properties[colourField] = cleanValue(properties[colourField]) || null;
+  }
+  if (fields !== null) properties[VALUES_PROPERTY] = valuesOf(properties, fields);
+  return { ...feature, properties };
 }
 
 /** A live feature, marked with its id (ArcGIS's object id) to ask for its details. */
@@ -362,14 +367,9 @@ export function valueFilter(
  * review of bb488a9).
  */
 export function settingsTag(layer: LayerGrouping): string {
-  // FNV-1a, 32 bits: only to tell settings apart, not for security.
-  let hash = 0x811c9dc5;
-  const text = groupingOf(layer);
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, '0');
+  // The settings themselves, not a hash of them: two different filters could share a short hash
+  // and reuse each other's squares (Codex's review of da6c543). A few hundred characters at most.
+  return encodeURIComponent(groupingOf(layer));
 }
 
 /** Where a live layer's square is kept: the layer, its settings and the square. */
@@ -510,6 +510,7 @@ export function useLayerOverlays(
         for (const feature of square.features) {
           const marked = withValues(
             withObjectId(feature),
+            layer.colourField,
             layer.alsoFields.length > 0 ? fields : null,
           );
           const id = marked.properties?.[OBJECT_ID] as string | number | undefined;

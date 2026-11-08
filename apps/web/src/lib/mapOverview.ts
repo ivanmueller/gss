@@ -1,4 +1,5 @@
 import {
+  cleanValue,
   groupingOf,
   MAX_OVERVIEW_PARTS,
   valuesOf,
@@ -59,9 +60,8 @@ function collect(
           : [];
     if (lines.length === 0) continue;
     const props = feature.properties ?? {};
-    const raw = field === null ? null : props[field];
-    const value =
-      typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() || null : null;
+    // Tidied as everywhere else, so the view colours and filters as live squares do.
+    const value = field === null ? null : cleanValue(props[field]) || null;
     const values = layer.alsoFields.length > 0 ? valuesOf(props, fields) : null;
     const key = `${value ?? ''}\u0000${values ?? ''}`;
     let group = groups.get(key);

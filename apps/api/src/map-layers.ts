@@ -1,6 +1,7 @@
 import {
   createMapLayerSchema,
   inspectLayerSchema,
+  cleanValue,
   isTile,
   whereOf,
   MAX_OVERVIEW_SOURCE,
@@ -235,8 +236,8 @@ export async function arcgisValueCounts(
       const attributes = record(record(feature)?.attributes);
       const value = attributes?.[field];
       const count = attributes?.gss_count;
-      if ((typeof value === 'string' || typeof value === 'number') && typeof count === 'number') {
-        const text = String(value).trim().slice(0, 500);
+      if (typeof count === 'number') {
+        const text = cleanValue(value);
         if (text !== '') counts.set(text, (counts.get(text) ?? 0) + count);
       }
     }

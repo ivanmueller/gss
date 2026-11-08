@@ -542,9 +542,8 @@ export function featureValueCounts(
 ): ValueCount[] {
   const counts = new Map<string, number>();
   for (const feature of collection.features) {
-    const value = feature.properties[field];
-    if (value === null || value === undefined || typeof value === 'boolean') continue;
-    const text = String(value);
+    const text = cleanValue(feature.properties[field]);
+    if (text === '') continue;
     counts.set(text, (counts.get(text) ?? 0) + 1);
   }
   return [...counts]
@@ -688,6 +687,20 @@ export function whereOf(layer: Pick<LayerGrouping, 'onlyField' | 'onlyValues'>):
   return values.length === 0 ? '1=0' : `${layer.onlyField} IN (${values.join(',')})`;
 }
 
+/**
+ * A value as it is kept, counted, coloured and filtered everywhere: control characters as spaces
+ * (as a checked file or view keeps them), trimmed, cut at MAX_FIELD_TEXT; '' for none (Codex's
+ * review of da6c543: a value changed by the check showed live but hid zoomed out).
+ */
+export function cleanValue(raw: unknown): string {
+  return typeof raw === 'string' || typeof raw === 'number'
+    ? String(raw)
+        .replace(/\p{Cc}/gu, ' ')
+        .trim()
+        .slice(0, MAX_FIELD_TEXT)
+    : '';
+}
+
 /** The property a feature's values (its colour field and the fields that also count) go under. */
 export const VALUES_PROPERTY = '__values';
 
@@ -704,12 +717,8 @@ export function valuesOf(
 ): string {
   const seen: string[] = [];
   for (const field of fields) {
-    const raw = properties[field];
-    // Cut as values are counted (arcgisValueCounts), so a value matches its colour everywhere.
-    const value =
-      typeof raw === 'string' || typeof raw === 'number'
-        ? String(raw).trim().slice(0, MAX_FIELD_TEXT)
-        : '';
+    // Tidied as values are counted (arcgisValueCounts), so a value matches its colour everywhere.
+    const value = cleanValue(properties[field]);
     if (value !== '' && !value.includes('|') && !seen.includes(value)) seen.push(value);
   }
   return seen.length === 0 ? '' : `|${seen.join('|')}|`;

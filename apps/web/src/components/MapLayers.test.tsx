@@ -910,4 +910,45 @@ describe('shared track and limits', () => {
     ).toBe(true);
     expect(settingsTag(before)).not.toBe(settingsTag(shared));
   });
+
+  it('gives every distinct filter its own address (Codex’s review of da6c543)', () => {
+    const base = { colourField: 'OWNER', alsoFields: ['RIGHTS'], onlyField: 'NET' };
+    expect(settingsTag({ ...base, onlyValues: ['th9o7l'] })).not.toBe(
+      settingsTag({ ...base, onlyValues: ['7tlz1e'] }),
+    );
+  });
+
+  it('tidies live values as a checked view does, so they colour and filter alike at every zoom', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Response.json({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              id: 5,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-95.4, 29.8],
+                  [-95.3, 29.9],
+                ],
+              },
+              properties: { RROWNER1: 'A\tB', TRKRGHTS1: 'CPKC' },
+            },
+          ],
+        }),
+      ),
+    );
+    const view = { bbox: { west: -95.45, south: 29.75, east: -95.25, north: 29.95 }, zoom: 7 };
+    const { result } = renderHook(() => useLayerOverlays([shared], view, 'token'));
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features[0]?.properties).toMatchObject({
+        RROWNER1: 'A B',
+        __values: '|A B|CPKC|',
+      });
+    });
+  });
 });

@@ -15,6 +15,7 @@ import {
   railroadPreset,
   groupingOf,
   valuesOf,
+  cleanValue,
   MAX_VALUES_TEXT,
   whereOf,
   simplifyDegrees,
@@ -470,5 +471,29 @@ describe('a feature’s values through the checks (Codex’s review of bb488a9)'
       ],
     });
     expect(checked.ok && checked.collection.features[0]?.properties.__values).toBe(values);
+  });
+});
+
+describe('values tidied the same everywhere (Codex’s review of da6c543)', () => {
+  it('keeps a value with a control character as a checked view keeps it', () => {
+    const values = valuesOf({ OWNER: 'A\tB', OWNER2: 'C' }, ['OWNER', 'OWNER2']);
+    expect(values).toBe('|A B|C|');
+    const checked = normalizeFeatureCollection({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-100, 50] },
+          properties: { OWNER: 'A\tB', __values: values },
+        },
+      ],
+    });
+    expect(checked.ok && checked.collection.features[0]?.properties).toEqual({
+      OWNER: 'A B',
+      __values: values,
+    });
+    expect(cleanValue('A\tB')).toBe('A B');
+    expect(cleanValue(7)).toBe('7');
+    expect(cleanValue(null)).toBe('');
   });
 });
