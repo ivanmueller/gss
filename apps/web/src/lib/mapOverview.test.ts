@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { groupingOf } from '@grain/domain';
 
 import { mockApi, type Call } from '../test/api';
-import { prepareOverview } from './mapOverview';
+import { prepareOverview, RETRY_WAITS } from './mapOverview';
 
 // Preparing a zoomed-out view (F-134, Codex's review of 8e0fd95). The service's pages are stood
 // in for by the decoder's answers, keyed by the first byte the page route sends; synthetic.
@@ -68,7 +68,14 @@ function saving(handlers: Record<string, (call: Call) => Response>) {
   return mockApi(handlers);
 }
 
+// Pauses before asking again, shortened for the tests.
+const WAITS = [...RETRY_WAITS];
+beforeEach(() => {
+  RETRY_WAITS.splice(0, RETRY_WAITS.length, 1, 1);
+});
+
 afterEach(() => {
+  RETRY_WAITS.splice(0, RETRY_WAITS.length, ...WAITS);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   pages.clear();
@@ -110,6 +117,45 @@ describe('prepareOverview', () => {
         sourceCount: 7,
       },
     });
+  });
+
+  it('asks a busy service again after a pause, then gives up (Amtrak Routes on staging, 2026-11-08)', async () => {
+    const handlers = service(3, 3);
+    const page = handlers[`GET /map-layers/${LAYER}/pages/0`];
+    let tries = 0;
+    handlers[`GET /map-layers/${LAYER}/pages/0`] = (call) => {
+      tries += 1;
+      return tries < 3 && page
+        ? Response.json(
+            { error: { code: 'LAYER_SERVICE_FAILED', message: 'No answer.' } },
+            { status: 502 },
+          )
+        : (page?.(call) ?? new Response(null, { status: 500 }));
+    };
+    saving(handlers);
+    const layer = {
+      id: LAYER,
+      colourField: 'OWNER',
+      alsoFields: [],
+      onlyField: null,
+      onlyValues: [],
+    };
+    expect(await prepareOverview(layer, 'token', vi.fn())).toEqual({ features: 1, pieces: 3 });
+    expect(tries).toBe(3);
+
+    vi.unstubAllGlobals();
+    const failing = service(3, 3);
+    let failed = 0;
+    failing[`GET /map-layers/${LAYER}/pages/0`] = () => {
+      failed += 1;
+      return Response.json(
+        { error: { code: 'LAYER_SERVICE_FAILED', message: 'No answer.' } },
+        { status: 502 },
+      );
+    };
+    saving(failing);
+    await expect(prepareOverview(layer, 'token', vi.fn())).rejects.toThrow('No answer.');
+    expect(failed).toBe(3);
   });
 
   it('fills in a page that came back short, so every piece is read once', async () => {

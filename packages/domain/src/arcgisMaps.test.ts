@@ -6,6 +6,7 @@ import {
   itemLayerDrawing,
   itemTerms,
   mapOfApp,
+  neverShown,
   parseArcgisMapLink,
   readItemInfo,
   scaleToZoom,
@@ -288,8 +289,8 @@ describe('zoom ranges', () => {
     expect(scaleToZoom('x')).toBeNull();
     expect(zoomRange(2_311_162.217, 0)).toEqual({ minZoom: 7, maxZoom: null });
     expect(zoomRange(0, 0)).toEqual({ minZoom: null, maxZoom: null });
-    // Out of order: no limit rather than a layer never shown.
-    expect(zoomRange(1000, 2_311_162.217)).toEqual({ minZoom: null, maxZoom: null });
+    // Out of order: never widened to every zoom (neverShown refuses such a layer).
+    expect(zoomRange(1000, 2_311_162.217)).toEqual({ minZoom: 18.17, maxZoom: 18.18 });
   });
 });
 
@@ -618,5 +619,176 @@ describe('Codex’s review of 1f328f9', () => {
     });
     // The group's narrower outward limit wins; its inward limit applies.
     expect(inGroup).toMatchObject({ minScale: 2_311_162.217, maxScale: 1000 });
+  });
+});
+
+describe('Codex’s re-review of 1a5f81c', () => {
+  it('refuses quoting that could hide a parenthesis', () => {
+    const dollar = '$'.repeat(2);
+    for (const bad of [
+      `${dollar}(${dollar} IS NOT NULL) OR (${dollar})${dollar} IS NOT NULL`,
+      '"a(" = 1',
+      "E'\\'' = 1",
+      '[a(] = 1',
+      '`a(` = 1',
+      'a = 1 # (',
+      '{fn x()}',
+    ]) {
+      expect(safeFilter(bad)).toBe(false);
+    }
+    for (const good of [
+      "NET IN ('M','I')",
+      "NAME LIKE 'Québec%' AND MILES >= 2.5",
+      "UPDATED > DATE '2024-01-01'",
+    ]) {
+      expect(safeFilter(good)).toBe(true);
+    }
+  });
+
+  it('puts an island’s hole in the island, not the shell around it', () => {
+    const square = (x: number, size: number, clockwise: boolean) => {
+      const ring = [
+        [x, x],
+        [x, x + size],
+        [x + size, x + size],
+        [x + size, x],
+        [x, x],
+      ];
+      return clockwise ? ring : ring.reverse();
+    };
+    const shell = square(0, 100, true);
+    const hole = square(10, 80, false);
+    const island = square(20, 60, true);
+    const islandHole = square(40, 10, false);
+    const result = featureSetToGeoJSON(
+      {
+        geometryType: 'esriGeometryPolygon',
+        features: [{ geometry: { rings: [shell, hole, island, islandHole] } }],
+      },
+      { wkid: 4326 },
+    );
+    expect(result?.features[0]).toMatchObject({
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: [
+          [shell, hole],
+          [island, islandHole],
+        ],
+      },
+    });
+  });
+
+  it('knows a layer ArcGIS never draws', () => {
+    expect(neverShown(10_000, 100_000)).toBe(true);
+    expect(neverShown(100_000, 10_000)).toBe(false);
+    expect(neverShown(null, 10_000)).toBe(false);
+    const [layer] = webMapLayers({
+      operationalLayers: [
+        {
+          layerType: 'GroupLayer',
+          minScale: 10_000,
+          layers: [
+            { layerType: 'ArcGISFeatureLayer', title: 'L', url: SERVICE, maxScale: 100_000 },
+          ],
+        },
+      ],
+    });
+    expect(neverShown(layer?.minScale ?? null, layer?.maxScale ?? null)).toBe(true);
+  });
+});
+
+describe('Codex’s re-review of 813c5b6', () => {
+  it('refuses a quote opened right after a letter (Oracle’s q quoting and the like)', () => {
+    for (const bad of [
+      "q'!'('!' IS NOT NULL) OR (q'!')'!' IS NOT NULL",
+      "N'a(' = 1",
+      "x_'a' = 1",
+    ]) {
+      expect(balancedFilter(bad)).toBe(false);
+      expect(safeFilter(bad)).toBe(false);
+    }
+    expect(safeFilter("NAME = 'it''s' AND NET IN('M')")).toBe(true);
+  });
+
+  it('puts a hole touching its outer ring at a corner in that ring', () => {
+    const shell = [
+      [0, 0],
+      [0, 10],
+      [10, 10],
+      [10, 0],
+      [0, 0],
+    ];
+    const hole = [
+      [10, 5],
+      [8, 6],
+      [8, 4],
+      [10, 5],
+    ];
+    const other = [
+      [20, 0],
+      [20, 10],
+      [30, 10],
+      [30, 0],
+      [20, 0],
+    ];
+    const result = featureSetToGeoJSON(
+      {
+        geometryType: 'esriGeometryPolygon',
+        features: [{ geometry: { rings: [shell, hole, other] } }],
+      },
+      { wkid: 4326 },
+    );
+    expect(result?.features[0]).toMatchObject({
+      geometry: { type: 'MultiPolygon', coordinates: [[shell, hole], [other]] },
+    });
+  });
+
+  it('keeps a range narrower than the zooms’ rounding narrow', () => {
+    expect(neverShown(100_001, 100_000)).toBe(false);
+    const range = zoomRange(100_001, 100_000);
+    expect(range.minZoom).not.toBeNull();
+    expect(range.maxZoom).not.toBeNull();
+    expect((range.maxZoom ?? 0) - (range.minZoom ?? 0)).toBeCloseTo(0.01);
+  });
+});
+
+describe('Codex’s re-review of 7d0382e', () => {
+  it('sees a comment past a line or paragraph separator', () => {
+    const hidden = "'a\u2028' IS NOT NULL /*(*/ ) OR (1=1 /*)*/";
+    expect(safeFilter(hidden)).toBe(false);
+    expect(safeFilter("'a\u2028' IS NOT NULL -- x")).toBe(false);
+    expect(whereOf({ onlyField: 'NET', onlyValues: ['M'], definitionExpression: hidden })).toBe(
+      '1=0',
+    );
+  });
+
+  it('converts a large area with holes quickly', () => {
+    // Two outer rings of 20,000 corners each (clockwise), each with a hole of 20,000 corners.
+    const circle = (cx: number, r: number, clockwise: boolean) => {
+      // 20,001 corners, the last back at the first.
+      return Array.from({ length: 20_001 }, (_, i) => {
+        const t = ((clockwise ? -1 : 1) * 2 * Math.PI * (i % 20_000)) / 20_000;
+        return [cx + r * Math.cos(t), r * Math.sin(t)];
+      });
+    };
+    const rings = [
+      circle(0, 10, true),
+      circle(30, 10, true),
+      circle(30, 5, false),
+      circle(0, 5, false),
+    ];
+    const started = Date.now();
+    const result = featureSetToGeoJSON(
+      { geometryType: 'esriGeometryPolygon', features: [{ geometry: { rings } }] },
+      { wkid: 4326 },
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+    const geometry = result?.features[0] as { geometry: { coordinates: unknown[][][] } };
+    expect(geometry.geometry.coordinates.map((polygon) => polygon.length)).toEqual([2, 2]);
+    // Each hole with the shape around it: the hole centred at 0 with the first, at 30 the second.
+    const firstX = (polygon: number) =>
+      (geometry.geometry.coordinates[polygon]?.[1]?.[0] as number[] | undefined)?.[0];
+    expect(firstX(0)).toBeCloseTo(5);
+    expect(firstX(1)).toBeCloseTo(35);
   });
 });

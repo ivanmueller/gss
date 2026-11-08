@@ -259,9 +259,15 @@ const presentation = {
 
 /**
  * The publisher's filter on a live layer's features (an ArcGIS where clause from its map), sent
- * only to the layer's own service: no statement separators, comments or control characters.
+ * only to the layer's own service: ASCII letters and digits, spaces, _ ' ( ) , . = < > ! + * / %
+ * : - and characters from U+00A0 up (accented letters) only, without -- or /*. No other quoting ($$, double quotes, backslashes, brackets or
+ * backticks), whose text could hide a parenthesis from balancedFilter on a service taking its
+ * database's own SQL (Codex's re-review of 1a5f81c), and no ; or control characters.
  */
-export const DEFINITION_EXPRESSION = /^(?!.*--)(?!.*\/\*)[^\p{Cc};]{1,2000}$/u;
+// The checks for -- and /* look across line and paragraph separators too, which . does not
+// match (Codex's re-review of 7d0382e: \u2028 hid a comment from them).
+export const DEFINITION_EXPRESSION =
+  /^(?![\s\S]*--)(?![\s\S]*\/\*)[A-Za-z0-9_ '(),.=<>!+*/%:\u{a0}-\u{10ffff}-]{1,2000}$/u;
 
 /**
  * Whether a filter's parentheses and quotes are balanced (parentheses inside quoted text not
@@ -278,8 +284,13 @@ export function balancedFilter(text: string): boolean {
         if (text[i + 1] === "'") i += 1;
         else quoted = false;
       }
-    } else if (c === "'") quoted = true;
-    else if (c === '(') depth += 1;
+    } else if (c === "'") {
+      // A quote opened right after a letter, digit or underscore is another kind of quoting
+      // (Oracle's q'!…!', N'…', E'…'), whose text could hide a parenthesis (Codex's re-review of
+      // 813c5b6).
+      if (i > 0 && /[A-Za-z0-9_]/.test(text[i - 1] ?? '')) return false;
+      quoted = true;
+    } else if (c === '(') depth += 1;
     else if (c === ')') {
       depth -= 1;
       if (depth < 0) return false;

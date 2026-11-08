@@ -432,14 +432,27 @@ export function scaleToZoom(scale: unknown): number | null {
  * The zooms a layer shows between: its minScale (the farthest out it shows) as the lowest zoom,
  * its maxScale (the closest in) as the highest. Null for no limit.
  */
+/**
+ * Whether ArcGIS never draws a layer: its farthest-out scale is not beyond its closest-in one
+ * (a group's range and its own that do not overlap; Codex's re-review of 1a5f81c).
+ */
+export function neverShown(minScale: number | null, maxScale: number | null): boolean {
+  return (
+    minScale !== null && maxScale !== null && minScale > 0 && maxScale > 0 && minScale <= maxScale
+  );
+}
+
 export function zoomRange(
   minScale: unknown,
   maxScale: unknown,
 ): { minZoom: number | null; maxZoom: number | null } {
   const minZoom = scaleToZoom(minScale);
   const maxZoom = scaleToZoom(maxScale);
+  // A range narrower than the zooms' rounding is kept narrow, never widened to every zoom
+  // (Codex's re-review of 813c5b6); a range ArcGIS never draws is refused by neverShown.
   if (minZoom !== null && maxZoom !== null && minZoom >= maxZoom) {
-    return { minZoom: null, maxZoom: null };
+    const narrow = Math.round((minZoom + 0.01) * 100) / 100;
+    return { minZoom: minZoom === 0 ? null : minZoom, maxZoom: narrow > 24 ? null : narrow };
   }
   return { minZoom: minZoom === 0 ? null : minZoom, maxZoom: maxZoom === 24 ? null : maxZoom };
 }
@@ -468,6 +481,15 @@ function path(points: unknown, convert: (p: unknown) => Position | null): Positi
 }
 
 /** Twice a ring's signed area with y up: positive when it runs clockwise (ArcGIS's outer rings). */
+function ringArea(ring: readonly Position[]): number {
+  let sum = 0;
+  ring.forEach(([x2, y2], i) => {
+    const before = ring[i - 1];
+    if (before) sum += (x2 - before[0]) * (y2 + before[1]);
+  });
+  return Math.abs(sum);
+}
+
 function clockwise(ring: readonly Position[]): boolean {
   let sum = 0;
   ring.forEach(([x2, y2], i) => {
@@ -478,15 +500,61 @@ function clockwise(ring: readonly Position[]): boolean {
 }
 
 /** Whether a point is inside a ring (crossings of a ray to its right). */
-function ringContains(ring: readonly Position[], [x, y]: Position): boolean {
+/** Where a point is against a ring: inside, outside, or on its edge. */
+function whereIs(ring: readonly Position[], [x, y]: Position): 'in' | 'out' | 'on' {
   let inside = false;
-  ring.forEach(([x2, y2], i) => {
+  for (let i = 1; i < ring.length; i += 1) {
     const before = ring[i - 1];
-    if (!before) return;
+    const after = ring[i];
+    if (!before || !after) continue;
     const [x1, y1] = before;
+    const [x2, y2] = after;
+    const cross = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1);
+    const scale = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1), 1e-12);
+    if (
+      Math.abs(cross) <= scale * 1e-9 &&
+      x >= Math.min(x1, x2) - 1e-12 &&
+      x <= Math.max(x1, x2) + 1e-12 &&
+      y >= Math.min(y1, y2) - 1e-12 &&
+      y <= Math.max(y1, y2) + 1e-12
+    ) {
+      return 'on';
+    }
     if (y1 > y !== y2 > y && x < ((x2 - x1) * (y - y1)) / (y2 - y1) + x1) inside = !inside;
-  });
-  return inside;
+  }
+  return inside ? 'in' : 'out';
+}
+
+/**
+ * Whether a hole lies within an outer ring: none of its corners outside, and one corner (or, when
+ * all touch the edge, the middle of one side) inside. A hole may touch its outer ring at a corner,
+ * so one corner alone does not tell (Codex's re-review of 813c5b6).
+ */
+function ringHolds(shell: readonly Position[], hole: readonly Position[]): boolean {
+  // In a valid area a hole is wholly inside its ring or wholly outside, so the first corner not
+  // on the ring's edge decides: one pass over the ring for most holes, not one per corner
+  // (Codex's re-review of 7d0382e: 20,000 corners a ring took seconds).
+  for (const p of hole) {
+    const place = whereIs(shell, p);
+    if (place !== 'on') return place === 'in';
+  }
+  for (let i = 1; i < hole.length; i += 1) {
+    const a = hole[i - 1];
+    const b = hole[i];
+    if (!a || !b) continue;
+    const place = whereIs(shell, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    if (place !== 'on') return place === 'in';
+  }
+  return false;
+}
+
+/** A ring's bounding box: west, south, east, north. */
+function boxOf(ring: readonly Position[]): [number, number, number, number] {
+  let box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [x, y] of ring) {
+    box = [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)];
+  }
+  return box;
 }
 
 function geometryOf(
@@ -522,13 +590,25 @@ function geometryOf(
     // the outer ring around it (Codex's review of 1f328f9: not merely the last one before it).
     const outer = rings.filter((ring) => clockwise(ring));
     const polygons: Position[][][] = (outer.length > 0 ? outer : rings.slice(0, 1)).map((r) => [r]);
+    // Each outer ring's box and size, worked out once.
+    const shells = polygons.flatMap((polygon) => {
+      const [ring] = polygon;
+      return ring ? [{ polygon, ring, box: boxOf(ring), area: ringArea(ring) }] : [];
+    });
+    const taken = new Set(shells.map((shell) => shell.ring));
     for (const ring of rings) {
-      if (polygons.some(([o]) => o === ring)) continue;
-      const [point] = ring;
-      const around =
-        polygons.find(([o]) => o !== undefined && point !== undefined && ringContains(o, point)) ??
-        polygons[polygons.length - 1];
-      around?.push(ring);
+      if (taken.has(ring)) continue;
+      // The innermost outer ring around it: an island inside a hole has its own holes (Codex's
+      // re-review of 1a5f81c). Rings whose box does not hold the hole's are skipped unread.
+      const [w, s, e, n] = boxOf(ring);
+      let best: (typeof shells)[number] | undefined;
+      for (const shell of shells) {
+        const [sw, ss, se, sn] = shell.box;
+        if (w < sw || s < ss || e > se || n > sn) continue;
+        if (best && shell.area >= best.area) continue;
+        if (ringHolds(shell.ring, ring)) best = shell;
+      }
+      (best?.polygon ?? polygons[polygons.length - 1])?.push(ring);
     }
     const [only, ...more] = polygons;
     if (!only) return null;
