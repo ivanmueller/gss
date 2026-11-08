@@ -9,6 +9,7 @@ import {
   useLayerChoice,
   useLayerOverlays,
   valueFilter,
+  settingsTag,
   OBJECT_ID,
 } from '../lib/mapLayers';
 import { clearApiCache } from '../lib/useApiResource';
@@ -853,5 +854,60 @@ describe('shared track and limits', () => {
       SESSION.token,
       expect.any(Function),
     );
+  });
+
+  it('fetches squares afresh, at a new address, when the layer’s settings change (Codex’s review of bb488a9)', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string) => {
+        asked.push(input);
+        const owner = asked.length <= 2 && !input.includes(settingsTag(shared)) ? 'OLD' : 'NEW';
+        return Promise.resolve(
+          Response.json({
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                id: 5,
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [
+                    [-95.4, 29.8],
+                    [-95.3, 29.9],
+                  ],
+                },
+                properties: { RROWNER1: owner, TRKRGHTS1: 'CPKC' },
+              },
+            ],
+          }),
+        );
+      }),
+    );
+    const view = { bbox: { west: -95.45, south: 29.75, east: -95.25, north: 29.95 }, zoom: 7 };
+    const before: MapLayerView = { ...shared, alsoFields: [] };
+    const { result, rerender } = renderHook(
+      ({ layer }) => useLayerOverlays([layer], view, 'token'),
+      {
+        initialProps: { layer: before },
+      },
+    );
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features.length).toBe(1);
+    });
+    const firstAsked = [...asked];
+    expect(firstAsked.every((u) => u.includes(`?g=${settingsTag(before)}`))).toBe(true);
+    rerender({ layer: shared });
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features[0]?.properties?.__values).toBe(
+        '|NEW|CPKC|',
+      );
+    });
+    expect(
+      asked.slice(firstAsked.length).every((u) => u.includes(`?g=${settingsTag(shared)}`)),
+    ).toBe(true);
+    expect(settingsTag(before)).not.toBe(settingsTag(shared));
   });
 });

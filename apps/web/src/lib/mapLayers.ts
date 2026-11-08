@@ -3,6 +3,7 @@ import {
   normalizeFeatureCollection,
   OVERVIEW_BELOW_ZOOM,
   groupingOf,
+  type LayerGrouping,
   valuesOf,
   VALUES_PROPERTY,
   tilesForView,
@@ -355,6 +356,27 @@ export function valueFilter(
 // ---------------------------------------------------------------------------------------------
 // The features of the layers that are on
 
+/**
+ * A short tag of the settings a live layer's squares are fetched under (groupingOf: colour field,
+ * fields that also count, limit): squares fetched under other settings are never reused (Codex's
+ * review of bb488a9).
+ */
+export function settingsTag(layer: LayerGrouping): string {
+  // FNV-1a, 32 bits: only to tell settings apart, not for security.
+  let hash = 0x811c9dc5;
+  const text = groupingOf(layer);
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+/** Where a live layer's square is kept: the layer, its settings and the square. */
+function squareKey(layer: MapLayerView, tile: { z: number; x: number; y: number }): string {
+  return `${layer.id}@${settingsTag(layer)}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
+}
+
 /** Whether a live layer is drawn from its zoomed-out view at this zoom (F-134). */
 export function usesOverview(layer: MapLayerView, zoom: number | null): boolean {
   return (
@@ -418,10 +440,12 @@ export function useLayerOverlays(
         );
       } else if (layer.kind === 'arcgis_features') {
         for (const tile of tiles) {
-          const key = `${layer.id}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
+          const key = squareKey(layer, tile);
           if (asked.current.has(key)) continue;
           asked.current.add(key);
-          const path = `/map-layers/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
+          // The settings in the address too, so the browser's cached square (an hour) is not
+          // reused after they change (Codex's review of bb488a9).
+          const path = `/map-layers/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`;
           apiFetch(path, token)
             .then((res) => res.json())
             .then((body: unknown) => {
@@ -476,9 +500,7 @@ export function useLayerOverlays(
       let exceeded = false;
       let failed = false;
       for (const tile of tiles) {
-        const square = squares.get(
-          `${layer.id}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`,
-        );
+        const square = squares.get(squareKey(layer, tile));
         if (square === undefined) continue;
         if (square === 'failed') {
           failed = true;

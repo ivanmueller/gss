@@ -440,8 +440,14 @@ function cleanProperties(value: unknown): Record<string, FieldValue> {
     let v: FieldValue;
     if (raw === null || typeof raw === 'boolean') v = raw;
     else if (typeof raw === 'number') v = Number.isFinite(raw) ? raw : null;
-    else if (typeof raw === 'string') v = raw.replace(/\p{Cc}/gu, ' ').slice(0, MAX_FIELD_TEXT);
-    else continue;
+    else if (typeof raw === 'string') {
+      // A feature's values from several fields (F-137) keep their own, larger limit, so no value
+      // is cut off (Codex's review of bb488a9); one longer than that is left out whole.
+      const limit = name === VALUES_PROPERTY ? MAX_VALUES_TEXT : MAX_FIELD_TEXT;
+      const text = raw.replace(/\p{Cc}/gu, ' ');
+      if (name === VALUES_PROPERTY && text.length > limit) continue;
+      v = text.slice(0, limit);
+    } else continue;
     out[name] = v;
     kept += 1;
   }
@@ -685,6 +691,12 @@ export function whereOf(layer: Pick<LayerGrouping, 'onlyField' | 'onlyValues'>):
 /** The property a feature's values (its colour field and the fields that also count) go under. */
 export const VALUES_PROPERTY = '__values';
 
+/**
+ * The longest a feature's values may be: every value of its colour field and the 16 fields that
+ * also count, each cut at MAX_FIELD_TEXT, with their separators.
+ */
+export const MAX_VALUES_TEXT = 17 * (MAX_FIELD_TEXT + 1) + 1;
+
 /** A feature's values from its fields, as "|CN|CPKC|", each once, in field order. */
 export function valuesOf(
   properties: Readonly<Record<string, unknown>>,
@@ -693,7 +705,11 @@ export function valuesOf(
   const seen: string[] = [];
   for (const field of fields) {
     const raw = properties[field];
-    const value = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : '';
+    // Cut as values are counted (arcgisValueCounts), so a value matches its colour everywhere.
+    const value =
+      typeof raw === 'string' || typeof raw === 'number'
+        ? String(raw).trim().slice(0, MAX_FIELD_TEXT)
+        : '';
     if (value !== '' && !value.includes('|') && !seen.includes(value)) seen.push(value);
   }
   return seen.length === 0 ? '' : `|${seen.join('|')}|`;

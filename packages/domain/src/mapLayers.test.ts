@@ -15,6 +15,7 @@ import {
   railroadPreset,
   groupingOf,
   valuesOf,
+  MAX_VALUES_TEXT,
   whereOf,
   simplifyDegrees,
   tileBounds,
@@ -430,5 +431,44 @@ describe('shared values and limits (F-137)', () => {
       createMapLayerSchema.safeParse({ ...layer, onlyField: 'NET', onlyValues: ['M', 'I'] })
         .success,
     ).toBe(true);
+  });
+});
+
+describe('a feature’s values through the checks (Codex’s review of bb488a9)', () => {
+  it('keeps every value of several fields, however long each is within its limit', () => {
+    const a = 'A'.repeat(300);
+    const b = 'B'.repeat(300);
+    const values = valuesOf({ OWNER: a, OWNER2: b }, ['OWNER', 'OWNER2']);
+    const checked = normalizeFeatureCollection({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-100, 50] },
+          properties: { OWNER: a, __values: values },
+        },
+      ],
+    });
+    expect(checked.ok && checked.collection.features[0]?.properties.__values).toBe(`|${a}|${b}|`);
+  });
+
+  it('cuts each value as values are counted, so the longest stays within the limit', () => {
+    const long = 'L'.repeat(900);
+    const fields = Array.from({ length: 17 }, (_, i) => `F${String(i)}`);
+    const props = Object.fromEntries(fields.map((f, i) => [f, `${String(i)}${long}`]));
+    const values = valuesOf(props, fields);
+    expect(values.split('|').filter(Boolean)).toHaveLength(17);
+    expect(values.length).toBeLessThanOrEqual(MAX_VALUES_TEXT);
+    const checked = normalizeFeatureCollection({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-100, 50] },
+          properties: { __values: values },
+        },
+      ],
+    });
+    expect(checked.ok && checked.collection.features[0]?.properties.__values).toBe(values);
   });
 });
