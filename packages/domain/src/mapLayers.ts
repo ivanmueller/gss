@@ -204,6 +204,8 @@ export function assignColours(values: readonly ValueCount[]): [string, string][]
 
 const HEX = /^#[0-9a-f]{6}$/;
 const FIELD = /^[A-Za-z0-9_][A-Za-z0-9_ .-]{0,63}$/;
+/** A value a layer is limited to: no quotes or anything else that could change a query. */
+const ONLY_VALUE = /^[A-Za-z0-9 _.-]{1,50}$/;
 const label = (max: number) =>
   z
     .string()
@@ -231,6 +233,11 @@ const layerDetails = {
   colour: z.string().regex(HEX),
   colourField: z.string().regex(FIELD).nullable(),
   colours: colourList,
+  /** Other fields whose values also count (F-137): RROWNER2, RROWNER3, TRKRGHTS1 to 9. */
+  alsoFields: z.array(z.string().regex(FIELD)).max(16).default([]),
+  /** Only features whose field has one of these values (F-137): NET is M or I. */
+  onlyField: z.string().regex(FIELD).nullable().default(null),
+  onlyValues: z.array(z.string().regex(ONLY_VALUE)).max(20).default([]),
 };
 
 /** POST /api/v1/map-layers?organization_id=… : a web service. */
@@ -272,8 +279,8 @@ export const overviewPartSchema = z.strictObject({
 
 /** POST /api/v1/map-layers/{id}/overview/{version}/publish: every part has been sent. */
 export const publishOverviewSchema = z.strictObject({
-  /** The field its lines are grouped by: the layer's colour field when it was read. */
-  colourField: z.string().regex(FIELD).nullable(),
+  /** The settings it was built with (groupingOf): the layer's when it was read. */
+  grouping: z.string().max(4000),
   /** How many parts were sent, numbered from 0. */
   partCount: z.number().int().min(1).max(64),
   /** How many pieces the service gave. */
@@ -285,6 +292,10 @@ export const inspectLayerSchema = z.strictObject({
   url: z.string().max(MAX_LAYER_URL_LENGTH * 2),
   /** Count this field's values, to colour by it. */
   field: z.string().regex(FIELD).nullable(),
+  /** Count these fields' values with it, and only features passing the limit (F-137). */
+  alsoFields: z.array(z.string().regex(FIELD)).max(16).default([]),
+  onlyField: z.string().regex(FIELD).nullable().default(null),
+  onlyValues: z.array(z.string().regex(ONLY_VALUE)).max(20).default([]),
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -312,6 +323,10 @@ export interface MapLayerView {
   createdAt: string;
   /** Sent back with a change; a change to a layer changed since is refused. */
   version: string;
+  /** Other fields whose values also count, and the limit to some features (F-137). */
+  alsoFields: string[];
+  onlyField: string | null;
+  onlyValues: string[];
   /** A live lines layer's zoomed-out view (F-134), or null before one is prepared. */
   overview: MapLayerOverviewInfo | null;
 }
@@ -319,6 +334,8 @@ export interface MapLayerView {
 export interface MapLayerOverviewInfo {
   /** The field its lines are grouped by when it was prepared. */
   colourField: string | null;
+  /** The settings it was built with (groupingOf); it is drawn only while they are the layer's. */
+  grouping: string;
   featureCount: number;
   /** How many pieces the service gave. */
   sourceCount: number;
@@ -346,6 +363,8 @@ export interface LayerInspection {
   fields: string[];
   /** The field's values and how often each occurs, most common first, when one was asked for. */
   values: ValueCount[] | null;
+  /** How many features it has (within its limit, when one was given); null for pictures. */
+  count: number | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -421,8 +440,14 @@ function cleanProperties(value: unknown): Record<string, FieldValue> {
     let v: FieldValue;
     if (raw === null || typeof raw === 'boolean') v = raw;
     else if (typeof raw === 'number') v = Number.isFinite(raw) ? raw : null;
-    else if (typeof raw === 'string') v = raw.replace(/\p{Cc}/gu, ' ').slice(0, MAX_FIELD_TEXT);
-    else continue;
+    else if (typeof raw === 'string') {
+      // A feature's values from several fields (F-137) keep their own, larger limit, so no value
+      // is cut off (Codex's review of bb488a9); one longer than that is left out whole.
+      const limit = name === VALUES_PROPERTY ? MAX_VALUES_TEXT : MAX_FIELD_TEXT;
+      const text = raw.replace(/\p{Cc}/gu, ' ');
+      if (name === VALUES_PROPERTY && text.length > limit) continue;
+      v = text.slice(0, limit);
+    } else continue;
     out[name] = v;
     kept += 1;
   }
@@ -517,9 +542,8 @@ export function featureValueCounts(
 ): ValueCount[] {
   const counts = new Map<string, number>();
   for (const feature of collection.features) {
-    const value = feature.properties[field];
-    if (value === null || value === undefined || typeof value === 'boolean') continue;
-    const text = String(value);
+    const text = cleanValue(feature.properties[field]);
+    if (text === '') continue;
     counts.set(text, (counts.get(text) ?? 0) + 1);
   }
   return [...counts]
@@ -630,4 +654,100 @@ export function tilesForView(
 /** How much a live layer's lines may be simplified at a zoom: about a pixel, in degrees. */
 export function simplifyDegrees(z: number): number {
   return 360 / 2 ** z / 512;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shared values and limits (F-137)
+
+/** What a layer's lines are grouped and limited by. */
+export interface LayerGrouping {
+  colourField: string | null;
+  alsoFields: readonly string[];
+  onlyField: string | null;
+  onlyValues: readonly string[];
+}
+
+/** The settings a zoomed-out view is built with, as text: a view is drawn only while they match. */
+export function groupingOf(layer: LayerGrouping): string {
+  return JSON.stringify({
+    colourField: layer.colourField,
+    alsoFields: [...layer.alsoFields],
+    onlyField: layer.onlyField,
+    onlyValues: [...layer.onlyValues],
+  });
+}
+
+/**
+ * The ArcGIS where clause for a layer's limit ("NET IN ('M','I')"), or 1=1 without one. Values
+ * can hold no quote (ONLY_VALUE), so they cannot change the query.
+ */
+export function whereOf(layer: Pick<LayerGrouping, 'onlyField' | 'onlyValues'>): string {
+  if (layer.onlyField === null || layer.onlyValues.length === 0) return '1=1';
+  const values = layer.onlyValues.filter((v) => ONLY_VALUE.test(v)).map((v) => `'${v}'`);
+  return values.length === 0 ? '1=0' : `${layer.onlyField} IN (${values.join(',')})`;
+}
+
+/**
+ * A value as it is kept, counted, coloured and filtered everywhere: control characters as spaces
+ * (as a checked file or view keeps them), trimmed, cut at MAX_FIELD_TEXT; '' for none (Codex's
+ * review of da6c543: a value changed by the check showed live but hid zoomed out).
+ */
+export function cleanValue(raw: unknown): string {
+  return typeof raw === 'string' || typeof raw === 'number'
+    ? String(raw)
+        .replace(/\p{Cc}/gu, ' ')
+        .trim()
+        .slice(0, MAX_FIELD_TEXT)
+        // Trimmed again after the cut, so tidying a tidied value changes nothing (Codex's review
+        // of 2693859: a cut ending in a space was tidied differently the second time).
+        .trimEnd()
+    : '';
+}
+
+/** The property a feature's values (its colour field and the fields that also count) go under. */
+export const VALUES_PROPERTY = '__values';
+
+/**
+ * The longest a feature's values may be: every value of its colour field and the 16 fields that
+ * also count, each cut at MAX_FIELD_TEXT, with their separators.
+ */
+export const MAX_VALUES_TEXT = 17 * (MAX_FIELD_TEXT + 1) + 1;
+
+/** A feature's values from its fields, as "|CN|CPKC|", each once, in field order. */
+export function valuesOf(
+  properties: Readonly<Record<string, unknown>>,
+  fields: readonly string[],
+): string {
+  const seen: string[] = [];
+  for (const field of fields) {
+    // Tidied as values are counted (arcgisValueCounts), so a value matches its colour everywhere.
+    const value = cleanValue(properties[field]);
+    if (value !== '' && !value.includes('|') && !seen.includes(value)) seen.push(value);
+  }
+  return seen.length === 0 ? '' : `|${seen.join('|')}|`;
+}
+
+/**
+ * The publisher's own railroad views for North American Rail Network Lines: a railroad's lines
+ * are those it owns, co-owns or has trackage rights on, main lines and industry track only (read
+ * from its CPKC view, 2026-11-08). Offered when a layer has those fields; null otherwise.
+ */
+export function railroadPreset(fields: readonly string[]): {
+  colourField: string;
+  alsoFields: string[];
+  onlyField: string | null;
+  onlyValues: string[];
+} | null {
+  if (!fields.includes('RROWNER1') || !fields.includes('TRKRGHTS1')) return null;
+  const also = [
+    'RROWNER2',
+    'RROWNER3',
+    ...Array.from({ length: 9 }, (_, i) => `TRKRGHTS${String(i + 1)}`),
+  ];
+  return {
+    colourField: 'RROWNER1',
+    alsoFields: also.filter((f) => fields.includes(f)),
+    onlyField: fields.includes('NET') ? 'NET' : null,
+    onlyValues: fields.includes('NET') ? ['M', 'I'] : [],
+  };
 }

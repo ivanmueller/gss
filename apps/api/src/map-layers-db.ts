@@ -1,4 +1,4 @@
-import type { MapLayerKind, MapLayerView } from '@grain/domain';
+import { groupingOf, type MapLayerKind, type MapLayerView } from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { RequestContext } from './db';
@@ -27,6 +27,10 @@ export interface NewMapLayer {
   colour: string;
   colourField: string | null;
   colours: [string, string][];
+  /** Other fields whose values also count, and the limit to some features (F-137). */
+  alsoFields: string[];
+  onlyField: string | null;
+  onlyValues: string[];
   /** A file layer's file: its name, its checked GeoJSON as UTF-8 and how many features. */
   file: { name: string; geojson: Uint8Array; featureCount: number } | null;
 }
@@ -42,6 +46,9 @@ export interface MapLayerSource {
   wmsLayers: string | null;
   idField: string | null;
   colourField: string | null;
+  alsoFields: string[];
+  onlyField: string | null;
+  onlyValues: string[];
 }
 
 export interface MapLayersDatabase {
@@ -92,7 +99,8 @@ export interface MapLayersDatabase {
     id: string,
     overview: {
       version: string;
-      colourField: string | null;
+      /** The settings it was built with (groupingOf). */
+      grouping: string;
       partCount: number;
       sourceCount: number;
     },
@@ -116,12 +124,16 @@ interface LayerRow {
   colour: string;
   colour_field: string | null;
   colours: [string, string][];
+  also_fields: string[];
+  only_field: string | null;
+  only_values: string[];
   file_name: string | null;
   feature_count: number | null;
   created_by_name: string | null;
   created_at: Date;
   version: string;
   overview_field: string | null;
+  overview_grouping: string | null;
   overview_features: number | null;
   overview_source: number | null;
   overview_by: string | null;
@@ -154,10 +166,12 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
         if (member?.ok !== true) return null;
         const rows = await tx<LayerRow[]>`
           select l.id, l.name, l.kind, l.source_url, l.wms_layers, l.source_name, l.terms_url,
-                 l.terms_note, l.colour, l.colour_field, l.colours, f.file_name, f.feature_count,
+                 l.terms_note, l.colour, l.colour_field, l.colours, to_jsonb(l.also_fields) as also_fields,
+                 l.only_field, to_jsonb(l.only_values) as only_values, f.file_name, f.feature_count,
                  app.member_name(l.organization_id, l.created_by) as created_by_name,
                  l.created_at, l.updated_at::text as version,
-                 o.colour_field as overview_field, o.feature_count as overview_features,
+                 o.colour_field as overview_field, o.grouping as overview_grouping,
+                 o.feature_count as overview_features,
                  o.source_count as overview_source,
                  app.member_name(o.organization_id, o.prepared_by) as overview_by,
                  o.prepared_at as overview_at, o.version::text as overview_version
@@ -178,6 +192,9 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           colour: row.colour,
           colourField: row.colour_field,
           colours: row.colours,
+          alsoFields: row.also_fields,
+          onlyField: row.only_field,
+          onlyValues: row.only_values,
           fileName: row.file_name,
           featureCount: row.feature_count,
           createdByName: row.created_by_name ?? 'A former member',
@@ -187,6 +204,7 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             row.overview_at && row.overview_version
               ? {
                   colourField: row.overview_field,
+                  grouping: row.overview_grouping ?? '',
                   featureCount: row.overview_features ?? 0,
                   sourceCount: row.overview_source ?? 0,
                   preparedByName: row.overview_by ?? 'A former member',
@@ -203,7 +221,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
         const [row] = await tx<MapLayerSource[]>`
           select id, organization_id as "organizationId", kind, source_url as url,
                  wms_layers as "wmsLayers", id_field as "idField",
-                 colour_field as "colourField"
+                 colour_field as "colourField", to_jsonb(also_fields) as "alsoFields",
+                 only_field as "onlyField", to_jsonb(only_values) as "onlyValues"
           from app.map_layers where id = ${id} and archived_at is null`;
         return row ?? null;
       });
@@ -227,12 +246,13 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
         if (admin?.ok !== true) return { status: 'forbidden' };
         const [saved] = await tx<{ id: string }[]>`
           insert into app.map_layers (organization_id, name, kind, source_url, wms_layers,
-            id_field, source_name, terms_url, terms_note, colour, colour_field, colours, created_by,
-            updated_by)
+            id_field, source_name, terms_url, terms_note, colour, colour_field, colours,
+            also_fields, only_field, only_values, created_by, updated_by)
           values (${organizationId}, ${layer.name}, ${layer.kind}, ${layer.url},
             ${layer.wmsLayers}, ${layer.idField}, ${layer.sourceName}, ${layer.termsUrl}, ${layer.termsNote},
             ${layer.colour}, ${layer.colourField}, ${tx.json(layer.colours)},
-            app.current_user_id(), app.current_user_id())
+            array(select jsonb_array_elements_text(${tx.json(layer.alsoFields)}::jsonb)), ${layer.onlyField},
+            array(select jsonb_array_elements_text(${tx.json(layer.onlyValues)}::jsonb)), app.current_user_id(), app.current_user_id())
           returning id`;
         if (!saved) throw new Error('map layer was not saved');
         if (layer.file) {
@@ -256,6 +276,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             source_name = ${changes.sourceName}, terms_url = ${changes.termsUrl},
             terms_note = ${changes.termsNote}, colour = ${changes.colour},
             colour_field = ${changes.colourField}, colours = ${tx.json(changes.colours)},
+            also_fields = array(select jsonb_array_elements_text(${tx.json(changes.alsoFields)}::jsonb)), only_field = ${changes.onlyField},
+            only_values = array(select jsonb_array_elements_text(${tx.json(changes.onlyValues)}::jsonb)),
             updated_by = app.current_user_id()
           where id = ${id} and updated_at::text = ${version} and archived_at is null`;
         return updated.count === 1 ? { status: 'saved', id } : { status: 'stale' };
@@ -343,15 +365,24 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           from app.map_layers where id = ${id} and archived_at is null`;
         if (!allowed) return { status: 'not_found' as const };
         if (!allowed.allowed) return { status: 'forbidden' as const };
-        // The layer is locked until this commits, so a change of its colour field made meanwhile
-        // waits, and a view grouped by an older field never replaces the current one (Codex's
-        // review of 8e0fd95).
-        const [layer] = await tx<{ colour_field: string | null }[]>`
-          select colour_field from app.map_layers
+        // The layer is locked until this commits, so a change of its settings made meanwhile
+        // waits, and a view built under older settings never replaces the current one (Codex's
+        // review of 8e0fd95; F-137).
+        const [layer] = await tx<
+          {
+            colourField: string | null;
+            alsoFields: string[];
+            onlyField: string | null;
+            onlyValues: string[];
+          }[]
+        >`
+          select colour_field as "colourField", to_jsonb(also_fields) as "alsoFields",
+                 only_field as "onlyField", to_jsonb(only_values) as "onlyValues"
+          from app.map_layers
           where id = ${id} and archived_at is null
           for update`;
         if (!layer) return { status: 'not_found' as const };
-        if (layer.colour_field !== overview.colourField) return { status: 'stale' as const };
+        if (groupingOf(layer) !== overview.grouping) return { status: 'stale' as const };
         const [parts] = await tx<{ parts: number; features: number; numbered: boolean }[]>`
           select count(*)::int as parts, coalesce(sum(feature_count), 0)::int as features,
                  coalesce(max(part_no), -1) = count(*) - 1 as numbered
@@ -367,11 +398,13 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
         }
         await tx`
           insert into app.map_layer_overviews (layer_id, organization_id, version, colour_field,
-            part_count, feature_count, source_count, prepared_by)
-          values (${id}, ${allowed.organization_id}, ${overview.version}, ${overview.colourField},
+            grouping, part_count, feature_count, source_count, prepared_by)
+          values (${id}, ${allowed.organization_id}, ${overview.version}, ${layer.colourField},
+            ${overview.grouping},
             ${parts.parts}, ${parts.features}, ${overview.sourceCount}, app.current_user_id())
           on conflict (layer_id) do update set
             version = excluded.version, colour_field = excluded.colour_field,
+            grouping = excluded.grouping,
             part_count = excluded.part_count, feature_count = excluded.feature_count,
             source_count = excluded.source_count, prepared_by = excluded.prepared_by,
             prepared_at = now()`;

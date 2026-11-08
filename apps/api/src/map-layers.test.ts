@@ -25,6 +25,8 @@ const DESCRIPTION = {
     { name: 'OWNER', type: 'esriFieldTypeString' },
     { name: 'TRACKS', type: 'esriFieldTypeInteger' },
     { name: 'MILES', type: 'esriFieldTypeDouble' },
+    { name: 'OWNER2', type: 'esriFieldTypeString' },
+    { name: 'NET', type: 'esriFieldTypeString' },
   ],
 };
 const SQUARE = {
@@ -52,6 +54,15 @@ let serviceInits: (RequestInit | undefined)[] = [];
 beforeEach(() => {
   service = (url) => {
     if (url.startsWith(`${SERVICE}?f=json`)) return Response.json(DESCRIPTION);
+    if (url.includes('returnCountOnly=true')) return Response.json({ count: 42 });
+    if (url.includes('groupByFieldsForStatistics=OWNER2')) {
+      return Response.json({
+        features: [
+          { attributes: { OWNER2: 'BBB', gss_count: 7 } },
+          { attributes: { OWNER2: 'CCC', gss_count: 1 } },
+        ],
+      });
+    }
     if (url.includes('groupByFieldsForStatistics')) {
       return Response.json({
         features: [
@@ -117,6 +128,9 @@ const source: MapLayerSource = {
   wmsLayers: null,
   idField: 'OBJECTID',
   colourField: 'OWNER',
+  alsoFields: [],
+  onlyField: null,
+  onlyValues: [],
 };
 
 describe('GET /api/v1/map-layers', () => {
@@ -151,11 +165,12 @@ describe('POST /api/v1/map-layers/inspect', () => {
       wmsLayers: null,
       title: 'Synthetic Rail Lines',
       copyright: 'Public domain.',
-      fields: ['OWNER', 'TRACKS'],
+      fields: ['OWNER', 'TRACKS', 'OWNER2', 'NET'],
       values: [
         { value: 'AAA', count: 9 },
         { value: 'BBB', count: 5 },
       ],
+      count: 42,
     } satisfies LayerInspection);
   });
 
@@ -205,6 +220,9 @@ describe('POST /api/v1/map-layers', () => {
       wmsLayers: null,
       idField: 'OBJECTID',
       file: null,
+      alsoFields: [],
+      onlyField: null,
+      onlyValues: [],
     });
   });
 
@@ -319,7 +337,7 @@ describe('changing and removing', () => {
     expect(db.updateMapLayer.mock.calls[0]?.slice(1)).toEqual([
       LAYER,
       'v1',
-      { ...details, wmsLayers: null },
+      { ...details, wmsLayers: null, alsoFields: [], onlyField: null, onlyValues: [] },
     ]);
   });
 
@@ -581,7 +599,7 @@ describe('a zoomed-out view', () => {
     expect(
       (
         await send(`/${LAYER}/overview/${VERSION}/publish`, 'POST', {
-          colourField: 'OWNER',
+          grouping: 'g',
           partCount: 1,
           sourceCount: 1,
         })
@@ -662,14 +680,14 @@ describe('a zoomed-out view', () => {
   it('publishes a view, or says why not', async () => {
     const publish = () =>
       send(`/${LAYER}/overview/${VERSION}/publish`, 'POST', {
-        colourField: 'OWNER',
+        grouping: 'g',
         partCount: 2,
         sourceCount: 302774,
       });
     expect((await publish()).status).toBe(200);
     expect(db.publishMapLayerOverview.mock.calls[0]?.slice(1)).toEqual([
       LAYER,
-      { version: VERSION, colourField: 'OWNER', partCount: 2, sourceCount: 302774 },
+      { version: VERSION, grouping: 'g', partCount: 2, sourceCount: 302774 },
     ]);
     db.publishMapLayerOverview.mockResolvedValueOnce({ status: 'stale' });
     expect((await publish()).status).toBe(409);
@@ -703,5 +721,105 @@ describe('a zoomed-out view', () => {
       mode: 'view',
       tolerance: 1000,
     });
+  });
+});
+
+// A railroad's lines as on ArcGIS (F-137).
+describe('shared fields and a limit', () => {
+  it('counts the values of every field that counts, within the limit', async () => {
+    const res = await send('/inspect', 'POST', {
+      url: SERVICE,
+      field: 'OWNER',
+      alsoFields: ['OWNER2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect(res.status).toBe(200);
+    const answer = await res.json<LayerInspection>();
+    expect(answer.values).toEqual([
+      { value: 'BBB', count: 12 },
+      { value: 'AAA', count: 9 },
+      { value: 'CCC', count: 1 },
+    ]);
+    const asked = serviceCalls.filter((u) => u.includes('/query?')).map((u) => new URL(u));
+    expect(asked.every((u) => u.searchParams.get('where') === "NET IN ('M','I')")).toBe(true);
+  });
+
+  it('refuses fields the layer does not have, or fields that count without a colour field', async () => {
+    const bad = await send('/inspect', 'POST', {
+      url: SERVICE,
+      field: 'OWNER',
+      alsoFields: ['NOPE'],
+    });
+    expect(bad.status).toBe(422);
+    const lonely = await send('/inspect', 'POST', {
+      url: SERVICE,
+      field: null,
+      alsoFields: ['OWNER2'],
+    });
+    expect(lonely.status).toBe(422);
+  });
+
+  it('adds a layer with them, checked against the service’s fields', async () => {
+    const web = { ...details, source: 'web', url: SERVICE, wmsLayers: null };
+    const res = await send('', 'POST', {
+      ...web,
+      alsoFields: ['OWNER2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect(res.status).toBe(201);
+    expect(db.createMapLayer.mock.calls[0]?.[2]).toMatchObject({
+      alsoFields: ['OWNER2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect((await send('', 'POST', { ...web, onlyField: 'NOPE', onlyValues: ['M'] })).status).toBe(
+      422,
+    );
+    expect(
+      (await send('', 'POST', { ...web, onlyField: 'NET', onlyValues: ["M' OR 1=1"] })).status,
+    ).toBe(422);
+  });
+
+  it('refuses them on a file layer', async () => {
+    const res = await send('', 'POST', {
+      ...details,
+      alsoFields: ['OWNER2'],
+      source: 'file',
+      fileName: 'rail.geojson',
+      geojson: {
+        type: 'FeatureCollection',
+        features: [
+          { type: 'Feature', geometry: { type: 'Point', coordinates: [-100, 50] }, properties: {} },
+        ],
+      },
+    });
+    expect(res.status).toBe(422);
+    expect(db.createMapLayer).not.toHaveBeenCalled();
+  });
+
+  it('changes them on an admin’s word only, fetching nothing otherwise', async () => {
+    db.getMapLayerSource.mockResolvedValue(source);
+    const change = { ...details, version: 'v1', wmsLayers: null, alsoFields: ['OWNER2'] };
+    db.isOrgAdmin.mockResolvedValueOnce(false);
+    expect((await send(`/${LAYER}`, 'PATCH', change)).status).toBe(403);
+    expect(serviceCalls).toEqual([]);
+    expect((await send(`/${LAYER}`, 'PATCH', change)).status).toBe(200);
+    expect(db.updateMapLayer.mock.calls[0]?.[3]).toMatchObject({
+      alsoFields: ['OWNER2'],
+      onlyField: null,
+      onlyValues: [],
+    });
+  });
+
+  it('asks the service for the limited features with every field that counts', () => {
+    const shared = { ...source, alsoFields: ['OWNER2'], onlyField: 'NET', onlyValues: ['M', 'I'] };
+    const square = new URL(arcgisSquareUrl(shared, { z: 6, x: 12, y: 21 }));
+    expect(square.searchParams.get('where')).toBe("NET IN ('M','I')");
+    expect(square.searchParams.get('outFields')).toBe('OBJECTID,OWNER,OWNER2');
+    const page = new URL(overviewPageUrl(shared, 0));
+    expect(page.searchParams.get('where')).toBe("NET IN ('M','I')");
+    expect(page.searchParams.get('outFields')).toBe('OWNER,OWNER2');
   });
 });

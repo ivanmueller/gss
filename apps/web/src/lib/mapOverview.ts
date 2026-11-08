@@ -1,4 +1,13 @@
-import { MAX_OVERVIEW_PARTS, type MapLayerView, type MercatorLine } from '@grain/domain';
+import {
+  cleanValue,
+  groupingOf,
+  MAX_OVERVIEW_PARTS,
+  valuesOf,
+  VALUES_PROPERTY,
+  type MapLayerView,
+  type MercatorLine,
+  type OverviewGroup,
+} from '@grain/domain';
 
 import { apiFetch, apiJson } from './api';
 import { runOverviewJob, type OverviewJob, type OverviewResult } from './overviewWorker';
@@ -22,12 +31,24 @@ export type OverviewProgress =
 type Decode = (typeof import('arcgis-pbf-parser'))['default'];
 type DecodedFeature = ReturnType<Decode>['featureCollection']['features'][number];
 
-/** Adds pieces to their value's group of lines; returns how many pieces there were. */
+/** What a view is built from: the layer and the settings its lines are grouped and limited by. */
+export type OverviewLayer = Pick<
+  MapLayerView,
+  'id' | 'colourField' | 'alsoFields' | 'onlyField' | 'onlyValues'
+>;
+
+/**
+ * Adds pieces to their group of lines: pieces with the same value of the colour field and, when
+ * other fields also count, the same values of all of them (F-137); returns how many pieces there
+ * were.
+ */
 function collect(
   features: readonly DecodedFeature[],
-  field: string | null,
-  groups: Map<string | null, MercatorLine[]>,
+  layer: OverviewLayer,
+  groups: Map<string, OverviewGroup>,
 ): number {
+  const field = layer.colourField;
+  const fields = field === null ? [] : [field, ...layer.alsoFields];
   for (const feature of features) {
     const geometry = feature.geometry;
     if (!geometry) continue;
@@ -38,12 +59,19 @@ function collect(
           ? (geometry.coordinates as MercatorLine[])
           : [];
     if (lines.length === 0) continue;
-    const raw = field === null ? null : feature.properties?.[field];
-    const value =
-      typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() || null : null;
-    let group = groups.get(value);
-    if (!group) groups.set(value, (group = []));
-    for (const line of lines) if (line.length >= 2) group.push(line);
+    const props = feature.properties ?? {};
+    // Tidied as everywhere else, so the view colours and filters as live squares do.
+    const value = field === null ? null : cleanValue(props[field]) || null;
+    const values = layer.alsoFields.length > 0 ? valuesOf(props, fields) : null;
+    const key = `${value ?? ''}\u0000${values ?? ''}`;
+    let group = groups.get(key);
+    if (!group) {
+      const properties: Record<string, string | null> = {};
+      if (field !== null) properties[field] = value;
+      if (values !== null) properties[VALUES_PROPERTY] = values;
+      groups.set(key, (group = { properties, lines: [] }));
+    }
+    for (const line of lines) if (line.length >= 2) group.lines.push(line);
   }
   return features.length;
 }
@@ -71,9 +99,9 @@ function join(job: OverviewJob): Promise<OverviewResult> {
  * exactly the counted pieces arrived (Codex's review of 8e0fd95).
  */
 async function readAll(
-  layer: Pick<MapLayerView, 'id' | 'colourField'>,
+  layer: OverviewLayer,
   token: string,
-  groups: Map<string | null, MercatorLine[]>,
+  groups: Map<string, OverviewGroup>,
   onProgress: (progress: OverviewProgress) => void,
   signal: AbortSignal,
   controller: AbortController,
@@ -97,7 +125,7 @@ async function readAll(
     let features = first ?? (await page(at));
     for (;;) {
       const taken = features.slice(0, end - at);
-      collect(taken, layer.colourField, groups);
+      collect(taken, layer, groups);
       at += taken.length;
       if (at >= end) return;
       if (taken.length === 0) {
@@ -156,7 +184,7 @@ async function inBatches<T>(
  * nothing more.
  */
 export async function prepareOverview(
-  layer: Pick<MapLayerView, 'id' | 'colourField'>,
+  layer: OverviewLayer,
   token: string,
   onProgress: (progress: OverviewProgress) => void,
 ): Promise<{ features: number; pieces: number }> {
@@ -173,16 +201,16 @@ export async function prepareOverview(
 }
 
 async function prepare(
-  layer: Pick<MapLayerView, 'id' | 'colourField'>,
+  layer: OverviewLayer,
   token: string,
   onProgress: (progress: OverviewProgress) => void,
   controller: AbortController,
 ): Promise<{ features: number; pieces: number }> {
   const { signal } = controller;
-  const groups = new Map<string | null, MercatorLine[]>();
+  const groups = new Map<string, OverviewGroup>();
   const pieces = await readAll(layer, token, groups, onProgress, signal, controller);
   onProgress({ stage: 'joining' });
-  const { parts, features } = await join({ groups: [...groups], field: layer.colourField });
+  const { parts, features } = await join({ groups: [...groups] });
   if (features === 0) {
     throw new Error('This layer has no lines, so it is drawn by map squares only.');
   }
@@ -207,7 +235,7 @@ async function prepare(
     onProgress({ stage: 'saving', done: sent, total: parts.length });
   });
   await send(`/map-layers/${layer.id}/overview/${version}/publish`, 'POST', {
-    colourField: layer.colourField,
+    grouping: groupingOf(layer),
     partCount: parts.length,
     sourceCount: pieces,
   });

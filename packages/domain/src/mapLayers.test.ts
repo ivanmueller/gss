@@ -12,6 +12,12 @@ import {
   MAX_TILES_PER_VIEW,
   normalizeFeatureCollection,
   parseLayerSource,
+  railroadPreset,
+  groupingOf,
+  valuesOf,
+  cleanValue,
+  MAX_VALUES_TEXT,
+  whereOf,
   simplifyDegrees,
   tileBounds,
   tileBoundsMercator,
@@ -361,5 +367,143 @@ describe('map squares', () => {
   it('simplifies lines by about a pixel', () => {
     expect(simplifyDegrees(0)).toBeCloseTo(360 / 512);
     expect(simplifyDegrees(10)).toBeLessThan(0.001);
+  });
+});
+
+describe('shared values and limits (F-137)', () => {
+  it('builds the service’s where clause from the limit, never from a quote', () => {
+    expect(whereOf({ onlyField: null, onlyValues: [] })).toBe('1=1');
+    expect(whereOf({ onlyField: 'NET', onlyValues: ['M', 'I'] })).toBe("NET IN ('M','I')");
+    expect(whereOf({ onlyField: 'NET', onlyValues: ["M' OR '1'='1"] })).toBe('1=0');
+  });
+
+  it('lists a feature’s values once each, in field order', () => {
+    expect(
+      valuesOf({ RROWNER1: 'UP', RROWNER2: null, TRKRGHTS1: 'CPKC', TRKRGHTS2: 'UP', N: 5 }, [
+        'RROWNER1',
+        'RROWNER2',
+        'TRKRGHTS1',
+        'TRKRGHTS2',
+      ]),
+    ).toBe('|UP|CPKC|');
+    expect(valuesOf({ RROWNER1: ' ' }, ['RROWNER1'])).toBe('');
+  });
+
+  it('offers the publisher’s railroad settings when the layer has their fields', () => {
+    const fields = ['RROWNER1', 'RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2', 'NET'];
+    expect(railroadPreset(fields)).toEqual({
+      colourField: 'RROWNER1',
+      alsoFields: ['RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect(railroadPreset(['OWNER', 'NET'])).toBeNull();
+  });
+
+  it('changes its grouping text with any setting that changes the lines', () => {
+    const base = {
+      colourField: 'RROWNER1',
+      alsoFields: ['RROWNER2'],
+      onlyField: 'NET',
+      onlyValues: ['M'],
+    };
+    expect(groupingOf(base)).toBe(groupingOf({ ...base }));
+    expect(groupingOf(base)).not.toBe(groupingOf({ ...base, alsoFields: [] }));
+    expect(groupingOf(base)).not.toBe(groupingOf({ ...base, onlyValues: ['M', 'I'] }));
+  });
+
+  it('refuses a limit value that could change the service’s query', () => {
+    const layer = {
+      name: 'Rail',
+      sourceName: 'P',
+      termsUrl: 'https://example.com/t',
+      termsNote: 'T',
+      colour: '#9ca3af',
+      colourField: 'RROWNER1',
+      colours: [],
+      source: 'web',
+      url: 'https://x.example.com/FeatureServer/0',
+      wmsLayers: null,
+    };
+    expect(
+      createMapLayerSchema.safeParse({ ...layer, onlyField: 'NET', onlyValues: ["M'"] }).success,
+    ).toBe(false);
+    expect(
+      createMapLayerSchema.safeParse({ ...layer, onlyField: 'NET', onlyValues: ['M', 'I'] })
+        .success,
+    ).toBe(true);
+  });
+});
+
+describe('a feature’s values through the checks (Codex’s review of bb488a9)', () => {
+  it('keeps every value of several fields, however long each is within its limit', () => {
+    const a = 'A'.repeat(300);
+    const b = 'B'.repeat(300);
+    const values = valuesOf({ OWNER: a, OWNER2: b }, ['OWNER', 'OWNER2']);
+    const checked = normalizeFeatureCollection({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-100, 50] },
+          properties: { OWNER: a, __values: values },
+        },
+      ],
+    });
+    expect(checked.ok && checked.collection.features[0]?.properties.__values).toBe(`|${a}|${b}|`);
+  });
+
+  it('cuts each value as values are counted, so the longest stays within the limit', () => {
+    const long = 'L'.repeat(900);
+    const fields = Array.from({ length: 17 }, (_, i) => `F${String(i)}`);
+    const props = Object.fromEntries(fields.map((f, i) => [f, `${String(i)}${long}`]));
+    const values = valuesOf(props, fields);
+    expect(values.split('|').filter(Boolean)).toHaveLength(17);
+    expect(values.length).toBeLessThanOrEqual(MAX_VALUES_TEXT);
+    const checked = normalizeFeatureCollection({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-100, 50] },
+          properties: { __values: values },
+        },
+      ],
+    });
+    expect(checked.ok && checked.collection.features[0]?.properties.__values).toBe(values);
+  });
+});
+
+describe('values tidied the same everywhere (Codex’s review of da6c543)', () => {
+  it('keeps a value with a control character as a checked view keeps it', () => {
+    const values = valuesOf({ OWNER: 'A\tB', OWNER2: 'C' }, ['OWNER', 'OWNER2']);
+    expect(values).toBe('|A B|C|');
+    const checked = normalizeFeatureCollection({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-100, 50] },
+          properties: { OWNER: 'A\tB', __values: values },
+        },
+      ],
+    });
+    expect(checked.ok && checked.collection.features[0]?.properties).toEqual({
+      OWNER: 'A B',
+      __values: values,
+    });
+    expect(cleanValue('A\tB')).toBe('A B');
+    expect(cleanValue(7)).toBe('7');
+    expect(cleanValue(null)).toBe('');
+  });
+});
+
+describe('tidying twice changes nothing (Codex’s review of 2693859)', () => {
+  it('gives the same value for a cut that ends in a space', () => {
+    const raw = `${'A'.repeat(499)} B`;
+    const once = cleanValue(raw);
+    expect(once).toBe('A'.repeat(499));
+    expect(cleanValue(once)).toBe(once);
+    expect(valuesOf({ OWNER: once }, ['OWNER'])).toBe(valuesOf({ OWNER: raw }, ['OWNER']));
   });
 });

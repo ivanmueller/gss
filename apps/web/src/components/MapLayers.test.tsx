@@ -1,4 +1,4 @@
-import type { LayerInspection, MapLayerView } from '@grain/domain';
+import { groupingOf, type LayerInspection, type MapLayerView } from '@grain/domain';
 import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import {
   useLayerChoice,
   useLayerOverlays,
   valueFilter,
+  settingsTag,
   OBJECT_ID,
 } from '../lib/mapLayers';
 import { clearApiCache } from '../lib/useApiResource';
@@ -48,6 +49,9 @@ const rail: MapLayerView = {
   createdByName: 'Adam Admin',
   createdAt: '2026-11-07T18:00:00Z',
   version: 'v1',
+  alsoFields: [],
+  onlyField: null,
+  onlyValues: [],
   overview: null,
 };
 const elevators: MapLayerView = {
@@ -236,6 +240,12 @@ describe('the zoomed-out view and each railroad on or off', () => {
     ...rail,
     overview: {
       colourField: 'OWNER',
+      grouping: groupingOf({
+        colourField: 'OWNER',
+        alsoFields: [],
+        onlyField: null,
+        onlyValues: [],
+      }),
       featureCount: 1,
       sourceCount: 100,
       preparedByName: 'Adam Admin',
@@ -439,6 +449,7 @@ describe('Team → Map layers', () => {
     copyright: 'Public domain.',
     fields: ['OWNER', 'TRACKS'],
     values: null,
+    count: 302774,
   };
 
   it('adds a web layer coloured by a field, each value its own colour', async () => {
@@ -514,11 +525,14 @@ describe('Team → Map layers', () => {
       source: 'web',
       url: SERVICE,
       wmsLayers: null,
+      alsoFields: [],
+      onlyField: null,
+      onlyValues: [],
     });
     expect(await screen.findByText('Synthetic rail lines')).toBeVisible();
     // Its zoomed-out view is prepared straight away (F-134).
     expect(prepare).toHaveBeenCalledWith(
-      { id: RAIL, colourField: 'OWNER' },
+      { id: RAIL, colourField: 'OWNER', alsoFields: [], onlyField: null, onlyValues: [] },
       SESSION.token,
       expect.any(Function),
     );
@@ -560,6 +574,12 @@ describe('Team → Map layers', () => {
       colours: [['1', '#e6194b']],
       overview: {
         colourField: 'TRACKS',
+        grouping: groupingOf({
+          colourField: 'TRACKS',
+          alsoFields: [],
+          onlyField: null,
+          onlyValues: [],
+        }),
         featureCount: 3,
         sourceCount: 300,
         preparedByName: 'Adam Admin',
@@ -600,9 +620,12 @@ describe('Team → Map layers', () => {
       colour: '#9ca3af',
       colourField: 'OWNER',
       colours: [['CN', '#e6194b']],
+      alsoFields: [],
+      onlyField: null,
+      onlyValues: [],
     });
     expect(prepare).toHaveBeenCalledWith(
-      { id: RAIL, colourField: 'OWNER' },
+      { id: RAIL, colourField: 'OWNER', alsoFields: [], onlyField: null, onlyValues: [] },
       SESSION.token,
       expect.any(Function),
     );
@@ -637,6 +660,312 @@ describe('Team → Map layers', () => {
     expect(await screen.findByText(/No map layers yet/)).toBeVisible();
     expect(calls.find((c) => c.path === `/map-layers/${RAIL}/remove`)?.body).toEqual({
       version: 'v1',
+    });
+  });
+});
+
+// A railroad's lines as on ArcGIS (F-137).
+describe('shared track and limits', () => {
+  const railFields = ['RROWNER1', 'RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2', 'NET'];
+  const shared: MapLayerView = {
+    ...rail,
+    colourField: 'RROWNER1',
+    colours: [
+      ['UP', '#4363d8'],
+      ['CPKC', '#f58231'],
+    ],
+    alsoFields: ['RROWNER2', 'TRKRGHTS1'],
+  };
+
+  it('shows a line under every railroad of its fields, in the chosen railroad’s colour', () => {
+    const choice = { shown: ['CPKC'], others: false };
+    expect(valueFilter(shared, choice)).toEqual([
+      'any',
+      ['in', '|CPKC|', ['to-string', ['get', '__values']]],
+    ]);
+    expect(colourExpression(shared, choice)).toEqual([
+      'case',
+      ['in', '|CPKC|', ['to-string', ['get', '__values']]],
+      '#f58231',
+      ['match', ['to-string', ['get', 'RROWNER1']], 'UP', '#4363d8', 'CPKC', '#f58231', '#2f6baa'],
+    ]);
+    // With every railroad shown, each line in its first owner's colour.
+    expect(colourExpression(shared, { shown: null, others: true })).toEqual([
+      'match',
+      ['to-string', ['get', 'RROWNER1']],
+      'UP',
+      '#4363d8',
+      'CPKC',
+      '#f58231',
+      '#2f6baa',
+    ]);
+  });
+
+  it('gives live pieces their railroads', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Response.json({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              id: 5,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-95.4, 29.8],
+                  [-95.3, 29.9],
+                ],
+              },
+              properties: { RROWNER1: 'UP', RROWNER2: null, TRKRGHTS1: 'CPKC' },
+            },
+          ],
+        }),
+      ),
+    );
+    const view = { bbox: { west: -95.45, south: 29.75, east: -95.25, north: 29.95 }, zoom: 7 };
+    const { result } = renderHook(() => useLayerOverlays([shared], view, 'token'));
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features[0]?.properties?.__values).toBe(
+        '|UP|CPKC|',
+      );
+    });
+  });
+
+  it('draws a zoomed-out view only while it was built under the layer’s settings, numbering its lines afresh', async () => {
+    const grouping = groupingOf(shared);
+    const built = {
+      colourField: 'RROWNER1',
+      grouping,
+      featureCount: 2,
+      sourceCount: 4,
+      preparedByName: 'Adam Admin',
+      preparedAt: '2026-11-08T03:00:00Z',
+      version: 'd'.repeat(64),
+    };
+    const line = {
+      type: 'Feature',
+      id: 1,
+      geometry: {
+        type: 'MultiLineString',
+        coordinates: [
+          [
+            [-95, 30],
+            [-94, 30],
+          ],
+        ],
+      },
+      properties: { RROWNER1: 'UP', __values: '|UP|CPKC|' },
+    };
+    const calls = mockApi({
+      [`GET /map-layers/${RAIL}/overview`]: () =>
+        Response.json({ type: 'FeatureCollection', features: [line, line] }),
+    });
+    const wide = { bbox: { west: -130, south: 20, east: -60, north: 60 }, zoom: 3 };
+    const { result } = renderHook(() =>
+      useLayerOverlays([{ ...shared, overview: built }], wide, 'token'),
+    );
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features.map((f) => f.id)).toEqual([1, 2]);
+    });
+    expect(calls.map((c) => c.path)).toEqual([`/map-layers/${RAIL}/overview`]);
+    // Built without the shared fields: not drawn; live squares instead.
+    const stale = mockApi({});
+    renderHook(() =>
+      useLayerOverlays(
+        [
+          {
+            ...shared,
+            overview: { ...built, grouping: groupingOf({ ...shared, alsoFields: [] }) },
+          },
+        ],
+        wide,
+        'token',
+      ),
+    );
+    expect(stale.some((c) => c.path.endsWith('/overview'))).toBe(false);
+  });
+
+  it('applies the publisher’s railroad settings from Edit, counting values again and preparing the view', async () => {
+    const tracks: MapLayerView = { ...rail, colourField: 'TRACKS', colours: [['1', '#e6194b']] };
+    const calls = mockApi({
+      [LIST]: () => Response.json({ layers: [tracks] }),
+      [`POST /map-layers/inspect?organization_id=${ORG.id}`]: ({ body }) =>
+        Response.json({
+          kind: 'arcgis_features',
+          url: SERVICE,
+          wmsLayers: null,
+          title: 'North American Rail Network Lines',
+          copyright: null,
+          fields: railFields,
+          values:
+            (body as { field: string | null }).field === null
+              ? null
+              : [{ value: 'CPKC', count: 9 }],
+          count: 300000,
+        } satisfies LayerInspection),
+      [`PATCH /map-layers/${RAIL}`]: () => Response.json({ id: RAIL }),
+    });
+    prepare.mockResolvedValue({ features: 1, pieces: 300 });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    expect(await screen.findByText(SERVICE)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Synthetic rail lines' });
+    await user.click(within(dialog).getByRole('button', { name: 'Change' }));
+    await user.click(
+      await within(dialog).findByRole('button', { name: 'Use ArcGIS’s railroad settings' }),
+    );
+    expect(
+      await within(dialog).findByText(
+        'Now: also counts RROWNER2, RROWNER3, TRKRGHTS1, TRKRGHTS2; only where NET is M or I.',
+      ),
+    ).toBeVisible();
+    const counted = calls.filter((c) => c.path.startsWith('/map-layers/inspect')).at(-1);
+    expect(counted?.body).toEqual({
+      url: SERVICE,
+      field: 'RROWNER1',
+      alsoFields: ['RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect(await within(dialog).findByText(/1 values, each its own colour/)).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({
+      colourField: 'RROWNER1',
+      alsoFields: ['RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2'],
+      onlyField: 'NET',
+      onlyValues: ['M', 'I'],
+    });
+    expect(prepare).toHaveBeenCalledWith(
+      {
+        id: RAIL,
+        colourField: 'RROWNER1',
+        alsoFields: ['RROWNER2', 'RROWNER3', 'TRKRGHTS1', 'TRKRGHTS2'],
+        onlyField: 'NET',
+        onlyValues: ['M', 'I'],
+      },
+      SESSION.token,
+      expect.any(Function),
+    );
+  });
+
+  it('fetches squares afresh, at a new address, when the layer’s settings change (Codex’s review of bb488a9)', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string) => {
+        asked.push(input);
+        const owner = asked.length <= 2 && !input.includes(settingsTag(shared)) ? 'OLD' : 'NEW';
+        return Promise.resolve(
+          Response.json({
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                id: 5,
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [
+                    [-95.4, 29.8],
+                    [-95.3, 29.9],
+                  ],
+                },
+                properties: { RROWNER1: owner, TRKRGHTS1: 'CPKC' },
+              },
+            ],
+          }),
+        );
+      }),
+    );
+    const view = { bbox: { west: -95.45, south: 29.75, east: -95.25, north: 29.95 }, zoom: 7 };
+    const before: MapLayerView = { ...shared, alsoFields: [] };
+    const { result, rerender } = renderHook(
+      ({ layer }) => useLayerOverlays([layer], view, 'token'),
+      {
+        initialProps: { layer: before },
+      },
+    );
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features.length).toBe(1);
+    });
+    const firstAsked = [...asked];
+    expect(firstAsked.every((u) => u.includes(`?g=${settingsTag(before)}`))).toBe(true);
+    rerender({ layer: shared });
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features[0]?.properties?.__values).toBe(
+        '|NEW|CPKC|',
+      );
+    });
+    expect(
+      asked.slice(firstAsked.length).every((u) => u.includes(`?g=${settingsTag(shared)}`)),
+    ).toBe(true);
+    expect(settingsTag(before)).not.toBe(settingsTag(shared));
+  });
+
+  it('gives every distinct filter its own address (Codex’s review of da6c543)', () => {
+    const base = { colourField: 'OWNER', alsoFields: ['RIGHTS'], onlyField: 'NET' };
+    expect(settingsTag({ ...base, onlyValues: ['th9o7l'] })).not.toBe(
+      settingsTag({ ...base, onlyValues: ['7tlz1e'] }),
+    );
+  });
+
+  it('tidies live values as a checked view does, so they colour and filter alike at every zoom', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Response.json({
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              id: 5,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-95.4, 29.8],
+                  [-95.3, 29.9],
+                ],
+              },
+              properties: { RROWNER1: 'A\tB', TRKRGHTS1: 'CPKC' },
+            },
+            {
+              type: 'Feature',
+              id: 6,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-95.4, 29.85],
+                  [-95.3, 29.95],
+                ],
+              },
+              // Codex's review of 2693859: a cut ending in a space.
+              properties: { RROWNER1: `${'A'.repeat(499)} B`, TRKRGHTS1: 'CPKC' },
+            },
+          ],
+        }),
+      ),
+    );
+    const view = { bbox: { west: -95.45, south: 29.75, east: -95.25, north: 29.95 }, zoom: 7 };
+    const { result } = renderHook(() => useLayerOverlays([shared], view, 'token'));
+    await waitFor(() => {
+      const first = result.current.overlays[0];
+      expect(first?.kind === 'features' && first.data.features[0]?.properties).toMatchObject({
+        RROWNER1: 'A B',
+        __values: '|A B|CPKC|',
+      });
+      expect(first?.kind === 'features' && first.data.features[1]?.properties).toMatchObject({
+        RROWNER1: 'A'.repeat(499),
+        __values: `|${'A'.repeat(499)}|CPKC|`,
+      });
     });
   });
 });

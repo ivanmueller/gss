@@ -215,33 +215,39 @@ describe('simplifyLine', () => {
 
 describe('buildOverview', () => {
   it('gives one feature per value, in longitude and latitude to three decimals, that the Worker accepts', () => {
-    const groups = new Map<string | null, MercatorLine[]>([
+    const groups = new Map([
       [
         'AAA',
-        [
-          [
-            [-11_000_000, 6_500_000],
-            [-10_990_000, 6_500_000],
-          ],
-          [
-            [-10_990_000, 6_500_000],
-            [-10_980_000, 6_505_000],
-          ],
-        ],
+        {
+          properties: { OWNER: 'AAA', __values: '|AAA|BBB|' },
+          lines: [
+            [
+              [-11_000_000, 6_500_000],
+              [-10_990_000, 6_500_000],
+            ],
+            [
+              [-10_990_000, 6_500_000],
+              [-10_980_000, 6_505_000],
+            ],
+          ] as MercatorLine[],
+        },
       ],
       [
-        null,
-        [
-          [
-            [-11_100_000, 6_400_000],
-            [-11_090_000, 6_400_000],
-          ],
-        ],
+        '',
+        {
+          properties: { OWNER: null },
+          lines: [
+            [
+              [-11_100_000, 6_400_000],
+              [-11_090_000, 6_400_000],
+            ],
+          ] as MercatorLine[],
+        },
       ],
     ]);
-    const overview = buildOverview(groups, 'OWNER');
+    const overview = buildOverview(groups);
     expect(overview.features).toHaveLength(2);
-    expect(overview.features[0]?.properties).toEqual({ OWNER: 'AAA' });
+    expect(overview.features[0]?.properties).toEqual({ OWNER: 'AAA', __values: '|AAA|BBB|' });
     expect(overview.features[1]?.properties).toEqual({ OWNER: null });
     const geometry = overview.features[0]?.geometry;
     expect(geometry?.type).toBe('MultiLineString');
@@ -257,20 +263,13 @@ describe('buildOverview', () => {
   });
 
   it('leaves out lines that shrink to a point', () => {
-    const overview = buildOverview(
-      new Map([
-        [
-          'A',
-          [
-            [
-              [0, 0],
-              [10, 10],
-            ],
-          ] as MercatorLine[],
-        ],
-      ]),
-      null,
-    );
+    const lines: MercatorLine[] = [
+      [
+        [0, 0],
+        [10, 10],
+      ],
+    ];
+    const overview = buildOverview(new Map([['A', { properties: {}, lines }]]));
     expect(overview.features).toEqual([]);
   });
 });

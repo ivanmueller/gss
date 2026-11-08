@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { groupingOf } from '@grain/domain';
+
 import { mockApi, type Call } from '../test/api';
 import { prepareOverview } from './mapOverview';
 
@@ -76,7 +78,11 @@ describe('prepareOverview', () => {
   it('reads every page, joins the pieces, sends the parts and publishes the view', async () => {
     const calls = saving(service(7, 3));
     const progress = vi.fn();
-    const done = await prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', progress);
+    const done = await prepareOverview(
+      { id: LAYER, colourField: 'OWNER', alsoFields: [], onlyField: null, onlyValues: [] },
+      'token',
+      progress,
+    );
     expect(done).toEqual({ features: 1, pieces: 7 });
     expect(progress).toHaveBeenCalledWith({ stage: 'reading', done: 7, total: 7 });
     expect(progress).toHaveBeenCalledWith({ stage: 'joining' });
@@ -93,14 +99,27 @@ describe('prepareOverview', () => {
     expect(feature?.geometry.coordinates[0]?.at(-1)).toEqual([lon(7), expect.any(Number)]);
     expect(calls.at(-1)).toMatchObject({
       method: 'POST',
-      body: { colourField: 'OWNER', partCount: 1, sourceCount: 7 },
+      body: {
+        grouping: groupingOf({
+          colourField: 'OWNER',
+          alsoFields: [],
+          onlyField: null,
+          onlyValues: [],
+        }),
+        partCount: 1,
+        sourceCount: 7,
+      },
     });
   });
 
   it('fills in a page that came back short, so every piece is read once', async () => {
     // From offset 3 the service gives only 1 piece: 4 and 5 are read from where it stopped.
     const calls = saving(service(9, 3, { 3: 1, 4: 1 }));
-    const done = await prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', vi.fn());
+    const done = await prepareOverview(
+      { id: LAYER, colourField: 'OWNER', alsoFields: [], onlyField: null, onlyValues: [] },
+      'token',
+      vi.fn(),
+    );
     expect(done.pieces).toBe(9);
     const asked = calls
       .filter((c) => c.path.includes('/pages/'))
@@ -119,7 +138,11 @@ describe('prepareOverview', () => {
     const handlers = service(7, 3, { 3: 0 });
     const calls = saving(handlers);
     await expect(
-      prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', vi.fn()),
+      prepareOverview(
+        { id: LAYER, colourField: 'OWNER', alsoFields: [], onlyField: null, onlyValues: [] },
+        'token',
+        vi.fn(),
+      ),
     ).rejects.toThrow('The map service stopped giving pieces at 3 of 7. Try again.');
     expect(calls.some((c) => c.method === 'PUT' || c.method === 'POST')).toBe(false);
   });
@@ -127,7 +150,11 @@ describe('prepareOverview', () => {
   it('says when the service gives nothing, or no lines', async () => {
     saving(service(5, 0));
     await expect(
-      prepareOverview({ id: LAYER, colourField: null }, 'token', vi.fn()),
+      prepareOverview(
+        { id: LAYER, colourField: null, alsoFields: [], onlyField: null, onlyValues: [] },
+        'token',
+        vi.fn(),
+      ),
     ).rejects.toThrow('The map service gave nothing to draw.');
     pages.set(0, {
       featureCollection: {
@@ -142,7 +169,11 @@ describe('prepareOverview', () => {
       [`GET /map-layers/${LAYER}/pages/0`]: () => new Response(new Uint8Array([0])),
     });
     await expect(
-      prepareOverview({ id: LAYER, colourField: null }, 'token', vi.fn()),
+      prepareOverview(
+        { id: LAYER, colourField: null, alsoFields: [], onlyField: null, onlyValues: [] },
+        'token',
+        vi.fn(),
+      ),
     ).rejects.toThrow(/no lines/);
   });
   it('reports nothing more once it has failed, though slower requests finish later (Codex’s review of d35ac90)', async () => {
@@ -162,7 +193,11 @@ describe('prepareOverview', () => {
     saving(handlers);
     const progress = vi.fn();
     await expect(
-      prepareOverview({ id: LAYER, colourField: 'OWNER' }, 'token', progress),
+      prepareOverview(
+        { id: LAYER, colourField: 'OWNER', alsoFields: [], onlyField: null, onlyValues: [] },
+        'token',
+        progress,
+      ),
     ).rejects.toThrow('Down.');
     const reported = progress.mock.calls.length;
     await vi.waitFor(() => {

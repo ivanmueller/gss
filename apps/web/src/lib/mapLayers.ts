@@ -2,6 +2,11 @@ import {
   FILE_COLOUR_FIELDS,
   normalizeFeatureCollection,
   OVERVIEW_BELOW_ZOOM,
+  cleanValue,
+  groupingOf,
+  type LayerGrouping,
+  valuesOf,
+  VALUES_PROPERTY,
   tilesForView,
   type Bbox,
   type FeatureCollectionResult,
@@ -88,15 +93,32 @@ export function hasFileColours(result: LayerFileResult): boolean {
  * else the colour the file gives it, else the layer's colour.
  */
 export function colourExpression(
-  layer: Pick<MapLayerView, 'colour' | 'colourField' | 'colours' | 'kind'>,
+  layer: Pick<MapLayerView, 'colour' | 'colourField' | 'colours' | 'kind'> & {
+    alsoFields?: readonly string[];
+  },
+  choice?: ValueChoice,
 ): ExpressionSpecification | string {
   if (layer.colourField !== null && layer.colours.length > 0) {
-    return [
+    const byOwner: ExpressionSpecification = [
       'match',
       ['to-string', ['get', layer.colourField]],
       ...layer.colours.flat(),
       layer.colour,
     ] as ExpressionSpecification;
+    // With only some values shown, a line shared with one of them (CPKC on Union Pacific
+    // track) takes the shown value's colour, so a railroad's route is one colour as on ArcGIS
+    // (the owner's answer of 2026-11-08, F-137).
+    if ((layer.alsoFields?.length ?? 0) > 0 && choice?.shown) {
+      const shown = new Set(choice.shown);
+      const cases = layer.colours
+        .filter(([value]) => shown.has(value))
+        .flatMap(([value, colour]) => [
+          ['in', `|${value}|`, ['to-string', ['get', VALUES_PROPERTY]]],
+          colour,
+        ]);
+      if (cases.length > 0) return ['case', ...cases, byOwner] as ExpressionSpecification;
+    }
+    return byOwner;
   }
   if (layer.kind === 'file') {
     return [
@@ -214,6 +236,24 @@ function asCollection(value: unknown): { features: GeoJSON.Feature[]; exceeded: 
   };
 }
 
+/** A live feature with its values from every field that counts (F-137), as views carry them. */
+function withValues(
+  feature: GeoJSON.Feature,
+  colourField: string | null,
+  fields: readonly string[] | null,
+): GeoJSON.Feature {
+  const original = feature.properties ?? {};
+  const properties: Record<string, unknown> = { ...original };
+  // The colour field's value tidied as in a checked view, so it colours and filters the same at
+  // every zoom; its values from the original properties, as a view builds them (Codex's review
+  // of 2693859).
+  if (colourField !== null && colourField in properties) {
+    properties[colourField] = cleanValue(original[colourField]) || null;
+  }
+  if (fields !== null) properties[VALUES_PROPERTY] = valuesOf(original, fields);
+  return { ...feature, properties };
+}
+
 /** A live feature, marked with its id (ArcGIS's object id) to ask for its details. */
 function withObjectId(feature: GeoJSON.Feature): GeoJSON.Feature {
   const id = feature.id;
@@ -300,7 +340,7 @@ export function valueShown(choice: ValueChoice, value: string): boolean {
  * colour of their own are shown when chosen; the rest when "Other values" is on.
  */
 export function valueFilter(
-  layer: Pick<MapLayerView, 'colourField' | 'colours'>,
+  layer: Pick<MapLayerView, 'colourField' | 'colours'> & { alsoFields?: readonly string[] },
   choice: ValueChoice | undefined,
 ): FilterSpecification | null {
   if (!choice || layer.colourField === null || layer.colours.length === 0) return null;
@@ -309,7 +349,11 @@ export function valueFilter(
   const listed = layer.colours.map(([v]) => v);
   const shown = choice.shown ?? listed;
   const parts: ExpressionSpecification[] = [];
-  if (shown.length > 0) parts.push(['in', value, ['literal', shown]]);
+  if (shown.length > 0 && (layer.alsoFields?.length ?? 0) > 0) {
+    // A line counts for every value of its fields: owners and trackage rights (F-137).
+    const values: ExpressionSpecification = ['to-string', ['get', VALUES_PROPERTY]];
+    parts.push(['any', ...shown.map((v): ExpressionSpecification => ['in', `|${v}|`, values])]);
+  } else if (shown.length > 0) parts.push(['in', value, ['literal', shown]]);
   if (choice.others) parts.push(['!', ['in', value, ['literal', listed]]]);
   const [only, ...more] = parts;
   if (!only) return ['boolean', false];
@@ -319,12 +363,28 @@ export function valueFilter(
 // ---------------------------------------------------------------------------------------------
 // The features of the layers that are on
 
+/**
+ * A short tag of the settings a live layer's squares are fetched under (groupingOf: colour field,
+ * fields that also count, limit): squares fetched under other settings are never reused (Codex's
+ * review of bb488a9).
+ */
+export function settingsTag(layer: LayerGrouping): string {
+  // The settings themselves, not a hash of them: two different filters could share a short hash
+  // and reuse each other's squares (Codex's review of da6c543). A few hundred characters at most.
+  return encodeURIComponent(groupingOf(layer));
+}
+
+/** Where a live layer's square is kept: the layer, its settings and the square. */
+function squareKey(layer: MapLayerView, tile: { z: number; x: number; y: number }): string {
+  return `${layer.id}@${settingsTag(layer)}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
+}
+
 /** Whether a live layer is drawn from its zoomed-out view at this zoom (F-134). */
 export function usesOverview(layer: MapLayerView, zoom: number | null): boolean {
   return (
     layer.kind === 'arcgis_features' &&
     layer.overview !== null &&
-    layer.overview.colourField === layer.colourField &&
+    layer.overview.grouping === groupingOf(layer) &&
     zoom !== null &&
     zoom < OVERVIEW_BELOW_ZOOM
   );
@@ -359,11 +419,11 @@ export function useLayerOverlays(
         .then((res) => res.json())
         .then((body: unknown) => {
           const collection = asCollection(body);
+          // Numbered afresh: a view sent in parts repeats its parts' numbers, and the map tells
+          // lines apart by them.
+          const features = collection?.features.map((feature, i) => ({ ...feature, id: i + 1 }));
           setFiles((current) =>
-            new Map(current).set(
-              id,
-              collection ? { type: 'FeatureCollection', features: collection.features } : 'failed',
-            ),
+            new Map(current).set(id, features ? { type: 'FeatureCollection', features } : 'failed'),
           );
         })
         .catch(() => {
@@ -382,10 +442,12 @@ export function useLayerOverlays(
         );
       } else if (layer.kind === 'arcgis_features') {
         for (const tile of tiles) {
-          const key = `${layer.id}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
+          const key = squareKey(layer, tile);
           if (asked.current.has(key)) continue;
           asked.current.add(key);
-          const path = `/map-layers/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
+          // The settings in the address too, so the browser's cached square (an hour) is not
+          // reused after they change (Codex's review of bb488a9).
+          const path = `/map-layers/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`;
           apiFetch(path, token)
             .then((res) => res.json())
             .then((body: unknown) => {
@@ -420,8 +482,9 @@ export function useLayerOverlays(
         overlays.push({ id: layer.id, kind: 'pictures', tiles: picturesUrl(layer.id) });
         continue;
       }
-      const colour = colourExpression(layer);
+      const colour = colourExpression(layer, choices[layer.id]);
       const filter = valueFilter(layer, choices[layer.id]);
+      const fields = [layer.colourField ?? '', ...layer.alsoFields];
       const whole = (data: GeoJSON.FeatureCollection | 'failed' | undefined) => {
         if (data === 'failed') notes.set(layer.id, 'This layer could not be loaded.');
         else if (data) overlays.push({ id: layer.id, kind: 'features', data, colour, filter });
@@ -439,9 +502,7 @@ export function useLayerOverlays(
       let exceeded = false;
       let failed = false;
       for (const tile of tiles) {
-        const square = squares.get(
-          `${layer.id}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`,
-        );
+        const square = squares.get(squareKey(layer, tile));
         if (square === undefined) continue;
         if (square === 'failed') {
           failed = true;
@@ -449,7 +510,11 @@ export function useLayerOverlays(
         }
         exceeded ||= square.exceeded;
         for (const feature of square.features) {
-          const marked = withObjectId(feature);
+          const marked = withValues(
+            withObjectId(feature),
+            layer.colourField,
+            layer.alsoFields.length > 0 ? fields : null,
+          );
           const id = marked.properties?.[OBJECT_ID] as string | number | undefined;
           if (id !== undefined) {
             if (seen.has(id)) continue;
