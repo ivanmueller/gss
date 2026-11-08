@@ -264,8 +264,10 @@ const presentation = {
  * backticks), whose text could hide a parenthesis from balancedFilter on a service taking its
  * database's own SQL (Codex's re-review of 1a5f81c), and no ; or control characters.
  */
+// The checks for -- and /* look across line and paragraph separators too, which . does not
+// match (Codex's re-review of 7d0382e: \u2028 hid a comment from them).
 export const DEFINITION_EXPRESSION =
-  /^(?!.*--)(?!.*\/\*)[A-Za-z0-9_ '(),.=<>!+*/%:\u{a0}-\u{10ffff}-]{1,2000}$/u;
+  /^(?![\s\S]*--)(?![\s\S]*\/\*)[A-Za-z0-9_ '(),.=<>!+*/%:\u{a0}-\u{10ffff}-]{1,2000}$/u;
 
 /**
  * Whether a filter's parentheses and quotes are balanced (parentheses inside quoted text not

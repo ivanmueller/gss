@@ -5,12 +5,20 @@
 -- taking its database's own SQL: PostgreSQL's $$…$$, double-quoted names, backslash escapes,
 -- brackets, backticks, and quotes opened right after a letter (Oracle's q'!…!', N'…', E'…').
 --
--- Now a filter holds only ASCII letters and digits, spaces, _ ' ( ) , . = < > ! + * / % : - and
--- characters from U+00A0 up (accented letters in values), checked by code point whatever the
+-- Now a new filter holds only ASCII letters and digits, spaces, _ ' ( ) , . = < > ! + * / % : -
+-- and characters from U+00A0 up (accented letters in values), checked by code point whatever the
 -- database's locale; and a quote may not open right after a letter, digit or underscore. The
--- same checks as DEFINITION_EXPRESSION and balancedFilter in @grain/domain.
+-- same checks as DEFINITION_EXPRESSION and balancedFilter in @grain/domain (app.plain_filter).
+--
+-- Checked when a layer is added, by a trigger, not by re-checking every row (Codex's re-review of
+-- 7d0382e): a filter kept before this, such as NAME = N'Québec', would otherwise stop this
+-- migration, or any later change to its layer, including removing it. A filter is never changed
+-- after it is added (app_api has no update grant on it). A kept filter that fails these checks is
+-- never sent: the Worker's whereOf asks its service for nothing (1=0) instead. app.balanced_filter,
+-- which the merged check calls, is left as it was, so that check keeps its meaning; this
+-- stricter one is app.plain_filter.
 
-create or replace function app.balanced_filter(filter text)
+create function app.plain_filter(filter text)
 returns boolean
 language plpgsql
 immutable
@@ -52,15 +60,31 @@ begin
 end
 $$;
 
-revoke all on function app.balanced_filter(text) from public, anon, authenticated, service_role;
-grant execute on function app.balanced_filter(text) to app_api;
+revoke all on function app.plain_filter(text) from public, anon, authenticated, service_role;
+grant execute on function app.plain_filter(text) to app_api;
 
-alter table app.map_layers
-  drop constraint map_layers_definition_expression_check,
-  add constraint map_layers_definition_expression_check check (
-    length(definition_expression) between 1 and 2000
-    and definition_expression ~ '^[A-Za-z0-9_ ''(),.=<>!+*/%: -\U0010ffff-]+$'
-    and position('--' in definition_expression) = 0
-    and position('/*' in definition_expression) = 0
-    and app.balanced_filter(definition_expression)
-  );
+create function app.check_map_layer_filter()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.definition_expression is not null and not (
+    length(new.definition_expression) between 1 and 2000
+    and new.definition_expression ~ ('^[A-Za-z0-9_ ''(),.=<>!+*/%:' || chr(160) || '-' || chr(1114111) || '-]+$')
+    and position('--' in new.definition_expression) = 0
+    and position('/*' in new.definition_expression) = 0
+    and app.plain_filter(new.definition_expression)
+  ) then
+    raise exception 'A map layer''s filter takes only plain quoting'
+      using errcode = '23514';
+  end if;
+  return new;
+end
+$$;
+
+create trigger map_layers_filter_check
+  before insert or update of definition_expression on app.map_layers
+  for each row execute function app.check_map_layer_filter();
+
+revoke all on function app.check_map_layer_filter() from public, anon, authenticated, service_role, app_api;

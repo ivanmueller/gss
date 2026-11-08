@@ -928,6 +928,9 @@ describe('layers from an ArcGIS map (F-138)', () => {
       // Unbalanced, it would undo the layer's limit (Codex's review of 1f328f9).
       { definitionExpression: '1=1) OR (1=1' },
       { definitionExpression: '1=1\u0085' },
+      // Oracle's q quoting, and a comment past a line separator (Codex's re-reviews).
+      { definitionExpression: "q'!'('!' IS NOT NULL) OR (q'!')'!' IS NOT NULL" },
+      { definitionExpression: "'a\u2028' IS NOT NULL /*(*/ ) OR (1=1 /*)*/" },
       { minZoom: 9, maxZoom: 4 },
       { opacity: 0 },
       { map: { itemId: '../x', title: 'M' } },

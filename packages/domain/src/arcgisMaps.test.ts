@@ -751,3 +751,44 @@ describe('Codex’s re-review of 813c5b6', () => {
     expect((range.maxZoom ?? 0) - (range.minZoom ?? 0)).toBeCloseTo(0.01);
   });
 });
+
+describe('Codex’s re-review of 7d0382e', () => {
+  it('sees a comment past a line or paragraph separator', () => {
+    const hidden = "'a\u2028' IS NOT NULL /*(*/ ) OR (1=1 /*)*/";
+    expect(safeFilter(hidden)).toBe(false);
+    expect(safeFilter("'a\u2028' IS NOT NULL -- x")).toBe(false);
+    expect(whereOf({ onlyField: 'NET', onlyValues: ['M'], definitionExpression: hidden })).toBe(
+      '1=0',
+    );
+  });
+
+  it('converts a large area with holes quickly', () => {
+    // Two outer rings of 20,000 corners each (clockwise), each with a hole of 20,000 corners.
+    const circle = (cx: number, r: number, clockwise: boolean) => {
+      // 20,001 corners, the last back at the first.
+      return Array.from({ length: 20_001 }, (_, i) => {
+        const t = ((clockwise ? -1 : 1) * 2 * Math.PI * (i % 20_000)) / 20_000;
+        return [cx + r * Math.cos(t), r * Math.sin(t)];
+      });
+    };
+    const rings = [
+      circle(0, 10, true),
+      circle(30, 10, true),
+      circle(30, 5, false),
+      circle(0, 5, false),
+    ];
+    const started = Date.now();
+    const result = featureSetToGeoJSON(
+      { geometryType: 'esriGeometryPolygon', features: [{ geometry: { rings } }] },
+      { wkid: 4326 },
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+    const geometry = result?.features[0] as { geometry: { coordinates: unknown[][][] } };
+    expect(geometry.geometry.coordinates.map((polygon) => polygon.length)).toEqual([2, 2]);
+    // Each hole with the shape around it: the hole centred at 0 with the first, at 30 the second.
+    const firstX = (polygon: number) =>
+      (geometry.geometry.coordinates[polygon]?.[1]?.[0] as number[] | undefined)?.[0];
+    expect(firstX(0)).toBeCloseTo(5);
+    expect(firstX(1)).toBeCloseTo(35);
+  });
+});

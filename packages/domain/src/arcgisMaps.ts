@@ -531,15 +531,30 @@ function whereIs(ring: readonly Position[], [x, y]: Position): 'in' | 'out' | 'o
  * so one corner alone does not tell (Codex's re-review of 813c5b6).
  */
 function ringHolds(shell: readonly Position[], hole: readonly Position[]): boolean {
-  const places = hole.map((p) => whereIs(shell, p));
-  if (places.includes('out')) return false;
-  if (places.includes('in')) return true;
-  return hole.some((p, i) => {
-    const next = hole[i + 1];
-    return (
-      next !== undefined && whereIs(shell, [(p[0] + next[0]) / 2, (p[1] + next[1]) / 2]) === 'in'
-    );
-  });
+  // In a valid area a hole is wholly inside its ring or wholly outside, so the first corner not
+  // on the ring's edge decides: one pass over the ring for most holes, not one per corner
+  // (Codex's re-review of 7d0382e: 20,000 corners a ring took seconds).
+  for (const p of hole) {
+    const place = whereIs(shell, p);
+    if (place !== 'on') return place === 'in';
+  }
+  for (let i = 1; i < hole.length; i += 1) {
+    const a = hole[i - 1];
+    const b = hole[i];
+    if (!a || !b) continue;
+    const place = whereIs(shell, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    if (place !== 'on') return place === 'in';
+  }
+  return false;
+}
+
+/** A ring's bounding box: west, south, east, north. */
+function boxOf(ring: readonly Position[]): [number, number, number, number] {
+  let box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [x, y] of ring) {
+    box = [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)];
+  }
+  return box;
 }
 
 function geometryOf(
@@ -575,21 +590,25 @@ function geometryOf(
     // the outer ring around it (Codex's review of 1f328f9: not merely the last one before it).
     const outer = rings.filter((ring) => clockwise(ring));
     const polygons: Position[][][] = (outer.length > 0 ? outer : rings.slice(0, 1)).map((r) => [r]);
+    // Each outer ring's box and size, worked out once.
+    const shells = polygons.flatMap((polygon) => {
+      const [ring] = polygon;
+      return ring ? [{ polygon, ring, box: boxOf(ring), area: ringArea(ring) }] : [];
+    });
+    const taken = new Set(shells.map((shell) => shell.ring));
     for (const ring of rings) {
-      if (polygons.some(([o]) => o === ring)) continue;
+      if (taken.has(ring)) continue;
       // The innermost outer ring around it: an island inside a hole has its own holes (Codex's
-      // re-review of 1a5f81c).
-      const containing = polygons.filter(([o]) => o !== undefined && ringHolds(o, ring));
-      const around =
-        containing.reduce<Position[][] | undefined>(
-          (best, candidate) =>
-            best?.[0] === undefined ||
-            (candidate[0] !== undefined && ringArea(candidate[0]) < ringArea(best[0]))
-              ? candidate
-              : best,
-          undefined,
-        ) ?? polygons[polygons.length - 1];
-      around?.push(ring);
+      // re-review of 1a5f81c). Rings whose box does not hold the hole's are skipped unread.
+      const [w, s, e, n] = boxOf(ring);
+      let best: (typeof shells)[number] | undefined;
+      for (const shell of shells) {
+        const [sw, ss, se, sn] = shell.box;
+        if (w < sw || s < ss || e > se || n > sn) continue;
+        if (best && shell.area >= best.area) continue;
+        if (ringHolds(shell.ring, ring)) best = shell;
+      }
+      (best?.polygon ?? polygons[polygons.length - 1])?.push(ring);
     }
     const [only, ...more] = polygons;
     if (!only) return null;

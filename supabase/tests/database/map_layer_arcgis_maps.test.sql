@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(34);
+select plan(38);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: adam (org_admin), olivia (operations). Org B: bob (org_admin).
@@ -131,7 +131,7 @@ select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'de
   'a filter with Oracle''s q quoting is refused');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
   $$'N''a('' = 1'$$)), '23514', 'a filter with a quote opened after a letter is refused');
-select is(app.balanced_filter('NAME = ''it''''s'' AND NET IN(''M'')'), true,
+select is(app.plain_filter('NAME = ''it''''s'' AND NET IN(''M'')'), true,
   'plain quoting with a doubled quote and IN( is taken');
 select is(pg_temp.api_run(:adam, format('delete from app.map_layers where id = %L', :layer2)), '42501',
   'app_api deletes no layer');
@@ -158,6 +158,28 @@ select ok(not has_column_privilege('app_api', 'app.map_layers', 'opacity', 'upda
 select ok(not has_table_privilege('anon', 'app.map_layers', 'select')
   and not has_table_privilege('authenticated', 'app.map_layers', 'insert'),
   'the Supabase API roles still read and write nothing');
+
+-- A filter kept before 20261108030000 that its checks would refuse (Codex's re-review of 7d0382e):
+-- new filters are checked when added, so such a layer can still be changed and removed.
+\set legacy '''00000000-0000-4000-8000-0000000a2a06'''
+-- Kept as before the check: written with triggers off, as a row from then would be.
+set local session_replication_role = replica;
+do $d$ begin
+  execute pg_temp.add_from_map('00000000-0000-4000-8000-0000000a2a06',
+    '00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-0000000022aa',
+    'definition_expression', $f$'NAME = N''Québec'''$f$);
+end $d$;
+set local session_replication_role = origin;
+select is(pg_temp.api_run(:adam, format($q$update app.map_layers set name = 'Renamed',
+  updated_by = %L where id = %L$q$, :adam, :legacy)), 'ok 1', 'a layer with a kept filter is still changed');
+select is(pg_temp.api_run(:adam, format($q$update app.map_layers set archived_at = now(),
+  archived_by = %L, updated_by = %L where id = %L$q$, :adam, :adam, :legacy)), 'ok 1',
+  'and removed');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'NAME = N''Québec'''$$)), '23514', 'but the same filter is refused on a new layer');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'''a' || chr(8232) || ''' IS NOT NULL /*(*/ ) OR (1=1 /*)*/'$$)), '23514',
+  'a comment past a line separator is refused');
 
 select * from finish();
 rollback;
