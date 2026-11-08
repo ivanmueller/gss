@@ -9,7 +9,7 @@ import {
   type OverviewGroup,
 } from '@grain/domain';
 
-import { apiFetch, apiJson } from './api';
+import { ApiError, apiFetch, apiJson } from './api';
 import { runOverviewJob, type OverviewJob, type OverviewResult } from './overviewWorker';
 
 // Preparing a live layer's zoomed-out view in an admin's browser (the owner's request of
@@ -22,6 +22,43 @@ import { runOverviewJob, type OverviewJob, type OverviewResult } from './overvie
 
 /** How many pages are read, or parts sent, at once. */
 const AT_ONCE = 4;
+
+/** Waits before asking a map service again, in milliseconds. */
+export const RETRY_WAITS = [2_000, 6_000];
+
+/**
+ * Reads from a map service through the Worker, asking twice more after a pause when the service
+ * did not answer (502: busy or slow after several layers in a row; on staging, Amtrak Routes,
+ * 2026-11-08); any other refusal is final.
+ */
+/** Whether a read was cancelled (read afresh: it can change while waiting). */
+function stopped(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
+
+async function withRetries<T>(read: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  for (const wait of [...RETRY_WAITS, null]) {
+    try {
+      return await read();
+    } catch (error) {
+      const busy = error instanceof ApiError && error.status === 502;
+      if (!busy || wait === null || signal.aborted) throw error;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, wait);
+        signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      if (stopped(signal)) throw error;
+    }
+  }
+  throw new Error('unreachable');
+}
 
 export type OverviewProgress =
   | { stage: 'reading'; done: number; total: number }
@@ -107,16 +144,19 @@ async function readAll(
   controller: AbortController,
 ): Promise<number> {
   const { default: decode } = await import('arcgis-pbf-parser');
-  const { count } = await apiJson<{ count: number; pageSize: number }>(
-    `/map-layers/${layer.id}/count`,
-    token,
-    { signal },
+  const { count } = await withRetries(
+    () =>
+      apiJson<{ count: number; pageSize: number }>(`/map-layers/${layer.id}/count`, token, {
+        signal,
+      }),
+    signal,
   );
   if (count === 0) throw new Error('This layer has nothing to draw.');
   const page = async (offset: number) => {
-    const res = await apiFetch(`/map-layers/${layer.id}/pages/${String(offset)}`, token, {
+    const res = await withRetries(
+      () => apiFetch(`/map-layers/${layer.id}/pages/${String(offset)}`, token, { signal }),
       signal,
-    });
+    );
     return decode(new Uint8Array(await res.arrayBuffer())).featureCollection.features;
   };
   /** The pieces from `start` up to (not including) `end`, however many each page gives. */

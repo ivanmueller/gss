@@ -448,8 +448,11 @@ export function zoomRange(
 ): { minZoom: number | null; maxZoom: number | null } {
   const minZoom = scaleToZoom(minScale);
   const maxZoom = scaleToZoom(maxScale);
+  // A range narrower than the zooms' rounding is kept narrow, never widened to every zoom
+  // (Codex's re-review of 813c5b6); a range ArcGIS never draws is refused by neverShown.
   if (minZoom !== null && maxZoom !== null && minZoom >= maxZoom) {
-    return { minZoom: null, maxZoom: null };
+    const narrow = Math.round((minZoom + 0.01) * 100) / 100;
+    return { minZoom: minZoom === 0 ? null : minZoom, maxZoom: narrow > 24 ? null : narrow };
   }
   return { minZoom: minZoom === 0 ? null : minZoom, maxZoom: maxZoom === 24 ? null : maxZoom };
 }
@@ -497,15 +500,46 @@ function clockwise(ring: readonly Position[]): boolean {
 }
 
 /** Whether a point is inside a ring (crossings of a ray to its right). */
-function ringContains(ring: readonly Position[], [x, y]: Position): boolean {
+/** Where a point is against a ring: inside, outside, or on its edge. */
+function whereIs(ring: readonly Position[], [x, y]: Position): 'in' | 'out' | 'on' {
   let inside = false;
-  ring.forEach(([x2, y2], i) => {
+  for (let i = 1; i < ring.length; i += 1) {
     const before = ring[i - 1];
-    if (!before) return;
+    const after = ring[i];
+    if (!before || !after) continue;
     const [x1, y1] = before;
+    const [x2, y2] = after;
+    const cross = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1);
+    const scale = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1), 1e-12);
+    if (
+      Math.abs(cross) <= scale * 1e-9 &&
+      x >= Math.min(x1, x2) - 1e-12 &&
+      x <= Math.max(x1, x2) + 1e-12 &&
+      y >= Math.min(y1, y2) - 1e-12 &&
+      y <= Math.max(y1, y2) + 1e-12
+    ) {
+      return 'on';
+    }
     if (y1 > y !== y2 > y && x < ((x2 - x1) * (y - y1)) / (y2 - y1) + x1) inside = !inside;
+  }
+  return inside ? 'in' : 'out';
+}
+
+/**
+ * Whether a hole lies within an outer ring: none of its corners outside, and one corner (or, when
+ * all touch the edge, the middle of one side) inside. A hole may touch its outer ring at a corner,
+ * so one corner alone does not tell (Codex's re-review of 813c5b6).
+ */
+function ringHolds(shell: readonly Position[], hole: readonly Position[]): boolean {
+  const places = hole.map((p) => whereIs(shell, p));
+  if (places.includes('out')) return false;
+  if (places.includes('in')) return true;
+  return hole.some((p, i) => {
+    const next = hole[i + 1];
+    return (
+      next !== undefined && whereIs(shell, [(p[0] + next[0]) / 2, (p[1] + next[1]) / 2]) === 'in'
+    );
   });
-  return inside;
 }
 
 function geometryOf(
@@ -543,12 +577,9 @@ function geometryOf(
     const polygons: Position[][][] = (outer.length > 0 ? outer : rings.slice(0, 1)).map((r) => [r]);
     for (const ring of rings) {
       if (polygons.some(([o]) => o === ring)) continue;
-      const [point] = ring;
       // The innermost outer ring around it: an island inside a hole has its own holes (Codex's
       // re-review of 1a5f81c).
-      const containing = polygons.filter(
-        ([o]) => o !== undefined && point !== undefined && ringContains(o, point),
-      );
+      const containing = polygons.filter(([o]) => o !== undefined && ringHolds(o, ring));
       const around =
         containing.reduce<Position[][] | undefined>(
           (best, candidate) =>

@@ -282,8 +282,13 @@ export function balancedFilter(text: string): boolean {
         if (text[i + 1] === "'") i += 1;
         else quoted = false;
       }
-    } else if (c === "'") quoted = true;
-    else if (c === '(') depth += 1;
+    } else if (c === "'") {
+      // A quote opened right after a letter, digit or underscore is another kind of quoting
+      // (Oracle's q'!…!', N'…', E'…'), whose text could hide a parenthesis (Codex's re-review of
+      // 813c5b6).
+      if (i > 0 && /[A-Za-z0-9_]/.test(text[i - 1] ?? '')) return false;
+      quoted = true;
+    } else if (c === '(') depth += 1;
     else if (c === ')') {
       depth -= 1;
       if (depth < 0) return false;

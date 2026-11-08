@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(31);
+select plan(34);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: adam (org_admin), olivia (operations). Org B: bob (org_admin).
@@ -125,6 +125,14 @@ select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'de
   $$'"a(" = 1'$$)), '23514', 'a filter with a quoted name is refused');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer5, :orga, :adam, 'definition_expression',
   $$'NAME = ''Québec'' AND MILES >= 2.5'$$)), 'ok 1', 'an accented value and comparisons are taken');
+-- A quote opened right after a letter (20261108030000; Codex's re-review of 813c5b6).
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'q''!''(''!'' IS NOT NULL) OR (q''!'')''!'' IS NOT NULL'$$)), '23514',
+  'a filter with Oracle''s q quoting is refused');
+select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer2, :orga, :adam, 'definition_expression',
+  $$'N''a('' = 1'$$)), '23514', 'a filter with a quote opened after a letter is refused');
+select is(app.balanced_filter('NAME = ''it''''s'' AND NET IN(''M'')'), true,
+  'plain quoting with a doubled quote and IN( is taken');
 select is(pg_temp.api_run(:adam, format('delete from app.map_layers where id = %L', :layer2)), '42501',
   'app_api deletes no layer');
 select is(pg_temp.api_run(:adam, pg_temp.add_from_map(:layer3, :orga, :adam, 'map_item_id, map_title',

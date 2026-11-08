@@ -289,8 +289,8 @@ describe('zoom ranges', () => {
     expect(scaleToZoom('x')).toBeNull();
     expect(zoomRange(2_311_162.217, 0)).toEqual({ minZoom: 7, maxZoom: null });
     expect(zoomRange(0, 0)).toEqual({ minZoom: null, maxZoom: null });
-    // Out of order: no limit rather than a layer never shown.
-    expect(zoomRange(1000, 2_311_162.217)).toEqual({ minZoom: null, maxZoom: null });
+    // Out of order: never widened to every zoom (neverShown refuses such a layer).
+    expect(zoomRange(1000, 2_311_162.217)).toEqual({ minZoom: 18.17, maxZoom: 18.18 });
   });
 });
 
@@ -694,5 +694,60 @@ describe('Codex’s re-review of 1a5f81c', () => {
       ],
     });
     expect(neverShown(layer?.minScale ?? null, layer?.maxScale ?? null)).toBe(true);
+  });
+});
+
+describe('Codex’s re-review of 813c5b6', () => {
+  it('refuses a quote opened right after a letter (Oracle’s q quoting and the like)', () => {
+    for (const bad of [
+      "q'!'('!' IS NOT NULL) OR (q'!')'!' IS NOT NULL",
+      "N'a(' = 1",
+      "x_'a' = 1",
+    ]) {
+      expect(balancedFilter(bad)).toBe(false);
+      expect(safeFilter(bad)).toBe(false);
+    }
+    expect(safeFilter("NAME = 'it''s' AND NET IN('M')")).toBe(true);
+  });
+
+  it('puts a hole touching its outer ring at a corner in that ring', () => {
+    const shell = [
+      [0, 0],
+      [0, 10],
+      [10, 10],
+      [10, 0],
+      [0, 0],
+    ];
+    const hole = [
+      [10, 5],
+      [8, 6],
+      [8, 4],
+      [10, 5],
+    ];
+    const other = [
+      [20, 0],
+      [20, 10],
+      [30, 10],
+      [30, 0],
+      [20, 0],
+    ];
+    const result = featureSetToGeoJSON(
+      {
+        geometryType: 'esriGeometryPolygon',
+        features: [{ geometry: { rings: [shell, hole, other] } }],
+      },
+      { wkid: 4326 },
+    );
+    expect(result?.features[0]).toMatchObject({
+      geometry: { type: 'MultiPolygon', coordinates: [[shell, hole], [other]] },
+    });
+  });
+
+  it('keeps a range narrower than the zooms’ rounding narrow', () => {
+    expect(neverShown(100_001, 100_000)).toBe(false);
+    const range = zoomRange(100_001, 100_000);
+    expect(range.minZoom).not.toBeNull();
+    expect(range.maxZoom).not.toBeNull();
+    expect((range.maxZoom ?? 0) - (range.minZoom ?? 0)).toBeCloseTo(0.01);
   });
 });
