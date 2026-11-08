@@ -188,12 +188,9 @@ export function CounterpartyMap({
               />
             </Suspense>
           )}
-          <MapLayersPanel state={layers} className="left-3" />
-          <PickedFeatureCard
-            state={layers}
-            token={token}
-            className={layers.panelOpen ? 'left-[19.5rem]' : 'left-3'}
-          />
+          {/* Below the zoom buttons, top right (F-139). */}
+          <MapLayersPanel state={layers} side="right" />
+          <PickedFeatureCard state={layers} token={token} className="left-3" />
         </div>
         <MapLayersLegend state={layers} />
       </div>

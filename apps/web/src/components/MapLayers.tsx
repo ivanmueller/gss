@@ -375,14 +375,17 @@ function MapGroup({
 
 /**
  * The Layers panel over the map (F-133): each layer with a switch, and under one coloured by a
- * field, each of its values with a tick box, so one railroad can be looked at alone.
+ * field, each of its values with a tick box, so one railroad can be looked at alone. It opens
+ * below the map's + and − zoom buttons, on their side, and runs down (the owner's request of
+ * 2026-11-08, F-139).
  */
 export function MapLayersPanel({
   state,
-  className,
+  side,
 }: {
   state: MapLayersState;
-  className?: string;
+  /** The side of the map its zoom buttons are on. */
+  side: 'left' | 'right';
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   if (!state.panelOpen) return null;
@@ -390,8 +393,9 @@ export function MapLayersPanel({
     <section
       aria-label="Map layers"
       className={cn(
-        'absolute top-3 bottom-3 z-10 flex w-72 max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-card border bg-card text-sm shadow-md',
-        className,
+        // Below the zoom buttons (10 px from the top, two 29 px buttons).
+        'absolute top-20 bottom-3 z-10 flex w-72 max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-card border bg-card text-sm shadow-md',
+        side === 'left' ? 'left-3' : 'right-3',
       )}
     >
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
@@ -443,7 +447,10 @@ export function MapLayersPanel({
   );
 }
 
-/** Under the map: each layer that is on, the colours shown, its source and any note. */
+/**
+ * Under the map: each layer that is on, the colours shown and any note. Its source and terms are
+ * on Team → Map layers, not here (the owner's request of 2026-11-08, F-139).
+ */
 export function MapLayersLegend({ state }: { state: MapLayersState }) {
   const on = state.layers.filter((layer) => state.chosen.has(layer.id));
   if (on.length === 0) return null;
@@ -485,17 +492,6 @@ export function MapLayersLegend({ state }: { state: MapLayersState }) {
                 style={{ backgroundColor: layer.colour }}
               />
             )}
-            <span>
-              Source:{' '}
-              <a
-                href={layer.termsUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="underline underline-offset-2 hover:text-foreground"
-              >
-                {layer.sourceName}
-              </a>
-            </span>
             {note && (
               <span role="status" className="text-warning">
                 {note}

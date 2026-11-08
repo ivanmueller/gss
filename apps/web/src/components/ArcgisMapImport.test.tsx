@@ -317,7 +317,9 @@ describe('how a map’s layers are shown', () => {
       error: null,
     } satisfies MapLayersState;
     const user = userEvent.setup();
-    render(<MapLayersPanel state={state} />);
+    render(<MapLayersPanel state={state} side="right" />);
+    // Below the zoom buttons, on their side (F-139).
+    expect(screen.getByRole('region', { name: 'Map layers' })).toHaveClass('top-20', 'right-3');
     const group = screen.getByRole('list', { name: 'Synthetic rail map: layers' });
     expect(
       within(group)

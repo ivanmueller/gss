@@ -500,6 +500,8 @@ describe('CounterpartiesPage', () => {
     // Tests build without a Mapbox token: the view says so, with no count and no list.
     expect(screen.getByText(/The map is not set up yet/)).toBeInTheDocument();
     expect(screen.queryByText(/no coordinates yet/)).not.toBeInTheDocument();
+    // No Find missing coordinates on the map (the owner's request of 2026-11-08, F-139).
+    expect(screen.queryByRole('button', { name: /Find missing coordinates/ })).toBeNull();
 
     await userEvent.click(screen.getByRole('tab', { name: 'Table' }));
     expect(window.location.search).toBe('?view=table&type=buyer');

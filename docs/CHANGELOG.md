@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-08 — Map tidy-up (F-139); handoff of #180
+
+- `docs/FEATURES.md`: F-139. `docs/DECISIONS.md`: the Layers panel under the zoom buttons, colours without the source under the map, no Find missing coordinates on Counterparties → map. `AGENTS.md`: the status line. `docs/HANDOFF.md`: ivanmueller/gss#180.
+
 ## 2026-11-08 — Codex's re-reviews of F-138; zoomed-out views ask a busy service again
 
 - `docs/DECISIONS.md`: Codex's re-reviews of `1a5f81c` and `813c5b6` and their fixes; the retry after Amtrak Routes' failure on staging. `docs/DATA_MODEL.md`, `docs/API.md`: `20261108030000_map_layer_filter_tokens.sql` and the filter's characters.

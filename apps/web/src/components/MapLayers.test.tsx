@@ -342,7 +342,7 @@ function Map() {
   return (
     <>
       <MapLayersButton state={state} />
-      <MapLayersPanel state={state} />
+      <MapLayersPanel state={state} side="left" />
       <MapLayersLegend state={state} />
       <button
         type="button"
@@ -377,10 +377,9 @@ describe('the Layers button', () => {
     const legend = screen.getByRole('list', { name: 'Map layers shown' });
     expect(within(legend).getByText('R0')).toBeVisible();
     expect(within(legend).getByText('and 2 more, each its own colour')).toBeVisible();
-    expect(within(legend).getAllByRole('link', { name: 'Synthetic publisher' })[0]).toHaveAttribute(
-      'href',
-      'https://example.com/terms',
-    );
+    // Colours only under the map: the source is on Team → Map layers (F-139).
+    expect(within(legend).queryByText(/Source/)).toBeNull();
+    expect(within(legend).queryByRole('link')).toBeNull();
 
     // One railroad alone (F-133).
     await user.click(
@@ -415,7 +414,7 @@ describe('the Layers button', () => {
       return (
         <>
           <MapLayersButton state={state} />
-          <MapLayersPanel state={state} />
+          <MapLayersPanel state={state} side="left" />
           <button
             type="button"
             onClick={() => {
