@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-07 — Codex's review of the zoomed-out view in parts
+
+- `docs/DECISIONS.md`: Codex's review of `d35ac90` (four P2) and their fixes; its re-review of `d0e8463` (one P2, a deadlock, fixed). `docs/DATA_MODEL.md`: `20261107060000_map_layer_overview_seal.sql`. `docs/API.md`: 409 `SEALED`.
+
 ## 2026-11-07 — Map layers panel, zoomed-out view, colours optional (F-133 to F-135); handoff of #173 to #175
 
 - `docs/HANDOFF.md`: ivanmueller/gss#173, #174 and #175 with their CI and Deploy staging runs; Dependabot's failed update jobs explained.

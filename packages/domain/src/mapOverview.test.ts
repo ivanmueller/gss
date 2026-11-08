@@ -7,6 +7,7 @@ import {
   OVERVIEW_PART_BYTES,
   simplifyLine,
   splitOverview,
+  utf8Length,
   type MercatorLine,
 } from './mapOverview';
 
@@ -144,6 +145,47 @@ describe('splitOverview', () => {
     expect(lines('AAA')).toBe(3);
     expect(lines('BIG')).toBe(400);
     expect(lines('BBB')).toBe(2);
+  });
+
+  it('cuts a line too long for any part into pieces sharing their ends, every request in budget (Codex’s review of d35ac90)', () => {
+    const long: [number, number][] = Array.from({ length: 20_000 }, (_, i) => [
+      -100 - i / 10_000,
+      50 + i / 10_000,
+    ]);
+    const collection = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          id: 1,
+          geometry: { type: 'MultiLineString' as const, coordinates: [long] },
+          // Accented names weigh more in UTF-8 than their characters.
+          properties: { OWNER: 'Chemin de fer Québec–Gatineau é'.repeat(15) },
+        },
+      ],
+    };
+    const parts = splitOverview(collection);
+    expect(parts.length).toBeGreaterThan(3);
+    for (const part of parts) {
+      expect(utf8Length(JSON.stringify({ features: part }))).toBeLessThanOrEqual(
+        OVERVIEW_PART_BYTES,
+      );
+    }
+    const pieces = parts.flat().flatMap((f) => f.geometry.coordinates as [number, number][][]);
+    for (let i = 1; i < pieces.length; i += 1) {
+      expect(pieces[i]?.[0]).toEqual(pieces[i - 1]?.at(-1));
+    }
+    const points = pieces.reduce((n, piece) => n + piece.length, 0);
+    expect(points).toBe(long.length + pieces.length - 1);
+    expect(pieces[0]?.[0]).toEqual(long[0]);
+    expect(pieces.at(-1)?.at(-1)).toEqual(long.at(-1));
+  });
+
+  it('measures text in UTF-8 bytes', () => {
+    expect(utf8Length('CN')).toBe(2);
+    expect(utf8Length('é')).toBe(2);
+    expect(utf8Length('–')).toBe(3);
+    expect(utf8Length('𝄞')).toBe(4);
   });
 
   it('gives one part for a small view', () => {

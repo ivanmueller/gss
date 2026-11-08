@@ -650,6 +650,15 @@ describe('a zoomed-out view', () => {
     expect(db.saveMapLayerOverviewPart).not.toHaveBeenCalled();
   });
 
+  it('says when a part is sent to a view already published', async () => {
+    db.saveMapLayerOverviewPart.mockResolvedValueOnce({ status: 'sealed' });
+    const res = await send(`/${LAYER}/overview/${VERSION}/1`, 'PUT', {
+      features: overview.features,
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json<{ error: { code: string } }>()).error.code).toBe('SEALED');
+  });
+
   it('publishes a view, or says why not', async () => {
     const publish = () =>
       send(`/${LAYER}/overview/${VERSION}/publish`, 'POST', {

@@ -1,6 +1,6 @@
 import { MAX_OVERVIEW_PARTS, type MapLayerView, type MercatorLine } from '@grain/domain';
 
-import { apiFetch, apiJson, sendJson } from './api';
+import { apiFetch, apiJson } from './api';
 import { runOverviewJob, type OverviewJob, type OverviewResult } from './overviewWorker';
 
 // Preparing a live layer's zoomed-out view in an admin's browser (the owner's request of
@@ -75,15 +75,20 @@ async function readAll(
   token: string,
   groups: Map<string | null, MercatorLine[]>,
   onProgress: (progress: OverviewProgress) => void,
+  signal: AbortSignal,
+  controller: AbortController,
 ): Promise<number> {
   const { default: decode } = await import('arcgis-pbf-parser');
   const { count } = await apiJson<{ count: number; pageSize: number }>(
     `/map-layers/${layer.id}/count`,
     token,
+    { signal },
   );
   if (count === 0) throw new Error('This layer has nothing to draw.');
   const page = async (offset: number) => {
-    const res = await apiFetch(`/map-layers/${layer.id}/pages/${String(offset)}`, token);
+    const res = await apiFetch(`/map-layers/${layer.id}/pages/${String(offset)}`, token, {
+      signal,
+    });
     return decode(new Uint8Array(await res.arrayBuffer())).featureCollection.features;
   };
   /** The pieces from `start` up to (not including) `end`, however many each page gives. */
@@ -115,31 +120,67 @@ async function readAll(
   done(0, Math.min(step, count));
   const starts: number[] = [];
   for (let start = step; start < count; start += step) starts.push(start);
-  for (let i = 0; i < starts.length; i += AT_ONCE) {
-    await Promise.all(
-      starts.slice(i, i + AT_ONCE).map(async (start) => {
-        const end = Math.min(start + step, count);
-        await span(start, end);
-        done(start, end);
-      }),
-    );
-  }
+  await inBatches(starts, controller, async (start) => {
+    const end = Math.min(start + step, count);
+    await span(start, end);
+    done(start, end);
+  });
   // Every counted piece, exactly once.
   if (read !== count) throw new Error('Not every piece of the layer arrived. Try again.');
   return count;
 }
 
 /**
+ * Runs batches of work; the first failure cancels the rest (their requests are aborted and they
+ * report no more progress) and is thrown (Codex's review of d35ac90: slower requests reported
+ * progress after a failure, leaving the screen busy).
+ */
+async function inBatches<T>(
+  items: readonly T[],
+  controller: AbortController,
+  run: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += AT_ONCE) {
+    try {
+      await Promise.all(items.slice(i, i + AT_ONCE).map((item, k) => run(item, i + k)));
+    } catch (error) {
+      controller.abort();
+      throw error;
+    }
+  }
+}
+
+/**
  * Prepares and publishes a live lines layer's zoomed-out view, reporting progress; throws with a
- * message to show when the layer cannot have one.
+ * message to show when the layer cannot have one. Once it has thrown or finished, it reports
+ * nothing more.
  */
 export async function prepareOverview(
   layer: Pick<MapLayerView, 'id' | 'colourField'>,
   token: string,
   onProgress: (progress: OverviewProgress) => void,
 ): Promise<{ features: number; pieces: number }> {
+  const controller = new AbortController();
+  const report = (progress: OverviewProgress) => {
+    if (!controller.signal.aborted) onProgress(progress);
+  };
+  try {
+    return await prepare(layer, token, report, controller);
+  } finally {
+    // Nothing still running reports after this.
+    controller.abort();
+  }
+}
+
+async function prepare(
+  layer: Pick<MapLayerView, 'id' | 'colourField'>,
+  token: string,
+  onProgress: (progress: OverviewProgress) => void,
+  controller: AbortController,
+): Promise<{ features: number; pieces: number }> {
+  const { signal } = controller;
   const groups = new Map<string | null, MercatorLine[]>();
-  const pieces = await readAll(layer, token, groups, onProgress);
+  const pieces = await readAll(layer, token, groups, onProgress, signal, controller);
   onProgress({ stage: 'joining' });
   const { parts, features } = await join({ groups: [...groups], field: layer.colourField });
   if (features === 0) {
@@ -151,21 +192,21 @@ export async function prepareOverview(
   const version = crypto.randomUUID();
   let sent = 0;
   onProgress({ stage: 'saving', done: 0, total: parts.length });
-  for (let i = 0; i < parts.length; i += AT_ONCE) {
-    await Promise.all(
-      parts.slice(i, i + AT_ONCE).map(async (part, k) => {
-        await sendJson(
-          `/map-layers/${layer.id}/overview/${version}/${String(i + k)}`,
-          token,
-          'PUT',
-          { features: part },
-        );
-        sent += 1;
-        onProgress({ stage: 'saving', done: sent, total: parts.length });
-      }),
-    );
-  }
-  await sendJson(`/map-layers/${layer.id}/overview/${version}/publish`, token, 'POST', {
+  const send = (path: string, method: 'PUT' | 'POST', body: unknown) =>
+    apiJson(path, token, {
+      method,
+      signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  await inBatches(parts, controller, async (part, i) => {
+    await send(`/map-layers/${layer.id}/overview/${version}/${String(i)}`, 'PUT', {
+      features: part,
+    });
+    sent += 1;
+    onProgress({ stage: 'saving', done: sent, total: parts.length });
+  });
+  await send(`/map-layers/${layer.id}/overview/${version}/publish`, 'POST', {
     colourField: layer.colourField,
     partCount: parts.length,
     sourceCount: pieces,

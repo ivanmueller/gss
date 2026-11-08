@@ -230,6 +230,14 @@ describe('map layers as app_api', () => {
       expect(await publish(VERA, v1, 'OWNER')).toEqual({ status: 'forbidden' });
       expect(await publish(ADAM, v1, 'OWNER')).toEqual({ status: 'saved', id: added.id });
 
+      // Codex's review of d35ac90: a published preparation is sealed; a part sent to it later
+      // changes nothing.
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 2))).toEqual({
+        status: 'sealed',
+      });
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part(v1, 0))).toEqual({
+        status: 'sealed',
+      });
       const read = await db.getMapLayerOverview(as(VERA), added.id);
       expect(read?.version).toBe(v1);
       expect(read?.parts.map((p) => new TextDecoder().decode(p))).toHaveLength(2);
@@ -266,6 +274,55 @@ describe('map layers as app_api', () => {
         where layer_id = ${added.id} and version = ${v1}`;
       expect(left?.n).toBe(0);
     } finally {
+      await db.close();
+    }
+  });
+
+  it('re-sends a part while a publication drops it, without a deadlock (Codex’s review of d0e8463)', async () => {
+    const db = postgresDatabase(API_URL);
+    const publisher = postgres(API_URL, { max: 1, onnotice: () => undefined });
+    try {
+      const added = await db.createMapLayer(as(ADAM), ORG_A, SERVICE);
+      if (added.status !== 'saved') throw new Error('not added');
+      const old = crypto.randomUUID();
+      const part = {
+        version: old,
+        partNo: 0,
+        featureCount: 1,
+        features: new TextEncoder().encode(
+          JSON.stringify([
+            {
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [-105, 50],
+                  [-104, 50],
+                ],
+              },
+              properties: { OWNER: 'AAA' },
+            },
+          ]),
+        ),
+      };
+      expect(await db.saveMapLayerOverviewPart(as(ADAM), added.id, part)).toMatchObject({
+        status: 'saved',
+      });
+      // A publication: it holds the layer, then drops other preparations' parts. Meanwhile the
+      // browser re-sends part 0 of the old preparation.
+      let retry: Promise<unknown> | undefined;
+      await publisher.begin(async (tx) => {
+        await tx`select set_config('app.user_id', ${ADAM}, true)`;
+        await tx`select 1 from app.map_layers where id = ${added.id} for update`;
+        retry = db.saveMapLayerOverviewPart(as(ADAM), added.id, part);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await tx`delete from app.map_layer_overview_parts
+                 where layer_id = ${added.id} and version = ${old}`;
+      });
+      // The re-sent part waited for the publication and then went in; nothing was aborted.
+      await expect(retry).resolves.toMatchObject({ status: 'saved' });
+    } finally {
+      await publisher.end();
       await db.close();
     }
   });
