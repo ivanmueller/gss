@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-08 — Map layers steady while zooming (F-140); handoff of #181
+
+- `docs/FEATURES.md`: F-140 and F-218 (the owner's check of #181). `docs/DECISIONS.md`: why lines came and went while zooming, and what the map draws now. `docs/HANDOFF.md`: ivanmueller/gss#181.
+
 ## 2026-11-08 — Map tidy-up (F-139); handoff of #180
 
 - `docs/FEATURES.md`: F-139. `docs/DECISIONS.md`: the Layers panel under the zoom buttons, colours without the source under the map, no Find missing coordinates on Counterparties → map. `AGENTS.md`: the status line. `docs/HANDOFF.md`: ivanmueller/gss#180.
