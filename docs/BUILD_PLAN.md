@@ -16,7 +16,9 @@ Ticket by ticket, with notes, in `docs/HANDOFF.md`. In short:
 | 5 (pulled forward) — Carrier freight rates (part of GT-050) | Built at the owner's request (2026-10-29, the priority after the FX connector): carriers in Counterparties with a Carriers filter, and the Freight page for carrier rates from one location to another, kept as revisions. A carrier's lanes by province and state, with its equipment, on a carrier page like a buyer's and a lane filter (owner's request, 2026-11-01); carriers added by hand with their equipment and lanes, and imported from a carrier spreadsheet whose lanes stay unverified until a rep verifies them (2026-11-01). Route geometry and routing (GT-051) are not started. |
 | 2 — CRM for counterparties (GT-027) | Built at the owner's request (2026-10-29): a contact log (calls, emails, meetings and visits, corrections kept as versions) and follow-ups (due time in Alberta time, the person responsible, marked done) on each counterparty's page, a Follow-ups page and a count in the menu. |
 | Owner's request: map layers (GT-026) | Built (ivanmueller/gss#175 to #185; F-107, F-133 to F-143): layers from ArcGIS, WMS and files, whole ArcGIS maps drawn as ArcGIS draws them (heat maps included), the Layers panel, zoomed-out views. Owner checks pending (F-214 to F-222). |
-| 4, 5 (rest), 6 | Not started. The thin trade slice is next. |
+| Owner's request: email (F-114, 2026-11-09) | Next, the owner's first priority: sending by hand and Claude's drafts through Cloudflare Email Service, replies received on a subdomain. Build plan and the owner's open questions in `docs/FEATURES.md`, "Next up". |
+| Workers paid plan follow-ups (F-136, F-145 to F-148, 2026-11-09) | Next after email: loosening what the free plan's ~10 ms limit shaped (file layers, picture checks, zoomed-out view parts, the Claude jobs' room). In `docs/FEATURES.md`, "Next up". |
+| 4, 5 (rest), 6 | Not started. The thin trade slice follows the owner's requests above. |
 
 # 13. Execution plan, ordered backlog and acceptance gates
 
