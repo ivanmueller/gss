@@ -60,25 +60,39 @@ export const REGISTER_EXCLUDED = ['docs/reviews/README.md', 'docs/reviews/ACCEPT
 export const isRegisterPath = (path) =>
   /^docs\/reviews\/[A-Za-z0-9._-]+\.md$/.test(path) && !REGISTER_EXCLUDED.includes(path);
 
-// High risk (AGENTS.md: database, auth, money, phone and Claude integrations; plus everything that
-// governs the review process itself, dependencies and the deploy). Never merged automatically.
+// Governance (the owner's decision, 2026-11-09): the rules and machinery that decide merging, and the
+// documents that set the project's rules. Held for the owner's approval of the exact commit, so the
+// process can never loosen its own safeguards unattended; also meets every high-risk requirement.
+const GOVERNANCE = [
+  /^\.github\//,
+  // Agent instructions and configuration at any depth (F-150-D1-04).
+  /(^|\/)\.(claude|gemini|codex|cursor)\//,
+  /(^|\/)(AGENTS|CLAUDE|GEMINI)\.md$/,
+  /(^|\/)\.cursorrules$/,
+  /^scripts\/(review-|guard-)/,
+  /^MASTER_PROJECT_SPECIFICATION\.md$/,
+  /^docs\/(AI_WORKFLOW|AI_CODING_SYSTEM|TRADING_RULES|ACCEPTANCE_TESTS)\.md$/,
+  /^docs\/reviews\/(README|ACCEPTED)\.md$/,
+];
+// High risk (AGENTS.md: database, auth, money, phone and Claude integrations; dependencies and the
+// Worker's configuration). Merged automatically only after the stronger checks (§11.6): a design
+// review, a final full review that approves, append-only migrations with database tests.
 const HIGH = [
   /^supabase\//,
   /^packages\/trading-engine\//,
   /^packages\/database\//,
   /^apps\/api\/src\/(anthropic|auth|callbacks|calls|call-steps|db|freight|fx|logins|members|quotes|readings|summaries|telnyx)[.-]/,
   /^packages\/domain\/src\/(callbacks|calls|drafts|freight|fx|members|money|quotes|readings|summaries)[.-]/,
+  // The API's routing (which routes are public and which need sign-in), the web app's sign-in, and
+  // its API, FX, freight and quote logic (F-150-R1-03).
+  /^apps\/api\/src\/(index|respond)\.ts$/,
+  /^packages\/domain\/src\/index\.ts$/,
+  /^apps\/web\/src\/auth\//,
+  /^apps\/web\/src\/lib\/(api|freight|fx|orderBook|quotes|supabase|workspaceQuotes)\./,
   /(^|\/)wrangler\.jsonc?$/,
   /(^|\/)package\.json$/,
   /^pnpm-(lock|workspace)\.yaml$/,
-  /^\.github\//,
-  /^\.claude\//,
-  /^scripts\/review-/,
   /^\.env\.example$/,
-  /^(AGENTS|CLAUDE)\.md$/,
-  /^MASTER_PROJECT_SPECIFICATION\.md$/,
-  /^docs\/(AI_WORKFLOW|AI_CODING_SYSTEM|TRADING_RULES|ACCEPTANCE_TESTS)\.md$/,
-  /^docs\/reviews\/(README|ACCEPTED)\.md$/,
 ];
 // Documents that record the owner's decisions: reviewed like code, never "documents only".
 const NORMAL = [/^docs\/(DECISIONS|DATA_MODEL|API|ARCHITECTURE)\.md$/];
@@ -86,13 +100,16 @@ const NORMAL = [/^docs\/(DECISIONS|DATA_MODEL|API|ARCHITECTURE)\.md$/];
 const LOW = [/\.md$/, /^tests\/e2e\//, /\.test\.[cm]?[jt]sx?$/, /\.css$/];
 
 export function fileTier(path) {
+  if (GOVERNANCE.some((re) => re.test(path))) return 'governance';
   if (HIGH.some((re) => re.test(path))) return 'high';
   if (NORMAL.some((re) => re.test(path))) return 'normal';
   if (LOW.some((re) => re.test(path))) return 'low';
   return 'normal';
 }
 
-const TIER_ORDER = { low: 0, normal: 1, high: 2 };
+const TIER_ORDER = { low: 0, normal: 1, high: 2, governance: 3 };
+/** Tiers that must meet the stronger high-risk requirements. */
+export const STRONG_TIERS = ['high', 'governance'];
 
 /** The highest tier among the changed files, with the files that set it. */
 export function changeTier(paths) {
@@ -161,9 +178,9 @@ export function parseRegister(text) {
   for (const review of reviews) {
     if (!/^(D\d+|\d+)$/.test(review.round))
       problems.push(`Review round "${review.round}" is not D<n> or <n>.`);
-    if (!['design', 'checkpoint', 'rereview'].includes(review.mode))
+    if (!['design', 'checkpoint', 'rereview', 'final'].includes(review.mode))
       problems.push(
-        `Review ${review.round}: mode "${review.mode}" is not design, checkpoint or rereview.`,
+        `Review ${review.round}: mode "${review.mode}" is not design, checkpoint, rereview or final.`,
       );
     if (!review.reviewed) problems.push(`Review ${review.round}: no reviewed commit.`);
     if (review.mode !== 'design' && !review.base)

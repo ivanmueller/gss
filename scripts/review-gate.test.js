@@ -9,6 +9,7 @@ import { after, before, describe, test } from 'node:test';
 import { eligibility, evaluate, mergeDecision } from './review-gate.js';
 import {
   changeTier,
+  documentsOnly,
   fileTier,
   nextReviewBase,
   parseRegister,
@@ -183,10 +184,11 @@ describe('review evidence check', () => {
     assert.ok(outcome.blockers.some((b) => /not where review 1 stopped/.test(b)));
   });
 
-  test('high risk is never eligible, even with complete evidence', () => {
-    branch('high');
+  // The owner's decision of 2026-11-09: high risk merges automatically, after stronger checks.
+  test('high risk needs a design review, a final full review and tested, added migrations', () => {
+    branch('highweak');
     const c1 = commit({ 'supabase/migrations/1_x.sql': 'select 1;\n' }, 'migration');
-    const head = commit(
+    const weak = commit(
       {
         'docs/reviews/F-900.md': register({
           reviews: [
@@ -196,34 +198,106 @@ describe('review evidence check', () => {
       },
       'register',
     );
-    const outcome = evaluate({ base: main, head });
-    assert.equal(outcome.evidence, 'complete');
-    assert.equal(outcome.tier, 'high');
-    assert.equal(
-      eligibility(outcome),
-      "no: high risk, held for the owner's approval (label owner-approved-merge)",
+    const blockers = evaluate({ base: main, head: weak }).blockers;
+    assert.ok(
+      blockers.some((b) => /no design review/.test(b)),
+      blockers.join('\n'),
     );
-    // F-150: the owner's label approves this head; a push (synchronize) makes it not count.
-    const approved = { labels: ['owner-approved-merge'], action: 'labeled' };
-    assert.equal(mergeDecision(outcome, approved).merge, true);
+    assert.ok(
+      blockers.some((b) => /must be a final review/.test(b)),
+      blockers.join('\n'),
+    );
+    assert.ok(
+      blockers.some((b) => /new migration without pgTAP/.test(b)),
+      blockers.join('\n'),
+    );
+
+    branch('highstrong');
+    const d1 = commit({ 'docs/plan.md': 'plan\n' }, 'plan');
+    const c2 = commit(
+      {
+        'supabase/migrations/1_x.sql': 'select 1;\n',
+        'supabase/tests/database/x.test.sql': 'select 1;\n',
+      },
+      'migration with tests',
+    );
+    const strong = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: 'D1', mode: 'design', reviewed: d1, result: 'needs-attention' },
+            { round: '1', mode: 'checkpoint', base: main, reviewed: c2, result: 'needs-attention' },
+            { round: '2', mode: 'final', base: main, reviewed: c2, result: 'approve' },
+          ],
+          findings: [{ id: 'F-900-R1-01', sev: 'P3', status: 'rejected', evidence: 'cosmetic' }],
+        }),
+      },
+      'register',
+    );
+    const outcome = evaluate({ base: main, head: strong });
+    assert.deepEqual(outcome.blockers, []);
+    assert.equal(outcome.tier, 'high');
+    assert.equal(mergeDecision(outcome).merge, true);
+    assert.equal(eligibility(outcome), 'yes (high risk)');
+  });
+
+  test('a migration already on the base branch is never changed or removed', () => {
+    git('switch', '-q', '-c', 'basewithmigration', main);
+    const withMigration = commit({ 'supabase/migrations/0_old.sql': 'select 0;\n' }, 'old');
+    git('switch', '-q', '-c', 'editsmigration', withMigration);
+    const head = commit({ 'supabase/migrations/0_old.sql': 'select 2;\n' }, 'edit');
+    const blockers = evaluate({ base: withMigration, head }).blockers;
+    assert.ok(
+      blockers.some((b) => /Migration supabase\/migrations\/0_old\.sql is changed/.test(b)),
+      blockers.join('\n'),
+    );
+  });
+
+  test('a serious finding cannot be left as an accepted limitation in high risk', () => {
+    branch('highaccepted');
+    const d1 = commit({ 'docs/plan.md': 'plan\n' }, 'plan');
+    const c1 = commit({ 'apps/api/src/telnyx.ts': 'export {};\n' }, 'code');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: 'D1', mode: 'design', reviewed: d1, result: 'approve' },
+            { round: '1', mode: 'final', base: main, reviewed: c1, result: 'approve' },
+          ],
+          findings: [
+            { id: 'F-900-D1-01', sev: 'P2', status: 'accepted-limitation', evidence: 'later' },
+          ],
+        }),
+      },
+      'register',
+    );
+    assert.ok(
+      evaluate({ base: main, head }).blockers.some((b) =>
+        /F-900-D1-01 \(P2\) is an accepted limitation/.test(b),
+      ),
+    );
+  });
+
+  // F-150-R1-02: the owner's approval is bound to the exact head commit (a commit status posted by
+  // the trusted workflow), never inferred from labels in an event.
+  test('governance merges only with the owner approval of the exact head', () => {
+    const governance = { evidence: 'complete', tier: 'governance' };
+    assert.equal(mergeDecision(governance).merge, false);
     assert.equal(
-      mergeDecision(outcome, { labels: ['owner-approved-merge'], action: 'synchronize' }).merge,
+      mergeDecision(governance, { labels: ['owner-approved-merge'], action: 'labeled' }).merge,
       false,
     );
-    // The extra-round label is not a merge approval.
+    assert.equal(mergeDecision(governance, { ownerApprovedHead: true }).merge, true);
     assert.equal(
-      mergeDecision(outcome, { labels: ['owner-approved-extra-review-round'] }).merge,
+      mergeDecision({ ...governance, evidence: 'incomplete' }, { ownerApprovedHead: true }).merge,
       false,
     );
   });
 
-  test('the merge policy never passes incomplete evidence, label or not', () => {
+  test('the merge policy never passes incomplete evidence', () => {
     const incomplete = { evidence: 'incomplete', tier: 'normal' };
     assert.equal(mergeDecision(incomplete).merge, false);
-    assert.equal(
-      mergeDecision({ ...incomplete, tier: 'high' }, { labels: ['owner-approved-merge'] }).merge,
-      false,
-    );
+    assert.equal(mergeDecision({ ...incomplete, tier: 'high' }).merge, false);
     assert.equal(mergeDecision({ evidence: 'not-needed', tier: 'low' }).merge, true);
     assert.equal(mergeDecision({ evidence: 'complete', tier: 'normal' }).merge, true);
   });
@@ -586,12 +660,62 @@ describe('register rules', () => {
     assert.equal(fileTier('supabase/migrations/2026_x.sql'), 'high');
     assert.equal(fileTier('apps/api/src/telnyx.ts'), 'high');
     assert.equal(fileTier('packages/domain/src/money.ts'), 'high');
-    assert.equal(fileTier('.github/workflows/ci.yml'), 'high');
-    assert.equal(fileTier('docs/AI_WORKFLOW.md'), 'high');
     assert.equal(fileTier('docs/DECISIONS.md'), 'normal');
     assert.equal(fileTier('apps/web/src/components/MapLayers.tsx'), 'normal');
     assert.equal(fileTier('tests/e2e/specs/counterparties.spec.ts'), 'low');
     assert.equal(fileTier('docs/FEATURES.md'), 'low');
     assert.deepEqual(changeTier(['docs/FEATURES.md', 'apps/web/src/x.tsx']).tier, 'normal');
+  });
+
+  // The owner's decision of 2026-11-09: the rules and machinery of merging are governance.
+  test('governance covers the merge machinery and the rule documents', () => {
+    for (const path of [
+      '.github/workflows/ci.yml',
+      '.github/workflows/merge-policy.yml',
+      '.claude/hooks/guard-merge.js',
+      '.claude/settings.json',
+      'scripts/review-gate.js',
+      'scripts/guard-merge.test.js',
+      'AGENTS.md',
+      'docs/AI_WORKFLOW.md',
+      'docs/TRADING_RULES.md',
+      'docs/reviews/ACCEPTED.md',
+    ])
+      assert.equal(fileTier(path), 'governance', path);
+    assert.equal(changeTier(['supabase/migrations/x.sql', 'AGENTS.md']).tier, 'governance');
+  });
+
+  // F-150-R1-03: existing authentication, routing and FX entry points are high risk.
+  test('authentication, routing and FX entry points are high risk', () => {
+    for (const path of [
+      'apps/api/src/index.ts',
+      'apps/web/src/auth/AuthGate.tsx',
+      'apps/web/src/auth/MfaChallenge.tsx',
+      'apps/web/src/lib/fx.ts',
+      'apps/web/src/lib/orderBook.ts',
+      'apps/web/src/lib/workspaceQuotes.ts',
+      'apps/web/src/lib/quotes.ts',
+      'apps/web/src/lib/freight.ts',
+      'apps/web/src/lib/api.ts',
+      'apps/web/src/lib/supabase.ts',
+      // F-150-D1-03: the authenticated database user, and the domain package's exports.
+      'apps/api/src/respond.ts',
+      'packages/domain/src/index.ts',
+    ])
+      assert.equal(fileTier(path), 'high', path);
+  });
+
+  // F-150-D1-04: agent instructions and configuration at any depth are governance, never documents.
+  test('nested agent instructions and configuration are governance', () => {
+    for (const path of [
+      'apps/web/CLAUDE.md',
+      'apps/api/AGENTS.md',
+      'packages/domain/GEMINI.md',
+      'apps/web/.claude/settings.json',
+      '.gemini/settings.json',
+      'apps/api/.codex/config.toml',
+    ])
+      assert.equal(fileTier(path), 'governance', path);
+    assert.equal(documentsOnly(['apps/web/CLAUDE.md']), false);
   });
 });

@@ -38,7 +38,18 @@ describe('merge guard hook', () => {
   });
 
   test('blocks a merge that is not automatic', () => {
-    for (const command of ['gh pr merge 194 --squash', 'gh pr merge 194', 'gh.exe pr merge 1 -s']) {
+    for (const command of [
+      'gh pr merge 194 --squash',
+      'gh pr merge 194',
+      'gh.exe pr merge 1 -s',
+      // F-150-R1-04: leading spaces and command prefixes are still a merge.
+      '  gh pr merge 194 --squash',
+      '\tgh pr merge 194',
+      'GH_DEBUG=1 gh pr merge 194',
+      'env GH_DEBUG=1 gh pr merge 194',
+      'command gh pr merge 194',
+      'echo ok;   gh pr merge 194',
+    ]) {
       const result = run(command);
       assert.equal(result.status, 2, command);
       assert.match(result.stderr, /only enables automatic merging/);

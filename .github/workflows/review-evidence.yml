@@ -1,17 +1,16 @@
 name: Review evidence
 
-# A pull request's risk tier and whether its Codex review register (docs/reviews/<ID>.md) covers the
-# exact head commit (docs/AI_WORKFLOW.md §11.6), and the Merge policy (F-150). It reads git data
-# only and never runs code from the pull request.
+# Reports a pull request's risk tier and whether its Codex review register (docs/reviews/<ID>.md)
+# covers the exact head commit (docs/AI_WORKFLOW.md §11.6). Report only: the check GitHub requires
+# before a merge is "Merge policy" (merge-policy.yml), which no pull_request run may define. It reads
+# git data only and never runs code from the pull request.
 #
-# Runs:
+# Two runs:
 # - "pull_request" uses this file and scripts/review-gate.js as the pull request has them, so changes
-#   to the check are tested in their own pull request (report only);
-# - "pull_request_target" uses the copy on main, which a pull request cannot change. It checks out
-#   the pull request's commits as data only (no install, no build, no scripts from the pull request)
-#   and has no secrets. Its "Merge policy" job is the check GitHub requires before any merge: low
-#   and normal risk pass with complete review evidence; high risk only with the owner's label
-#   owner-approved-merge, which approves one head commit (a push removes it).
+#   to the check are tested in their own pull request;
+# - "pull_request_target" uses the copy on main, which a pull request cannot change. It checks out the
+#   pull request's commits as data only (no install, no build, no scripts from the pull request) with
+#   read-only permissions and no secrets.
 on:
   pull_request:
   pull_request_target:
@@ -22,8 +21,7 @@ permissions:
 
 concurrency:
   group: review-evidence-${{ github.event_name }}-${{ github.event.pull_request.number }}
-  # Queued, not cancelled: a push's run must finish removing the owner's approval label.
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   evidence:
@@ -60,46 +58,3 @@ jobs:
         run: |
           git fetch --no-tags --quiet origin "$BASE_SHA"
           node ../gate/scripts/review-gate.js --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS"
-
-  policy:
-    # The check GitHub requires before any merge (docs/AI_WORKFLOW.md §11.6). main's copy only.
-    name: Merge policy
-    if: github.event_name == 'pull_request_target'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      # Only to remove the owner's approval label after a push.
-      pull-requests: write
-    steps:
-      - name: A push withdraws the owner's approval
-        if: github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'owner-approved-merge')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: gh pr edit "$PR" --repo "$REPO" --remove-label owner-approved-merge
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: gate
-          persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Decide whether this pull request may merge
-        working-directory: pr
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          ACTION: ${{ github.event.action }}
-        run: |
-          git fetch --no-tags --quiet origin "$BASE_SHA"
-          node ../gate/scripts/review-gate.js --policy --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS" --action "$ACTION"

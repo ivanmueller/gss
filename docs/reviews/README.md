@@ -41,7 +41,7 @@ Pull requests that change documents only (Markdown outside the governance files)
 ```
 
 - **Round**: `D1`, `D2`… for design reviews of a plan (they do not count toward the limit); `1`, `2`, `3` for code reviews.
-- **Mode**: `design` (a plan), `checkpoint` (every change from a base commit; the first code review starts on the base branch), `rereview` (only what changed since the previous code review, plus the fixes to verify). Each code review starts where the previous one stopped, so together they cover the whole pull request; after the last one, only `docs/reviews/` may change.
+- **Mode**: `design` (a plan), `checkpoint` (every change from a base commit; the first code review starts on the base branch), `rereview` (only what changed since the previous code review, plus the fixes to verify), `final` (high risk and governance: the whole pull request again from the base branch, the last review before merging, which must approve). Coverage starts at the latest review that starts on the base branch; each review after it starts where the previous one stopped; after the last one, only `docs/reviews/` may change.
 - **Result**: Codex's verdict, `approve` or `needs-attention`; `failed` when Codex did not finish (does not count). The last code review must approve, unless it raised only P3 findings.
 - **Findings**: the round's issue count as the runner prints it ("Issues this round"): Codex's new findings plus fixes it found not fixed, each problem counted once. Rounds 6 to 8 are allowed only while it falls.
 - **Finding ID**: `<ID>-R<round>-<n>`, or `<ID>-D<n>-<n>` from a design review. Never reused.

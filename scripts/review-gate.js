@@ -23,6 +23,7 @@ import {
   isRegisterPath,
   OWNER_APPROVAL_LABEL,
   OWNER_MERGE_LABEL,
+  STRONG_TIERS,
   parseRegister,
   registerBlockers,
   verifyingReview,
@@ -59,6 +60,33 @@ export function evaluate({ base, head, labels = [] }) {
   if (files.length === 0) return { ...result, evidence: 'not-needed', note: 'No changed files.' };
   if (documentsOnly(files))
     return { ...result, evidence: 'not-needed', note: 'Documents only: no Codex review needed.' };
+
+  // Automated database checks (AGENTS.md, "Database rules"): a migration is never edited or removed
+  // once it is on the base branch, and a new migration comes with pgTAP tests.
+  const migrations = git([
+    'diff',
+    '--name-status',
+    '--no-renames',
+    mergeBase,
+    head,
+    '--',
+    'supabase/migrations',
+  ])
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.split('\t'));
+  for (const [status, path] of migrations)
+    if (status !== 'A')
+      result.blockers.push(
+        `Migration ${path} is ${status === 'D' ? 'removed' : 'changed'}: migrations are only ever added (a new file).`,
+      );
+  if (
+    migrations.some(([status]) => status === 'A') &&
+    !files.some((path) => path.startsWith('supabase/tests/database/'))
+  )
+    result.blockers.push(
+      'A new migration without pgTAP tests: add or change a test in supabase/tests/database/.',
+    );
 
   const registers = files.filter(isRegisterPath);
   if (registers.length !== 1) {
@@ -101,19 +129,30 @@ export function evaluate({ base, head, labels = [] }) {
       );
   }
 
-  // The chain of code reviews must cover every change from the base branch to the head.
+  // The chain of code reviews must cover every change from the base branch to the head. Coverage
+  // starts at the latest review that starts on the base branch (a full review of the whole pull
+  // request, such as a high-risk final review); each review after it continues where the previous
+  // one stopped.
   const chain = codeReviewChain(register);
+  const onBase = (review) => known(review.base) && isAncestor(review.base, mergeBase);
+  let start = -1;
+  for (let i = chain.length - 1; i >= 0; i -= 1)
+    if (onBase(chain[i])) {
+      start = i;
+      break;
+    }
+  if (chain.length && start < 0)
+    result.blockers.push(
+      `Review ${chain[0].round} starts at ${chain[0].base}, which is not on the base branch: no review covers the whole pull request.`,
+    );
   for (const [i, review] of chain.entries()) {
     if (!known(review.reviewed) || (review.base && !known(review.base))) {
       result.blockers.push(`Review ${review.round}: its commits are not in this repository.`);
       continue;
     }
-    if (i === 0) {
-      if (!isAncestor(review.base, mergeBase))
-        result.blockers.push(
-          `Review ${review.round} starts at ${review.base}, which is not on the base branch: it does not cover the whole pull request.`,
-        );
-    } else if (
+    if (
+      i > start &&
+      i > 0 &&
       !chain[i - 1].reviewed.startsWith(review.base) &&
       !review.base.startsWith(chain[i - 1].reviewed)
     ) {
@@ -136,24 +175,53 @@ export function evaluate({ base, head, labels = [] }) {
         `Changed after the last review (${last.reviewed}), outside docs/reviews/: ${after.join(', ')}. A re-review must cover them.`,
       );
   }
+
+  // Stronger requirements for high risk and governance (the owner's decision, 2026-11-09).
+  if (STRONG_TIERS.includes(tier)) {
+    if (!last || last.mode !== 'final' || start !== chain.length - 1)
+      result.blockers.push(
+        `${tier} risk: the last code review must be a final review of the whole pull request from the base branch (run-review.js --mode final).`,
+      );
+    const designs = register.reviews.filter(
+      (review) => review.mode === 'design' && review.result !== 'failed',
+    );
+    if (designs.length === 0)
+      result.blockers.push(`${tier} risk: no design review (D round) of the plan is recorded.`);
+    else if (
+      last &&
+      !designs.some((d) => known(d.reviewed) && isAncestor(d.reviewed, last.reviewed))
+    )
+      result.blockers.push(
+        `${tier} risk: the design review must have reviewed a commit before the reviewed code (its commit is not in the history of ${last.reviewed}).`,
+      );
+    for (const finding of register.findings)
+      if (finding.severity !== 'P3' && finding.status === 'accepted-limitation')
+        result.blockers.push(
+          `${tier} risk: ${finding.id} (${finding.severity}) is an accepted limitation; a serious finding left unfixed needs the owner's decision (requires-decision).`,
+        );
+  }
   return { ...result, evidence: result.blockers.length ? 'incomplete' : 'complete' };
 }
 
 /**
- * The merge policy (F-150, the owner's authorization of 2026-11-09): low and normal risk may merge
- * once the review evidence is complete (or not needed); high risk only with the owner's label
- * `owner-approved-merge` on this head commit (a push removes it, so on `synchronize` it never
- * counts). Required checks (CI) are GitHub's to enforce beside this one.
+ * The merge policy (F-150; the owner's decisions of 2026-11-09): low, normal and high risk merge
+ * automatically once the review evidence is complete (or not needed); high risk's evidence already
+ * includes its stronger requirements (evaluate). Governance, the rules and machinery of merging,
+ * also needs the owner's approval of this exact head commit: `ownerApprovedHead`, which the trusted
+ * Merge policy workflow sets only when it finds its own `owner-approved-merge` commit status on the
+ * head SHA (posted when the owner labels the pull request). Labels in an event are never trusted
+ * (F-150-R1-02): a new push is a new commit without approval. Required checks (CI) are GitHub's to
+ * enforce beside this one.
  */
-export function mergeDecision(outcome, { labels = [], action = '' } = {}) {
+export function mergeDecision(outcome, { ownerApprovedHead = false } = {}) {
   if (outcome.evidence === 'incomplete')
     return { merge: false, reason: 'no: review evidence incomplete' };
-  if (outcome.tier !== 'high') return { merge: true, reason: `yes (${outcome.tier} risk)` };
-  if (labels.includes(OWNER_MERGE_LABEL) && action !== 'synchronize')
-    return { merge: true, reason: `yes (high risk, approved by the owner: ${OWNER_MERGE_LABEL})` };
+  if (outcome.tier !== 'governance') return { merge: true, reason: `yes (${outcome.tier} risk)` };
+  if (ownerApprovedHead)
+    return { merge: true, reason: 'yes (governance, the owner approved this exact commit)' };
   return {
     merge: false,
-    reason: `no: high risk, held for the owner's approval (label ${OWNER_MERGE_LABEL})`,
+    reason: `no: governance change, held for the owner's approval of this commit (label ${OWNER_MERGE_LABEL})`,
   };
 }
 
@@ -180,12 +248,12 @@ function main(argv) {
   const head = option('head');
   if (!base || !head) {
     console.error(
-      'Usage: node scripts/review-gate.js --base <ref> --head <sha> [--labels a,b] [--action <pull request event action>] [--policy] [--json]',
+      'Usage: node scripts/review-gate.js --base <ref> --head <sha> [--labels a,b] [--policy] [--owner-approved-head] [--json]',
     );
     return 2;
   }
   const labels = (option('labels') ?? '').split(',').filter(Boolean);
-  const options = { labels, action: option('action') ?? '' };
+  const options = { ownerApprovedHead: argv.includes('--owner-approved-head') };
   let outcome;
   try {
     outcome = evaluate({ base, head: git(['rev-parse', `${head}^{commit}`]), labels });

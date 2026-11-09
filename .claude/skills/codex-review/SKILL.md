@@ -9,13 +9,17 @@ The process and its reasons are in `docs/AI_WORKFLOW.md` §11.5 and §11.6; the 
 
 The runner is `node .claude/skills/codex-review/run-review.js`. It reviews a **committed** snapshot in its own worktree with Codex's read-only sandbox, so commit before reviewing and never point it at uncommitted work. Run it with `run_in_background: true` and keep working; you are notified when it exits. Its output (findings with probable duplicates) is what you triage; Codex's raw output stays in `~/.gss-reviews/<ID>/` outside the repository.
 
+The runner loads `scripts/review-register.js` from the working tree: do not start a review while that file (or the runner) is half-edited, or it fails before reaching Codex.
+
 ## 0. Start
 
 - The item ID is the `F-###` or `T-##` from `docs/FEATURES.md` (add a suffix for a second pull request of the same item: `F-114-2`).
 - Create `docs/reviews/<ID>.md` from the format in `docs/reviews/README.md` (Status: open).
 - Risk tier: `node scripts/review-gate.js --base origin/main --head HEAD` once there is a commit; high risk also includes anything that changes how money, permissions, phone numbers or real business data are handled, whatever the paths say.
 
-## 1. Design review (high risk only, before coding)
+## 1. Design review (required for high risk and governance, before coding)
+
+The evidence check refuses a high-risk or governance pull request without one, and the design review must have reviewed a commit before the reviewed code. Know the tier before you start: anything touching the paths of the high-risk and governance rows in `docs/AI_WORKFLOW.md` §11.6.
 
 1. Write the plan to `~/.gss-reviews/<ID>/plan.md`: goal, files, schema and API changes, permissions, tests, risks. No real business data.
 2. `node .claude/skills/codex-review/run-review.js --id <ID> --mode design --plan <plan file>` (background).
@@ -59,7 +63,7 @@ To stop for the owner: record the round's findings, set the register's Status to
 
 ## 7. Finish
 
-1. The last code review must have reviewed the final code and approved (or raised only P3 findings): after its commit only `docs/reviews/` may change. If code changed since, run a re-review.
+1. The last code review must have reviewed the final code and approved (or raised only P3 findings): after its commit only `docs/reviews/` may change. If code changed since, run a re-review. **High risk and governance:** the last code review must be a final review of the whole pull request, `run-review.js --id <ID> --mode final` (background), after the loop has settled; it counts as a round. Triage its findings like any other; if it raises a P1 or P2, fix, re-review, and run the final review again (within the round limits).
 2. Set Status to **complete** (or **escalated**), commit the register.
 3. Run `node scripts/review-gate.js --base origin/main --head HEAD` and fix whatever it lists.
 4. Push and open the pull request, ready for review (template sections filled, the register linked, rounds and any escalation stated).
@@ -67,7 +71,8 @@ To stop for the owner: record the round's findings, set the register's Status to
 ## 8. Merge and staging (docs/AI_WORKFLOW.md §11.6)
 
 1. **Low or normal risk:** `gh pr merge <n> --auto --squash`. GitHub merges once `check` and `Merge policy` pass. The hook refuses it while GitHub does not require the Merge policy (automatic merging not switched on): then say the pull request is ready and leave the merge to the owner.
-2. **High risk:** never enable merging. Tell the owner briefly what it changes and why it is high risk; they merge it or add `owner-approved-merge`.
-3. Watch until it merges (`gh pr checks <n> --watch`, then `gh pr view <n> --json mergedAt,mergeCommit`), then the `Deploy staging` run for the merge commit (`gh run list --workflow "Deploy staging" --commit <sha>`, `gh run watch <id>`).
-4. On success: send the owner a short notification (PushNotification) and message: what changed, in plain words, the pull request and that staging is updated. Then the records commit (`docs/HANDOFF.md`, `docs/FEATURES.md`) on the next branch.
-5. On failure (a check, the deploy, the smoke test): read the log, notify the owner of the blocker, and fix it on a new branch; never re-run a deploy or migration by hand.
+2. **High risk:** the same `--auto --squash`, once the evidence check passes locally with its stronger requirements; GitHub merges after `check` and `Merge policy`.
+3. **Governance:** enable `--auto --squash` too, then tell the owner briefly what it changes; the workflow comments the exact `approve-merge <commit>` line, which the owner copies as a comment and then adds the label `owner-approved-merge`. Never write that line or add the label yourself; do not push to the pull request while it waits (a push needs a new approval).
+4. Watch until it merges (`gh pr checks <n> --watch`, then `gh pr view <n> --json mergedAt,mergeCommit`), then the `Deploy staging` run for the merge commit (`gh run list --workflow "Deploy staging" --commit <sha>`, `gh run watch <id>`).
+5. On success: send the owner a short notification (PushNotification) and message: what changed, in plain words, the pull request and that staging is updated. Then the records commit (`docs/HANDOFF.md`, `docs/FEATURES.md`) on the next branch.
+6. On failure (a check, the deploy, the smoke test): read the log, notify the owner of the blocker, and fix it on a new branch; never re-run a deploy or migration by hand.

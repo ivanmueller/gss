@@ -20,9 +20,12 @@ try {
   process.exit(0);
 }
 const command = String(input.tool_input?.command ?? '');
-// Only where a command starts (the line's start, or after && ; | or a parenthesis), so text that
-// merely mentions the command, such as a document written by a heredoc, is not taken for it.
-if (!/(^|[;&|(]\s*|\n\s*)(sudo\s+)?gh(\.exe)?\s+pr\s+merge\b/.test(command)) process.exit(0);
+// Only where a command starts (the line's start, or after && ; | or a parenthesis, with any spaces
+// and prefixes such as VAR=value, env, command, sudo, time: F-150-R1-04), so text that merely
+// mentions the command, such as a document written by a heredoc, is not taken for it.
+const START =
+  /(^|[;&|(\n])\s*((\w+=\S*|env|command|sudo|time|exec|nohup)\s+)*gh(\.exe)?\s+pr\s+merge\b/;
+if (!START.test(command)) process.exit(0);
 
 if (/(^|\s)(--admin|-A)\b/.test(command))
   block('--admin bypasses the branch rules; Claude never uses it.');
