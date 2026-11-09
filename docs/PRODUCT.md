@@ -83,7 +83,7 @@ Trader sees a ranked **table**, not only a map. The table ranks candidate seller
 | Route | Main purpose | Primary controls |
 |---|---|---|
 | `/login` (implemented) | Secure employee access | Email and password, then an authenticator code; at first sign-in, set up the authenticator (a computer: QR code and key; an iPhone: **Copy setup key** or **Save in Apple Passwords**; Android: **Open in authenticator app** or **Copy setup key**), choose a password and give a name |
-| `/workspace` | Main map and synchronized table | Commodity, grade, geography, buyer/seller, quote status, valid-as-of |
+| `/workspace` | Main map and synchronized table | Commodity, grade, geography, buyer/seller, quote status, valid-as-of; **Layers** under the zoom buttons: map layers switched on and off per person, a map's layers under one row with a drop-down arrow, each layer's colours or legend under the map (F-107, F-133, F-139, F-142) |
 | `/facilities/:id` | Facility details | Organization, location, contact, service type, quotes, notes, provenance |
 | `/quotes` (implemented, without import and export) | Bids and offers: live ones by default | All / Bids / Offers, commodity, include withdrawn and expired; New bid or offer for traders and admins. Above the list, **Claude's drafts to verify** (F-115, F-116): drafts of bids and offers from calls, under the same filters, each naming its company |
 | `/quotes/new` (implemented) | Enter a bid or offer | Side, counterparty (buyers or sellers, and brokers), optional location, commodity, then the terms; `?counterparty=&side=` from a counterparty's page |
