@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { arcgisSquareUrl, overviewPageUrl, pictureType, pictureUrl } from './map-layers';
+import { arcgisSquareUrl, crc32, overviewPageUrl, pictureType, pictureUrl } from './map-layers';
 import type { MapLayerSource } from './map-layers-db';
 import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 
@@ -1139,21 +1139,71 @@ describe('pre-drawn ArcGIS maps (F-141)', () => {
   });
 });
 
-describe('pictureType (Codex’s reviews of 4026e22 and b9746f9)', () => {
-  /** A minimal JPEG: start, a JFIF header, a frame header, a scan with two bytes of data, end. */
+describe('pictureType (Codex’s reviews of 4026e22, b9746f9 and aca667e)', () => {
+  /** A minimal JPEG: start, a quantization table, a frame, a scan with two bytes of data, end. */
   const jpeg = new Uint8Array([
-    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
-    0x00, 0x01, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11,
-    0x00, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x12, 0x34, 0xff, 0xd9,
+    0xff,
+    0xd8,
+    0xff,
+    0xdb,
+    0x00,
+    0x43,
+    0x00,
+    ...Array.from({ length: 64 }, () => 1),
+    0xff,
+    0xc0,
+    0x00,
+    0x0b,
+    0x08,
+    0x00,
+    0x01,
+    0x00,
+    0x01,
+    0x01,
+    0x01,
+    0x11,
+    0x00,
+    0xff,
+    0xda,
+    0x00,
+    0x08,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x3f,
+    0x00,
+    0x12,
+    0x34,
+    0xff,
+    0xd9,
   ]);
 
-  it('takes whole PNGs and JPEGs', () => {
-    expect(pictureType(ONE_PIXEL_BYTES)).toBe('image/png');
-    expect(pictureType(jpeg)).toBe('image/jpeg');
-    expect(pictureType(new Uint8Array([...jpeg, 0, 0]))).toBe('image/jpeg');
+  /** A PNG chunk with its length and correct checksum. */
+  function chunk(type: string, data: Uint8Array): number[] {
+    const body = new Uint8Array([...new TextEncoder().encode(type), ...data]);
+    const crc = crc32(body, 0, body.length);
+    const n = data.length;
+    return [
+      n >>> 24,
+      (n >>> 16) & 255,
+      (n >>> 8) & 255,
+      n & 255,
+      ...body,
+      crc >>> 24,
+      (crc >>> 16) & 255,
+      (crc >>> 8) & 255,
+      crc & 255,
+    ];
+  }
+
+  it('takes whole PNGs and JPEGs', async () => {
+    expect(await pictureType(ONE_PIXEL_BYTES)).toBe('image/png');
+    expect(await pictureType(jpeg)).toBe('image/jpeg');
+    expect(await pictureType(new Uint8Array([...jpeg, 0, 0]))).toBe('image/jpeg');
   });
 
-  it('refuses wrappers with a picture’s markers around anything else', () => {
+  it('refuses wrappers with a picture’s markers around anything else', async () => {
     const text = [...new TextEncoder().encode('<b>not a picture</b>')];
     // A PNG signature with IHDR and IEND where they would be, but no real chunks.
     const fakePng = new Uint8Array(57);
@@ -1163,18 +1213,73 @@ describe('pictureType (Codex’s reviews of 4026e22 and b9746f9)', () => {
     // A PNG whose checksum is wrong, cut short, or without an end.
     const wrongCrc = ONE_PIXEL_BYTES.slice();
     wrongCrc[29] = (wrongCrc[29] ?? 0) ^ 0xff;
+    // A PNG of good chunks with text for its picture data (Codex's re-review of aca667e).
+    const header = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]);
+    const textInside = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(text)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
     for (const bad of [
       fakePng,
       wrongCrc,
+      textInside,
       ONE_PIXEL_BYTES.slice(0, ONE_PIXEL_BYTES.length - 12),
       new Uint8Array([0xff, 0xd8, 0xff, ...text, 0xff, 0xd9]),
       new Uint8Array([0xff, 0xd8, ...text, 0xff, 0xd9]),
-      // A JPEG without its frame header, or with a non-zero byte after its end.
-      jpeg.filter((_, k) => k < 20 || k > 32),
+      // Empty frame and scan headers (Codex's re-review of aca667e).
+      new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x02, 0xff, 0xda, 0x00, 0x02, 0xff, 0xd9]),
+      // A JPEG without its quantization table, or with a non-zero byte after its end.
+      jpeg.filter((_, k) => k < 2 || k > 70),
       new Uint8Array([...jpeg, 0x41]),
       new Uint8Array(0),
     ]) {
-      expect(pictureType(bad)).toBeNull();
+      expect(await pictureType(bad)).toBeNull();
     }
+  });
+
+  it('takes a PNG with real picture data built the same way', async () => {
+    const { deflateSync } = await import('node:zlib');
+    const header = new Uint8Array([0, 0, 0, 2, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+    // One row: its filter byte and two RGB pixels.
+    const pixels = deflateSync(new Uint8Array([0, 255, 0, 0, 0, 0, 255]));
+    const png = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(pixels)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(png)).toBe('image/png');
+    // The same with one pixel too few.
+    const short = deflateSync(new Uint8Array([0, 255, 0, 0]));
+    const tooShort = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(short)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(tooShort)).toBeNull();
   });
 });

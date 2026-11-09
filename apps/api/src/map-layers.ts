@@ -53,7 +53,7 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   return c >>> 0;
 });
 
-function crc32(bytes: Uint8Array, start: number, end: number): number {
+export function crc32(bytes: Uint8Array, start: number, end: number): number {
   let c = 0xffffffff;
   for (let i = start; i < end; i += 1) {
     c = (CRC_TABLE[(c ^ (bytes[i] ?? 0)) & 0xff] ?? 0) ^ (c >>> 8);
@@ -61,76 +61,219 @@ function crc32(bytes: Uint8Array, start: number, end: number): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
+/** Channels per pixel of each PNG colour type, and the bit depths it allows. */
+const PNG_COLOUR_TYPES: Record<number, { channels: number; depths: number[] }> = {
+  0: { channels: 1, depths: [1, 2, 4, 8, 16] },
+  2: { channels: 3, depths: [8, 16] },
+  3: { channels: 1, depths: [1, 2, 4, 8] },
+  4: { channels: 2, depths: [8, 16] },
+  6: { channels: 4, depths: [8, 16] },
+};
+
+/** The bytes of a PNG's unpacked picture data: one filter byte and the pixels of each row. */
+function pngDataSize(width: number, height: number, bitsPerPixel: number, interlaced: boolean) {
+  const rows = (w: number, h: number) =>
+    w === 0 || h === 0 ? 0 : h * (1 + Math.ceil((w * bitsPerPixel) / 8));
+  if (!interlaced) return rows(width, height);
+  // Adam7: seven passes, each a smaller picture.
+  const passes = [
+    [0, 0, 8, 8],
+    [4, 0, 8, 8],
+    [0, 4, 4, 8],
+    [2, 0, 4, 4],
+    [0, 2, 2, 4],
+    [1, 0, 2, 2],
+    [0, 1, 1, 2],
+  ] as const;
+  return passes.reduce(
+    (sum, [x0, y0, dx, dy]) =>
+      sum + rows(Math.ceil((width - x0) / dx), Math.ceil((height - y0) / dy)),
+    0,
+  );
+}
+
+/** Unpacks zlib data, stopping past `limit` bytes; null when it is not zlib data. */
+async function inflate(data: Uint8Array, limit: number): Promise<number | null> {
+  try {
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate'));
+    const reader = stream.getReader();
+    let total = 0;
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return total;
+      total += chunk.value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined);
+        return total;
+      }
+    }
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Whether bytes are a whole PNG: its signature, then chunks each with its length, type and a
- * correct checksum, the header (IHDR, 13 bytes, a size above 0) first, picture data (IDAT) and
- * the end (IEND) last, exactly at the end of the bytes.
+ * Whether bytes are a whole PNG: its signature; chunks each with its length, type and a correct
+ * checksum; the header (IHDR) first, with a size above 0 and a colour type and bit depth PNG
+ * allows; a palette (PLTE) for palette pictures; and the end (IEND) exactly last. Its picture
+ * data (IDAT), unpacked, must be exactly the size the header gives (Codex's re-review of aca667e:
+ * text inside IDAT passed), at most 4096 by 4096 pixels.
  */
-function isPng(b: Uint8Array): boolean {
+async function isPng(b: Uint8Array): Promise<boolean> {
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (b.length < 8 || !signature.every((v, k) => b[k] === v)) return false;
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
   let at = 8;
-  let first = true;
-  let data = false;
+  let header: {
+    width: number;
+    height: number;
+    bits: number;
+    interlaced: boolean;
+    palette: boolean;
+  } | null = null;
+  let palette = false;
+  const data: Uint8Array[] = [];
   while (at + 12 <= b.length) {
     const length = view.getUint32(at);
     const type = String.fromCharCode(...b.subarray(at + 4, at + 8));
     const end = at + 12 + length;
     if (!/^[A-Za-z]{4}$/.test(type) || end > b.length) return false;
     if (crc32(b, at + 4, at + 8 + length) !== view.getUint32(at + 8 + length)) return false;
-    if (first) {
+    if (header === null) {
       if (type !== 'IHDR' || length !== 13) return false;
-      if (view.getUint32(at + 8) === 0 || view.getUint32(at + 12) === 0) return false;
-      first = false;
+      const width = view.getUint32(at + 8);
+      const height = view.getUint32(at + 12);
+      const depth = b[at + 16] ?? 0;
+      const colour = PNG_COLOUR_TYPES[b[at + 17] ?? 99];
+      const [compression, filter, interlace] = [b[at + 18], b[at + 19], b[at + 20]];
+      if (
+        width === 0 ||
+        height === 0 ||
+        width > 4096 ||
+        height > 4096 ||
+        !colour?.depths.includes(depth) ||
+        compression !== 0 ||
+        filter !== 0 ||
+        (interlace !== 0 && interlace !== 1)
+      ) {
+        return false;
+      }
+      header = {
+        width,
+        height,
+        bits: depth * colour.channels,
+        interlaced: interlace === 1,
+        palette: b[at + 17] === 3,
+      };
+    } else if (type === 'IHDR') return false;
+    if (type === 'PLTE') palette = true;
+    if (type === 'IDAT') data.push(b.subarray(at + 8, at + 8 + length));
+    if (type === 'IEND') {
+      if (length !== 0 || end !== b.length || data.length === 0) return false;
+      if (header.palette && !palette) return false;
+      const packed = new Uint8Array(data.reduce((n, d) => n + d.length, 0));
+      let o = 0;
+      for (const d of data) {
+        packed.set(d, o);
+        o += d.length;
+      }
+      const expected = pngDataSize(header.width, header.height, header.bits, header.interlaced);
+      return (await inflate(packed, expected)) === expected;
     }
-    if (type === 'IDAT') data = true;
-    if (type === 'IEND') return data && length === 0 && end === b.length;
     at = end;
   }
   return false;
 }
 
 /**
- * Whether bytes are a whole JPEG: its start marker, then marker segments each with its length, a
- * frame header (SOF) before the scan (SOS), the scan's data, and the end marker last, followed
- * by nothing but zero padding.
+ * Whether bytes are a whole JPEG: its start marker; marker segments each with its length, all
+ * walked to the end marker, through every scan (progressive pictures have several); quantization
+ * tables (DQT); one frame header (SOF) of 1 to 4 components, 8 or 12 bits, a size above 0,
+ * exactly as long as its components; each scan header (SOS) exactly as long as its 1 to 4
+ * components, followed by some coded data; and the end marker last, followed by nothing but zero
+ * padding (Codex's re-review of aca667e: empty SOF and SOS segments passed).
  */
 function isJpeg(b: Uint8Array): boolean {
   if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return false;
+  const u16 = (i: number) => ((b[i] ?? 0) << 8) | (b[i + 1] ?? 0);
   let at = 2;
   let frame = false;
+  let tables = false;
+  let scans = 0;
   for (;;) {
     if (b[at] !== 0xff) return false;
     while (b[at] === 0xff) at += 1;
     const marker = b[at];
     if (marker === undefined) return false;
     at += 1;
-    // Markers without a length.
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
-    if (marker === 0xd9) return false;
-    const length = ((b[at] ?? 0) << 8) | (b[at + 1] ?? 0);
+    if (marker === 0xd9) {
+      // The end: only zero padding after it.
+      for (let i = at; i < b.length; i += 1) if (b[i] !== 0x00) return false;
+      return frame && tables && scans > 0;
+    }
+    if (marker === 0xd8) return false;
+    const length = u16(at);
     if (length < 2 || at + length > b.length) return false;
-    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+    const isFrame =
+      marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrame) {
+      const components = b[at + 7] ?? 0;
+      const precision = b[at + 2];
+      if (
+        frame ||
+        components < 1 ||
+        components > 4 ||
+        length !== 8 + 3 * components ||
+        (precision !== 8 && precision !== 12) ||
+        u16(at + 3) === 0 ||
+        u16(at + 5) === 0
+      ) {
+        return false;
+      }
       frame = true;
     }
+    if (marker === 0xdb) tables = true;
     at += length;
-    if (marker === 0xda) break;
+    if (marker === 0xda) {
+      const components = b[at - length + 2] ?? 0;
+      if (!frame || components < 1 || components > 4 || length !== 6 + 2 * components) {
+        return false;
+      }
+      // The coded data, to the next marker: 0xFF 0x00 is a data byte, 0xFF 0xD0–D7 a restart.
+      const start = at;
+      while (at < b.length) {
+        if (b[at] === 0xff) {
+          const next = b[at + 1];
+          if (next === 0x00 || (next !== undefined && next >= 0xd0 && next <= 0xd7)) {
+            at += 2;
+            continue;
+          }
+          if (next === 0xff) {
+            at += 1;
+            continue;
+          }
+          break;
+        }
+        at += 1;
+      }
+      if (at === start) return false;
+      scans += 1;
+    }
   }
-  if (!frame) return false;
-  // The scan's data runs to the end marker; after it, only zero padding.
-  let end = b.length;
-  while (end > at && b[end - 1] === 0x00) end -= 1;
-  return end - 2 >= at && b[end - 2] === 0xff && b[end - 1] === 0xd9;
 }
 
 /**
- * A picture's type from its structure, every PNG chunk and JPEG segment checked, not its first
- * bytes alone (Codex's reviews of 4026e22 and b9746f9): null for anything else.
+ * A picture's type from its structure, every PNG chunk and JPEG segment checked and a PNG's
+ * picture data unpacked, not its first bytes alone (Codex's reviews of 4026e22, b9746f9 and
+ * aca667e): null for anything else. A JPEG's coded pixels are not decoded; browsers draw what
+ * they can and nothing else.
  */
-export function pictureType(body: ArrayBuffer | Uint8Array): 'image/png' | 'image/jpeg' | null {
+export async function pictureType(
+  body: ArrayBuffer | Uint8Array,
+): Promise<'image/png' | 'image/jpeg' | null> {
   const b = body instanceof Uint8Array ? body : new Uint8Array(body);
-  if (isPng(b)) return 'image/png';
+  if (await isPng(b)) return 'image/png';
   if (isJpeg(b)) return 'image/jpeg';
   return null;
 }
@@ -152,7 +295,7 @@ const MAX_LEGEND_BYTES = 1024 * 1024;
  * layer's name before its entries when there are several, each with plain words and its picture
  * when it is a small PNG or JPEG (at most 40 entries, each picture at most 20 KB).
  */
-export function legendEntries(body: unknown): LayerLegend['entries'] {
+export async function legendEntries(body: unknown): Promise<LayerLegend['entries']> {
   const layers = record(body)?.layers;
   if (!Array.isArray(layers)) return [];
   const entries: LayerLegend['entries'] = [];
@@ -174,7 +317,7 @@ export function legendEntries(body: unknown): LayerLegend['entries'] {
       const image =
         bytes !== null &&
         (type === 'image/png' || type === 'image/jpeg') &&
-        pictureType(bytes) === type
+        (await pictureType(bytes)) === type
           ? `data:${type};base64,${typeof data === 'string' ? data : ''}`
           : null;
       const label = plainText(i?.label, 200);
@@ -1224,7 +1367,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         return serviceFailed(c, error, 'legend');
       }
       c.header('Cache-Control', LIVE_CACHE);
-      return c.json({ entries: legendEntries(body) } satisfies LayerLegend);
+      return c.json({ entries: await legendEntries(body) } satisfies LayerLegend);
     });
   });
 
@@ -1272,7 +1415,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         }
         return serviceFailed(c, error, 'picture');
       }
-      const type = pictureType(answer.body);
+      const type = await pictureType(answer.body);
       if (type === null) return serviceFailed(c, new LayerServiceError(415), 'picture');
       c.header('Cache-Control', LIVE_CACHE);
       c.header('Content-Type', type);
