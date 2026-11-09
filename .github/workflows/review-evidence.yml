@@ -47,7 +47,8 @@ jobs:
           node-version: 22
       - name: Tests of the check
         if: github.event_name == 'pull_request'
-        run: node --test gate/scripts/
+        # A file pattern, not a folder: Node 22 (CI) takes `--test` arguments as files or globs.
+        run: node --test 'gate/scripts/*.test.js'
       - name: Check the review evidence
         working-directory: pr
         env:

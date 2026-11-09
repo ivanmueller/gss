@@ -465,7 +465,32 @@ describe('register rules', () => {
   });
 
   test('a round counts each problem once, and stops on recurrence or disagreement', () => {
-    const finding = (severity, dup = null) => ({ severity, probable_duplicate_of: dup });
+    // Codex's own duplicate_of; the runner copies it, or a nearby known finding, into
+    // probable_duplicate_of.
+    const finding = (severity, dup = null) => ({
+      severity,
+      duplicate_of: dup,
+      probable_duplicate_of: dup,
+    });
+    // F-149-R4-01: a finding the runner only matched by nearness (Codex: duplicate_of null) is
+    // advisory; it neither escalates nor merges issues.
+    const nearby = { severity: 'P2', duplicate_of: null, probable_duplicate_of: 'X-R1-02' };
+    const unconfirmed = roundOutcome({
+      findings: [nearby],
+      verifiedFixes: [],
+      previous: null,
+      known: [{ id: 'X-R1-02', severity: 'P2', status: 'rejected' }],
+    });
+    assert.equal(unconfirmed.escalation, null);
+    assert.equal(
+      roundOutcome({
+        findings: [{ ...nearby, probable_duplicate_of: 'X-R1-01' }],
+        verifiedFixes: [{ id: 'X-R1-01', status: 'not-fixed', note: '' }],
+        previous: null,
+        known: [],
+      }).issues,
+      2,
+    );
     const notFixed = (id) => ({ id, status: 'not-fixed', note: '' });
     const known = [
       { id: 'X-R1-01', severity: 'P2', status: 'fixed' },

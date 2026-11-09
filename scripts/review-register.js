@@ -293,13 +293,16 @@ export function registerBlockers(register, { ownerApproved = false } = {}) {
  * - `escalation`: why the loop must stop for the owner, or null. The same fix found not fixed in
  *   two rounds running without the issue count falling (recurring without progress), or Codex
  *   raising again a P1 or P2 that Claude rejected or accepted (a significant disagreement).
- * `findings` carry `probable_duplicate_of`; `previous` is the last completed code round's state
+ * `findings` are Codex's, with its own `duplicate_of`; `previous` is the last completed code round's state
  * ({ issues, notFixed }), null before the first, undefined for a design review (never escalates);
  * `known` are the register's rows ({ id, severity, status }).
  */
 export function roundOutcome({ findings, verifiedFixes, previous, known }) {
   const notFixed = verifiedFixes.filter((v) => v.status === 'not-fixed').map((v) => v.id);
-  const repeated = new Set(findings.map((f) => f.probable_duplicate_of).filter(Boolean));
+  // Only Codex's own duplicate_of counts here; the runner's nearness match
+  // (probable_duplicate_of) is a hint for Claude's triage, never grounds to stop the loop
+  // (F-149-R4-01).
+  const repeated = new Set(findings.map((f) => f.duplicate_of).filter(Boolean));
   const issues = findings.length + notFixed.filter((id) => !repeated.has(id)).length;
   if (previous === undefined) return { issues, notFixed, escalation: null };
   const reasons = [];
@@ -310,12 +313,12 @@ export function roundOutcome({ findings, verifiedFixes, previous, known }) {
       `recurring without progress: ${recurring.join(', ')} found not fixed two rounds running, issues ${before} then ${issues}`,
     );
   const disputed = findings.filter((f) => {
-    const row = known.find((k) => k.id === f.probable_duplicate_of);
+    const row = known.find((k) => k.id === f.duplicate_of);
     return f.severity !== 'P3' && row && ['rejected', 'accepted-limitation'].includes(row.status);
   });
   if (disputed.length)
     reasons.push(
-      `disagreement: Codex raises again ${disputed.map((f) => `${f.probable_duplicate_of} as ${f.severity}`).join(', ')}, which Claude rejected or accepted`,
+      `disagreement: Codex raises again ${disputed.map((f) => `${f.duplicate_of} as ${f.severity}`).join(', ')}, which Claude rejected or accepted`,
     );
   return { issues, notFixed, escalation: reasons.length ? reasons.join('; ') : null };
 }
