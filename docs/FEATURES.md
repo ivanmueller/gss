@@ -52,7 +52,7 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 
 **Owner decisions still open:**
 1. The sending address: each person's own (name@ the domain) or one shared (trading@ the domain)?
-2. Is the domain's DNS already on Cloudflare (Cloudflare → Websites lists it)? Which subdomain for replies?
+2. ~~Is the domain's DNS on Cloudflare?~~ Answered 2026-11-09: moved from IONOS to Cloudflare that day; the domain's mailboxes stay at IONOS. Still open: which subdomain for replies.
 3. Who may send: everyone on the team, or traders and admins only?
 4. Attachments (photos, PDFs), or text only at first?
 5. A standard GSS signature; saved templates?
