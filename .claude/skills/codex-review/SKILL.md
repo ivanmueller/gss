@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: GSS's Claude-to-Codex review loop. Use for every GSS pull request that changes code - a Codex design review of the plan before high-risk work (database, auth, money, Telnyx, Anthropic), background Codex reviews of committed checkpoints while you keep working, triage of each finding into docs/reviews/<ID>.md, fixes with regression tests, targeted re-reviews, at most 3 rounds, then the evidence check before the pull request.
+description: GSS's Claude-to-Codex review loop. Use for every GSS pull request that changes code - a Codex design review of the plan before high-risk work (database, auth, money, Telnyx, Anthropic), background Codex reviews of committed checkpoints while you keep working, triage of each finding into docs/reviews/<ID>.md, fixes with regression tests, targeted re-reviews (up to 5 rounds, 6 to 8 only with progress, escalation on recurrence or disagreement), then the evidence check before the pull request.
 ---
 
 # Codex review loop (GSS)
@@ -27,7 +27,7 @@ The runner is `node .claude/skills/codex-review/run-review.js`. It reviews a **c
 At each stable point (a coherent piece built, `pnpm check` or the relevant tests passing locally), commit and push, then start
 `node .claude/skills/codex-review/run-review.js --id <ID> --mode checkpoint` (background; the first one starts at the branch's merge base with `origin/main`). Continue with work in other files while it runs. Do not start a second code review of the same pull request while one is running: rounds form a chain.
 
-Prefer one checkpoint review when the feature is complete over many small ones: the limit is 3 code rounds per pull request, and a large feature should be split into several pull requests (as the build plans already do).
+Prefer one checkpoint review when the feature is complete over many small ones: every code review is a round (5 automatic per pull request), and a large feature should be split into several pull requests (as the build plans already do).
 
 ## 3. Triage every finding (never accept one unchecked)
 
@@ -39,7 +39,7 @@ For each finding, read the code it names and decide:
 - **accepted-limitation**: real but accepted for this pull request; Evidence says why and who accepted it. Anything touching money, permissions, privacy, costs or retention is the owner's to accept: use requires-decision instead.
 - **requires-decision**: the right answer is a business choice. Write it under "Escalated to the owner" in plain language.
 
-Record each in the register's Findings table with ID `<ID>-R<round>-<nn>`. If Codex marked it `security_sensitive` and it is not fixed yet, write the summary in general terms only ("Security finding in <area>; details withheld until fixed") and keep the detail in `~/.gss-reviews/<ID>/notes.md`. Add the review's row to the Reviews table (round, mode, base, reviewed commit, verdict, number of findings).
+Record each in the register's Findings table with ID `<ID>-R<round>-<nn>`. If Codex marked it `security_sensitive` and it is not fixed yet, write the summary in general terms only ("Security finding in <area>; details withheld until fixed") and keep the detail in `~/.gss-reviews/<ID>/notes.md`. Add the review's row to the Reviews table (round, mode, base, reviewed commit, verdict, and the runner's "Issues this round" as Findings).
 
 ## 4. Fix confirmed findings
 
@@ -49,13 +49,17 @@ For each confirmed finding: write or keep the failing test, fix the code, run th
 
 `node .claude/skills/codex-review/run-review.js --id <ID> --mode rereview` (background). It reviews only what changed since the last code review and asks Codex to verify every fixed-but-unverified and confirmed finding. For each `verified_fixes` entry: `fixed` → set Verified to `R<this round>`; `not-fixed` → set Status back to **confirmed** with Codex's note in Evidence; `cannot-tell` → explain in Evidence and decide (a test proving it may be enough to ask again next round). New findings are triaged as in step 3.
 
-## 6. The limit
+## 6. When to stop
 
-The runner allows 3 code rounds (exit code 3 after that). When it refuses, or when you and Codex still disagree after two exchanges on one finding, stop the loop: set the register's Status to **escalated**, write under "Escalated to the owner" what is unresolved, your position, Codex's position and the decision needed, in plain language, and put the same in the pull request. Only the owner may allow one more round (`--extra-round`, with the label `owner-approved-extra-review-round` on the pull request, which only the owner adds).
+- **Codex approves** (the runner says "Codex approved: stop the loop"): stop. Record the round and go to step 7.
+- **Limits** (the runner enforces them, exit code 3): rounds 1 to 5 run; 6 to 8 only when the last round's issue count ("Issues this round", which goes in the Reviews table's Findings column) fell from the round before; beyond 8 only with the owner's approval.
+- **Escalation** (exit code 6, "ESCALATE: …"): the same fix was found not fixed two rounds running without the issue count falling, or Codex raised again a P1 or P2 you rejected or accepted. Also escalate yourself when you would reject a P1 or P2 in what should be the last round: that is a significant disagreement, never a pass.
+
+To stop for the owner: record the round's findings, set the register's Status to **escalated**, write under "Escalated to the owner" what is unresolved, your position, Codex's position and the decision needed, in plain language, and put the same in the pull request. **Reaching a limit is never approval**: unresolved P1 and P2 findings keep blocking, and an escalated register blocks merging. Only the owner may allow more rounds (`--owner-approved`, with the label `owner-approved-extra-review-round` on the pull request, which only the owner adds).
 
 ## 7. Finish
 
-1. The last code review must have reviewed the final code: after its commit only `docs/reviews/` may change. If code changed since, run a re-review.
+1. The last code review must have reviewed the final code and approved (or raised only P3 findings): after its commit only `docs/reviews/` may change. If code changed since, run a re-review.
 2. Set Status to **complete** (or **escalated**), commit the register.
 3. Run `node scripts/review-gate.js --base origin/main --head HEAD` and fix whatever it lists.
 4. Push and open the pull request (template sections filled, the register linked, rounds and any escalation stated). Report the link. Do not merge.

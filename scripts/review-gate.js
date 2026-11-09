@@ -2,7 +2,9 @@
 //   - its risk tier (low, normal, high) from the files it changes;
 //   - whether its review register (docs/reviews/<ID>.md) is complete for the exact head commit:
 //     every code review round chained from a commit on the base branch to a commit after which only
-//     docs/reviews/ changed, no blocking finding, fixes verified by Codex, at most 3 rounds;
+//     docs/reviews/ changed, no blocking finding, fixes verified by Codex, the last review
+//     approving, not escalated, and every round within the limits (5; up to 8 with progress;
+//     more only with the owner's label);
 //   - whether it would be eligible for automatic merging (never for high risk). Automatic merging is
 //     not switched on: this only reports.
 // It reads git data only and never runs code from the pull request.
@@ -18,12 +20,11 @@ import {
   codeReviewChain,
   documentsOnly,
   isRegisterPath,
+  OWNER_APPROVAL_LABEL,
   parseRegister,
   registerBlockers,
   verifyingReview,
 } from './review-register.js';
-
-const EXTRA_ROUND_LABEL = 'owner-approved-extra-review-round';
 
 function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
@@ -68,8 +69,8 @@ export function evaluate({ base, head, labels = [] }) {
   }
   result.register = registers[0];
   const register = parseRegister(git(['show', `${head}:${registers[0]}`]));
-  const extraRounds = labels.includes(EXTRA_ROUND_LABEL) ? 1 : 0;
-  result.blockers.push(...registerBlockers(register, { extraRounds }));
+  const ownerApproved = labels.includes(OWNER_APPROVAL_LABEL);
+  result.blockers.push(...registerBlockers(register, { ownerApproved }));
 
   const known = (sha) => {
     try {
