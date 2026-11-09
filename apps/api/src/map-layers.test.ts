@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { arcgisSquareUrl, overviewPageUrl, pictureUrl } from './map-layers';
+import { arcgisSquareUrl, crc32, overviewPageUrl, pictureType, pictureUrl } from './map-layers';
 import type { MapLayerSource } from './map-layers-db';
 import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 
@@ -11,6 +11,11 @@ import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 let db = fakeDatabase();
 const openDatabase = vi.fn<(url: string) => Database>(() => db);
 const app = createApp(openDatabase);
+
+/** A real 1-pixel PNG. */
+const ONE_PIXEL =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const ONE_PIXEL_BYTES = Uint8Array.from(atob(ONE_PIXEL), (c) => c.charCodeAt(0));
 
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}`, 'Content-Type': 'application/json' };
 const LAYER = '00000000-0000-4000-8000-0000000a1a01';
@@ -132,6 +137,7 @@ const source: MapLayerSource = {
   onlyField: null,
   onlyValues: [],
   definitionExpression: null,
+  tileLevels: null,
 };
 
 /** How a layer added by hand is presented (F-138). */
@@ -142,6 +148,8 @@ const PLAIN = {
   maxZoom: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
   definitionExpression: null,
 };
 
@@ -436,8 +444,7 @@ describe('fetching a layer for the map', () => {
       idField: null,
       colourField: null,
     });
-    service = () =>
-      new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png' } });
+    service = () => new Response(ONE_PIXEL_BYTES, { headers: { 'content-type': 'image/png' } });
     const ok = await send(`/${LAYER}/tiles/5/7/11.png`, 'GET');
     expect(ok.status).toBe(200);
     expect(ok.headers.get('content-type')).toBe('image/png');
@@ -983,5 +990,415 @@ describe('layers from an ArcGIS map (F-138)', () => {
     expect(square.searchParams.get('where')).toBe("(STATE = 'TX')");
     const page = new URL(overviewPageUrl({ ...filtered, onlyField: 'NET', onlyValues: ['M'] }, 0));
     expect(page.searchParams.get('where')).toBe("(STATE = 'TX') AND NET IN ('M')");
+  });
+});
+
+describe('pre-drawn ArcGIS maps (F-141)', () => {
+  const TILED = 'https://tiles.example.com/tiles/x/arcgis/rest/services/Crop_Density/MapServer';
+  const lods = Array.from({ length: 24 }, (_, level) => ({
+    level,
+    scale: 591_657_527.591555 / 2 ** level,
+  }));
+  const tiled = {
+    name: 'Synthetic crop density',
+    capabilities: 'Map,TilesOnly,Tilemap',
+    singleFusedMapCache: true,
+    minLOD: 3,
+    maxLOD: 10,
+    tileInfo: {
+      rows: 256,
+      cols: 256,
+      origin: { x: -20037508.342787, y: 20037508.342787 },
+      spatialReference: { wkid: 102100, latestWkid: 3857 },
+      lods,
+    },
+  };
+  const PNG = ONE_PIXEL_BYTES;
+  const picture: MapLayerSource = {
+    ...source,
+    kind: 'arcgis_tiles',
+    url: TILED,
+    idField: null,
+    colourField: null,
+    tileLevels: { min: 3, max: 10 },
+  };
+
+  it('takes a pre-drawn map as such, with its levels', async () => {
+    service = (url) =>
+      url.startsWith(`${TILED}?f=json`)
+        ? Response.json(tiled)
+        : new Response('no', { status: 404 });
+    const inspected = await send('/inspect', 'POST', { url: TILED, field: null });
+    expect(inspected.status).toBe(200);
+    expect((await inspected.json<LayerInspection>()).kind).toBe('arcgis_tiles');
+    const res = await send('', 'POST', {
+      ...details,
+      colourField: null,
+      colours: [],
+      source: 'web',
+      url: TILED,
+      wmsLayers: null,
+      mapVisible: false,
+    });
+    expect(res.status).toBe(201);
+    expect(db.createMapLayer.mock.calls[0]?.[2]).toMatchObject({
+      kind: 'arcgis_tiles',
+      url: TILED,
+      tileLevels: { min: 3, max: 10 },
+      mapVisible: false,
+    });
+  });
+
+  it('refuses a pre-drawn map whose squares are not the standard ones', async () => {
+    service = () =>
+      Response.json({ ...tiled, tileInfo: { ...tiled.tileInfo, rows: 512, cols: 512 } });
+    const res = await send('/inspect', 'POST', { url: TILED, field: null });
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(await res.json())).toContain('cannot place');
+  });
+
+  it('passes on a pre-drawn square by level, row and column, checked as a picture', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    service = () => new Response(PNG, { headers: { 'Content-Type': 'application/octet-stream' } });
+    const res = await send(`/${LAYER}/tiles/5/7/11.png`, 'GET');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(serviceCalls).toEqual([`${TILED}/tile/5/11/7`]);
+  });
+
+  it('asks for nothing outside its levels, and gives an empty square where it has none', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    expect((await send(`/${LAYER}/tiles/11/7/11.png`, 'GET')).status).toBe(404);
+    expect((await send(`/${LAYER}/tiles/2/1/1.png`, 'GET')).status).toBe(404);
+    expect(serviceCalls).toEqual([]);
+    service = () => new Response('Page Not Found', { status: 404 });
+    expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(204);
+  });
+
+  it('passes on nothing that is not a picture', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    service = () =>
+      new Response('<html>', { headers: { 'Content-Type': 'application/octet-stream' } });
+    expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(502);
+    // Text after a picture's first bytes is not a picture (Codex's review of 4026e22).
+    for (const start of [
+      [0x89, 0x50, 0x4e, 0x47],
+      [0xff, 0xd8, 0xff],
+    ]) {
+      const fake = new Uint8Array([
+        ...start,
+        ...new TextEncoder().encode('<script>x</script>'.repeat(4)),
+      ]);
+      service = () =>
+        new Response(fake, { headers: { 'Content-Type': 'application/octet-stream' } });
+      expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(502);
+    }
+  });
+
+  it('gives a picture layer’s legend, small pictures only', async () => {
+    db.getMapLayerSource.mockResolvedValue(picture);
+    service = (url) =>
+      url === `${TILED}/legend?f=json`
+        ? Response.json({
+            layers: [
+              {
+                layerName: 'All Annual Crops',
+                legend: [
+                  {
+                    label: 'Most Dense - <b>Least</b> Dense',
+                    contentType: 'image/png',
+                    imageData: ONE_PIXEL,
+                  },
+                  { label: 'Too big', contentType: 'image/png', imageData: 'A'.repeat(30_000) },
+                  { label: 'Not a picture', contentType: 'text/html', imageData: 'PGI+' },
+                  // Text called a PNG (Codex's review of 4026e22).
+                  {
+                    label: 'Text called a PNG',
+                    contentType: 'image/png',
+                    imageData: btoa('hello, not a picture'),
+                  },
+                  { label: 'A PNG called a JPEG', contentType: 'image/jpeg', imageData: ONE_PIXEL },
+                ],
+              },
+            ],
+          })
+        : new Response('no', { status: 404 });
+    const res = await send(`/${LAYER}/legend`, 'GET');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      entries: [
+        { label: 'Most Dense - Least Dense', image: `data:image/png;base64,${ONE_PIXEL}` },
+        { label: 'Too big', image: null },
+        { label: 'Not a picture', image: null },
+        { label: 'Text called a PNG', image: null },
+        { label: 'A PNG called a JPEG', image: null },
+      ],
+    });
+    db.getMapLayerSource.mockResolvedValue(source);
+    expect((await send(`/${LAYER}/legend`, 'GET')).status).toBe(404);
+  });
+});
+
+describe('pictureType (Codex’s reviews of 4026e22, b9746f9 and aca667e)', () => {
+  /** A minimal JPEG: start, a quantization table, a frame, a scan with two bytes of data, end. */
+  const jpeg = new Uint8Array([
+    0xff,
+    0xd8,
+    0xff,
+    0xdb,
+    0x00,
+    0x43,
+    0x00,
+    ...Array.from({ length: 64 }, () => 1),
+    0xff,
+    0xc0,
+    0x00,
+    0x0b,
+    0x08,
+    0x00,
+    0x01,
+    0x00,
+    0x01,
+    0x01,
+    0x01,
+    0x11,
+    0x00,
+    0xff,
+    0xda,
+    0x00,
+    0x08,
+    0x01,
+    0x01,
+    0x00,
+    0x00,
+    0x3f,
+    0x00,
+    0x12,
+    0x34,
+    0xff,
+    0xd9,
+  ]);
+
+  /** A PNG chunk with its length and correct checksum. */
+  function chunk(type: string, data: Uint8Array): number[] {
+    const body = new Uint8Array([...new TextEncoder().encode(type), ...data]);
+    const crc = crc32(body, 0, body.length);
+    const n = data.length;
+    return [
+      n >>> 24,
+      (n >>> 16) & 255,
+      (n >>> 8) & 255,
+      n & 255,
+      ...body,
+      crc >>> 24,
+      (crc >>> 16) & 255,
+      (crc >>> 8) & 255,
+      crc & 255,
+    ];
+  }
+
+  it('takes whole PNGs and JPEGs', async () => {
+    expect(await pictureType(ONE_PIXEL_BYTES)).toBe('image/png');
+    expect(await pictureType(jpeg)).toBe('image/jpeg');
+    expect(await pictureType(new Uint8Array([...jpeg, 0, 0]))).toBe('image/jpeg');
+  });
+
+  it('refuses wrappers with a picture’s markers around anything else', async () => {
+    const text = [...new TextEncoder().encode('<b>not a picture</b>')];
+    // A PNG signature with IHDR and IEND where they would be, but no real chunks.
+    const fakePng = new Uint8Array(57);
+    fakePng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    fakePng.set([0x49, 0x48, 0x44, 0x52], 12);
+    fakePng.set([0x49, 0x45, 0x4e, 0x44], 49);
+    // A PNG whose checksum is wrong, cut short, or without an end.
+    const wrongCrc = ONE_PIXEL_BYTES.slice();
+    wrongCrc[29] = (wrongCrc[29] ?? 0) ^ 0xff;
+    // A PNG of good chunks with text for its picture data (Codex's re-review of aca667e).
+    const header = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0, 0, 0]);
+    const textInside = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(text)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    for (const bad of [
+      fakePng,
+      wrongCrc,
+      textInside,
+      ONE_PIXEL_BYTES.slice(0, ONE_PIXEL_BYTES.length - 12),
+      new Uint8Array([0xff, 0xd8, 0xff, ...text, 0xff, 0xd9]),
+      new Uint8Array([0xff, 0xd8, ...text, 0xff, 0xd9]),
+      // Empty frame and scan headers (Codex's re-review of aca667e).
+      new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x02, 0xff, 0xda, 0x00, 0x02, 0xff, 0xd9]),
+      // A JPEG without its quantization table, or with a non-zero byte after its end.
+      jpeg.filter((_, k) => k < 2 || k > 70),
+      new Uint8Array([...jpeg, 0x41]),
+      new Uint8Array(0),
+    ]) {
+      expect(await pictureType(bad)).toBeNull();
+    }
+  });
+
+  it('takes a PNG with real picture data built the same way', async () => {
+    const { deflateSync } = await import('node:zlib');
+    const header = new Uint8Array([0, 0, 0, 2, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+    // One row: its filter byte and two RGB pixels.
+    const pixels = deflateSync(new Uint8Array([0, 255, 0, 0, 0, 0, 255]));
+    const png = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(pixels)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(png)).toBe('image/png');
+    // The same with one pixel too few.
+    const short = deflateSync(new Uint8Array([0, 255, 0, 0]));
+    const tooShort = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(short)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(tooShort)).toBeNull();
+    // Rows to spare after the last: refused at the first byte too many.
+    const extra = deflateSync(new Uint8Array([0, 255, 0, 0, 0, 0, 255, 0, 1, 2, 3, 4, 5, 6]));
+    const tooLong = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(extra)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(tooLong)).toBeNull();
+    // Larger than any map square or legend picture: refused before unpacking.
+    const big = new Uint8Array([0, 0, 2, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+    const tooWide = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', big),
+      ...chunk('IDAT', new Uint8Array(deflateSync(new Uint8Array(1 + 513 * 3)))),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(tooWide)).toBeNull();
+  });
+
+  it('refuses a PNG row filter PNG does not have, and empty JPEG tables (Codex’s re-review of d9477cc)', async () => {
+    const { deflateSync } = await import('node:zlib');
+    const header = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+    const filter255 = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(deflateSync(new Uint8Array([255, 0, 0, 0])))),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(filter255)).toBeNull();
+    // The same row with filter 1 (Sub) is a picture.
+    const filter1 = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(deflateSync(new Uint8Array([1, 0, 0, 0])))),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(filter1)).toBe('image/png');
+    // The minimal JPEG with an empty quantization table, or a quantization table cut short.
+    const emptyTable = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x02, ...jpeg.slice(71)]);
+    expect(await pictureType(emptyTable)).toBeNull();
+    const cutTable = new Uint8Array([
+      0xff,
+      0xd8,
+      0xff,
+      0xdb,
+      0x00,
+      0x22,
+      0x00,
+      ...Array.from({ length: 32 }, () => 1),
+      ...jpeg.slice(71),
+    ]);
+    expect(await pictureType(cutTable)).toBeNull();
+    // A Huffman table of no codes.
+    const emptyHuffman = new Uint8Array([
+      ...jpeg.slice(0, 71),
+      0xff,
+      0xc4,
+      0x00,
+      0x13,
+      0x00,
+      ...Array.from({ length: 16 }, () => 0),
+      ...jpeg.slice(71),
+    ]);
+    expect(await pictureType(emptyHuffman)).toBeNull();
+    // A frame component with sampling factor 0.
+    // Three one-bit codes where only two exist (Codex's re-review of 8306584).
+    const huffman = (counts: number[]) => {
+      const symbols = counts.reduce((n, c) => n + c, 0);
+      const body = [0x00, ...counts, ...Array.from({ length: symbols }, (_, k) => k)];
+      return new Uint8Array([
+        ...jpeg.slice(0, 71),
+        0xff,
+        0xc4,
+        0x00,
+        body.length + 2,
+        ...body,
+        ...jpeg.slice(71),
+      ]);
+    };
+    const pad = (counts: number[]) => [
+      ...counts,
+      ...Array.from({ length: 16 - counts.length }, () => 0),
+    ];
+    expect(await pictureType(huffman(pad([3])))).toBeNull();
+    expect(await pictureType(huffman(pad([2])))).toBeNull();
+    expect(await pictureType(huffman(pad([1, 1])))).toBe('image/jpeg');
+    expect(await pictureType(huffman(pad([0, 3])))).toBe('image/jpeg');
+    const badFrame = jpeg.slice();
+    badFrame[82] = 0x00;
+    expect(await pictureType(badFrame)).toBeNull();
   });
 });

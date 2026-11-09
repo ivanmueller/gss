@@ -39,6 +39,9 @@ export interface NewMapLayer {
   definitionExpression: string | null;
   othersShown: boolean;
   map: { itemId: string; title: string } | null;
+  /** Whether its ArcGIS map shows it at first, and a pre-drawn layer's levels (F-141). */
+  mapVisible: boolean;
+  tileLevels: { min: number; max: number } | null;
   /** A file layer's file: its name, its checked GeoJSON as UTF-8 and how many features. */
   file: { name: string; geojson: Uint8Array; featureCount: number } | null;
 }
@@ -56,6 +59,8 @@ export type MapLayerChanges = Omit<
   | 'definitionExpression'
   | 'othersShown'
   | 'map'
+  | 'mapVisible'
+  | 'tileLevels'
 >;
 
 /** What the Worker needs to fetch a live layer for the map. */
@@ -72,6 +77,8 @@ export interface MapLayerSource {
   onlyValues: string[];
   /** The publisher's filter from its ArcGIS map (F-138). */
   definitionExpression: string | null;
+  /** A pre-drawn layer's levels of squares (F-141). */
+  tileLevels: { min: number; max: number } | null;
 }
 
 export interface MapLayersDatabase {
@@ -170,6 +177,9 @@ interface LayerRow {
   others_shown: boolean;
   map_item_id: string | null;
   map_title: string | null;
+  map_visible: boolean;
+  tile_min_level: number | null;
+  tile_max_level: number | null;
 }
 
 /** Whether the person may change a layer and it is the version they saw (checked again by the update itself). */
@@ -207,7 +217,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
                  app.member_name(o.organization_id, o.prepared_by) as overview_by,
                  o.prepared_at as overview_at, o.version::text as overview_version,
                  l.line_width, l.opacity, l.min_zoom, l.max_zoom, l.definition_expression,
-                 l.others_shown, l.map_item_id, l.map_title
+                 l.others_shown, l.map_item_id, l.map_title, l.map_visible, l.tile_min_level,
+                 l.tile_max_level
           from app.map_layers l
           left join app.map_layer_files f on f.layer_id = l.id
           left join app.map_layer_overviews o on o.layer_id = l.id
@@ -255,6 +266,11 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             row.map_item_id !== null && row.map_title !== null
               ? { itemId: row.map_item_id, title: row.map_title }
               : null,
+          mapVisible: row.map_visible,
+          tileLevels:
+            row.tile_min_level !== null && row.tile_max_level !== null
+              ? { min: row.tile_min_level, max: row.tile_max_level }
+              : null,
         }));
       });
     },
@@ -266,7 +282,10 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
                  wms_layers as "wmsLayers", id_field as "idField",
                  colour_field as "colourField", to_jsonb(also_fields) as "alsoFields",
                  only_field as "onlyField", to_jsonb(only_values) as "onlyValues",
-                 definition_expression as "definitionExpression"
+                 definition_expression as "definitionExpression",
+                 case when tile_min_level is null then null
+                      else jsonb_build_object('min', tile_min_level, 'max', tile_max_level)
+                 end as "tileLevels"
           from app.map_layers where id = ${id} and archived_at is null`;
         return row ?? null;
       });
@@ -292,7 +311,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           insert into app.map_layers (organization_id, name, kind, source_url, wms_layers,
             id_field, source_name, terms_url, terms_note, colour, colour_field, colours,
             also_fields, only_field, only_values, line_width, opacity, min_zoom, max_zoom,
-            definition_expression, others_shown, map_item_id, map_title, created_by, updated_by)
+            definition_expression, others_shown, map_item_id, map_title, map_visible,
+            tile_min_level, tile_max_level, created_by, updated_by)
           values (${organizationId}, ${layer.name}, ${layer.kind}, ${layer.url},
             ${layer.wmsLayers}, ${layer.idField}, ${layer.sourceName}, ${layer.termsUrl}, ${layer.termsNote},
             ${layer.colour}, ${layer.colourField}, ${tx.json(layer.colours)},
@@ -300,7 +320,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             array(select jsonb_array_elements_text(${tx.json(layer.onlyValues)}::jsonb)),
             ${layer.lineWidth}, ${layer.opacity}, ${layer.minZoom}, ${layer.maxZoom},
             ${layer.definitionExpression}, ${layer.othersShown}, ${layer.map?.itemId ?? null},
-            ${layer.map?.title ?? null}, app.current_user_id(), app.current_user_id())
+            ${layer.map?.title ?? null}, ${layer.mapVisible}, ${layer.tileLevels?.min ?? null},
+            ${layer.tileLevels?.max ?? null}, app.current_user_id(), app.current_user_id())
           returning id`;
         if (!saved) throw new Error('map layer was not saved');
         if (layer.file) {

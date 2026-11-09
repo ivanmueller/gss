@@ -681,6 +681,8 @@ export interface WebMapLayer {
   /** The features of a layer kept in the map itself, as GeoJSON. */
   collection: { type: 'FeatureCollection'; features: unknown[] } | null;
   problem: string | null;
+  /** Whether the map shows it at first (its own and its group's visibility; F-141). */
+  visible: boolean;
 }
 
 const LAYER_KIND_NAMES: Record<string, string> = {
@@ -737,6 +739,7 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
     opacity: number;
     minScale: number | null;
     maxScale: number | null;
+    visible: boolean;
   }
   const visit = (layers: unknown, group: Group, depth: number) => {
     if (!Array.isArray(layers) || depth > 4) return;
@@ -745,6 +748,8 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
       if (!layer) continue;
       const title = arcgisPlainText(layer.title, 200) ?? 'Untitled layer';
       const opacity = group.opacity * Math.min(1, Math.max(0, numberOr(layer.opacity, 1)));
+      // Shown at first unless the map says otherwise, and only when its group is.
+      const visible = group.visible && layer.visibility !== false;
       const definition = record(layer.layerDefinition);
       // The farthest out it shows is the nearer of its own and its group's; likewise inwards
       // (Codex's review of 1f328f9: a group's range was dropped).
@@ -760,7 +765,7 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
       );
       const type = typeof layer.layerType === 'string' ? layer.layerType : '';
       if (type === 'GroupLayer') {
-        visit(layer.layers, { opacity, minScale, maxScale }, depth + 1);
+        visit(layer.layers, { opacity, minScale, maxScale, visible }, depth + 1);
         continue;
       }
       const filter = filterOf(definition?.definitionExpression);
@@ -783,6 +788,7 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
         maxScale,
         collection: null,
         problem: null,
+        visible,
       };
       if (filter.refused) {
         out.push({ ...base, problem: FILTER_REFUSED });
@@ -892,7 +898,7 @@ export function webMapLayers(data: unknown): WebMapLayer[] {
       });
     }
   };
-  visit(body?.operationalLayers, { opacity: 1, minScale: null, maxScale: null }, 0);
+  visit(body?.operationalLayers, { opacity: 1, minScale: null, maxScale: null, visible: true }, 0);
   return out;
 }
 

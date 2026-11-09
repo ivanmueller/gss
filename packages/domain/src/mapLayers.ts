@@ -14,12 +14,19 @@ interface URLSearchParamsLike {
   forEach(callback: (value: string, key: string) => void): void;
 }
 
-export const MAP_LAYER_KINDS = ['arcgis_features', 'arcgis_image', 'wms', 'file'] as const;
+export const MAP_LAYER_KINDS = [
+  'arcgis_features',
+  'arcgis_image',
+  'arcgis_tiles',
+  'wms',
+  'file',
+] as const;
 export type MapLayerKind = (typeof MAP_LAYER_KINDS)[number];
 
 export const MAP_LAYER_KIND_LABELS: Record<MapLayerKind, string> = {
   arcgis_features: 'ArcGIS layer (lines, areas or points)',
   arcgis_image: 'ArcGIS map (pictures)',
+  arcgis_tiles: 'ArcGIS map (pre-drawn pictures)',
   wms: 'WMS map (pictures)',
   file: 'File',
 };
@@ -251,6 +258,8 @@ const presentation = {
   minZoom: z.number().min(0).max(24).nullable().default(null),
   maxZoom: z.number().min(0).max(24).nullable().default(null),
   othersShown: z.boolean().default(true),
+  /** Whether its ArcGIS map shows it at first (F-141); its map's switch turns on those. */
+  mapVisible: z.boolean().default(true),
   map: z
     .strictObject({ itemId: z.string().regex(/^[0-9a-f]{32}$/), title: label(200) })
     .nullable()
@@ -407,6 +416,16 @@ export interface MapLayerView {
   othersShown: boolean;
   /** The ArcGIS map it was added from. */
   map: { itemId: string; title: string } | null;
+  /** Whether its ArcGIS map shows it at first (F-141). */
+  mapVisible: boolean;
+  /** A pre-drawn layer's levels of squares (F-141); null for any other kind. */
+  tileLevels: { min: number; max: number } | null;
+}
+
+/** A picture layer's legend from ArcGIS (GET /api/v1/map-layers/{id}/legend, F-141). */
+export interface LayerLegend {
+  /** In ArcGIS's order: words, and a small picture as a data: address (PNG or JPEG) or null. */
+  entries: { label: string; image: string | null }[];
 }
 
 export interface MapLayerOverviewInfo {
@@ -845,4 +864,83 @@ export function railroadPreset(fields: readonly string[]): {
     onlyField: fields.includes('NET') ? 'NET' : null,
     onlyValues: fields.includes('NET') ? ['M', 'I'] : [],
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pre-drawn picture squares (F-141)
+
+/** ArcGIS's scale at level 0 of the standard web Mercator squares (256 pixels, 96 dpi). */
+const LEVEL_0_SCALE = 591_657_527.591555;
+const WEB_MERCATOR_ORIGIN = 20_037_508.342787;
+
+/**
+ * The levels of an ArcGIS service's pre-drawn squares, from its description (?f=json), when they
+ * are the standard web Mercator squares Mapbox uses (256 pixels, the world's corner as origin,
+ * each level's scale half the last's), so square z/x/y is ArcGIS's tile z/y/x; null when it has
+ * none, or squares of another kind GSS cannot place. The levels it has are its minLOD to maxLOD
+ * when it states them, else all those it lists.
+ */
+export function standardTileLevels(description: unknown): { min: number; max: number } | null {
+  const body =
+    typeof description === 'object' && description !== null
+      ? (description as Record<string, unknown>)
+      : null;
+  if (body?.singleFusedMapCache !== true) return null;
+  const info = body.tileInfo as
+    | {
+        rows?: unknown;
+        cols?: unknown;
+        origin?: { x?: unknown; y?: unknown };
+        spatialReference?: { wkid?: unknown; latestWkid?: unknown };
+        lods?: unknown;
+      }
+    | undefined;
+  if (info?.rows !== 256 || info.cols !== 256) return null;
+  const wkid = info.spatialReference?.latestWkid ?? info.spatialReference?.wkid;
+  if (wkid !== 3857 && wkid !== 102100) return null;
+  const { x, y } = info.origin ?? {};
+  if (
+    typeof x !== 'number' ||
+    typeof y !== 'number' ||
+    Math.abs(x + WEB_MERCATOR_ORIGIN) > 1 ||
+    Math.abs(y - WEB_MERCATOR_ORIGIN) > 1
+  ) {
+    return null;
+  }
+  const levels = (Array.isArray(info.lods) ? info.lods : []).flatMap((lod: unknown) => {
+    const { level, scale } = (lod ?? {}) as { level?: unknown; scale?: unknown };
+    if (typeof level !== 'number' || !Number.isInteger(level) || typeof scale !== 'number') {
+      return [];
+    }
+    const expected = LEVEL_0_SCALE / 2 ** level;
+    // Each listed level must be the standard one, within ArcGIS's rounding.
+    return Math.abs(scale - expected) / expected < 0.01 && level >= 0 && level <= 23
+      ? [level]
+      : [Number.NaN];
+  });
+  if (levels.length === 0 || levels.some(Number.isNaN)) return null;
+  let min = Math.min(...levels);
+  let max = Math.max(...levels);
+  if (typeof body.minLOD === 'number' && Number.isInteger(body.minLOD)) {
+    min = Math.max(min, body.minLOD);
+  }
+  if (typeof body.maxLOD === 'number' && Number.isInteger(body.maxLOD)) {
+    max = Math.min(max, body.maxLOD);
+  }
+  return min <= max ? { min, max } : null;
+}
+
+/** Whether an ArcGIS service only gives pre-drawn squares (it cannot draw a picture on request). */
+export function tilesOnly(description: unknown): boolean {
+  const capabilities =
+    typeof description === 'object' && description !== null
+      ? (description as { capabilities?: unknown }).capabilities
+      : undefined;
+  return (
+    typeof capabilities === 'string' &&
+    capabilities
+      .split(',')
+      .map((c) => c.trim())
+      .includes('TilesOnly')
+  );
 }

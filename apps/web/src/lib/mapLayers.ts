@@ -187,7 +187,14 @@ export type MapOverlay =
       filter?: FilterSpecification | null;
       look?: OverlayLook;
     }
-  | { id: string; kind: 'pictures'; tiles: string; look?: OverlayLook };
+  | {
+      id: string;
+      kind: 'pictures';
+      tiles: string;
+      look?: OverlayLook;
+      /** A pre-drawn layer's levels: no squares asked below, the last enlarged above (F-141). */
+      levels?: { min: number; max: number } | null;
+    };
 
 /** The property FacilityMap reads to say which feature of a live layer was clicked. */
 export const OBJECT_ID = '__gss_object_id';
@@ -488,6 +495,30 @@ export function squaresOverlap(a: Tile, b: Tile): boolean {
   return up(a, a.x) === up(b, b.x) && up(a, a.y) === up(b, b.y);
 }
 
+/**
+ * Whether loaded squares (as "z/x/y") cover all of a square: it or a wider square holding it is
+ * loaded, or each of its four quarters is covered, down to four levels finer.
+ */
+export function squareCovered(tile: Tile, loaded: ReadonlySet<string>, depth = 0): boolean {
+  for (let z = tile.z; z >= 0; z -= 1) {
+    const up = 2 ** (tile.z - z);
+    if (
+      loaded.has(
+        `${String(z)}/${String(Math.floor(tile.x / up))}/${String(Math.floor(tile.y / up))}`,
+      )
+    ) {
+      return true;
+    }
+  }
+  if (depth >= 4) return false;
+  const z = tile.z + 1;
+  return [0, 1].every((dx) =>
+    [0, 1].every((dy) =>
+      squareCovered({ z, x: tile.x * 2 + dx, y: tile.y * 2 + dy }, loaded, depth + 1),
+    ),
+  );
+}
+
 /** A square's place from its key (layer@settings/z/x/y). */
 function tileOfKey(key: string): Tile | null {
   const parts = key.split('/').slice(-3).map(Number);
@@ -603,12 +634,13 @@ export function useLayerOverlays(
     const overlays: MapOverlay[] = [];
     const notes = new Map<string, string>();
     for (const layer of layers) {
-      if (layer.kind === 'arcgis_image' || layer.kind === 'wms') {
+      if (layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' || layer.kind === 'wms') {
         overlays.push({
           id: layer.id,
           kind: 'pictures',
           tiles: picturesUrl(layer.id),
           look: lookOf(layer),
+          levels: layer.tileLevels,
         });
         continue;
       }
@@ -667,7 +699,10 @@ export function useLayerOverlays(
           continue;
         }
         if (square === 'failed') {
+          // Filled in like one still loading (Codex's review of 4026e22: a failed square blanked
+          // its place though other lines were loaded).
           failed = true;
+          missing.push(tile);
           continue;
         }
         exceeded ||= square.exceeded;
@@ -675,7 +710,8 @@ export function useLayerOverlays(
       }
       // Then, for the squares still loading, those already loaded at the nearest other zooms.
       if (missing.length > 0) {
-        const loaded: { tile: Tile; square: { features: GeoJSON.Feature[] } }[] = [];
+        const loaded: { tile: Tile; square: { features: GeoJSON.Feature[]; exceeded: boolean } }[] =
+          [];
         for (const [key, square] of squares) {
           if (!key.startsWith(prefix) || square === 'failed') continue;
           const tile = tileOfKey(key);
@@ -683,10 +719,22 @@ export function useLayerOverlays(
         }
         const near = (tile: Tile) => Math.abs(tile.z - (missing[0]?.z ?? tile.z));
         loaded.sort((a, b) => near(a.tile) - near(b.tile));
+        // A square the service cut short covers nothing: its place is still missing lines
+        // (Codex's re-review of b9746f9).
+        const have = new Set(
+          loaded
+            .filter((l) => !l.square.exceeded)
+            .map((l) => `${String(l.tile.z)}/${String(l.tile.x)}/${String(l.tile.y)}`),
+        );
         for (const tile of missing) {
           const over = loaded.filter((l) => squaresOverlap(l.tile, tile));
-          if (over.length === 0) uncovered += 1;
-          for (const l of over) add(l.square);
+          // Covered only when the loaded squares cover all of it, not just a part (Codex's review
+          // of 4026e22: zooming out from one square left three quarters of the wider one empty).
+          if (!squareCovered(tile, have)) uncovered += 1;
+          for (const l of over) {
+            exceeded ||= l.square.exceeded;
+            add(l.square);
+          }
         }
       }
       if (

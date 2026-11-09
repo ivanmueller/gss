@@ -285,7 +285,13 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
     }
     if (overlay.kind === 'pictures') {
       if (!map.getSource(source)) {
-        map.addSource(source, { type: 'raster', tiles: [overlay.tiles], tileSize: 256 });
+        map.addSource(source, {
+          type: 'raster',
+          tiles: [overlay.tiles],
+          tileSize: 256,
+          // A pre-drawn layer's own levels (F-141): its last level enlarged when zoomed further.
+          ...(overlay.levels && { minzoom: overlay.levels.min, maxzoom: overlay.levels.max }),
+        });
         map.addLayer(
           { id: pictures, type: 'raster', source, paint: { 'raster-opacity': 0.8 } },
           below,

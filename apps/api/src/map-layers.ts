@@ -17,8 +17,11 @@ import {
   tileBounds,
   tileBoundsMercator,
   updateMapLayerSchema,
+  standardTileLevels,
+  tilesOnly,
   withoutTags,
   type LayerInspection,
+  type LayerLegend,
   type MapLayerList,
   type Tile,
   type ValueCount,
@@ -42,6 +45,375 @@ import {
 // off in the browser. A web service is fetched by the Worker, never by the browser: its
 // address stays here, the app's content security policy stays as it is, and the request is
 // built from the layer's stored address and a map square only, never from the browser's text.
+
+/** CRC-32 (as PNG checks its chunks with). */
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+export function crc32(bytes: Uint8Array, start: number, end: number): number {
+  let c = 0xffffffff;
+  for (let i = start; i < end; i += 1) {
+    c = (CRC_TABLE[(c ^ (bytes[i] ?? 0)) & 0xff] ?? 0) ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * The widest and highest picture passed on: map squares are 256 pixels and legend pictures
+ * smaller, and unpacking a larger one would take more than Cloudflare's free plan allows a
+ * request (a 4096 by 4096 picture took about 0.4 s; Codex's re-review of 8306584).
+ */
+const MAX_PICTURE_SIDE = 512;
+
+/** Channels per pixel of each PNG colour type, and the bit depths it allows. */
+const PNG_COLOUR_TYPES: Record<number, { channels: number; depths: number[] }> = {
+  0: { channels: 1, depths: [1, 2, 4, 8, 16] },
+  2: { channels: 3, depths: [8, 16] },
+  3: { channels: 1, depths: [1, 2, 4, 8] },
+  4: { channels: 2, depths: [8, 16] },
+  6: { channels: 4, depths: [8, 16] },
+};
+
+/**
+ * The length of each row of a PNG's unpacked picture data, in order: one filter byte and the
+ * pixels of the row; for an interlaced picture (Adam7), the rows of each of its seven passes.
+ */
+function pngRows(width: number, height: number, bitsPerPixel: number, interlaced: boolean) {
+  const rows = (w: number, h: number): number[] =>
+    w <= 0 || h <= 0 ? [] : Array<number>(h).fill(1 + Math.ceil((w * bitsPerPixel) / 8));
+  if (!interlaced) return rows(width, height);
+  const passes = [
+    [0, 0, 8, 8],
+    [4, 0, 8, 8],
+    [0, 4, 4, 8],
+    [2, 0, 4, 4],
+    [0, 2, 2, 4],
+    [1, 0, 2, 2],
+    [0, 1, 1, 2],
+  ] as const;
+  return passes.flatMap(([x0, y0, dx, dy]) =>
+    rows(Math.ceil((width - x0) / dx), Math.ceil((height - y0) / dy)),
+  );
+}
+
+/**
+ * Whether zlib data unpacks to exactly the given rows, each starting with one of PNG's filters
+ * (0 to 4), checked as it unpacks: nothing is kept, so a picture that unpacks large uses no more
+ * memory than the piece being read (Codex's re-review of 8306584: 256 MB for a 4096 by 4096
+ * picture), and unpacking stops at the first byte too many.
+ */
+async function unpacksToRows(data: Uint8Array, rows: readonly number[]): Promise<boolean> {
+  let row = 0;
+  let left = rows[0] ?? 0;
+  let atStart = true;
+  try {
+    const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate'));
+    const reader = stream.getReader();
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return row === rows.length;
+      const bytes = chunk.value;
+      let p = 0;
+      while (p < bytes.length) {
+        if (row >= rows.length || (atStart && (bytes[p] ?? 255) > 4)) {
+          await reader.cancel().catch(() => undefined);
+          return false;
+        }
+        const take = Math.min(left, bytes.length - p);
+        p += take;
+        left -= take;
+        atStart = false;
+        if (left === 0) {
+          row += 1;
+          left = rows[row] ?? 0;
+          atStart = true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether bytes are a whole PNG: its signature; chunks each with its length, type and a correct
+ * checksum; the header (IHDR) first, with a size above 0 and a colour type and bit depth PNG
+ * allows; a palette (PLTE) for palette pictures; and the end (IEND) exactly last. Its picture
+ * data (IDAT), unpacked, must be exactly the size the header gives (Codex's re-review of aca667e:
+ * text inside IDAT passed), at most MAX_PICTURE_SIDE pixels wide and high.
+ */
+async function isPng(b: Uint8Array): Promise<boolean> {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (b.length < 8 || !signature.every((v, k) => b[k] === v)) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let at = 8;
+  let header: {
+    width: number;
+    height: number;
+    bits: number;
+    interlaced: boolean;
+    palette: boolean;
+  } | null = null;
+  let palette = false;
+  const data: Uint8Array[] = [];
+  while (at + 12 <= b.length) {
+    const length = view.getUint32(at);
+    const type = String.fromCharCode(...b.subarray(at + 4, at + 8));
+    const end = at + 12 + length;
+    if (!/^[A-Za-z]{4}$/.test(type) || end > b.length) return false;
+    if (crc32(b, at + 4, at + 8 + length) !== view.getUint32(at + 8 + length)) return false;
+    if (header === null) {
+      if (type !== 'IHDR' || length !== 13) return false;
+      const width = view.getUint32(at + 8);
+      const height = view.getUint32(at + 12);
+      const depth = b[at + 16] ?? 0;
+      const colour = PNG_COLOUR_TYPES[b[at + 17] ?? 99];
+      const [compression, filter, interlace] = [b[at + 18], b[at + 19], b[at + 20]];
+      if (
+        width === 0 ||
+        height === 0 ||
+        width > MAX_PICTURE_SIDE ||
+        height > MAX_PICTURE_SIDE ||
+        !colour?.depths.includes(depth) ||
+        compression !== 0 ||
+        filter !== 0 ||
+        (interlace !== 0 && interlace !== 1)
+      ) {
+        return false;
+      }
+      header = {
+        width,
+        height,
+        bits: depth * colour.channels,
+        interlaced: interlace === 1,
+        palette: b[at + 17] === 3,
+      };
+    } else if (type === 'IHDR') return false;
+    if (type === 'PLTE') palette = true;
+    if (type === 'IDAT') data.push(b.subarray(at + 8, at + 8 + length));
+    if (type === 'IEND') {
+      if (length !== 0 || end !== b.length || data.length === 0) return false;
+      if (header.palette && !palette) return false;
+      const packed = new Uint8Array(data.reduce((n, d) => n + d.length, 0));
+      let o = 0;
+      for (const d of data) {
+        packed.set(d, o);
+        o += d.length;
+      }
+      // Unpacked, exactly the rows the header gives, each starting with a filter PNG has (0 to
+      // 4; Codex's re-review of d9477cc).
+      return unpacksToRows(
+        packed,
+        pngRows(header.width, header.height, header.bits, header.interlaced),
+      );
+    }
+    at = end;
+  }
+  return false;
+}
+
+/** Whether a DQT segment's body is one or more whole tables (64 values of 8 or 16 bits, id 0–3). */
+function quantizationTables(b: Uint8Array, start: number, end: number): boolean {
+  let i = start;
+  if (i >= end) return false;
+  while (i < end) {
+    const precision = (b[i] ?? 0) >> 4;
+    const id = (b[i] ?? 0) & 15;
+    if (precision > 1 || id > 3) return false;
+    i += 1 + 64 * (precision + 1);
+  }
+  return i === end;
+}
+
+/** Whether a DHT segment's body is one or more whole tables (class 0–1, id 0–3, 1–256 codes). */
+function huffmanTables(b: Uint8Array, start: number, end: number): boolean {
+  let i = start;
+  if (i >= end) return false;
+  while (i < end) {
+    const kind = (b[i] ?? 0) >> 4;
+    const id = (b[i] ?? 0) & 15;
+    if (kind > 1 || id > 3 || i + 17 > end) return false;
+    // The codes of each length must fit those left by shorter ones, so the table is a real code
+    // tree (Codex's re-review of 8306584: three one-bit codes passed).
+    let codes = 0;
+    let room = 1;
+    for (let k = 1; k <= 16; k += 1) {
+      const count = b[i + k] ?? 0;
+      room = room * 2 - count;
+      if (room < 0) return false;
+      codes += count;
+    }
+    // JPEG has no code of all ones, so some room is always left.
+    if (codes < 1 || codes > 256 || room < 1) return false;
+    i += 17 + codes;
+  }
+  return i === end;
+}
+
+/**
+ * Whether bytes are a whole JPEG: its start marker; marker segments each with its length, all
+ * walked to the end marker, through every scan (progressive pictures have several); quantization
+ * tables (DQT); one frame header (SOF) of 1 to 4 components, 8 or 12 bits, a size above 0,
+ * exactly as long as its components; each scan header (SOS) exactly as long as its 1 to 4
+ * components, followed by some coded data; and the end marker last, followed by nothing but zero
+ * padding (Codex's re-review of aca667e: empty SOF and SOS segments passed).
+ */
+function isJpeg(b: Uint8Array): boolean {
+  if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return false;
+  const u16 = (i: number) => ((b[i] ?? 0) << 8) | (b[i + 1] ?? 0);
+  let at = 2;
+  let frame = false;
+  let tables = false;
+  let scans = 0;
+  for (;;) {
+    if (b[at] !== 0xff) return false;
+    while (b[at] === 0xff) at += 1;
+    const marker = b[at];
+    if (marker === undefined) return false;
+    at += 1;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (marker === 0xd9) {
+      // The end: only zero padding after it.
+      for (let i = at; i < b.length; i += 1) if (b[i] !== 0x00) return false;
+      return frame && tables && scans > 0;
+    }
+    if (marker === 0xd8) return false;
+    const length = u16(at);
+    if (length < 2 || at + length > b.length) return false;
+    const isFrame =
+      marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrame) {
+      const components = b[at + 7] ?? 0;
+      const precision = b[at + 2];
+      if (
+        frame ||
+        components < 1 ||
+        components > 4 ||
+        length !== 8 + 3 * components ||
+        (precision !== 8 && precision !== 12) ||
+        u16(at + 3) === 0 ||
+        u16(at + 5) === 0
+      ) {
+        return false;
+      }
+      // Each component: sampling factors 1 to 4, a quantization table 0 to 3.
+      for (let k = 0; k < components; k += 1) {
+        const sampling = b[at + 9 + 3 * k] ?? 0;
+        const h = sampling >> 4;
+        const v = sampling & 15;
+        if (h < 1 || h > 4 || v < 1 || v > 4 || (b[at + 10 + 3 * k] ?? 99) > 3) return false;
+      }
+      frame = true;
+    }
+    // Tables filled exactly, each the size it says (Codex's re-review of d9477cc: an empty
+    // quantization table passed).
+    if (marker === 0xdb) {
+      if (!quantizationTables(b, at + 2, at + length)) return false;
+      tables = true;
+    }
+    if (marker === 0xc4 && !huffmanTables(b, at + 2, at + length)) return false;
+    at += length;
+    if (marker === 0xda) {
+      const components = b[at - length + 2] ?? 0;
+      if (!frame || components < 1 || components > 4 || length !== 6 + 2 * components) {
+        return false;
+      }
+      // The coded data, to the next marker: 0xFF 0x00 is a data byte, 0xFF 0xD0–D7 a restart.
+      const start = at;
+      while (at < b.length) {
+        if (b[at] === 0xff) {
+          const next = b[at + 1];
+          if (next === 0x00 || (next !== undefined && next >= 0xd0 && next <= 0xd7)) {
+            at += 2;
+            continue;
+          }
+          if (next === 0xff) {
+            at += 1;
+            continue;
+          }
+          break;
+        }
+        at += 1;
+      }
+      if (at === start) return false;
+      scans += 1;
+    }
+  }
+}
+
+/**
+ * A picture's type from its structure, every PNG chunk and JPEG segment checked and a PNG's
+ * picture data unpacked, not its first bytes alone (Codex's reviews of 4026e22, b9746f9 and
+ * aca667e): null for anything else. A JPEG's coded pixels are not decoded; browsers draw what
+ * they can and nothing else.
+ */
+export async function pictureType(
+  body: ArrayBuffer | Uint8Array,
+): Promise<'image/png' | 'image/jpeg' | null> {
+  const b = body instanceof Uint8Array ? body : new Uint8Array(body);
+  if (await isPng(b)) return 'image/png';
+  if (isJpeg(b)) return 'image/jpeg';
+  return null;
+}
+
+/** A base64 text's bytes, or null when it is not base64. */
+function base64Bytes(text: string): Uint8Array | null {
+  try {
+    return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+/** The largest legend read: a few small pictures. */
+const MAX_LEGEND_BYTES = 1024 * 1024;
+
+/**
+ * A legend's entries as ArcGIS gives them (…/legend?f=json): each layer's entries in order, the
+ * layer's name before its entries when there are several, each with plain words and its picture
+ * when it is a small PNG or JPEG (at most 40 entries, each picture at most 20 KB).
+ */
+export async function legendEntries(body: unknown): Promise<LayerLegend['entries']> {
+  const layers = record(body)?.layers;
+  if (!Array.isArray(layers)) return [];
+  const entries: LayerLegend['entries'] = [];
+  const several = layers.length > 1;
+  for (const layer of layers) {
+    const l = record(layer);
+    const items = Array.isArray(l?.legend) ? l.legend : [];
+    const name = plainText(l?.layerName, 200);
+    for (const item of items) {
+      const i = record(item);
+      const type = i?.contentType;
+      const data = i?.imageData;
+      // Its bytes checked as a picture of the type it says, not its word alone (Codex's review
+      // of 4026e22).
+      const bytes =
+        typeof data === 'string' && data.length <= 27_000 && /^[A-Za-z0-9+/]+=*$/.test(data)
+          ? base64Bytes(data)
+          : null;
+      const image =
+        bytes !== null &&
+        (type === 'image/png' || type === 'image/jpeg') &&
+        (await pictureType(bytes)) === type
+          ? `data:${type};base64,${typeof data === 'string' ? data : ''}`
+          : null;
+      const label = plainText(i?.label, 200);
+      const words = several && name ? (label ? `${name}: ${label}` : name) : (label ?? name);
+      if (words === null && image === null) continue;
+      entries.push({ label: words ?? '', image });
+      if (entries.length >= 40) return entries;
+    }
+  }
+  return entries;
+}
+
+/** A service of pre-drawn squares that are not the standard web Mercator ones (F-141). */
+const TILES_NOT_STANDARD =
+  'This ArcGIS map is drawn ahead of time in squares GSS cannot place on its map (not the standard web map squares).';
 
 /** ArcGIS Online's items, where a map's description and data are read (F-138). */
 const ARCGIS_ITEMS = 'https://www.arcgis.com/sharing/rest/content/items';
@@ -189,6 +561,10 @@ export async function describeArcgis(url: string): Promise<{
   fields: string[];
   idField: string | null;
   drawing: LayerInspection['drawing'];
+  /** Its pre-drawn squares' levels, when they are the standard ones (F-141). */
+  tileLevels: { min: number; max: number } | null;
+  /** Whether it only gives pre-drawn squares, drawing no picture on request (F-141). */
+  tilesOnly: boolean;
 }> {
   const body = record(await fetchJson(`${url}?f=json`));
   if (!body || record(body.error)) throw new LayerServiceError(422);
@@ -213,6 +589,8 @@ export async function describeArcgis(url: string): Promise<{
   const scale = (value: unknown) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
   return {
+    tileLevels: standardTileLevels(body),
+    tilesOnly: tilesOnly(body),
     drawing: {
       renderer: drawingInfo?.renderer ?? null,
       transparency: typeof drawingInfo?.transparency === 'number' ? drawingInfo.transparency : 0,
@@ -319,6 +697,10 @@ export function arcgisSquareUrl(source: MapLayerSource, tile: Tile): string {
 
 /** The address of one map square's picture from an ArcGIS map or a WMS service. */
 export function pictureUrl(source: MapLayerSource, tile: Tile): string {
+  // A pre-drawn layer's own square: ArcGIS numbers them level/row/column (F-141).
+  if (source.kind === 'arcgis_tiles') {
+    return `${source.url ?? ''}/tile/${String(tile.z)}/${String(tile.y)}/${String(tile.x)}`;
+  }
   const bbox = tileBoundsMercator(tile)
     .map((n) => n.toFixed(2))
     .join(',');
@@ -546,6 +928,14 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         answer.title = described.title;
         answer.copyright = described.copyright;
         answer.drawing = described.drawing;
+        // A picture layer drawn ahead of time in standard squares is drawn from them, as ArcGIS
+        // does (F-141); one that draws nothing on request and has other squares is refused.
+        if (source.kind === 'arcgis_image') {
+          if (described.tileLevels !== null) answer.kind = 'arcgis_tiles';
+          else if (described.tilesOnly) {
+            return apiError(c, 422, 'NOT_A_LAYER', TILES_NOT_STANDARD);
+          }
+        }
         if (source.kind === 'arcgis_features') {
           answer.fields = described.fields;
           const { field, alsoFields, onlyField, onlyValues } = parsed.data;
@@ -634,6 +1024,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       maxZoom: input.maxZoom,
       othersShown: input.othersShown,
       map: input.map,
+      mapVisible: input.mapVisible,
     };
     if (
       details.minZoom !== null &&
@@ -668,6 +1059,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         url: source.url,
         wmsLayers,
         idField: null,
+        tileLevels: null,
         definitionExpression: input.definitionExpression,
         file: null,
       };
@@ -697,6 +1089,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         url: null,
         wmsLayers: null,
         idField: null,
+        tileLevels: null,
         definitionExpression: null,
         file: {
           name: input.fileName,
@@ -716,6 +1109,12 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if (layer.kind === 'arcgis_features' || layer.kind === 'arcgis_image') {
         try {
           const described = await describeArcgis(layer.url ?? '');
+          // Pre-drawn squares are drawn from the squares themselves (F-141).
+          if (layer.kind === 'arcgis_image' && described.tileLevels !== null) {
+            layer = { ...layer, kind: 'arcgis_tiles', tileLevels: described.tileLevels };
+          } else if (layer.kind === 'arcgis_image' && described.tilesOnly) {
+            return apiError(c, 422, 'NOT_A_LAYER', TILES_NOT_STANDARD);
+          }
           if (layer.kind === 'arcgis_features') {
             layer = { ...layer, idField: described.idField };
             if (layer.colourField !== null && !described.fields.includes(layer.colourField)) {
@@ -1029,27 +1428,78 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   });
 
   // One map square's picture of an ArcGIS map or a WMS service.
+  // A picture layer's legend from ArcGIS (F-141): each entry's words and its small picture, so
+  // the colours of a heat map are explained under the map as on ArcGIS.
+  routes.get('/:id/legend', (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const source = await db.getMapLayerSource(ctx, id);
+      if (
+        (source?.kind !== 'arcgis_image' && source?.kind !== 'arcgis_tiles') ||
+        source.url === null
+      ) {
+        return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      }
+      let body: unknown;
+      try {
+        body = await fetchJson(`${source.url}/legend?f=json`, MAX_LEGEND_BYTES);
+      } catch (error) {
+        return serviceFailed(c, error, 'legend');
+      }
+      c.header('Cache-Control', LIVE_CACHE);
+      return c.json({ entries: await legendEntries(body) } satisfies LayerLegend);
+    });
+  });
+
   routes.get('/:id/tiles/:z/:x/:y', (c) => {
     const id = c.req.param('id');
     const tile = tileOf(c);
     if (!isUuid(id) || tile === null) return apiError(c, 404, 'NOT_FOUND', 'No such map square.');
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const source = await db.getMapLayerSource(ctx, id);
-      if ((source?.kind !== 'arcgis_image' && source?.kind !== 'wms') || source.url === null) {
+      if (
+        (source?.kind !== 'arcgis_image' &&
+          source?.kind !== 'arcgis_tiles' &&
+          source?.kind !== 'wms') ||
+        source.url === null
+      ) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      }
+      // A pre-drawn layer has squares only at its own levels; the map enlarges its last level.
+      const levels = source.tileLevels;
+      if (
+        source.kind === 'arcgis_tiles' &&
+        (levels === null || tile.z < levels.min || tile.z > levels.max)
+      ) {
+        return apiError(c, 404, 'NOT_FOUND', 'This layer has no square at this zoom.');
       }
       let answer: { body: ArrayBuffer; type: string };
       try {
         answer = await fetchService(
           pictureUrl(source, tile),
-          /^image\/(png|jpeg)$/,
+          // ArcGIS's pre-drawn squares come without a picture type; the bytes are checked below.
+          source.kind === 'arcgis_tiles'
+            ? /^(image\/(png|jpeg)|application\/octet-stream)$/
+            : /^image\/(png|jpeg)$/,
           MAX_PICTURE_BYTES,
         );
       } catch (error) {
+        // A pre-drawn layer has no square where it has nothing to show: an empty square.
+        if (
+          source.kind === 'arcgis_tiles' &&
+          error instanceof LayerServiceError &&
+          error.status === 404
+        ) {
+          c.header('Cache-Control', LIVE_CACHE);
+          return c.body(null, 204);
+        }
         return serviceFailed(c, error, 'picture');
       }
+      const type = await pictureType(answer.body);
+      if (type === null) return serviceFailed(c, new LayerServiceError(415), 'picture');
       c.header('Cache-Control', LIVE_CACHE);
-      c.header('Content-Type', answer.type);
+      c.header('Content-Type', type);
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);
     });

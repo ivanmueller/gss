@@ -14,7 +14,7 @@ import {
 import { clearApiCache } from '../lib/useApiResource';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { MapLayerSettings } from './MapLayerSettings';
-import { MapLayersPanel, panelEntries, type MapLayersState } from './MapLayers';
+import { MapLayersLegend, MapLayersPanel, panelEntries, type MapLayersState } from './MapLayers';
 
 // Layers from an ArcGIS map, as ArcGIS presents them (F-138). Every map, service and value is
 // synthetic.
@@ -284,6 +284,8 @@ const base: MapLayerView = {
   definitionExpression: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
 };
 const map = { itemId: MAP, title: 'Synthetic rail map' };
 
@@ -301,6 +303,7 @@ describe('how a map’s layers are shown', () => {
     ).toEqual(['a', ['top', 'bottom']]);
     const setMany = vi.fn();
     const state = {
+      token: 'token',
       layers,
       chosen: new Set(['top']),
       toggle: vi.fn(),
@@ -327,8 +330,38 @@ describe('how a map’s layers are shown', () => {
         .map((s) => s.closest('label')?.textContent),
     ).toEqual(['Top', 'Bottom']);
     expect(screen.getByText('1 of 2')).toBeVisible();
+    // One of them on: the map's switch turns them all off.
     await user.click(screen.getByRole('switch', { name: /Synthetic rail map/ }));
-    expect(setMany).toHaveBeenCalledWith(['top', 'bottom'], true);
+    expect(setMany).toHaveBeenCalledWith(['top', 'bottom'], false);
+  });
+
+  it('turns on the layers the ArcGIS map shows at first (F-141)', async () => {
+    const layers = [
+      { ...base, id: 'wheat', name: 'Wheat', map, mapVisible: false },
+      { ...base, id: 'all', name: 'All crops', map, mapVisible: true },
+    ];
+    const setMany = vi.fn();
+    const state = {
+      token: 'token',
+      layers,
+      chosen: new Set<string>(),
+      toggle: vi.fn(),
+      setMany,
+      values: {},
+      setValues: vi.fn(),
+      panelOpen: true,
+      setPanelOpen: vi.fn(),
+      overlays: [],
+      notes: new Map(),
+      onViewChange: vi.fn(),
+      picked: null,
+      setPicked: vi.fn(),
+      error: null,
+    } satisfies MapLayersState;
+    const user = userEvent.setup();
+    render(<MapLayersPanel state={state} side="left" />);
+    await user.click(screen.getByRole('switch', { name: /Synthetic rail map/ }));
+    expect(setMany).toHaveBeenCalledWith(['all'], true);
   });
 
   it('draws a layer with ArcGIS’s width, opacity and zooms', () => {
@@ -426,5 +459,137 @@ describe('Codex’s review of 1f328f9', () => {
       result.current[1](layer.id, { shown: null, others: false }, choiceOf(layer, {}));
     });
     expect(result.current[0]).toEqual({});
+  });
+});
+
+describe('a map of pre-drawn pictures, such as a heat map (F-141)', () => {
+  const TILED = 'https://tiles.example.com/tiles/x/arcgis/rest/services/Crop_Density/MapServer';
+
+  it('adds its layers as pre-drawn pictures, those ArcGIS shows at first marked so', async () => {
+    let next = 0;
+    const calls = mockApi({
+      [`GET /map-layers${Q}`]: () => Response.json({ layers: [] }),
+      [`POST /map-layers/arcgis-item${Q}`]: ({ body }) =>
+        (body as { part: string }).part === 'info'
+          ? Response.json({ id: MAP, title: 'Synthetic crop density', type: 'Web Map' })
+          : Response.json({
+              operationalLayers: [
+                {
+                  layerType: 'ArcGISTiledMapServiceLayer',
+                  title: 'Synthetic wheat density',
+                  url: TILED,
+                  visibility: false,
+                },
+                {
+                  layerType: 'ArcGISTiledMapServiceLayer',
+                  title: 'Synthetic all crops density',
+                  url: TILED,
+                  visibility: true,
+                },
+              ],
+            }),
+      [`POST /map-layers/inspect${Q}`]: () =>
+        Response.json({
+          kind: 'arcgis_tiles',
+          url: TILED,
+          wmsLayers: null,
+          title: 'Synthetic',
+          copyright: null,
+          fields: [],
+          values: null,
+          count: null,
+          drawing: { renderer: null, transparency: 0, minScale: null, maxScale: null },
+        }),
+      [`POST /map-layers${Q}`]: () => {
+        next += 1;
+        return Response.json({ id: `tiles-${String(next)}` }, { status: 201 });
+      },
+    });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(await screen.findByRole('button', { name: 'Add map layer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add map layer' });
+    await user.click(within(dialog).getByRole('button', { name: 'ArcGIS map' }));
+    await user.type(within(dialog).getByLabelText('ArcGIS map link'), MAP);
+    await user.click(within(dialog).getByRole('button', { name: 'Read map' }));
+    const list = await within(dialog).findByRole('list', { name: 'The map’s layers' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([
+      expect.stringMatching(/^Synthetic all crops density.*pre-drawn pictures/),
+      expect.stringMatching(/^Synthetic wheat density.*off at first, as on ArcGIS/),
+    ]);
+    // Pictures are ArcGIS's own drawing: not marked as shown roughly.
+    expect(within(dialog).queryByText(/roughly/)).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Add 2 layers' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    const added = calls
+      .filter((c) => c.method === 'POST' && c.path === `/map-layers${Q}`)
+      .map((c) => c.body as Record<string, unknown>);
+    expect(added.map((b) => [b.name, b.mapVisible])).toEqual([
+      ['Synthetic wheat density', false],
+      ['Synthetic all crops density', true],
+    ]);
+    // No zoomed-out view to prepare for pictures.
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('shows a picture layer’s legend from ArcGIS under the map', async () => {
+    const picture: MapLayerView = {
+      ...base,
+      id: 'tiles-1',
+      name: 'Synthetic all crops density',
+      kind: 'arcgis_tiles',
+      url: TILED,
+      tileLevels: { min: 3, max: 10 },
+    };
+    mockApi({
+      'GET /map-layers/tiles-1/legend': () =>
+        Response.json({
+          entries: [
+            { label: 'Most Dense - Least Dense', image: 'data:image/png;base64,iVBORw0KGgo=' },
+          ],
+        }),
+    });
+    const state = {
+      token: 'token',
+      layers: [picture],
+      chosen: new Set(['tiles-1']),
+      toggle: vi.fn(),
+      setMany: vi.fn(),
+      values: {},
+      setValues: vi.fn(),
+      panelOpen: false,
+      setPanelOpen: vi.fn(),
+      overlays: [],
+      notes: new Map(),
+      onViewChange: vi.fn(),
+      picked: null,
+      setPicked: vi.fn(),
+      error: null,
+    } satisfies MapLayersState;
+    render(<MapLayersLegend state={state} />);
+    expect(await screen.findByText('Most Dense - Least Dense')).toBeVisible();
+    expect(
+      screen.getByRole('list', { name: 'Map layers shown' }).querySelector('img'),
+    ).toHaveAttribute('src', 'data:image/png;base64,iVBORw0KGgo=');
+  });
+
+  it('draws a pre-drawn layer within its levels', () => {
+    const picture: MapLayerView = {
+      ...base,
+      kind: 'arcgis_tiles',
+      url: TILED,
+      tileLevels: { min: 3, max: 10 },
+    };
+    const { result } = renderHook(() => useLayerOverlays([picture], null, 'token'));
+    expect(result.current.overlays[0]).toMatchObject({
+      kind: 'pictures',
+      levels: { min: 3, max: 10 },
+    });
   });
 });

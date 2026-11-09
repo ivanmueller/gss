@@ -2,7 +2,13 @@ import { groupingOf, type MapLayerView } from '@grain/domain';
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OBJECT_ID, squaresOverlap, useLayerOverlays, type MapView } from './mapLayers';
+import {
+  OBJECT_ID,
+  squareCovered,
+  squaresOverlap,
+  useLayerOverlays,
+  type MapView,
+} from './mapLayers';
 
 // No blank map between zooms (the owner's report of 2026-11-08, F-140): lines came and went while
 // zooming in and out, unlike ArcGIS. Every layer, square and value is synthetic.
@@ -37,6 +43,8 @@ const live: MapLayerView = {
   definitionExpression: null,
   othersShown: true,
   map: null,
+  mapVisible: true,
+  tileLevels: null,
 };
 
 const withOverview: MapLayerView = {
@@ -181,5 +189,83 @@ describe('zooming without a blank map (F-140)', () => {
     expect(squaresOverlap({ z: 8, x: 50, y: 80 }, { z: 9, x: 102, y: 160 })).toBe(false);
     expect(squaresOverlap({ z: 8, x: 50, y: 80 }, { z: 8, x: 50, y: 80 })).toBe(true);
     expect(squaresOverlap({ z: 8, x: 50, y: 80 }, { z: 8, x: 51, y: 80 })).toBe(false);
+  });
+});
+
+describe('Codex’s review of 4026e22', () => {
+  it('draws the zoomed-out view when zooming out leaves part of the wider square empty', async () => {
+    api({ 9: square([1]), 8: null });
+    const { result, rerender } = renderHook(
+      ({ view }) => useLayerOverlays([withOverview], view, 'token'),
+      { initialProps: { view: at(9.5) } },
+    );
+    await waitFor(() => {
+      expect(drawn(result).map((f): unknown => f.properties?.[OBJECT_ID])).toEqual([1]);
+    });
+    // The zoom 8 square is four zoom 9 squares; only one is loaded.
+    rerender({ view: at(8.5) });
+    expect(drawn(result)).toHaveLength(1);
+    expect(drawn(result)[0]?.properties).toEqual({ OWNER: 'R1' });
+  });
+
+  it('keeps lines already loaded where a square failed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string) => {
+        if (input.endsWith('/overview')) return Promise.resolve(Response.json(OVERVIEW));
+        return input.includes('/features/8/')
+          ? Promise.resolve(Response.json(square([2, 3])))
+          : Promise.resolve(
+              Response.json(
+                { error: { code: 'LAYER_SERVICE_FAILED', message: 'No.' } },
+                { status: 502 },
+              ),
+            );
+      }),
+    );
+    const { result, rerender } = renderHook(({ view }) => useLayerOverlays([live], view, 'token'), {
+      initialProps: { view: at(8.5) },
+    });
+    await waitFor(() => {
+      expect(drawn(result)).toHaveLength(2);
+    });
+    rerender({ view: at(9.5) });
+    await waitFor(() => {
+      expect(result.current.notes.get(LAYER)).toMatch(/could not be loaded/);
+    });
+    expect(drawn(result).map((f): unknown => f.properties?.[OBJECT_ID])).toEqual([2, 3]);
+  });
+
+  it('knows when loaded squares cover all of a square', () => {
+    const tile = { z: 8, x: 50, y: 80 };
+    expect(squareCovered(tile, new Set(['7/25/40']))).toBe(true);
+    expect(squareCovered(tile, new Set(['8/50/80']))).toBe(true);
+    expect(squareCovered(tile, new Set(['9/100/160']))).toBe(false);
+    expect(squareCovered(tile, new Set(['9/100/160', '9/101/160', '9/100/161', '9/101/161']))).toBe(
+      true,
+    );
+    expect(
+      squareCovered(
+        tile,
+        new Set(['9/100/160', '9/101/160', '9/100/161', '10/202/322', '10/203/322', '10/202/323']),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('Codex’s re-review of b9746f9', () => {
+  it('keeps the zoomed-out view when the only loaded squares were cut short', async () => {
+    api({ 8: square([5, 6], true), 9: null });
+    const { result, rerender } = renderHook(
+      ({ view }) => useLayerOverlays([withOverview], view, 'token'),
+      { initialProps: { view: at(8.5) } },
+    );
+    await waitFor(() => {
+      expect(drawn(result)[0]?.properties).toEqual({ OWNER: 'R1' });
+    });
+    // Zoom 9 still loading: the cut-short zoom 8 squares do not replace the whole view.
+    rerender({ view: at(9.5) });
+    expect(drawn(result)).toHaveLength(1);
+    expect(drawn(result)[0]?.properties).toEqual({ OWNER: 'R1' });
   });
 });
