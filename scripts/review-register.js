@@ -81,8 +81,10 @@ const HIGH = [
   /^supabase\//,
   /^packages\/trading-engine\//,
   /^packages\/database\//,
-  /^apps\/api\/src\/(anthropic|auth|callbacks|calls|call-steps|db|freight|fx|logins|members|quotes|readings|summaries|telnyx)[.-]/,
-  /^packages\/domain\/src\/(callbacks|calls|drafts|freight|fx|members|money|quotes|readings|summaries)[.-]/,
+  // The whole API Worker, tests apart: it is where organization isolation, permissions and every
+  // database write are enforced (F-150-R3-01).
+  /^apps\/api\/src\/(?!.*\.test\.ts$)/,
+  /^packages\/domain\/src\/(callbacks|calls|drafts|freight|fx|members|money|png|quotes|readings|summaries|terms)[.-]/,
   // The API's routing (which routes are public and which need sign-in), the web app's sign-in, and
   // its API, FX, freight and quote logic (F-150-R1-03).
   /^apps\/api\/src\/(index|respond)\.ts$/,

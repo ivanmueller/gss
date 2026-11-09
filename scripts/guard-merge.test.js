@@ -49,6 +49,9 @@ describe('merge guard hook', () => {
       'env GH_DEBUG=1 gh pr merge 194',
       'command gh pr merge 194',
       'echo ok;   gh pr merge 194',
+      // F-150-R3-02: a flag of another command does not excuse this one.
+      'gh pr merge 194 --squash; gh pr merge 195 --disable-auto',
+      'gh pr merge 195 --disable-auto && gh pr merge 194',
     ]) {
       const result = run(command);
       assert.equal(result.status, 2, command);

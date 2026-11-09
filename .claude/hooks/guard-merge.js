@@ -20,21 +20,27 @@ try {
   process.exit(0);
 }
 const command = String(input.tool_input?.command ?? '');
-// Only where a command starts (the line's start, or after && ; | or a parenthesis, with any spaces
-// and prefixes such as VAR=value, env, command, sudo, time: F-150-R1-04), so text that merely
-// mentions the command, such as a document written by a heredoc, is not taken for it.
-const START =
-  /(^|[;&|(\n])\s*((\w+=\S*|env|command|sudo|time|exec|nohup)\s+)*gh(\.exe)?\s+pr\s+merge\b/;
-if (!START.test(command)) process.exit(0);
+// Each command on its own (F-150-R3-02): the input is split at && ; | parentheses and new lines, and
+// a piece is a merge only when it starts with `gh pr merge` (after spaces and prefixes such as
+// VAR=value, env, command, sudo, time: F-150-R1-04), so text that merely mentions the command, such
+// as a document written by a heredoc, is not taken for it.
+const MERGE = /^\s*((\w+=\S*|env|command|sudo|time|exec|nohup)\s+)*gh(\.exe)?\s+pr\s+merge\b/;
+const merges = command.split(/[;&|()\n]+/).filter((piece) => MERGE.test(piece));
+if (merges.length === 0) process.exit(0);
 
-if (/(^|\s)(--admin|-A)\b/.test(command))
-  block('--admin bypasses the branch rules; Claude never uses it.');
-// Turning automatic merging off is always allowed.
-if (/(^|\s)--disable-auto\b/.test(command)) process.exit(0);
-if (!/(^|\s)--auto\b/.test(command))
-  block(
-    'Claude only enables automatic merging (`gh pr merge <n> --auto --squash`); GitHub merges once every required check passes.',
-  );
+let needsEnforcement = false;
+for (const merge of merges) {
+  if (/(^|\s)(--admin|-A)\b/.test(merge))
+    block('--admin bypasses the branch rules; Claude never uses it.');
+  // Turning automatic merging off is always allowed, for that command only.
+  if (/(^|\s)--disable-auto\b/.test(merge)) continue;
+  if (!/(^|\s)--auto\b/.test(merge))
+    block(
+      'Claude only enables automatic merging (`gh pr merge <n> --auto --squash`); GitHub merges once every required check passes.',
+    );
+  needsEnforcement = true;
+}
+if (!needsEnforcement) process.exit(0);
 
 // Automatic merging only once GitHub enforces the Merge policy on main.
 function requiredChecks() {

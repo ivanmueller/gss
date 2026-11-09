@@ -726,8 +726,19 @@ describe('register rules', () => {
       // F-150-D1-03: the authenticated database user, and the domain package's exports.
       'apps/api/src/respond.ts',
       'packages/domain/src/index.ts',
+      // F-150-R3-01: every API module (database access, organization scoping, admin writes), and
+      // the shared validation of prices, quantities and validity, and of uploaded logos.
+      'apps/api/src/map-layers-db.ts',
+      'apps/api/src/counterparties.ts',
+      'apps/api/src/crm-db.ts',
+      'apps/api/src/geocoding.ts',
+      'packages/domain/src/terms.ts',
+      'packages/domain/src/png.ts',
     ])
       assert.equal(fileTier(path), 'high', path);
+    // Tests of the API are still tests.
+    assert.equal(fileTier('apps/api/src/crm.test.ts'), 'low');
+    assert.equal(fileTier('apps/api/src/crm.db.test.ts'), 'low');
   });
 
   // F-150-D1-04: agent instructions and configuration at any depth are governance, never documents.
