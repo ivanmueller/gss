@@ -323,6 +323,9 @@ describe('how a map’s layers are shown', () => {
     render(<MapLayersPanel state={state} side="right" />);
     // Below the zoom buttons, on their side (F-139).
     expect(screen.getByRole('region', { name: 'Map layers' })).toHaveClass('top-20', 'right-3');
+    // Folded until its drop-down is opened (F-142).
+    expect(screen.queryByRole('list', { name: 'Synthetic rail map: layers' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Show the layers of Synthetic rail map' }));
     const group = screen.getByRole('list', { name: 'Synthetic rail map: layers' });
     expect(
       within(group)
@@ -591,5 +594,88 @@ describe('a map of pre-drawn pictures, such as a heat map (F-141)', () => {
       kind: 'pictures',
       levels: { min: 3, max: 10 },
     });
+  });
+});
+
+describe('a map’s layers kept together on Team (F-142)', () => {
+  const rail = { itemId: MAP, title: 'Synthetic rail map' };
+  const layers: MapLayerView[] = [
+    { ...base, id: 'alone', name: 'Synthetic elevators', version: 'v-alone' },
+    { ...base, id: 'bottom', name: 'Synthetic bottom', map: rail, version: 'v-bottom' },
+    { ...base, id: 'middle', name: 'Synthetic middle', map: rail, version: 'v-middle' },
+    { ...base, id: 'top', name: 'Synthetic top', map: rail, version: 'v-top' },
+  ];
+
+  it('lists a map as one entry, folded, with its source once', async () => {
+    mockApi({ [`GET /map-layers${Q}`]: () => Response.json({ layers }) });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    expect(await screen.findByText('Synthetic elevators')).toBeVisible();
+    expect(screen.getByText('· 3 layers')).toBeVisible();
+    expect(screen.queryByText('Synthetic top')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Show the layers of Synthetic rail map' }));
+    const list = screen.getByRole('list', { name: 'Synthetic rail map: layers' });
+    expect(
+      within(list)
+        .getAllByRole('checkbox')
+        .map((c) => c.getAttribute('aria-label')),
+    ).toEqual(['Select Synthetic top', 'Select Synthetic middle', 'Select Synthetic bottom']);
+    // The map's source and terms once, not under each of its layers.
+    expect(within(list).queryByText(/Source:/)).toBeNull();
+  });
+
+  it('removes only the layers selected, after asking', async () => {
+    let shown = layers;
+    const calls = mockApi({
+      [`GET /map-layers${Q}`]: () => Response.json({ layers: shown }),
+      'POST /map-layers/middle/remove': () => {
+        shown = shown.filter((l) => l.id !== 'middle');
+        return Response.json({ id: 'middle' });
+      },
+    });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Show the layers of Synthetic rail map' }),
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Select Synthetic middle' }));
+    await user.click(screen.getByRole('button', { name: 'Remove selected' }));
+    await user.click(screen.getByRole('button', { name: 'Remove 1 layer for everyone' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Synthetic middle')).toBeNull();
+    });
+    const removed = calls.filter((c) => c.method === 'POST');
+    expect(removed.map((c) => [c.path, c.body])).toEqual([
+      ['/map-layers/middle/remove', { version: 'v-middle' }],
+    ]);
+  });
+
+  it('removes the whole map, after asking', async () => {
+    let shown = layers;
+    const calls = mockApi({
+      [`GET /map-layers${Q}`]: () => Response.json({ layers: shown }),
+      ...Object.fromEntries(
+        ['bottom', 'middle', 'top'].map((id) => [
+          `POST /map-layers/${id}/remove`,
+          () => {
+            shown = shown.filter((l) => l.id !== id);
+            return Response.json({ id });
+          },
+        ]),
+      ),
+    });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(await screen.findByRole('button', { name: 'Remove map' }));
+    await user.click(screen.getByRole('button', { name: 'Remove all 3 layers for everyone' }));
+    await waitFor(() => {
+      expect(screen.queryByText('Synthetic rail map')).toBeNull();
+    });
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual([
+      '/map-layers/top/remove',
+      '/map-layers/middle/remove',
+      '/map-layers/bottom/remove',
+    ]);
+    expect(screen.getByText('Synthetic elevators')).toBeVisible();
   });
 });
