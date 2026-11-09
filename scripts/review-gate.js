@@ -210,10 +210,16 @@ export function evaluate({ base, head, labels = [] }) {
       result.blockers.push(`${tier} risk: no design review (D round) of the plan is recorded.`);
     else if (
       last &&
-      !designs.some((d) => known(d.reviewed) && isAncestor(d.reviewed, last.reviewed))
+      !designs.some((d) => {
+        if (!known(d.reviewed) || !isAncestor(d.reviewed, last.reviewed)) return false;
+        // Before the code (F-150-R6-01): between the base branch and the design's snapshot, at most
+        // the plan in Markdown changed; a snapshot already on the base branch is before it too.
+        if (!isAncestor(mergeBase, d.reviewed)) return true;
+        return changedFiles(mergeBase, d.reviewed).every((path) => path.endsWith('.md'));
+      })
     )
       result.blockers.push(
-        `${tier} risk: the design review must have reviewed a commit before the reviewed code (its commit is not in the history of ${last.reviewed}).`,
+        `${tier} risk: the design review must come before the code: it must review a commit in this history with no change but Markdown since the base branch (${last.reviewed} is the last reviewed).`,
       );
     for (const finding of register.findings)
       if (finding.severity !== 'P3' && finding.status === 'accepted-limitation')

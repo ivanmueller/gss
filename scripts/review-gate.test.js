@@ -256,6 +256,28 @@ describe('review evidence check', () => {
     );
   });
 
+  // F-150-R6-01: the design review must come before the code: its snapshot has no code changes.
+  test('a design review of a snapshot that already has the code does not count', () => {
+    branch('latedesign');
+    const c1 = commit({ 'apps/api/src/telnyx.ts': 'export const late = 1;\n' }, 'code first');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: 'D1', mode: 'design', reviewed: c1, result: 'approve' },
+            { round: '1', mode: 'final', base: main, reviewed: c1, result: 'approve' },
+          ],
+        }),
+      },
+      'register',
+    );
+    assert.ok(
+      evaluate({ base: main, head }).blockers.some((b) =>
+        /design review must come before the code/.test(b),
+      ),
+    );
+  });
+
   // F-150-R5-02: only an added or changed pgTAP test counts for a new migration.
   test('deleting a database test or adding a non-test file does not count as migration tests', () => {
     git('switch', '-q', '-c', 'basewithtest', main);
