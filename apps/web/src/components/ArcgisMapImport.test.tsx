@@ -185,10 +185,13 @@ describe('Team → Map layers → Add map layer → ArcGIS map', () => {
       expect.stringMatching(/^Synthetic passenger lines.*1 shapes, kept in the map/),
     ]);
     expect(within(dialog).getByLabelText('Source')).toHaveValue('Synthetic Board');
-    expect(within(dialog).getByLabelText('Terms of use (link)')).toHaveValue(
+    // The terms are not asked for: taken from the map's ArcGIS page (F-143).
+    expect(within(dialog).queryByLabelText('Terms of use (link)')).toBeNull();
+    expect(within(dialog).queryByLabelText('What the terms allow')).toBeNull();
+    expect(within(dialog).getByRole('link', { name: 'the map’s ArcGIS page' })).toHaveAttribute(
+      'href',
       `https://www.arcgis.com/home/item.html?id=${MAP}`,
     );
-    expect(within(dialog).getByLabelText('What the terms allow')).toHaveValue('Public domain.');
     // ArcGIS Online is read through the Worker only.
     expect(calls.every((c) => !c.path.startsWith('https://'))).toBe(true);
 
@@ -211,6 +214,11 @@ describe('Team → Map layers → Add map layer → ArcGIS map', () => {
       lineWidth: 0.75,
       map,
     });
+    // Each layer still records the map's terms (F-143).
+    expect(
+      added.every((b) => b.termsUrl === `https://www.arcgis.com/home/item.html?id=${MAP}`),
+    ).toBe(true);
+    expect(added.every((b) => b.termsNote === 'Public domain.')).toBe(true);
     // The layer's own item gives its grey, not the service's purple.
     expect(added[1]).toMatchObject({ source: 'web', url: OTHER, colour: '#999999', map });
     expect(added[2]).toMatchObject({

@@ -25,7 +25,7 @@ import { message, prepareWithProgress, takesOverview } from '../lib/mapLayerPrep
 import { forgetApiAnswers } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { Button } from './ui/button';
-import { Input, Textarea } from './ui/input';
+import { Input } from './ui/input';
 
 // Layers from an ArcGIS map, presented as ArcGIS presents them (the owner's request and answers
 // of 2026-11-08, F-138). An admin pastes a map's link; the Worker reads the map from ArcGIS
@@ -272,6 +272,7 @@ export function ImportArcgisMapForm({
   const [plan, setPlan] = useState<Plan | null>(null);
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(() => new Set());
   const [sourceName, setSourceName] = useState('');
+  // From the map's ArcGIS page, recorded with each layer without being asked for (F-143).
   const [termsUrl, setTermsUrl] = useState('');
   const [termsNote, setTermsNote] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -526,34 +527,20 @@ export function ImportArcgisMapForm({
               }}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={field('terms')} className="font-medium">
-              Terms of use (link)
-            </label>
-            <Input
-              id={field('terms')}
-              value={termsUrl}
-              onChange={(event) => {
-                setTermsUrl(event.target.value);
-              }}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={field('note')} className="font-medium">
-              What the terms allow
-            </label>
-            <Textarea
-              id={field('note')}
-              rows={3}
-              value={termsNote}
-              onChange={(event) => {
-                setTermsNote(event.target.value);
-              }}
-            />
-            <p className="text-xs text-muted-foreground">
-              From the map’s ArcGIS page. Check it allows GSS’s use before adding.
-            </p>
-          </div>
+          {/* The terms are taken from the map's ArcGIS page and shown on Team, not asked for
+              (the owner's request of 2026-11-09, F-143). */}
+          <p className="text-xs text-muted-foreground">
+            Its terms of use are recorded from{' '}
+            <a
+              href={termsUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              the map’s ArcGIS page
+            </a>{' '}
+            and shown on Team → Map layers.
+          </p>
         </>
       )}
 
