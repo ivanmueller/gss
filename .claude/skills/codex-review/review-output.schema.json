@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings", "verified_fixes"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["approve", "needs-attention"] },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "category",
+          "title",
+          "body",
+          "file",
+          "line_start",
+          "line_end",
+          "confidence",
+          "recommendation",
+          "duplicate_of",
+          "security_sensitive",
+          "needs_owner_decision"
+        ],
+        "properties": {
+          "severity": { "type": "string", "enum": ["P1", "P2", "P3"] },
+          "category": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "security",
+              "data-integrity",
+              "financial",
+              "concurrency",
+              "tests",
+              "design",
+              "other"
+            ]
+          },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "file": { "type": "string" },
+          "line_start": { "type": ["integer", "null"] },
+          "line_end": { "type": ["integer", "null"] },
+          "confidence": { "type": "number" },
+          "recommendation": { "type": "string" },
+          "duplicate_of": { "type": ["string", "null"] },
+          "security_sensitive": { "type": "boolean" },
+          "needs_owner_decision": { "type": "boolean" }
+        }
+      }
+    },
+    "verified_fixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "note"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["fixed", "not-fixed", "cannot-tell"] },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}

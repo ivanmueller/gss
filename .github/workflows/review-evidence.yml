@@ -1,0 +1,60 @@
+name: Review evidence
+
+# Reports a pull request's risk tier and whether its Codex review register (docs/reviews/<ID>.md)
+# covers the exact head commit (docs/AI_WORKFLOW.md §11.6). Report only: it is not a required check
+# and nothing merges automatically. It reads git data only and never runs code from the pull request.
+#
+# Two runs:
+# - "pull_request" uses this file and scripts/review-gate.js as the pull request has them, so changes
+#   to the check are tested in their own pull request;
+# - "pull_request_target" uses the copy on main, which a pull request cannot change; that one is the
+#   check to make required if the owner switches on automatic merging. It checks out the pull
+#   request's commits as data only (no install, no build, no scripts from the pull request) with
+#   read-only permissions and no secrets.
+on:
+  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-evidence-${{ github.event_name }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: Review evidence (${{ github.event_name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The check itself: the pull request's copy on pull_request, main's on pull_request_target.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+          path: gate
+          persist-credentials: false
+      # The pull request's history, as data.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Tests of the check
+        if: github.event_name == 'pull_request'
+        # A file pattern, not a folder: Node 22 (CI) takes `--test` arguments as files or globs.
+        run: node --test 'gate/scripts/*.test.js'
+      - name: Check the review evidence
+        working-directory: pr
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          git fetch --no-tags --quiet origin "$BASE_SHA"
+          node ../gate/scripts/review-gate.js --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS"

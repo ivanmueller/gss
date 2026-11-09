@@ -14,12 +14,12 @@ No trading engine, saved scenarios or production deployment exists yet; `docs/HA
 
 1. Read `MASTER_PROJECT_SPECIFICATION.md` for product and technical requirements.
 2. Read `docs/BUILD_PLAN.md` for staged work and its early end-to-end demonstration path.
-3. **Read `docs/AI_CODING_SYSTEM.md` for the October 2026 tool choices and practical multi-agent coding setup**; `docs/AI_WORKFLOW.md` describes Git/PR governance.
-4. Every agent follows root `AGENTS.md` (Claude Code via `CLAUDE.md`, Gemini CLI via `.gemini/settings.json`; Cursor and Codex also recognize `AGENTS.md`). Verify instruction loading in your selected tool.
+3. **Read `docs/AI_CODING_SYSTEM.md` for the tools in use and the practical coding setup**; `docs/AI_WORKFLOW.md` describes Git/PR governance and the Claude + Codex review loop (§11.5, §11.6).
+4. Every agent follows root `AGENTS.md` (Claude Code via `CLAUDE.md`, Gemini CLI via `.gemini/settings.json`; Codex also recognizes `AGENTS.md`). Verify instruction loading in your selected tool.
 5. Use dedicated issue/PR branches and templates. The integration owner updates `docs/HANDOFF.md` **after** each verified merge, not separately in parallel feature branches.
 6. See `docs/CHANGELOG.md` for changes made to this documentation pack.
 
-**Initial AI workflow:** Evaluate Cursor 3 Agents Window as the primary hub, Claude for implementation, Codex for independent review, and Gemini for targeted alternate approaches. Claude Code or Google Antigravity 2.0 may replace the primary interface after a small controlled comparison. This is a **recommendation**, not a requirement or configured integration.
+**AI workflow (since 2026-11-09, F-149):** Claude Code in VS Code implements; OpenAI Codex, called by Claude through the official Codex plugin's CLI, reviews designs and committed checkpoints read-only, with findings kept in `docs/reviews/`; GitHub CI is the authoritative validation and only the owner merges. Gemini is optional for alternate approaches. (Until 2026-11-09 the recommendation was to evaluate Cursor 3 as the hub.)
 
 **Recommended stack:** React/Vite, TypeScript, Hono/Cloudflare Workers, Supabase PostgreSQL/PostGIS/Auth/Storage, Mapbox GL JS; pnpm, Vitest, Playwright.
 
