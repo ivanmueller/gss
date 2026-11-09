@@ -278,6 +278,55 @@ describe('review evidence check', () => {
     );
   });
 
+  // F-150-R7-01: no way round it by updating from the base branch, or with governance Markdown.
+  test('a late design review does not count after an update from the base branch', () => {
+    git('switch', '-q', '-c', 'movingmain', main);
+    branch('latedesignmerged');
+    const c1 = commit({ 'apps/api/src/telnyx.ts': 'export const late = 2;\n' }, 'code first');
+    git('switch', '-q', 'movingmain');
+    const newMain = commit({ 'README.md': 'hello again\n' }, 'main moves on');
+    git('switch', '-q', 'latedesignmerged');
+    git('merge', '-q', '--no-edit', 'movingmain');
+    const merged = git('rev-parse', 'HEAD');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: 'D1', mode: 'design', reviewed: c1, result: 'approve' },
+            { round: '1', mode: 'final', base: newMain, reviewed: merged, result: 'approve' },
+          ],
+        }),
+      },
+      'register',
+    );
+    assert.ok(
+      evaluate({ base: newMain, head }).blockers.some((b) =>
+        /design review must come before the code/.test(b),
+      ),
+    );
+  });
+
+  test('a governance change in Markdown cannot use its own change as the design snapshot', () => {
+    branch('governancemarkdown');
+    const c1 = commit({ 'AGENTS.md': 'new rules\n' }, 'governance change');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: 'D1', mode: 'design', reviewed: c1, result: 'approve' },
+            { round: '1', mode: 'final', base: main, reviewed: c1, result: 'approve' },
+          ],
+        }),
+      },
+      'register',
+    );
+    assert.ok(
+      evaluate({ base: main, head }).blockers.some((b) =>
+        /design review must come before the code/.test(b),
+      ),
+    );
+  });
+
   // F-150-R5-02: only an added or changed pgTAP test counts for a new migration.
   test('deleting a database test or adding a non-test file does not count as migration tests', () => {
     git('switch', '-q', '-c', 'basewithtest', main);

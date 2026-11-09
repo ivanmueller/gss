@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import {
   changeTier,
+  fileTier,
   codeReviewChain,
   documentsOnly,
   isRegisterPath,
@@ -212,10 +213,14 @@ export function evaluate({ base, head, labels = [] }) {
       last &&
       !designs.some((d) => {
         if (!known(d.reviewed) || !isAncestor(d.reviewed, last.reviewed)) return false;
-        // Before the code (F-150-R6-01): between the base branch and the design's snapshot, at most
-        // the plan in Markdown changed; a snapshot already on the base branch is before it too.
-        if (!isAncestor(mergeBase, d.reviewed)) return true;
-        return changedFiles(mergeBase, d.reviewed).every((path) => path.endsWith('.md'));
+        // Before the code (F-150-R6-01, R7-01): measured from the design snapshot's own fork point
+        // from the base branch (so a later update from the base branch changes nothing), at most
+        // the plan changed: ordinary documents, never code and never governance documents such as
+        // AGENTS.md. A snapshot already on the base branch is before the code too.
+        const fork = git(['merge-base', d.reviewed, base]);
+        return changedFiles(fork, d.reviewed).every(
+          (path) => path.endsWith('.md') && fileTier(path) === 'low',
+        );
       })
     )
       result.blockers.push(
