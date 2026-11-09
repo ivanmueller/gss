@@ -20,6 +20,11 @@ export const AUTO_ROUNDS = 5;
 export const MAX_ROUNDS = 8;
 /** The pull request label by which only the owner allows rounds beyond the limits. */
 export const OWNER_APPROVAL_LABEL = 'owner-approved-extra-review-round';
+/**
+ * The pull request label by which only the owner approves merging a high-risk pull request (F-150).
+ * It approves one head commit: a push after it removes it (the Merge policy workflow).
+ */
+export const OWNER_MERGE_LABEL = 'owner-approved-merge';
 
 /**
  * Whether code review round `round` (1, 2, …) may run, given the issue count of every completed

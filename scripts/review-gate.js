@@ -5,8 +5,9 @@
 //     docs/reviews/ changed, no blocking finding, fixes verified by Codex, the last review
 //     approving, not escalated, and every round within the limits (5; up to 8 with progress;
 //     more only with the owner's label);
-//   - whether it would be eligible for automatic merging (never for high risk). Automatic merging is
-//     not switched on: this only reports.
+//   - whether it may merge (mergeDecision, F-150): low and normal risk with complete evidence; high
+//     risk only with the owner's label owner-approved-merge on this head. With --policy this is the
+//     exit code: the Merge policy check, which GitHub can require before any merge.
 // It reads git data only and never runs code from the pull request.
 //
 //   node scripts/review-gate.js --base <base sha or ref> --head <head sha> [--labels a,b] [--json]
@@ -21,6 +22,7 @@ import {
   documentsOnly,
   isRegisterPath,
   OWNER_APPROVAL_LABEL,
+  OWNER_MERGE_LABEL,
   parseRegister,
   registerBlockers,
   verifyingReview,
@@ -137,20 +139,34 @@ export function evaluate({ base, head, labels = [] }) {
   return { ...result, evidence: result.blockers.length ? 'incomplete' : 'complete' };
 }
 
-export function eligibility(outcome) {
-  if (outcome.evidence === 'incomplete') return 'no: review evidence incomplete';
-  if (outcome.tier === 'high') return 'no: high risk, held for qualified approval';
-  return 'yes (automatic merging is not switched on)';
+/**
+ * The merge policy (F-150, the owner's authorization of 2026-11-09): low and normal risk may merge
+ * once the review evidence is complete (or not needed); high risk only with the owner's label
+ * `owner-approved-merge` on this head commit (a push removes it, so on `synchronize` it never
+ * counts). Required checks (CI) are GitHub's to enforce beside this one.
+ */
+export function mergeDecision(outcome, { labels = [], action = '' } = {}) {
+  if (outcome.evidence === 'incomplete')
+    return { merge: false, reason: 'no: review evidence incomplete' };
+  if (outcome.tier !== 'high') return { merge: true, reason: `yes (${outcome.tier} risk)` };
+  if (labels.includes(OWNER_MERGE_LABEL) && action !== 'synchronize')
+    return { merge: true, reason: `yes (high risk, approved by the owner: ${OWNER_MERGE_LABEL})` };
+  return {
+    merge: false,
+    reason: `no: high risk, held for the owner's approval (label ${OWNER_MERGE_LABEL})`,
+  };
 }
 
-function report(outcome) {
+export const eligibility = (outcome, options) => mergeDecision(outcome, options).reason;
+
+function report(outcome, options) {
   const lines = [
     `Risk tier: ${outcome.tier}${outcome.because.length ? ` (${outcome.because.slice(0, 8).join(', ')}${outcome.because.length > 8 ? ', …' : ''})` : ''}`,
     `Head commit: ${outcome.head}`,
     `Review evidence: ${outcome.evidence}${outcome.note ? ` (${outcome.note})` : ''}`,
     ...(outcome.register ? [`Register: ${outcome.register}`] : []),
     ...outcome.blockers.map((blocker) => `  - ${blocker}`),
-    `Eligible for automatic merge: ${eligibility(outcome)}`,
+    `May merge: ${eligibility(outcome, options)}`,
   ];
   return lines.join('\n');
 }
@@ -164,32 +180,34 @@ function main(argv) {
   const head = option('head');
   if (!base || !head) {
     console.error(
-      'Usage: node scripts/review-gate.js --base <ref> --head <sha> [--labels a,b] [--json]',
+      'Usage: node scripts/review-gate.js --base <ref> --head <sha> [--labels a,b] [--action <pull request event action>] [--policy] [--json]',
     );
     return 2;
   }
+  const labels = (option('labels') ?? '').split(',').filter(Boolean);
+  const options = { labels, action: option('action') ?? '' };
   let outcome;
   try {
-    outcome = evaluate({
-      base,
-      head: git(['rev-parse', `${head}^{commit}`]),
-      labels: (option('labels') ?? '').split(',').filter(Boolean),
-    });
+    outcome = evaluate({ base, head: git(['rev-parse', `${head}^{commit}`]), labels });
   } catch (error) {
     console.error(`Git error: ${error.message}`);
     return 2;
   }
-  const text = report(outcome);
+  const text = report(outcome, options);
+  const decision = mergeDecision(outcome, options);
   console.log(
     argv.includes('--json')
-      ? JSON.stringify({ ...outcome, eligible: eligibility(outcome) }, null, 2)
+      ? JSON.stringify({ ...outcome, merge: decision.merge, reason: decision.reason }, null, 2)
       : text,
   );
+  const policy = argv.includes('--policy');
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
-      `## Review evidence\n\n\`\`\`\n${text}\n\`\`\`\n`,
+      `## ${policy ? 'Merge policy' : 'Review evidence'}\n\n\`\`\`\n${text}\n\`\`\`\n`,
     );
+  // --policy (the Merge policy check): pass only when this pull request may merge.
+  if (policy) return decision.merge ? 0 : 1;
   return outcome.evidence === 'incomplete' ? 1 : 0;
 }
 

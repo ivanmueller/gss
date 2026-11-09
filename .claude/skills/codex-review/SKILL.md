@@ -62,4 +62,12 @@ To stop for the owner: record the round's findings, set the register's Status to
 1. The last code review must have reviewed the final code and approved (or raised only P3 findings): after its commit only `docs/reviews/` may change. If code changed since, run a re-review.
 2. Set Status to **complete** (or **escalated**), commit the register.
 3. Run `node scripts/review-gate.js --base origin/main --head HEAD` and fix whatever it lists.
-4. Push and open the pull request (template sections filled, the register linked, rounds and any escalation stated). Report the link. Do not merge.
+4. Push and open the pull request, ready for review (template sections filled, the register linked, rounds and any escalation stated).
+
+## 8. Merge and staging (docs/AI_WORKFLOW.md §11.6)
+
+1. **Low or normal risk:** `gh pr merge <n> --auto --squash`. GitHub merges once `check` and `Merge policy` pass. The hook refuses it while GitHub does not require the Merge policy (automatic merging not switched on): then say the pull request is ready and leave the merge to the owner.
+2. **High risk:** never enable merging. Tell the owner briefly what it changes and why it is high risk; they merge it or add `owner-approved-merge`.
+3. Watch until it merges (`gh pr checks <n> --watch`, then `gh pr view <n> --json mergedAt,mergeCommit`), then the `Deploy staging` run for the merge commit (`gh run list --workflow "Deploy staging" --commit <sha>`, `gh run watch <id>`).
+4. On success: send the owner a short notification (PushNotification) and message: what changed, in plain words, the pull request and that staging is updated. Then the records commit (`docs/HANDOFF.md`, `docs/FEATURES.md`) on the next branch.
+5. On failure (a check, the deploy, the smoke test): read the log, notify the owner of the blocker, and fix it on a new branch; never re-run a deploy or migration by hand.

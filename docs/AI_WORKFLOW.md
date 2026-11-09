@@ -62,25 +62,32 @@ Pull requests that change documents only (Markdown other than the governance fil
 
 ## 11.6 Merge policy and safeguards
 
-**Today: only the owner merges.** Automatic merging is designed below but **not switched on**; switching it on needs the owner's explicit authorization and the GitHub settings in step 4.
+**Automatic merging (F-150, the owner's authorization of 2026-11-09)** for low and normal risk, only once GitHub enforces the merge policy. High risk always waits for the owner. Until the owner's switch-on steps below are done, nothing merges automatically and only the owner merges.
 
 | Tier (set by `scripts/review-gate.js` from the changed files) | Examples | Merge |
 |---|---|---|
-| **Low** | Documents, tests, style sheets | Eligible for automatic merge once CI and the review evidence check pass (documents only need no Codex review). |
-| **Normal** | Features, API and web changes outside the high-risk areas | Eligible for automatic merge after a complete Codex review (no blocking finding, every fix verified), regression tests and CI. |
-| **High** | `supabase/` (migrations, RLS), auth, members and logins, money, FX, quotes, freight, trading engine, Telnyx, calls and callbacks, Anthropic, readings and summaries, the database layer, Worker config, dependencies, `.github/`, `.claude/`, the review scripts and governance documents | Never automatic. Held for qualified independent approval (today: the owner's merge after Codex's review and CI). |
+| **Low** | Documents, tests, style sheets | Automatic once CI and the Merge policy pass (documents only need no Codex review). |
+| **Normal** | Features, API and web changes outside the high-risk areas | Automatic after a complete Codex review (no blocking finding, every fix verified, the last review approving), regression tests, CI and the Merge policy. |
+| **High** | `supabase/` (migrations, RLS), auth, members and logins, money, FX, quotes, freight, trading engine, Telnyx, calls and callbacks, Anthropic, readings and summaries, the database layer, Worker config, dependencies, `.github/`, `.claude/`, the review scripts and governance documents | Never automatic. Waits for the owner: the owner merges it, or adds the label `owner-approved-merge`, which approves that head commit only. |
+
+**The Merge policy check** (job `Merge policy` in `.github/workflows/review-evidence.yml`, run by `pull_request_target` from `main`'s copy, which a pull request cannot change; it reads git data only and never runs the pull request's code) passes only when the review evidence is complete (or not needed) and the tier is low or normal, or the owner's label is on the pull request. A push removes the label, so the owner's approval never carries over to new commits. GitHub requires it beside `check` (CI) before any merge to `main`.
+
+**How Claude merges:** only `gh pr merge <n> --auto --squash`, after the evidence check passes locally; GitHub then merges once every required check passes. A Claude Code hook (`.claude/hooks/guard-merge.js`) blocks any other merge command, always blocks `--admin` (which bypasses the rules), and blocks every merge until GitHub requires the `Merge policy` check. Claude never adds labels: approving a high-risk pull request is the owner's act.
+
+**After a merge, Claude watches staging.** When a pull request merges, Claude follows `Deploy staging` for the merge commit and, once it succeeds, sends the owner a short notification of what changed. The only other reasons to interrupt the owner: a failed deploy or check, a failed or escalated review, a high-risk pull request waiting for approval, or a business decision.
 
 **Merging, deploying and migrating are different steps**, and today one leads to the other: every merge to `main` runs `Deploy staging`, which applies migrations to the staging database (real business data) and deploys the staging Worker. That is why migrations and everything touching real data are high risk. Production deployment does not exist yet (F-130) and needs the owner's go-ahead.
 
-**Never done by an agent:** merging a pull request (until automatic merging is switched on, and then only by GitHub's own auto-merge), approving a pull request, pushing to `main`, force-pushing, deploying (`wrangler deploy`), pushing migrations to a database (`supabase db push`), running workflows by hand, changing secrets, variables, labels, rulesets, branch protection or environments; and the restricted actions of `AGENTS.md` rule 8 (trades, binding offers, payments, hedges). `.claude/settings.json` blocks these commands for Claude Code. That is a guardrail, not a security boundary: GitHub's settings are the boundary, because Claude's `gh` acts with the owner's account.
+**Never done by an agent:** merging other than by `--auto` as above, `--admin`, approving a pull request, adding labels, pushing to `main`, force-pushing, deploying (`wrangler deploy`), pushing migrations to a database (`supabase db push`), running workflows by hand, changing secrets, variables, labels, rulesets, branch protection or environments; and the restricted actions of `AGENTS.md` rule 8 (trades, binding offers, payments, hedges). `.claude/settings.json` and the hook block these commands for Claude Code. That is a guardrail, not a security boundary: GitHub's settings are the boundary, because Claude's `gh` acts with the owner's account.
 
-**Review evidence in GitHub.** The workflow `Review evidence` runs `scripts/review-gate.js` on every pull request: its risk tier, whether the register covers the exact head commit, and whether the pull request would be eligible for automatic merge. It reads git data only. Its `pull_request_target` run uses the copy on `main`, which a pull request cannot change. Known limit: GitHub can check that the evidence matches the commits, not that Codex really produced it, since the register is written by Claude. Codex's own GitHub code review (from ChatGPT's Codex settings, posting reviews as its own app) would add independent proof; it is not set up.
+**Review evidence in GitHub.** The `Review evidence` job reports on every pull request: its risk tier, whether the register covers the exact head commit, and whether it may merge. Known limit: GitHub can check that the evidence matches the commits, not that Codex really produced it, since the register is written by Claude. Codex's own GitHub code review (from ChatGPT's Codex settings, posting reviews as its own app) would add independent proof; it is not set up.
 
-**To switch on automatic merging (owner steps, later, only after the test pull requests have shown the system works):**
-1. GitHub → the repository → Settings → General → Pull Requests → tick **Allow auto-merge**.
-2. Settings → Rules → Rulesets → New branch ruleset for `main`: require the status checks `check` and `Review evidence (pull_request_target)`, require a pull request, block force pushes; keep yourself as the only bypass.
-3. Settings → Environments → `staging` → Required reviewers: yourself, if migrations should wait for you after a merge.
-4. Tell Claude it may run `gh pr merge --auto` for low and normal tier pull requests; the settings file then allows that one command.
+**To switch on automatic merging (owner steps, once, after F-150 is merged),** in this order. Type each line in Claude Code's prompt (the `!` runs it as you, not as Claude):
+1. `! gh label create owner-approved-merge --repo ivanmueller/gss --color B60205 --description "The owner approves merging this high-risk pull request at its current commit"`
+2. `! gh api -X POST repos/ivanmueller/gss/branches/main/protection/required_status_checks/contexts -f "contexts[]=Merge policy"` (GitHub then requires `check` and `Merge policy` before any merge to `main`)
+3. `! gh repo edit ivanmueller/gss --enable-auto-merge`
+
+The same by clicks: GitHub → the repository → Settings → Labels → New label; Settings → Branches → `main` → Edit → Require status checks → add `Merge policy`; Settings → General → Pull Requests → tick **Allow auto-merge**. To switch it off: untick **Allow auto-merge**. Optional: Settings → Environments → `staging` → Required reviewers → yourself, if every staging deploy (and its migrations) should wait for you.
 
 # 12. Repository structure and engineering standards
 

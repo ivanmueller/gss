@@ -35,7 +35,7 @@ export default defineConfig(
   },
   {
     // Node scripts run by CI workflows, and the Codex review runner (docs/AI_WORKFLOW.md §11.5).
-    files: ['scripts/**/*.js', '.claude/skills/**/*.js'],
+    files: ['scripts/**/*.js', '.claude/skills/**/*.js', '.claude/hooks/**/*.js'],
     languageOptions: {
       globals: { console: 'readonly', process: 'readonly', fetch: 'readonly', URL: 'readonly' },
     },

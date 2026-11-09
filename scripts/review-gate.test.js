@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { eligibility, evaluate } from './review-gate.js';
+import { eligibility, evaluate, mergeDecision } from './review-gate.js';
 import {
   changeTier,
   fileTier,
@@ -199,7 +199,33 @@ describe('review evidence check', () => {
     const outcome = evaluate({ base: main, head });
     assert.equal(outcome.evidence, 'complete');
     assert.equal(outcome.tier, 'high');
-    assert.equal(eligibility(outcome), 'no: high risk, held for qualified approval');
+    assert.equal(
+      eligibility(outcome),
+      "no: high risk, held for the owner's approval (label owner-approved-merge)",
+    );
+    // F-150: the owner's label approves this head; a push (synchronize) makes it not count.
+    const approved = { labels: ['owner-approved-merge'], action: 'labeled' };
+    assert.equal(mergeDecision(outcome, approved).merge, true);
+    assert.equal(
+      mergeDecision(outcome, { labels: ['owner-approved-merge'], action: 'synchronize' }).merge,
+      false,
+    );
+    // The extra-round label is not a merge approval.
+    assert.equal(
+      mergeDecision(outcome, { labels: ['owner-approved-extra-review-round'] }).merge,
+      false,
+    );
+  });
+
+  test('the merge policy never passes incomplete evidence, label or not', () => {
+    const incomplete = { evidence: 'incomplete', tier: 'normal' };
+    assert.equal(mergeDecision(incomplete).merge, false);
+    assert.equal(
+      mergeDecision({ ...incomplete, tier: 'high' }, { labels: ['owner-approved-merge'] }).merge,
+      false,
+    );
+    assert.equal(mergeDecision({ evidence: 'not-needed', tier: 'low' }).merge, true);
+    assert.equal(mergeDecision({ evidence: 'complete', tier: 'normal' }).merge, true);
   });
 
   // The owner's rule of 2026-11-09: 5 rounds; 6 to 8 only while issues fall; more only with
