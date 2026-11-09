@@ -15,7 +15,7 @@ Cloudflare Worker — Hono API
    |  typed repositories / outbound adapters
 Supabase Postgres — PostGIS, quote history, scenarios, audit
 Supabase Storage — private supporting documents
-External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker scheduled job, GT-052); Telnyx calls placed and received, recordings and speech-to-text (Worker; its webhooks accepted only with a valid Ed25519 signature); Anthropic's API, Claude reading call transcripts and writing company summaries (Worker scheduled job, every 2 minutes); map layers from ArcGIS and WMS services (Worker, F-107, GT-026: fetched by map square from each layer's stored address, never by the browser); routing, licensed price data (as added)
+External adapters — Mapbox tiles (browser), Geocodio geocoding (Worker), Bank of Canada daily FX (Worker scheduled job, GT-052); Telnyx calls placed and received, recordings and speech-to-text (Worker; its webhooks accepted only with a valid Ed25519 signature); Anthropic's API, Claude reading call transcripts and writing company summaries (Worker scheduled job, every 2 minutes); map layers from ArcGIS and WMS services (Worker, F-107, GT-026: fetched by map square from each layer's stored address, never by the browser; an ArcGIS map's item read from www.arcgis.com for an admin's import, F-138; pictures passed on only once checked as whole PNG or JPEG, F-141); routing, licensed price data (as added)
 ```
 
 Every outside service is called from the Worker, with its key a Worker secret the owner adds in Cloudflare; none is called from the browser (Mapbox tiles excepted, with a public token).
