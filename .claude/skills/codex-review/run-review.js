@@ -38,6 +38,8 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { nextReviewBase } from '../../../scripts/review-register.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = join(HERE, 'review-output.schema.json');
 const TEMPLATE = join(HERE, 'prompt-template.md');
@@ -133,15 +135,13 @@ const allocation = withLock((state) => {
     return {
       refused: `${code.length} code review rounds already ran for ${id} (limit ${ROUND_LIMIT}).`,
     };
-  let base = option('base');
-  if (mode === 'rereview' && !base) {
-    const last = code.filter((r) => r.status === 'completed').at(-1);
-    if (!last)
-      return {
-        refused: 'No completed code review to re-review from; run a checkpoint review first.',
-      };
-    base = last.reviewed;
-  }
+  // Each code review starts where the last completed one stopped, so the rounds form the chain
+  // the evidence check requires (F-149-R1-02); the first starts at the merge base with main.
+  let base = option('base') ?? (mode === 'design' ? null : nextReviewBase(state.rounds));
+  if (mode === 'rereview' && !base)
+    return {
+      refused: 'No completed code review to re-review from; run a checkpoint review first.',
+    };
   if (mode === 'checkpoint' && !base) {
     try {
       base = git('merge-base', 'origin/main', sha);

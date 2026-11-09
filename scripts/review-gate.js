@@ -20,6 +20,7 @@ import {
   isRegisterPath,
   parseRegister,
   registerBlockers,
+  verifyingReview,
 } from './review-register.js';
 
 const EXTRA_ROUND_LABEL = 'owner-approved-extra-review-round';
@@ -70,17 +71,29 @@ export function evaluate({ base, head, labels = [] }) {
   const extraRounds = labels.includes(EXTRA_ROUND_LABEL) ? 1 : 0;
   result.blockers.push(...registerBlockers(register, { extraRounds }));
 
+  const known = (sha) => {
+    try {
+      git(['cat-file', '-e', `${sha}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // A fix counts only if the review that verified it saw the fix commit (F-149-D1-02).
+  for (const finding of register.findings.filter((f) => f.status === 'fixed')) {
+    const review = verifyingReview(register, finding);
+    const fix = (finding.fix ?? '').replace(/`/g, '');
+    if (!review || !/^[0-9a-f]{7,40}$/.test(fix)) continue;
+    if (!known(fix) || !known(review.reviewed) || !isAncestor(fix, review.reviewed))
+      result.blockers.push(
+        `Finding ${finding.id}: fix commit ${fix} is not in the commit review ${review.round} saw (${review.reviewed}).`,
+      );
+  }
+
   // The chain of code reviews must cover every change from the base branch to the head.
   const chain = codeReviewChain(register);
   for (const [i, review] of chain.entries()) {
-    const known = (sha) => {
-      try {
-        git(['cat-file', '-e', `${sha}^{commit}`]);
-        return true;
-      } catch {
-        return false;
-      }
-    };
     if (!known(review.reviewed) || (review.base && !known(review.base))) {
       result.blockers.push(`Review ${review.round}: its commits are not in this repository.`);
       continue;

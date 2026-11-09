@@ -7,7 +7,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { eligibility, evaluate } from './review-gate.js';
-import { changeTier, fileTier, parseRegister, registerBlockers } from './review-register.js';
+import {
+  changeTier,
+  fileTier,
+  nextReviewBase,
+  parseRegister,
+  registerBlockers,
+} from './review-register.js';
 
 let repo;
 const cwd = process.cwd();
@@ -211,6 +217,59 @@ describe('review evidence check', () => {
       [],
     );
   });
+
+  // F-149-R1-03: a failed attempt is not a round.
+  test('a failed attempt does not count toward the limit', () => {
+    branch('failedattempt');
+    const commits = [main];
+    for (let i = 0; i < 3; i += 1)
+      commits.push(commit({ 'apps/web/src/a.ts': `export const a = ${40 + i};\n` }, `c${i}`));
+    const reviews = [
+      { round: '1', mode: 'checkpoint', base: main, reviewed: commits[1], result: 'failed' },
+      ...[1, 2, 3].map((n) => ({
+        round: String(n),
+        mode: n === 1 ? 'checkpoint' : 'rereview',
+        base: commits[n - 1],
+        reviewed: commits[n],
+        result: 'approve',
+      })),
+    ];
+    const head = commit({ 'docs/reviews/F-900.md': register({ reviews }) }, 'register');
+    assert.deepEqual(evaluate({ base: main, head }).blockers, []);
+  });
+
+  // F-149-D1-02 / R1-01: a fix counts only when a later code review saw it.
+  test('a fix verified by a review that did not include the fix commit is incomplete', () => {
+    branch('prefix');
+    const c1 = commit({ 'apps/web/src/a.ts': 'export const a = 50;\n' }, 'code');
+    const c2 = commit({ 'apps/web/src/a.ts': 'export const a = 51;\n' }, 'fix');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: '1', mode: 'checkpoint', base: main, reviewed: c1, result: 'needs-attention' },
+            { round: '2', mode: 'rereview', base: c1, reviewed: c2, result: 'approve' },
+          ],
+          findings: [
+            {
+              id: 'F-900-R1-01',
+              sev: 'P2',
+              status: 'fixed',
+              fix: 'deadbee',
+              test: 'a.test.ts',
+              verified: 'R2',
+            },
+            // Claims a fix made after the review that verified it.
+            { id: 'F-900-R1-02', sev: 'P2', status: 'fixed', fix: c2, test: 't', verified: 'R1' },
+          ],
+        }),
+      },
+      'register',
+    );
+    const blockers = evaluate({ base: main, head }).blockers;
+    assert.ok(blockers.some((b) => /F-900-R1-01.*fix commit deadbee/.test(b)));
+    assert.ok(blockers.some((b) => /F-900-R1-02.*verified in round 1/.test(b)));
+  });
 });
 
 describe('register rules', () => {
@@ -242,6 +301,42 @@ describe('register rules', () => {
     assert.ok(blockers.some((b) => /R1-03 \(P2\) is fixed without a regression test/.test(b)));
     assert.ok(blockers.includes('Finding F-900-R1-04 is rejected without evidence.'));
   });
+  // F-149-D1-02 / R1-01: only a successful code review after the finding can verify it.
+  test('a fix verified by a design review, a failed review or its own round is not verified', () => {
+    const blockers = registerBlockers({
+      id: 'F-900',
+      problems: [],
+      reviews: [
+        { round: 'D1', mode: 'design', base: null, reviewed: 'a', result: 'needs-attention' },
+        { round: '1', mode: 'checkpoint', base: 'a', reviewed: 'b', result: 'needs-attention' },
+        { round: '2', mode: 'rereview', base: 'b', reviewed: 'c', result: 'failed' },
+        { round: '2', mode: 'rereview', base: 'b', reviewed: 'd', result: 'approve' },
+      ],
+      findings: [
+        { id: 'F-900-D1-01', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'D1' },
+        { id: 'F-900-R1-01', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'R1' },
+        { id: 'F-900-R1-02', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'R2' },
+        { id: 'F-900-D1-02', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'R1' },
+      ],
+    });
+    assert.ok(blockers.some((b) => /F-900-D1-01 .*verified in round D1/.test(b)));
+    assert.ok(blockers.some((b) => /F-900-R1-01 .*verified in round 1/.test(b)));
+    assert.ok(!blockers.some((b) => /F-900-R1-02/.test(b)), blockers.join('\n'));
+    assert.ok(!blockers.some((b) => /F-900-D1-02/.test(b)), blockers.join('\n'));
+  });
+
+  // F-149-R1-02: successive checkpoints continue the chain.
+  test('the next review starts where the last completed code review stopped', () => {
+    assert.equal(nextReviewBase([], 'checkpoint'), null);
+    const rounds = [
+      { mode: 'design', status: 'completed', reviewed: 'd' },
+      { mode: 'checkpoint', status: 'completed', reviewed: 'b' },
+      { mode: 'checkpoint', status: 'failed', reviewed: 'c' },
+    ];
+    assert.equal(nextReviewBase(rounds, 'checkpoint'), 'b');
+    assert.equal(nextReviewBase(rounds, 'rereview'), 'b');
+  });
+
   test('malformed registers are reported', () => {
     const parsed = parseRegister('# Something else\n');
     assert.ok(parsed.problems.length >= 3);

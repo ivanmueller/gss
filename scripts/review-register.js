@@ -166,27 +166,52 @@ const blank = (cell) => !cell || cell === '—' || cell === '-';
  * What still stands between a register and a merge, apart from the git checks (review-gate.js).
  * `extraRounds` is the number of rounds beyond the limit the owner allowed (a PR label).
  */
+/**
+ * The successful code review named in a fixed finding's Verified column (`R2` or `2`), if it is
+ * one that can verify the finding: a code review (not a design review), not failed, and later
+ * than the round that found it (F-149-D1-02). Null otherwise. Whether that review's commit
+ * includes the fix is checked against git by review-gate.js.
+ */
+export function verifyingReview(register, finding) {
+  const round = /^R?(\d+)$/.exec(finding.verified ?? '')?.[1];
+  if (!round) return null;
+  // The round that found it: from the ID (`…-R2-01`), else the Round column; design findings
+  // (`…-D1-01`) can be verified by any code review.
+  const fromId = /-R(\d+)-\d+$/.exec(finding.id ?? '')?.[1];
+  const fromColumn = /^\d+$/.test(finding.round ?? '') ? finding.round : undefined;
+  const foundIn = Number(fromId ?? fromColumn ?? 0);
+  if (Number(round) <= foundIn) return null;
+  return (
+    register.reviews.find(
+      (review) => review.round === round && review.mode !== 'design' && review.result !== 'failed',
+    ) ?? null
+  );
+}
+
 export function registerBlockers(register, { extraRounds = 0 } = {}) {
   const blockers = [...register.problems];
-  const code = register.reviews.filter((review) => review.mode !== 'design');
+  const attempts = register.reviews.filter((review) => review.mode !== 'design');
+  // Failed attempts are not rounds (the runner uses their number again; F-149-R1-03).
+  const code = attempts.filter((review) => review.result !== 'failed');
   if (code.length === 0) blockers.push('No code review (checkpoint or rereview) is recorded.');
   if (code.length > ROUND_LIMIT + extraRounds)
     blockers.push(
       `${code.length} code review rounds recorded; the limit is ${ROUND_LIMIT}` +
         (extraRounds ? ` plus ${extraRounds} the owner allowed.` : '. Escalate to the owner.'),
     );
-  const failed = code.filter((review) => review.result === 'failed');
-  if (failed.length && failed.at(-1) === code.at(-1)) blockers.push('The last code review failed.');
+  if (attempts.at(-1)?.result === 'failed') blockers.push('The last code review failed.');
 
-  const roundNames = new Set(register.reviews.map((review) => review.round));
   for (const finding of register.findings) {
     if (BLOCKING_STATUSES.includes(finding.status))
       blockers.push(`Finding ${finding.id} is ${finding.status}.`);
     if (finding.status === 'fixed') {
-      const verifiedIn = /^R?(D?\d+)$/.exec(finding.verified ?? '')?.[1];
-      if (!verifiedIn || !roundNames.has(verifiedIn))
+      if (blank(finding.verified))
         blockers.push(
           `Finding ${finding.id} is fixed but no Codex re-review verified it (Verified column).`,
+        );
+      else if (!verifyingReview(register, finding))
+        blockers.push(
+          `Finding ${finding.id} is fixed but verified in round ${finding.verified.replace(/^R/, '')}, which is not a successful code review after round ${finding.round}.`,
         );
       if (finding.severity !== 'P3' && blank(finding.test))
         blockers.push(
@@ -202,6 +227,18 @@ export function registerBlockers(register, { extraRounds = 0 } = {}) {
       blockers.push(`Finding ${finding.id} is ${finding.status} without evidence.`);
   }
   return blockers;
+}
+
+/**
+ * Where the next code review starts: the commit the last completed code review saw, so successive
+ * checkpoints form a chain (F-149-R1-02); null before the first one (the runner then uses the
+ * merge base with main). `rounds` is the runner's private state.
+ */
+export function nextReviewBase(rounds) {
+  return (
+    rounds.filter((round) => round.mode !== 'design' && round.status === 'completed').at(-1)
+      ?.reviewed ?? null
+  );
 }
 
 /** Code review rounds in order, each expected to start where the previous one stopped. */
