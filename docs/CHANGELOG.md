@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-09 — Importing an ArcGIS map without the terms fields (F-143); handoff of #184
+
+- `docs/FEATURES.md`: F-143, F-221 (the owner's check of #184). `docs/DECISIONS.md`: the terms recorded from the map's ArcGIS page. `docs/HANDOFF.md`: ivanmueller/gss#184.
+
 ## 2026-11-09 — A map's layers kept together (F-142); handoff of #183
 
 - `docs/FEATURES.md`: F-142, F-220 (the owner's check of #183). `docs/DECISIONS.md`: a map's layers under one entry on Team and in the Layers panel. `docs/PRODUCT.md`: Team's map layers. `docs/HANDOFF.md`: ivanmueller/gss#183. `AGENTS.md`: the map layers line.
