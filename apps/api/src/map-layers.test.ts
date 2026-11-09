@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { arcgisSquareUrl, overviewPageUrl, pictureUrl } from './map-layers';
+import { arcgisSquareUrl, overviewPageUrl, pictureType, pictureUrl } from './map-layers';
 import type { MapLayerSource } from './map-layers-db';
 import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 
@@ -11,6 +11,11 @@ import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 let db = fakeDatabase();
 const openDatabase = vi.fn<(url: string) => Database>(() => db);
 const app = createApp(openDatabase);
+
+/** A real 1-pixel PNG. */
+const ONE_PIXEL =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const ONE_PIXEL_BYTES = Uint8Array.from(atob(ONE_PIXEL), (c) => c.charCodeAt(0));
 
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}`, 'Content-Type': 'application/json' };
 const LAYER = '00000000-0000-4000-8000-0000000a1a01';
@@ -439,8 +444,7 @@ describe('fetching a layer for the map', () => {
       idField: null,
       colourField: null,
     });
-    service = () =>
-      new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png' } });
+    service = () => new Response(ONE_PIXEL_BYTES, { headers: { 'content-type': 'image/png' } });
     const ok = await send(`/${LAYER}/tiles/5/7/11.png`, 'GET');
     expect(ok.status).toBe(200);
     expect(ok.headers.get('content-type')).toBe('image/png');
@@ -1009,7 +1013,7 @@ describe('pre-drawn ArcGIS maps (F-141)', () => {
       lods,
     },
   };
-  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const PNG = ONE_PIXEL_BYTES;
   const picture: MapLayerSource = {
     ...source,
     kind: 'arcgis_tiles',
@@ -1076,6 +1080,19 @@ describe('pre-drawn ArcGIS maps (F-141)', () => {
     service = () =>
       new Response('<html>', { headers: { 'Content-Type': 'application/octet-stream' } });
     expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(502);
+    // Text after a picture's first bytes is not a picture (Codex's review of 4026e22).
+    for (const start of [
+      [0x89, 0x50, 0x4e, 0x47],
+      [0xff, 0xd8, 0xff],
+    ]) {
+      const fake = new Uint8Array([
+        ...start,
+        ...new TextEncoder().encode('<script>x</script>'.repeat(4)),
+      ]);
+      service = () =>
+        new Response(fake, { headers: { 'Content-Type': 'application/octet-stream' } });
+      expect((await send(`/${LAYER}/tiles/5/7/11.png`, 'GET')).status).toBe(502);
+    }
   });
 
   it('gives a picture layer’s legend, small pictures only', async () => {
@@ -1090,10 +1107,17 @@ describe('pre-drawn ArcGIS maps (F-141)', () => {
                   {
                     label: 'Most Dense - <b>Least</b> Dense',
                     contentType: 'image/png',
-                    imageData: 'iVBORw0KGgo=',
+                    imageData: ONE_PIXEL,
                   },
                   { label: 'Too big', contentType: 'image/png', imageData: 'A'.repeat(30_000) },
                   { label: 'Not a picture', contentType: 'text/html', imageData: 'PGI+' },
+                  // Text called a PNG (Codex's review of 4026e22).
+                  {
+                    label: 'Text called a PNG',
+                    contentType: 'image/png',
+                    imageData: btoa('hello, not a picture'),
+                  },
+                  { label: 'A PNG called a JPEG', contentType: 'image/jpeg', imageData: ONE_PIXEL },
                 ],
               },
             ],
@@ -1103,12 +1127,27 @@ describe('pre-drawn ArcGIS maps (F-141)', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       entries: [
-        { label: 'Most Dense - Least Dense', image: 'data:image/png;base64,iVBORw0KGgo=' },
+        { label: 'Most Dense - Least Dense', image: `data:image/png;base64,${ONE_PIXEL}` },
         { label: 'Too big', image: null },
         { label: 'Not a picture', image: null },
+        { label: 'Text called a PNG', image: null },
+        { label: 'A PNG called a JPEG', image: null },
       ],
     });
     db.getMapLayerSource.mockResolvedValue(source);
     expect((await send(`/${LAYER}/legend`, 'GET')).status).toBe(404);
+  });
+});
+
+describe('pictureType (Codex’s review of 4026e22)', () => {
+  it('knows a PNG and a JPEG by their structure, not their first bytes alone', () => {
+    expect(pictureType(ONE_PIXEL_BYTES)).toBe('image/png');
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0xff, 0xd9]);
+    expect(pictureType(jpeg)).toBe('image/jpeg');
+    expect(pictureType(new Uint8Array([...jpeg, 0, 0]))).toBe('image/jpeg');
+    expect(pictureType(new Uint8Array([0xff, 0xd8, 0xff, 0x3c, 0x62, 0x3e]))).toBeNull();
+    const cut = ONE_PIXEL_BYTES.slice(0, ONE_PIXEL_BYTES.length - 12);
+    expect(pictureType(cut)).toBeNull();
+    expect(pictureType(new Uint8Array(0))).toBeNull();
   });
 });

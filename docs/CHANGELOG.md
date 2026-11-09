@@ -2,6 +2,8 @@
 
 ## 2026-11-08 — ArcGIS maps of pre-drawn pictures (F-141)
 
+- `docs/DECISIONS.md`: Codex's review of `4026e22` (two P2 in F-140, one P3) and their fixes. `docs/HANDOFF.md`: ivanmueller/gss#182; F-219 in `docs/FEATURES.md`.
+
 - `docs/FEATURES.md`: F-141. `docs/DECISIONS.md`: why the crop density map did not show, and what is built. `docs/DATA_MODEL.md`: `20261109010000_map_layer_tiles.sql`. `docs/API.md`: the legend route; pre-drawn squares on the picture route.
 
 ## 2026-11-08 — Map layers steady while zooming (F-140); handoff of #181

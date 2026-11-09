@@ -495,6 +495,30 @@ export function squaresOverlap(a: Tile, b: Tile): boolean {
   return up(a, a.x) === up(b, b.x) && up(a, a.y) === up(b, b.y);
 }
 
+/**
+ * Whether loaded squares (as "z/x/y") cover all of a square: it or a wider square holding it is
+ * loaded, or each of its four quarters is covered, down to four levels finer.
+ */
+export function squareCovered(tile: Tile, loaded: ReadonlySet<string>, depth = 0): boolean {
+  for (let z = tile.z; z >= 0; z -= 1) {
+    const up = 2 ** (tile.z - z);
+    if (
+      loaded.has(
+        `${String(z)}/${String(Math.floor(tile.x / up))}/${String(Math.floor(tile.y / up))}`,
+      )
+    ) {
+      return true;
+    }
+  }
+  if (depth >= 4) return false;
+  const z = tile.z + 1;
+  return [0, 1].every((dx) =>
+    [0, 1].every((dy) =>
+      squareCovered({ z, x: tile.x * 2 + dx, y: tile.y * 2 + dy }, loaded, depth + 1),
+    ),
+  );
+}
+
 /** A square's place from its key (layer@settings/z/x/y). */
 function tileOfKey(key: string): Tile | null {
   const parts = key.split('/').slice(-3).map(Number);
@@ -675,7 +699,10 @@ export function useLayerOverlays(
           continue;
         }
         if (square === 'failed') {
+          // Filled in like one still loading (Codex's review of 4026e22: a failed square blanked
+          // its place though other lines were loaded).
           failed = true;
+          missing.push(tile);
           continue;
         }
         exceeded ||= square.exceeded;
@@ -691,9 +718,14 @@ export function useLayerOverlays(
         }
         const near = (tile: Tile) => Math.abs(tile.z - (missing[0]?.z ?? tile.z));
         loaded.sort((a, b) => near(a.tile) - near(b.tile));
+        const have = new Set(
+          loaded.map((l) => `${String(l.tile.z)}/${String(l.tile.x)}/${String(l.tile.y)}`),
+        );
         for (const tile of missing) {
           const over = loaded.filter((l) => squaresOverlap(l.tile, tile));
-          if (over.length === 0) uncovered += 1;
+          // Covered only when the loaded squares cover all of it, not just a part (Codex's review
+          // of 4026e22: zooming out from one square left three quarters of the wider one empty).
+          if (!squareCovered(tile, have)) uncovered += 1;
           for (const l of over) add(l.square);
         }
       }

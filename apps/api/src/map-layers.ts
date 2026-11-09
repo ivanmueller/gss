@@ -46,12 +46,41 @@ import {
 // address stays here, the app's content security policy stays as it is, and the request is
 // built from the layer's stored address and a map square only, never from the browser's text.
 
-/** A picture's type from its first bytes: PNG or JPEG, or null for anything else. */
-export function pictureType(body: ArrayBuffer): 'image/png' | 'image/jpeg' | null {
-  const b = new Uint8Array(body, 0, Math.min(8, body.byteLength));
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+/**
+ * A picture's type from its structure: a PNG (its 8-byte signature, its header chunk first and
+ * its end chunk last) or a JPEG (its start marker first and its end marker last, perhaps followed
+ * by padding); null for anything else, so text with a picture's first bytes is not passed on as
+ * one (Codex's review of 4026e22).
+ */
+export function pictureType(body: ArrayBuffer | Uint8Array): 'image/png' | 'image/jpeg' | null {
+  const b = body instanceof Uint8Array ? body : new Uint8Array(body);
+  const at = (i: number, bytes: number[]) => bytes.every((v, k) => b[i + k] === v);
+  const n = b.length;
+  if (
+    n >= 57 &&
+    at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) &&
+    at(12, [0x49, 0x48, 0x44, 0x52]) &&
+    at(n - 8, [0x49, 0x45, 0x4e, 0x44])
+  ) {
+    return 'image/png';
+  }
+  if (n >= 4 && at(0, [0xff, 0xd8, 0xff])) {
+    // The end marker last, allowing a little padding after it.
+    for (let i = n - 2; i >= Math.max(2, n - 32); i -= 1) {
+      if (b[i] === 0xff && b[i + 1] === 0xd9) return 'image/jpeg';
+      if (b[i + 1] !== 0x00 && i < n - 2) break;
+    }
+  }
   return null;
+}
+
+/** A base64 text's bytes, or null when it is not base64. */
+function base64Bytes(text: string): Uint8Array | null {
+  try {
+    return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
 }
 
 /** The largest legend read: a few small pictures. */
@@ -75,12 +104,17 @@ export function legendEntries(body: unknown): LayerLegend['entries'] {
       const i = record(item);
       const type = i?.contentType;
       const data = i?.imageData;
+      // Its bytes checked as a picture of the type it says, not its word alone (Codex's review
+      // of 4026e22).
+      const bytes =
+        typeof data === 'string' && data.length <= 27_000 && /^[A-Za-z0-9+/]+=*$/.test(data)
+          ? base64Bytes(data)
+          : null;
       const image =
+        bytes !== null &&
         (type === 'image/png' || type === 'image/jpeg') &&
-        typeof data === 'string' &&
-        data.length <= 27_000 &&
-        /^[A-Za-z0-9+/]+=*$/.test(data)
-          ? `data:${type};base64,${data}`
+        pictureType(bytes) === type
+          ? `data:${type};base64,${typeof data === 'string' ? data : ''}`
           : null;
       const label = plainText(i?.label, 200);
       const words = several && name ? (label ? `${name}: ${label}` : name) : (label ?? name);
