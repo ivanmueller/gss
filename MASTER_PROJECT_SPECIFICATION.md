@@ -24,7 +24,7 @@
 | Authentication | Supabase Auth + MFA and server-side membership checks | Least privilege and explicit organization isolation |
 | Testing | Vitest, Playwright, PostgreSQL integration tests, RLS tests | Automated regression protection, especially for money and permissions |
 | Initial deployment | Cloudflare Workers for web/API; Supabase separately | Fits existing familiarity, minimizes operations burden |
-| AI-assisted development | `AGENTS.md` + `docs/AI_CODING_SYSTEM.md` + Git worktrees/PRs | Prefer Cursor 3 as an initial agent hub, but keep model/vendor choice replaceable and enforce independent review |
+| AI-assisted development | `AGENTS.md` + `docs/AI_CODING_SYSTEM.md` + Git worktrees/PRs | Claude Code as the hub and Codex as independent reviewer (owner's choice, 2026-11-09; Cursor 3 was the initial recommendation); keep model/vendor choice replaceable and enforce independent review |
 | Analytics | Python added only after MVP | Avoid two application runtimes until numerical analysis justifies it |
 
 ### Product success criterion
@@ -424,7 +424,7 @@ Git is the source of code truth; specifications and decision records are the sou
 ## 11.2 Suggested human/agent roles
 
 - **Owner/product lead:** Accepts economic assumptions, prioritizes backlog, owns commercial correctness and merges approved changes.
-- **Primary implementer (often Claude via Cursor or native Claude Code):** Delivers a scoped UI, API, migration or bug-fix ticket in an isolated worktree.
+- **Primary implementer (Claude Code):** Delivers a scoped UI, API, migration or bug-fix ticket in an isolated worktree.
 - **Independent reviewer (often Codex):** Challenges financial math, authorization, migrations and hidden coupling; writes or requests regression tests.
 - **Alternate implementer / second opinion (often Gemini):** Implements discrete tasks, assesses integrations and challenges UX alternatives.
 - **Integration owner:** Approves shared contracts, serializes dependent merges and updates the merged-state handoff.

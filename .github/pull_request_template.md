@@ -2,7 +2,7 @@
 
 ## Business intent and acceptance criteria
 
-## Implementing agent / worktree / independent reviewer
+## Implementing agent / branch / independent reviewer
 
 ## Files changed / architecture decisions
 
@@ -16,6 +16,14 @@
 - [ ] Domain/financial unit tests
 - [ ] Database and RLS tests if schema/auth touched
 - [ ] UI smoke or screenshot if front-end touched
+
+## Codex review (docs/AI_WORKFLOW.md §11.5)
+- Register: `docs/reviews/<ID>.md` (none for documents only)
+- Risk tier (from `node scripts/review-gate.js --base origin/main --head HEAD`):
+- Rounds used (design / code, limit 3 code rounds):
+- Findings: confirmed and fixed (verified by Codex) / rejected / duplicate / accepted / open:
+- Last reviewed commit, and what changed after it (only `docs/reviews/`):
+- **Needs owner decision** (plain language), if anything was escalated:
 
 ## Data provenance, permissions and user-impact warnings
 

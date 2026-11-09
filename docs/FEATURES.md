@@ -71,6 +71,12 @@ Work shaped by the free plan's limit of about 10 ms of computing per request, to
 | F-147 | **The Claude and recordings jobs: check their room** | Planned | Claude's readings of transcripts and its company summaries run in the Worker's job every 2 minutes, at most 3 of each a run within an 8-minute budget (`READ_MOST`, `SUMMARIES_MOST`, `RECORDINGS_JOB_BUDGET_MS`). Most of their time is waiting for Anthropic, which is not computing time, so this is a check rather than a known problem: confirm the paid plan's limits for scheduled runs and raise the per-run counts if calls pile up on busy days. |
 | F-148 | **Simplify what the free plan forced** | Planned | After F-136 and F-145 to F-147: remove workarounds no longer needed (code comments and documents that name the free plan, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md`), keeping every safety check. |
 
+#### Development workflow (the owner's request, 2026-11-09)
+
+| ID | Item | Status | What it is |
+|---|---|---|---|
+| F-149 | **Claude + Codex review loop** | In progress (`claude/F-149-codex-review-loop`) | Asked 2026-11-09 after a read-only audit: VS Code, Claude Code (Claude Max) as the implementer, OpenAI Codex (ChatGPT plan, the official Codex plugin) as independent reviewer, GitHub and its CI as the authority. Claude calls Codex itself (no copied prompts): a design review before high-risk work, background reviews of committed snapshots in their own read-only worktrees, every finding validated and kept in `docs/reviews/<ID>.md`, confirmed bugs fixed with regression tests and verified by a Codex re-review, at most 3 rounds then escalation (`docs/AI_WORKFLOW.md` §11.5; the `codex-review` skill). A risk-based merge policy (§11.6) with a report-only GitHub check of the review evidence for the exact head commit (`Review evidence`, `scripts/review-gate.js`), and command guardrails in `.claude/settings.json`. **Not switched on, each needing the owner's explicit authorization:** automatic merging, any change to GitHub protection, rulesets or environments. First real use: T-01. |
+
 ### Owner's list (2026-11-06)
 
 | ID | Feature | Status | What it needs before work starts |
@@ -203,7 +209,7 @@ Test file names are short: `*.spec.ts` are browser tests in `tests/e2e/specs/`; 
 
 | ID | Issue | Status |
 |---|---|---|
-| T-01 | Browser test "enters an offer, records new terms, and withdraws it" failed once (CI run #331, `counterparties.spec.ts:562`): after the withdrawal, "No live bids or offers here." not seen within 5 seconds. The test's fault, not the app's; likely cause: the Bids & offers list showing its kept answer, with the offer still live, before it refreshes. | Planned: confirm the cause locally, then forget kept quote lists after a withdrawal or new terms and wait on the offer's own row. |
+| T-01 | Browser test "enters an offer, records new terms, and withdraws it" failed once (CI run #331, `counterparties.spec.ts:562`): after the withdrawal, "No live bids or offers here." not seen within 5 seconds. The test's fault, not the app's; likely cause: the Bids & offers list showing its kept answer, with the offer still live, before it refreshes. | Planned: confirm the cause locally, then forget kept quote lists after a withdrawal or new terms and wait on the offer's own row. The owner chose it as the first real use of the Claude + Codex review loop (F-149, 2026-11-09). |
 | T-02 | CI's local database refused its port (runs #342, #357, #367), with nothing listening on it: the port lies in Linux's range for outgoing connections. | Retries added in #159 did not help on #367; #162 reserves ports 54320 to 54329 as the job's first step. Its first run on `main` (#371) started the database at the first try and passed. Watch a few more runs before calling it fixed. |
 | T-03 | Browser tests missing for: Grains, calling, callbacks and transcripts (needs a fake Telnyx), Claude's drafts and summaries (needs a fake Anthropic), lanes map and map layers (no Mapbox token in CI). | Planned, one area at a time. |
 
