@@ -40,8 +40,10 @@ const isAncestor = (a, b) => {
     return false;
   }
 };
+// Exact paths, NUL-separated: by default git quotes and escapes non-ASCII paths, which then matched
+// no tier rule (F-150-R4-01).
 const changedFiles = (from, to) =>
-  git(['diff', '--name-only', '--no-renames', from, to]).split('\n').filter(Boolean);
+  git(['diff', '--name-only', '-z', '--no-renames', from, to]).split('\0').filter(Boolean);
 
 export function evaluate({ base, head, labels = [] }) {
   const mergeBase = git(['merge-base', base, head]);
@@ -63,18 +65,20 @@ export function evaluate({ base, head, labels = [] }) {
 
   // Automated database checks (AGENTS.md, "Database rules"): a migration is never edited or removed
   // once it is on the base branch, and a new migration comes with pgTAP tests.
-  const migrations = git([
+  // With -z, git writes status and path as separate NUL-terminated fields (F-150-R4-01).
+  const fields = git([
     'diff',
     '--name-status',
+    '-z',
     '--no-renames',
     mergeBase,
     head,
     '--',
     'supabase/migrations',
-  ])
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => line.split('\t'));
+  ]).split('\0');
+  const migrations = [];
+  for (let i = 0; i + 1 < fields.length; i += 2)
+    if (fields[i]) migrations.push([fields[i], fields[i + 1]]);
   for (const [status, path] of migrations)
     if (status !== 'A')
       result.blockers.push(

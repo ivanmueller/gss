@@ -241,6 +241,21 @@ describe('review evidence check', () => {
     assert.equal(eligibility(outcome), 'yes (high risk)');
   });
 
+  // F-150-R4-01: git quotes non-ASCII paths by default; a quoted path matched no tier rule.
+  test('a file name with accents is classified like any other', () => {
+    branch('accents');
+    const head = commit({ '.github/workflows/é.yml': 'name: x\n' }, 'workflow with an accent');
+    const outcome = evaluate({ base: main, head });
+    assert.equal(outcome.tier, 'governance');
+    assert.deepEqual(outcome.because, ['.github/workflows/é.yml']);
+    const migration = commit({ 'supabase/migrations/2_é.sql': 'select 1;\n' }, 'migration');
+    assert.ok(
+      evaluate({ base: main, head: migration }).blockers.some((b) =>
+        /new migration without pgTAP/.test(b),
+      ),
+    );
+  });
+
   test('a migration already on the base branch is never changed or removed', () => {
     git('switch', '-q', '-c', 'basewithmigration', main);
     const withMigration = commit({ 'supabase/migrations/0_old.sql': 'select 0;\n' }, 'old');
