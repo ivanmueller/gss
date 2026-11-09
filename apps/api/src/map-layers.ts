@@ -70,12 +70,14 @@ const PNG_COLOUR_TYPES: Record<number, { channels: number; depths: number[] }> =
   6: { channels: 4, depths: [8, 16] },
 };
 
-/** The bytes of a PNG's unpacked picture data: one filter byte and the pixels of each row. */
-function pngDataSize(width: number, height: number, bitsPerPixel: number, interlaced: boolean) {
-  const rows = (w: number, h: number) =>
-    w === 0 || h === 0 ? 0 : h * (1 + Math.ceil((w * bitsPerPixel) / 8));
+/**
+ * The length of each row of a PNG's unpacked picture data, in order: one filter byte and the
+ * pixels of the row; for an interlaced picture (Adam7), the rows of each of its seven passes.
+ */
+function pngRows(width: number, height: number, bitsPerPixel: number, interlaced: boolean) {
+  const rows = (w: number, h: number): number[] =>
+    w <= 0 || h <= 0 ? [] : Array<number>(h).fill(1 + Math.ceil((w * bitsPerPixel) / 8));
   if (!interlaced) return rows(width, height);
-  // Adam7: seven passes, each a smaller picture.
   const passes = [
     [0, 0, 8, 8],
     [4, 0, 8, 8],
@@ -85,28 +87,35 @@ function pngDataSize(width: number, height: number, bitsPerPixel: number, interl
     [1, 0, 2, 2],
     [0, 1, 1, 2],
   ] as const;
-  return passes.reduce(
-    (sum, [x0, y0, dx, dy]) =>
-      sum + rows(Math.ceil((width - x0) / dx), Math.ceil((height - y0) / dy)),
-    0,
+  return passes.flatMap(([x0, y0, dx, dy]) =>
+    rows(Math.ceil((width - x0) / dx), Math.ceil((height - y0) / dy)),
   );
 }
 
 /** Unpacks zlib data, stopping past `limit` bytes; null when it is not zlib data. */
-async function inflate(data: Uint8Array, limit: number): Promise<number | null> {
+async function inflate(data: Uint8Array, limit: number): Promise<Uint8Array | null> {
   try {
     const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate'));
     const reader = stream.getReader();
+    const parts: Uint8Array[] = [];
     let total = 0;
     for (;;) {
       const chunk = await reader.read();
-      if (chunk.done) return total;
+      if (chunk.done) break;
       total += chunk.value.byteLength;
       if (total > limit) {
         await reader.cancel().catch(() => undefined);
-        return total;
+        return null;
       }
+      parts.push(chunk.value);
     }
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const part of parts) {
+      out.set(part, o);
+      o += part.byteLength;
+    }
+    return out;
   } catch {
     return null;
   }
@@ -177,12 +186,51 @@ async function isPng(b: Uint8Array): Promise<boolean> {
         packed.set(d, o);
         o += d.length;
       }
-      const expected = pngDataSize(header.width, header.height, header.bits, header.interlaced);
-      return (await inflate(packed, expected)) === expected;
+      // Unpacked, exactly the rows the header gives, each starting with a filter PNG has (0 to
+      // 4; Codex's re-review of d9477cc).
+      const rows = pngRows(header.width, header.height, header.bits, header.interlaced);
+      const expected = rows.reduce((n, r) => n + r, 0);
+      const pixels = await inflate(packed, expected);
+      if (pixels?.length !== expected) return false;
+      let row = 0;
+      for (const length of rows) {
+        if ((pixels[row] ?? 255) > 4) return false;
+        row += length;
+      }
+      return true;
     }
     at = end;
   }
   return false;
+}
+
+/** Whether a DQT segment's body is one or more whole tables (64 values of 8 or 16 bits, id 0–3). */
+function quantizationTables(b: Uint8Array, start: number, end: number): boolean {
+  let i = start;
+  if (i >= end) return false;
+  while (i < end) {
+    const precision = (b[i] ?? 0) >> 4;
+    const id = (b[i] ?? 0) & 15;
+    if (precision > 1 || id > 3) return false;
+    i += 1 + 64 * (precision + 1);
+  }
+  return i === end;
+}
+
+/** Whether a DHT segment's body is one or more whole tables (class 0–1, id 0–3, 1–256 codes). */
+function huffmanTables(b: Uint8Array, start: number, end: number): boolean {
+  let i = start;
+  if (i >= end) return false;
+  while (i < end) {
+    const kind = (b[i] ?? 0) >> 4;
+    const id = (b[i] ?? 0) & 15;
+    if (kind > 1 || id > 3 || i + 17 > end) return false;
+    let codes = 0;
+    for (let k = 1; k <= 16; k += 1) codes += b[i + k] ?? 0;
+    if (codes < 1 || codes > 256) return false;
+    i += 17 + codes;
+  }
+  return i === end;
 }
 
 /**
@@ -231,9 +279,22 @@ function isJpeg(b: Uint8Array): boolean {
       ) {
         return false;
       }
+      // Each component: sampling factors 1 to 4, a quantization table 0 to 3.
+      for (let k = 0; k < components; k += 1) {
+        const sampling = b[at + 9 + 3 * k] ?? 0;
+        const h = sampling >> 4;
+        const v = sampling & 15;
+        if (h < 1 || h > 4 || v < 1 || v > 4 || (b[at + 10 + 3 * k] ?? 99) > 3) return false;
+      }
       frame = true;
     }
-    if (marker === 0xdb) tables = true;
+    // Tables filled exactly, each the size it says (Codex's re-review of d9477cc: an empty
+    // quantization table passed).
+    if (marker === 0xdb) {
+      if (!quantizationTables(b, at + 2, at + length)) return false;
+      tables = true;
+    }
+    if (marker === 0xc4 && !huffmanTables(b, at + 2, at + length)) return false;
     at += length;
     if (marker === 0xda) {
       const components = b[at - length + 2] ?? 0;

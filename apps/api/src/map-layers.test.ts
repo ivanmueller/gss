@@ -1282,4 +1282,69 @@ describe('pictureType (Codex’s reviews of 4026e22, b9746f9 and aca667e)', () =
     ]);
     expect(await pictureType(tooShort)).toBeNull();
   });
+
+  it('refuses a PNG row filter PNG does not have, and empty JPEG tables (Codex’s re-review of d9477cc)', async () => {
+    const { deflateSync } = await import('node:zlib');
+    const header = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+    const filter255 = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(deflateSync(new Uint8Array([255, 0, 0, 0])))),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(filter255)).toBeNull();
+    // The same row with filter 1 (Sub) is a picture.
+    const filter1 = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(deflateSync(new Uint8Array([1, 0, 0, 0])))),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(filter1)).toBe('image/png');
+    // The minimal JPEG with an empty quantization table, or a quantization table cut short.
+    const emptyTable = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x02, ...jpeg.slice(71)]);
+    expect(await pictureType(emptyTable)).toBeNull();
+    const cutTable = new Uint8Array([
+      0xff,
+      0xd8,
+      0xff,
+      0xdb,
+      0x00,
+      0x22,
+      0x00,
+      ...Array.from({ length: 32 }, () => 1),
+      ...jpeg.slice(71),
+    ]);
+    expect(await pictureType(cutTable)).toBeNull();
+    // A Huffman table of no codes.
+    const emptyHuffman = new Uint8Array([
+      ...jpeg.slice(0, 71),
+      0xff,
+      0xc4,
+      0x00,
+      0x13,
+      0x00,
+      ...Array.from({ length: 16 }, () => 0),
+      ...jpeg.slice(71),
+    ]);
+    expect(await pictureType(emptyHuffman)).toBeNull();
+    // A frame component with sampling factor 0.
+    const badFrame = jpeg.slice();
+    badFrame[82] = 0x00;
+    expect(await pictureType(badFrame)).toBeNull();
+  });
 });
