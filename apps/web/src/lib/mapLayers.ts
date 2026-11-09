@@ -710,7 +710,8 @@ export function useLayerOverlays(
       }
       // Then, for the squares still loading, those already loaded at the nearest other zooms.
       if (missing.length > 0) {
-        const loaded: { tile: Tile; square: { features: GeoJSON.Feature[] } }[] = [];
+        const loaded: { tile: Tile; square: { features: GeoJSON.Feature[]; exceeded: boolean } }[] =
+          [];
         for (const [key, square] of squares) {
           if (!key.startsWith(prefix) || square === 'failed') continue;
           const tile = tileOfKey(key);
@@ -718,15 +719,22 @@ export function useLayerOverlays(
         }
         const near = (tile: Tile) => Math.abs(tile.z - (missing[0]?.z ?? tile.z));
         loaded.sort((a, b) => near(a.tile) - near(b.tile));
+        // A square the service cut short covers nothing: its place is still missing lines
+        // (Codex's re-review of b9746f9).
         const have = new Set(
-          loaded.map((l) => `${String(l.tile.z)}/${String(l.tile.x)}/${String(l.tile.y)}`),
+          loaded
+            .filter((l) => !l.square.exceeded)
+            .map((l) => `${String(l.tile.z)}/${String(l.tile.x)}/${String(l.tile.y)}`),
         );
         for (const tile of missing) {
           const over = loaded.filter((l) => squaresOverlap(l.tile, tile));
           // Covered only when the loaded squares cover all of it, not just a part (Codex's review
           // of 4026e22: zooming out from one square left three quarters of the wider one empty).
           if (!squareCovered(tile, have)) uncovered += 1;
-          for (const l of over) add(l.square);
+          for (const l of over) {
+            exceeded ||= l.square.exceeded;
+            add(l.square);
+          }
         }
       }
       if (

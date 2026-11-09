@@ -46,31 +46,92 @@ import {
 // address stays here, the app's content security policy stays as it is, and the request is
 // built from the layer's stored address and a map square only, never from the browser's text.
 
+/** CRC-32 (as PNG checks its chunks with). */
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(bytes: Uint8Array, start: number, end: number): number {
+  let c = 0xffffffff;
+  for (let i = start; i < end; i += 1) {
+    c = (CRC_TABLE[(c ^ (bytes[i] ?? 0)) & 0xff] ?? 0) ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
 /**
- * A picture's type from its structure: a PNG (its 8-byte signature, its header chunk first and
- * its end chunk last) or a JPEG (its start marker first and its end marker last, perhaps followed
- * by padding); null for anything else, so text with a picture's first bytes is not passed on as
- * one (Codex's review of 4026e22).
+ * Whether bytes are a whole PNG: its signature, then chunks each with its length, type and a
+ * correct checksum, the header (IHDR, 13 bytes, a size above 0) first, picture data (IDAT) and
+ * the end (IEND) last, exactly at the end of the bytes.
+ */
+function isPng(b: Uint8Array): boolean {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (b.length < 8 || !signature.every((v, k) => b[k] === v)) return false;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let at = 8;
+  let first = true;
+  let data = false;
+  while (at + 12 <= b.length) {
+    const length = view.getUint32(at);
+    const type = String.fromCharCode(...b.subarray(at + 4, at + 8));
+    const end = at + 12 + length;
+    if (!/^[A-Za-z]{4}$/.test(type) || end > b.length) return false;
+    if (crc32(b, at + 4, at + 8 + length) !== view.getUint32(at + 8 + length)) return false;
+    if (first) {
+      if (type !== 'IHDR' || length !== 13) return false;
+      if (view.getUint32(at + 8) === 0 || view.getUint32(at + 12) === 0) return false;
+      first = false;
+    }
+    if (type === 'IDAT') data = true;
+    if (type === 'IEND') return data && length === 0 && end === b.length;
+    at = end;
+  }
+  return false;
+}
+
+/**
+ * Whether bytes are a whole JPEG: its start marker, then marker segments each with its length, a
+ * frame header (SOF) before the scan (SOS), the scan's data, and the end marker last, followed
+ * by nothing but zero padding.
+ */
+function isJpeg(b: Uint8Array): boolean {
+  if (b.length < 4 || b[0] !== 0xff || b[1] !== 0xd8) return false;
+  let at = 2;
+  let frame = false;
+  for (;;) {
+    if (b[at] !== 0xff) return false;
+    while (b[at] === 0xff) at += 1;
+    const marker = b[at];
+    if (marker === undefined) return false;
+    at += 1;
+    // Markers without a length.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (marker === 0xd9) return false;
+    const length = ((b[at] ?? 0) << 8) | (b[at + 1] ?? 0);
+    if (length < 2 || at + length > b.length) return false;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      frame = true;
+    }
+    at += length;
+    if (marker === 0xda) break;
+  }
+  if (!frame) return false;
+  // The scan's data runs to the end marker; after it, only zero padding.
+  let end = b.length;
+  while (end > at && b[end - 1] === 0x00) end -= 1;
+  return end - 2 >= at && b[end - 2] === 0xff && b[end - 1] === 0xd9;
+}
+
+/**
+ * A picture's type from its structure, every PNG chunk and JPEG segment checked, not its first
+ * bytes alone (Codex's reviews of 4026e22 and b9746f9): null for anything else.
  */
 export function pictureType(body: ArrayBuffer | Uint8Array): 'image/png' | 'image/jpeg' | null {
   const b = body instanceof Uint8Array ? body : new Uint8Array(body);
-  const at = (i: number, bytes: number[]) => bytes.every((v, k) => b[i + k] === v);
-  const n = b.length;
-  if (
-    n >= 57 &&
-    at(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) &&
-    at(12, [0x49, 0x48, 0x44, 0x52]) &&
-    at(n - 8, [0x49, 0x45, 0x4e, 0x44])
-  ) {
-    return 'image/png';
-  }
-  if (n >= 4 && at(0, [0xff, 0xd8, 0xff])) {
-    // The end marker last, allowing a little padding after it.
-    for (let i = n - 2; i >= Math.max(2, n - 32); i -= 1) {
-      if (b[i] === 0xff && b[i + 1] === 0xd9) return 'image/jpeg';
-      if (b[i + 1] !== 0x00 && i < n - 2) break;
-    }
-  }
+  if (isPng(b)) return 'image/png';
+  if (isJpeg(b)) return 'image/jpeg';
   return null;
 }
 

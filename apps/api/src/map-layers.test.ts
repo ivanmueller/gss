@@ -1139,15 +1139,42 @@ describe('pre-drawn ArcGIS maps (F-141)', () => {
   });
 });
 
-describe('pictureType (Codex’s review of 4026e22)', () => {
-  it('knows a PNG and a JPEG by their structure, not their first bytes alone', () => {
+describe('pictureType (Codex’s reviews of 4026e22 and b9746f9)', () => {
+  /** A minimal JPEG: start, a JFIF header, a frame header, a scan with two bytes of data, end. */
+  const jpeg = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11,
+    0x00, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x12, 0x34, 0xff, 0xd9,
+  ]);
+
+  it('takes whole PNGs and JPEGs', () => {
     expect(pictureType(ONE_PIXEL_BYTES)).toBe('image/png');
-    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0xff, 0xd9]);
     expect(pictureType(jpeg)).toBe('image/jpeg');
     expect(pictureType(new Uint8Array([...jpeg, 0, 0]))).toBe('image/jpeg');
-    expect(pictureType(new Uint8Array([0xff, 0xd8, 0xff, 0x3c, 0x62, 0x3e]))).toBeNull();
-    const cut = ONE_PIXEL_BYTES.slice(0, ONE_PIXEL_BYTES.length - 12);
-    expect(pictureType(cut)).toBeNull();
-    expect(pictureType(new Uint8Array(0))).toBeNull();
+  });
+
+  it('refuses wrappers with a picture’s markers around anything else', () => {
+    const text = [...new TextEncoder().encode('<b>not a picture</b>')];
+    // A PNG signature with IHDR and IEND where they would be, but no real chunks.
+    const fakePng = new Uint8Array(57);
+    fakePng.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    fakePng.set([0x49, 0x48, 0x44, 0x52], 12);
+    fakePng.set([0x49, 0x45, 0x4e, 0x44], 49);
+    // A PNG whose checksum is wrong, cut short, or without an end.
+    const wrongCrc = ONE_PIXEL_BYTES.slice();
+    wrongCrc[29] = (wrongCrc[29] ?? 0) ^ 0xff;
+    for (const bad of [
+      fakePng,
+      wrongCrc,
+      ONE_PIXEL_BYTES.slice(0, ONE_PIXEL_BYTES.length - 12),
+      new Uint8Array([0xff, 0xd8, 0xff, ...text, 0xff, 0xd9]),
+      new Uint8Array([0xff, 0xd8, ...text, 0xff, 0xd9]),
+      // A JPEG without its frame header, or with a non-zero byte after its end.
+      jpeg.filter((_, k) => k < 20 || k > 32),
+      new Uint8Array([...jpeg, 0x41]),
+      new Uint8Array(0),
+    ]) {
+      expect(pictureType(bad)).toBeNull();
+    }
   });
 });

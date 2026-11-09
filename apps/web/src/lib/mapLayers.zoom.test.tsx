@@ -252,3 +252,20 @@ describe('Codex’s review of 4026e22', () => {
     ).toBe(false);
   });
 });
+
+describe('Codex’s re-review of b9746f9', () => {
+  it('keeps the zoomed-out view when the only loaded squares were cut short', async () => {
+    api({ 8: square([5, 6], true), 9: null });
+    const { result, rerender } = renderHook(
+      ({ view }) => useLayerOverlays([withOverview], view, 'token'),
+      { initialProps: { view: at(8.5) } },
+    );
+    await waitFor(() => {
+      expect(drawn(result)[0]?.properties).toEqual({ OWNER: 'R1' });
+    });
+    // Zoom 9 still loading: the cut-short zoom 8 squares do not replace the whole view.
+    rerender({ view: at(9.5) });
+    expect(drawn(result)).toHaveLength(1);
+    expect(drawn(result)[0]?.properties).toEqual({ OWNER: 'R1' });
+  });
+});
