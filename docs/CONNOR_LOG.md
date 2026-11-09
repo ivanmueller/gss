@@ -11,6 +11,23 @@ This file is only a log. Statuses in `docs/FEATURES.md` and `docs/HANDOFF.md` ar
 - **Answers to owner questions:** the `F-###` ID, the question's number and the answer.
 - **Code or document changes:** the branch and the pull request.
 
+## 2026-11-09 (staging checks, first pass)
+
+Run by Claude Code in Connor's Chrome, signed in as Connor (admin), at desktop width (about 1500 px), dark theme. **Look-only:** nothing was added, changed, verified, dismissed or removed, and no calls were placed. Turning layers on and off in the Layers panel was the only thing clicked that is saved (per person, in the browser); they were switched back off at the end.
+
+| ID | Result | What was seen |
+|---|---|---|
+| F-218 Map tidy-up | **Pass, one note** | Workspace: the Layers box opens under the zoom buttons, top left. Counterparties → map: under the zoom buttons, top right; no Find missing coordinates. Note: on the Workspace the layers' colour key is shown **above** the map, not under it (on Counterparties → map it is under). With the rail map on (9 lines) it pushes the map about 180 px down the page. |
+| F-219 Steady while zooming | **Pass** | Rail map on; zoomed in step by step from the whole continent to the Duluth area (Minnesota). Lines stayed at every step, and the whole network showed zoomed out. Not tried over Chicago or Houston. |
+| F-220 Heat maps | **Pass** | The crop map's switch turns on All Annual Crops alone (1 of 22) with its "Most Dense – Least Dense" scale. Barley added (2 of 22) gets its own scale line. Not tried: zoomed past level 10. |
+| F-221 A map's layers together | **Pass (looked only)** | Layers panel: each map is one row with its count and arrow; the arrow lists each layer with its own switch. Team → Map layers: each map is one entry with its layer count, Remove map, source and terms. Not tried: the tick boxes, Remove selected, Keep. |
+| F-222 Terms on Team | **Pass (part)** | Both maps show their source and terms on Team. The Add map layer form was not opened. |
+| F-214 Clicking a line | **Note** | Clicking a rail line shows a box naming the railroad (e.g. BNSF Railway), but it says "No details for this shape". On the Workspace the box was **below the visible screen** (the colour key above the map pushes it down) until scrolling. Is "No details" expected for layers imported from an ArcGIS map? |
+| F-210 Grains | **Pass** | Search "Camden" picks out Oats. Wheat opens with CWRS chosen: grades with minimum test weight and protein, moisture, most grown varieties, source. CWAD switches the table. Close returns to the tiles. Not tried: phone width, a buyer's grain badge. |
+| F-211 / F-213 Claude's drafts | **Pass (looked only)** | Follow-ups → Everyone: "Claude's drafts to verify (3)", on test companies, marked "Drafted by Claude" with the logo, folded. A complete one offers Verify, Edit, Dismiss; ones "Not heard on the call" offer Finish in the form and Dismiss. Unfolding shows the call and the transcript line. Not checked: the light theme's cream colour, the company page's sections, the main Bids & offers page. Note: the complete draft also has an **Edit** button, not in the checklist. |
+
+**Not done yet:** anything that adds or changes data or places calls: F-203 to F-209, F-212, F-201, F-202, the rest of F-211, and F-214 to F-217 (adding and editing layers). Also not done: the phone layout.
+
 ## 2026-11-09
 
 - Read `docs/FEATURES.md` with Claude Code to see what is waiting on us. Open items:
