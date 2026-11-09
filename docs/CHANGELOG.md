@@ -1,5 +1,9 @@
 # Documentation pack changelog
 
+## 2026-11-09 — A map's layers kept together (F-142); handoff of #183
+
+- `docs/FEATURES.md`: F-142, F-220 (the owner's check of #183). `docs/DECISIONS.md`: a map's layers under one entry on Team and in the Layers panel. `docs/PRODUCT.md`: Team's map layers. `docs/HANDOFF.md`: ivanmueller/gss#183. `AGENTS.md`: the map layers line.
+
 ## 2026-11-08 — ArcGIS maps of pre-drawn pictures (F-141)
 
 - `docs/DECISIONS.md`: Codex's review of `4026e22` (two P2 in F-140, one P3) and their fixes. `docs/HANDOFF.md`: ivanmueller/gss#182; F-219 in `docs/FEATURES.md`.

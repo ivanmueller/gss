@@ -336,12 +336,14 @@ function LayerSwitch({
 /** An ArcGIS map's layers under its title, with one switch for all of them (F-138). */
 function MapGroup({
   state,
+  itemId,
   title,
   layers,
   open,
   setOpen,
 }: {
   state: MapLayersState;
+  itemId: string;
   title: string;
   layers: MapLayerView[];
   open: OpenState[0];
@@ -349,35 +351,58 @@ function MapGroup({
 }) {
   const onCount = layers.filter((layer) => state.chosen.has(layer.id)).length;
   const ids = layers.map((layer) => layer.id);
+  // Its layers folded under it until opened (the owner's request of 2026-11-09, F-142).
+  const key = `map:${itemId}`;
+  const expanded = open.has(key);
   return (
     <li className="py-2">
-      <label className="flex min-w-0 cursor-pointer items-center gap-2 font-medium">
-        <input
-          type="checkbox"
-          role="switch"
-          className="size-4 accent-primary"
-          checked={onCount > 0}
-          aria-checked={onCount === layers.length ? 'true' : onCount === 0 ? 'false' : 'mixed'}
-          onChange={() => {
-            // On: the layers the ArcGIS map shows at first (all when it names none, F-141);
-            // off: all of them.
-            if (onCount > 0) state.setMany(ids, false);
-            else {
-              const first = layers.filter((layer) => layer.mapVisible).map((layer) => layer.id);
-              state.setMany(first.length > 0 ? first : ids, true);
-            }
+      <div className="flex items-center gap-1">
+        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 font-medium">
+          <input
+            type="checkbox"
+            role="switch"
+            className="size-4 accent-primary"
+            checked={onCount > 0}
+            aria-checked={onCount === layers.length ? 'true' : onCount === 0 ? 'false' : 'mixed'}
+            onChange={() => {
+              // On: the layers the ArcGIS map shows at first (all when it names none, F-141);
+              // off: all of them.
+              if (onCount > 0) state.setMany(ids, false);
+              else {
+                const first = layers.filter((layer) => layer.mapVisible).map((layer) => layer.id);
+                state.setMany(first.length > 0 ? first : ids, true);
+              }
+            }}
+          />
+          <span className="truncate">{title}</span>
+          <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground">
+            {onCount} of {layers.length}
+          </span>
+        </label>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} the layers of ${title}`}
+          onClick={() => {
+            setOpen((current) => {
+              const next = new Set(current);
+              if (next.has(key)) next.delete(key);
+              else next.add(key);
+              return next;
+            });
           }}
-        />
-        <span className="truncate">{title}</span>
-        <span className="ml-auto shrink-0 text-xs font-normal text-muted-foreground">
-          {onCount} of {layers.length}
-        </span>
-      </label>
-      <ul aria-label={`${title}: layers`} className="flex flex-col pl-6">
-        {layers.map((layer) => (
-          <LayerSwitch key={layer.id} state={state} layer={layer} open={open} setOpen={setOpen} />
-        ))}
-      </ul>
+        >
+          {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+        </Button>
+      </div>
+      {expanded && (
+        <ul aria-label={`${title}: layers`} className="flex flex-col pl-6">
+          {layers.map((layer) => (
+            <LayerSwitch key={layer.id} state={state} layer={layer} open={open} setOpen={setOpen} />
+          ))}
+        </ul>
+      )}
     </li>
   );
 }
@@ -442,6 +467,7 @@ export function MapLayersPanel({
                 <MapGroup
                   key={`map-${entry.itemId}`}
                   state={state}
+                  itemId={entry.itemId}
                   title={entry.title}
                   layers={entry.layers}
                   open={open}

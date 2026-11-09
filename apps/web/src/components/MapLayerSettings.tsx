@@ -14,7 +14,7 @@ import {
   type MapLayerList,
   type MapLayerView,
 } from '@grain/domain';
-import { Layers, Pencil, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Layers, Map as MapIcon, Pencil, Plus } from 'lucide-react';
 import { useId, useState, type ChangeEvent, type SubmitEvent } from 'react';
 
 import { apiJson, sendJson } from '../lib/api';
@@ -23,6 +23,7 @@ import { message, prepareWithProgress, takesOverview } from '../lib/mapLayerPrep
 import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ImportArcgisMapForm } from './ArcgisMapImport';
+import { panelEntries } from './MapLayers';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
@@ -973,10 +974,16 @@ function LayerRow({
   layer,
   session,
   onChanged,
+  inMap = false,
+  selected,
 }: {
   layer: MapLayerView;
   session: DirectorySession;
   onChanged: () => void;
+  /** Listed under its ArcGIS map, which shows the map, source and terms once (F-142). */
+  inMap?: boolean;
+  /** Its tick box under its map, to remove only some of the map's layers (F-142). */
+  selected?: { checked: boolean; onChange: () => void };
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1015,6 +1022,15 @@ function LayerRow({
     <li className="flex flex-col gap-1 border-b py-3 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2 font-medium">
+          {selected && (
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              aria-label={`Select ${layer.name}`}
+              checked={selected.checked}
+              onChange={selected.onChange}
+            />
+          )}
           <span
             aria-hidden="true"
             className="size-3 rounded-full"
@@ -1081,7 +1097,7 @@ function LayerRow({
           ` · only where ${layer.onlyField} is ${layer.onlyValues.join(' or ')}`}
         {layer.definitionExpression !== null && ` · only where ${layer.definitionExpression}`}
       </span>
-      {layer.map !== null && (
+      {layer.map !== null && !inMap && (
         <span className="text-xs text-muted-foreground">
           From the ArcGIS map{' '}
           <a
@@ -1104,21 +1120,25 @@ function LayerRow({
         // Which service exactly: a publisher's per-railroad views share one name (2026-11-07).
         <span className="text-xs break-all text-muted-foreground">{layer.url}</span>
       )}
-      <span className="text-xs text-muted-foreground">
-        Source:{' '}
-        <a
-          href={layer.termsUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="underline underline-offset-2 hover:text-foreground"
-        >
-          {layer.sourceName}
-        </a>{' '}
-        · {layer.termsNote}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        Added by {layer.createdByName}, {formatAlberta(layer.createdAt)}.
-      </span>
+      {!inMap && (
+        <>
+          <span className="text-xs text-muted-foreground">
+            Source:{' '}
+            <a
+              href={layer.termsUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              {layer.sourceName}
+            </a>{' '}
+            · {layer.termsNote}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Added by {layer.createdByName}, {formatAlberta(layer.createdAt)}.
+          </span>
+        </>
+      )}
       {takesOverview(layer.kind) && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
@@ -1144,6 +1164,244 @@ function LayerRow({
       )}
       {problem && (
         <p role="alert" className="text-xs text-danger">
+          {problem}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/**
+ * An ArcGIS map's layers under one entry (the owner's request of 2026-11-09, F-142): the map's
+ * title, how many layers, its source and terms once, and **Remove map**; opened, each layer with
+ * a tick box, and **Remove selected**. Removing asks first; removed layers are kept, never
+ * deleted.
+ */
+function MapLayerGroup({
+  itemId,
+  title,
+  layers,
+  session,
+  onChanged,
+}: {
+  itemId: string;
+  title: string;
+  layers: MapLayerView[];
+  session: DirectorySession;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [confirming, setConfirming] = useState<'all' | 'selected' | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const first = layers[0];
+  const chosen = layers.filter((layer) => selected.has(layer.id));
+  const count = (n: number) => `${n.toLocaleString('en-CA')} ${n === 1 ? 'layer' : 'layers'}`;
+
+  function remove(which: MapLayerView[]) {
+    setProblem(null);
+    void (async () => {
+      const failed: string[] = [];
+      for (const [i, layer] of which.entries()) {
+        setBusy(`Removing ${String(i + 1)} of ${String(which.length)}: ${layer.name}…`);
+        try {
+          await sendJson(`/map-layers/${layer.id}/remove`, session.token, 'POST', {
+            version: layer.version,
+          });
+        } catch (reason) {
+          failed.push(`${layer.name}: ${message(reason, 'not removed.')}`);
+        }
+      }
+      setBusy(null);
+      setConfirming(null);
+      setSelected(new Set());
+      forgetApiAnswers('/map-layers');
+      if (failed.length > 0) setProblem(`Not all were removed. ${failed.join(' ')}`);
+      onChanged();
+    })();
+  }
+
+  if (!first) return null;
+  return (
+    <li className="flex flex-col gap-1 border-b py-3 last:border-b-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1 font-medium">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-expanded={open}
+            aria-label={`${open ? 'Hide' : 'Show'} the layers of ${title}`}
+            onClick={() => {
+              setOpen(!open);
+            }}
+          >
+            {open ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+          </Button>
+          <MapIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{title}</span>
+          <span className="shrink-0 text-xs font-normal text-muted-foreground">
+            · {count(layers.length)}
+          </span>
+        </span>
+        {confirming === 'all' ? (
+          <span className="flex gap-2">
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy !== null}
+              onClick={() => {
+                remove(layers);
+              }}
+            >
+              Remove all {count(layers.length)} for everyone
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => {
+                setConfirming(null);
+              }}
+            >
+              Keep
+            </Button>
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => {
+              setConfirming('all');
+            }}
+          >
+            Remove map
+          </Button>
+        )}
+      </div>
+      <span className="pl-9 text-xs text-muted-foreground">
+        ArcGIS map{' '}
+        <a
+          href={`https://www.arcgis.com/home/item.html?id=${itemId}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          {title}
+        </a>
+        , each layer drawn as ArcGIS shows it.
+      </span>
+      <span className="pl-9 text-xs text-muted-foreground">
+        Source:{' '}
+        <a
+          href={first.termsUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          {first.sourceName}
+        </a>{' '}
+        · {first.termsNote}
+      </span>
+      <span className="pl-9 text-xs text-muted-foreground">
+        Added by {first.createdByName}, {formatAlberta(first.createdAt)}.
+      </span>
+      {open && (
+        <div className="flex flex-col gap-2 pl-9">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted-foreground">
+              {chosen.length.toLocaleString('en-CA')} selected
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              onClick={() => {
+                setSelected(new Set(layers.map((layer) => layer.id)));
+              }}
+            >
+              Select all
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              onClick={() => {
+                setSelected(new Set());
+              }}
+            >
+              Select none
+            </Button>
+            {chosen.length > 0 &&
+              (confirming === 'selected' ? (
+                <span className="ml-auto flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      remove(chosen);
+                    }}
+                  >
+                    Remove {count(chosen.length)} for everyone
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setConfirming(null);
+                    }}
+                  >
+                    Keep
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setConfirming('selected');
+                  }}
+                >
+                  Remove selected
+                </Button>
+              ))}
+          </div>
+          <ul aria-label={`${title}: layers`}>
+            {layers.map((layer) => (
+              <LayerRow
+                key={layer.id}
+                layer={layer}
+                session={session}
+                onChanged={onChanged}
+                inMap
+                selected={{
+                  checked: selected.has(layer.id),
+                  onChange: () => {
+                    setSelected((current) => {
+                      const next = new Set(current);
+                      if (next.has(layer.id)) next.delete(layer.id);
+                      else next.add(layer.id);
+                      return next;
+                    });
+                  },
+                }}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+      {busy && (
+        <p role="status" className="pl-9 text-xs text-muted-foreground">
+          {busy}
+        </p>
+      )}
+      {problem && (
+        <p role="alert" className="pl-9 text-xs text-danger">
           {problem}
         </p>
       )}
@@ -1203,9 +1461,26 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
             </p>
           ) : (
             <ul>
-              {list.data.layers.map((layer) => (
-                <LayerRow key={layer.id} layer={layer} session={session} onChanged={reload} />
-              ))}
+              {/* A map's layers under one entry, top first as ArcGIS lists them (F-142). */}
+              {panelEntries(list.data.layers).map((entry) =>
+                entry.kind === 'layer' ? (
+                  <LayerRow
+                    key={entry.layer.id}
+                    layer={entry.layer}
+                    session={session}
+                    onChanged={reload}
+                  />
+                ) : (
+                  <MapLayerGroup
+                    key={`map-${entry.itemId}`}
+                    itemId={entry.itemId}
+                    title={entry.title}
+                    layers={entry.layers}
+                    session={session}
+                    onChanged={reload}
+                  />
+                ),
+              )}
             </ul>
           )}
         </CardContent>
