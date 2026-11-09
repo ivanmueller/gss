@@ -270,6 +270,40 @@ describe('review evidence check', () => {
     assert.ok(blockers.some((b) => /F-900-R1-01.*fix commit deadbee/.test(b)));
     assert.ok(blockers.some((b) => /F-900-R1-02.*verified in round 1/.test(b)));
   });
+
+  // F-149-D1-02, Codex round 2: a Fix cell that is not a commit must not skip the check.
+  test('a fix cell that is not a bare commit hash is incomplete', () => {
+    branch('badfix');
+    const c1 = commit({ 'apps/web/src/a.ts': 'export const a = 60;\n' }, 'code');
+    const c2 = commit({ 'apps/web/src/a.ts': 'export const a = 61;\n' }, 'fix');
+    const fixed = (id, fix) => ({ id, sev: 'P2', status: 'fixed', fix, test: 't', verified: 'R2' });
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: '1', mode: 'checkpoint', base: main, reviewed: c1, result: 'needs-attention' },
+            { round: '2', mode: 'rereview', base: c1, reviewed: c2, result: 'approve' },
+          ],
+          findings: [
+            fixed('F-900-R1-01', `${c2.slice(0, 7)} (fix)`),
+            fixed('F-900-R1-02', 'not-a-commit'),
+            fixed('F-900-R1-03', `\`${c2.slice(0, 7)}\``),
+          ],
+        }),
+      },
+      'register',
+    );
+    const blockers = evaluate({ base: main, head }).blockers;
+    assert.ok(
+      blockers.some((b) => /F-900-R1-01.*not a commit hash/.test(b)),
+      blockers.join('\n'),
+    );
+    assert.ok(
+      blockers.some((b) => /F-900-R1-02.*not a commit hash/.test(b)),
+      blockers.join('\n'),
+    );
+    assert.ok(!blockers.some((b) => /F-900-R1-03/.test(b)), blockers.join('\n'));
+  });
 });
 
 describe('register rules', () => {

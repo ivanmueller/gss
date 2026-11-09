@@ -83,8 +83,15 @@ export function evaluate({ base, head, labels = [] }) {
   // A fix counts only if the review that verified it saw the fix commit (F-149-D1-02).
   for (const finding of register.findings.filter((f) => f.status === 'fixed')) {
     const review = verifyingReview(register, finding);
-    const fix = (finding.fix ?? '').replace(/`/g, '');
-    if (!review || !/^[0-9a-f]{7,40}$/.test(fix)) continue;
+    const fix = (finding.fix ?? '').replace(/`/g, '').trim();
+    if (!review || fix === '' || fix === '—' || fix === '-') continue; // reported elsewhere
+    // Anything but a bare commit hash would skip the check below (Codex, F-149 round 2).
+    if (!/^[0-9a-f]{7,40}$/.test(fix)) {
+      result.blockers.push(
+        `Finding ${finding.id}: its Fix cell "${fix}" is not a commit hash (write the commit alone).`,
+      );
+      continue;
+    }
     if (!known(fix) || !known(review.reviewed) || !isAncestor(fix, review.reviewed))
       result.blockers.push(
         `Finding ${finding.id}: fix commit ${fix} is not in the commit review ${review.round} saw (${review.reviewed}).`,
