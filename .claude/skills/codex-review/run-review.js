@@ -4,11 +4,15 @@
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode checkpoint [--sha HEAD] [--base <ref>]
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode rereview   [--sha HEAD] [--base <ref>]
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode design --plan <file> [--sha <ref>]
-//   options: --extra-round (only when the owner allowed a 4th round), --dry-run (prompt only, no Codex)
+//   options: --owner-approved (only when the owner allowed rounds beyond the limits),
+//            --dry-run (prompt only, no Codex)
 //
 // What it does:
-//   1. Allocates the next round under a lock (design: D1, D2…; code: 1, 2, 3; a 4th code round is
-//      refused unless --extra-round), so two reviews never share a round or an output folder.
+//   1. Allocates the next round under a lock, so two reviews never share a round or an output
+//      folder. Design reviews are D1, D2… and do not count. Code rounds 1 to 5 run; 6 to 8 only
+//      when the last round's issue count fell (measurable progress); beyond 8, or after an
+//      escalation, only with --owner-approved (the rule is roundAllowed in scripts/review-register.js,
+//      shared with the GitHub check).
 //   2. Adds a detached git worktree of the commit in ../gss-review/<unique>: Codex sees exactly that
 //      commit (tracked files only), never the working tree Claude keeps editing.
 //   3. Runs the Codex CLI (`codex exec`, installed by the official Codex plugin) with a read-only
@@ -18,9 +22,14 @@
 //   4. Keeps everything Codex wrote outside the repository, in ~/.gss-reviews/<ID>/<round>-<sha>-<n>/
 //      (the repository is public: open security findings must not be committed in detail).
 //   5. Removes only the worktree it created, and prints the findings with probable duplicates.
+//   6. Records the round's issue count (new findings plus fixes Codex found not fixed, one problem
+//      counted once) and stops the loop for the owner when the same fix is found not fixed two
+//      rounds running without the count falling, or when Codex raises again a P1 or P2 that
+//      Claude rejected or accepted (a disagreement on a significant issue).
 //
 // Exit code 0: review completed (any verdict). 2: usage. 3: round limit reached (escalate to the
-// owner). 4: Codex failed or returned malformed output. 5: git error.
+// owner). 4: Codex failed or returned malformed output. 5: git error. 6: review completed, and the
+// loop must stop and be escalated to the owner (recurring findings or a disagreement).
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
@@ -38,10 +47,11 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { nextReviewBase, roundAllowed, roundOutcome } from '../../../scripts/review-register.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = join(HERE, 'review-output.schema.json');
 const TEMPLATE = join(HERE, 'prompt-template.md');
-const ROUND_LIMIT = 3;
 const CODEX_TIMEOUT_MS = 45 * 60 * 1000;
 
 const argv = process.argv.slice(2);
@@ -129,19 +139,24 @@ const allocation = withLock((state) => {
     (r.status === 'running' && Date.now() - Date.parse(r.startedAt) < CODEX_TIMEOUT_MS + 60_000);
   const code = state.rounds.filter((r) => r.mode !== 'design' && counts(r));
   const design = state.rounds.filter((r) => r.mode === 'design');
-  if (mode !== 'design' && code.length >= ROUND_LIMIT && !flag('extra-round'))
-    return {
-      refused: `${code.length} code review rounds already ran for ${id} (limit ${ROUND_LIMIT}).`,
-    };
-  let base = option('base');
-  if (mode === 'rereview' && !base) {
-    const last = code.filter((r) => r.status === 'completed').at(-1);
-    if (!last)
-      return {
-        refused: 'No completed code review to re-review from; run a checkpoint review first.',
-      };
-    base = last.reviewed;
+  let allowedBecause = null;
+  if (mode !== 'design') {
+    const completed = code.filter((r) => r.status === 'completed');
+    const verdict = roundAllowed(
+      code.length + 1,
+      completed.map((r) => r.issues ?? r.findings ?? 0),
+      { ownerApproved: flag('owner-approved'), escalated: Boolean(completed.at(-1)?.escalation) },
+    );
+    if (!verdict.allowed) return { refused: `${id}: ${verdict.reason}.`, limit: true };
+    allowedBecause = verdict.reason;
   }
+  // Each code review starts where the last completed one stopped, so the rounds form the chain
+  // the evidence check requires (F-149-R1-02); the first starts at the merge base with main.
+  let base = option('base') ?? (mode === 'design' ? null : nextReviewBase(state.rounds));
+  if (mode === 'rereview' && !base)
+    return {
+      refused: 'No completed code review to re-review from; run a checkpoint review first.',
+    };
   if (mode === 'checkpoint' && !base) {
     try {
       base = git('merge-base', 'origin/main', sha);
@@ -162,16 +177,19 @@ const allocation = withLock((state) => {
     dir,
     startedAt: new Date().toISOString(),
   });
-  return { round, base, dir };
+  return { round, base, dir, allowedBecause };
 });
 if (allocation.refused) {
-  console.error(`ROUND LIMIT: ${allocation.refused}`);
-  console.error(
-    'Stop here and escalate to the owner in the pull request (docs/AI_WORKFLOW.md §11.5, step 7).',
-  );
-  process.exit(allocation.refused.includes('limit') ? 3 : 2);
+  console.error(`${allocation.limit ? 'ROUND LIMIT' : 'REFUSED'}: ${allocation.refused}`);
+  if (allocation.limit)
+    console.error(
+      'Stop here. Reaching the limit is not approval: unresolved P1 and P2 findings still block. ' +
+        'Escalate to the owner in the pull request (docs/AI_WORKFLOW.md §11.5, step 7).',
+    );
+  process.exit(allocation.limit ? 3 : 2);
 }
-const { round, base, dir } = allocation;
+const { round, base, dir, allowedBecause } = allocation;
+if (allowedBecause) console.log(`Allowed: ${allowedBecause}.`);
 mkdirSync(dir, { recursive: true });
 
 function finish(status, extra = {}) {
@@ -325,7 +343,29 @@ try {
       JSON.stringify({ id, round, mode, base, reviewed: sha, ...review }, null, 2),
     );
     renameSync(join(dir, 'result.json.tmp'), join(dir, 'result.json'));
-    finish('completed', { verdict: review.verdict, findings: review.findings.length });
+
+    // The round's issue count, and whether the loop must stop for the owner (roundOutcome).
+    const previous =
+      mode === 'design'
+        ? null
+        : withLock((state) =>
+            state.rounds
+              .filter((r) => r.mode !== 'design' && r.status === 'completed' && r.dir !== dir)
+              .at(-1),
+          );
+    const { issues, notFixed, escalation } = roundOutcome({
+      findings: review.findings,
+      verifiedFixes: review.verified_fixes,
+      previous: mode === 'design' ? undefined : (previous ?? null),
+      known: findingRows.map(([fid, severity, status]) => ({ id: fid, severity, status })),
+    });
+    finish('completed', {
+      verdict: review.verdict,
+      findings: review.findings.length,
+      issues,
+      notFixed,
+      escalation,
+    });
     console.log(
       `Codex review ${id} round ${round} (${mode}) of ${sha.slice(0, 7)}${base ? ` from ${base.slice(0, 7)}` : ''}: ${review.verdict}`,
     );
@@ -341,7 +381,18 @@ try {
     });
     for (const v of review.verified_fixes)
       console.log(`\nVerified ${v.id}: ${v.status}. ${v.note}`);
-    console.log(`\nFull result (private, outside the repository): ${join(dir, 'result.json')}`);
+    console.log(`\nIssues this round: ${issues} (the register's Findings column).`);
+    console.log(`Full result (private, outside the repository): ${join(dir, 'result.json')}`);
+    if (escalation) {
+      console.log(
+        `\nESCALATE: ${escalation}. Stop the loop: record the findings, set the register's Status to escalated, and explain it to the owner in the pull request (docs/AI_WORKFLOW.md §11.5, step 7).`,
+      );
+      exitCode = 6;
+    } else if (review.verdict === 'approve' && mode !== 'design') {
+      console.log(
+        '\nCodex approved: stop the loop. Record the round, then run the evidence check (node scripts/review-gate.js) and let CI run.',
+      );
+    }
   }
 } catch (error) {
   finish('failed', { note: error.message });

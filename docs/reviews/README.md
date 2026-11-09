@@ -11,7 +11,7 @@ Pull requests that change documents only (Markdown outside the governance files)
 3. **Codex's raw output stays private** in that folder; the register holds the curated record.
 4. **Nothing Codex says is accepted unchecked.** Claude validates each finding against the code (for P1 and P2, by reproducing it with a failing test wherever that is technically possible) before marking it confirmed or rejected.
 5. A finding marked **fixed** needs its fix commit, a regression test (P1 and P2; or `n/a: <reason>`), and the round in which a Codex re-review verified it (the Verified column). Until then it stays blocking.
-6. **At most 3 code review rounds** per pull request. The runner refuses a 4th; what is unresolved is escalated to the owner in the pull request. Only the owner can allow one more round, with the pull request label `owner-approved-extra-review-round`.
+6. **Round limits** (`docs/AI_WORKFLOW.md` §11.5, step 7): up to 5 code review rounds; 6 to 8 only while each round's issue count falls; beyond 8, or after an escalation, only with the owner's approval (pull request label `owner-approved-extra-review-round`, added by the owner only). The loop stops when Codex approves, and stops for the owner on recurring findings or a disagreement on a P1 or P2 (Status: **escalated**, which blocks merging). Reaching a limit is never approval.
 
 ## Format
 
@@ -42,7 +42,8 @@ Pull requests that change documents only (Markdown outside the governance files)
 
 - **Round**: `D1`, `D2`… for design reviews of a plan (they do not count toward the limit); `1`, `2`, `3` for code reviews.
 - **Mode**: `design` (a plan), `checkpoint` (every change from a base commit; the first code review starts on the base branch), `rereview` (only what changed since the previous code review, plus the fixes to verify). Each code review starts where the previous one stopped, so together they cover the whole pull request; after the last one, only `docs/reviews/` may change.
-- **Result**: Codex's verdict, `approve` or `needs-attention`; `failed` when Codex did not finish (does not count).
+- **Result**: Codex's verdict, `approve` or `needs-attention`; `failed` when Codex did not finish (does not count). The last code review must approve, unless it raised only P3 findings.
+- **Findings**: the round's issue count as the runner prints it ("Issues this round"): Codex's new findings plus fixes it found not fixed, each problem counted once. Rounds 6 to 8 are allowed only while it falls.
 - **Finding ID**: `<ID>-R<round>-<n>`, or `<ID>-D<n>-<n>` from a design review. Never reused.
 - **Sev**: P1 must fix before merge; P2 should fix; P3 minor.
 - **Status**: `confirmed` (real, not yet fixed; blocks), `fixed`, `duplicate` (of the ID given in Evidence), `rejected` (not a real problem; the evidence says why), `accepted-limitation` (real, accepted; the evidence says who accepted it and why; project-wide ones go to `ACCEPTED.md` after the merge), `requires-decision` (the owner's to decide; blocks).

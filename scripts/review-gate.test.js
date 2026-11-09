@@ -7,7 +7,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { eligibility, evaluate } from './review-gate.js';
-import { changeTier, fileTier, parseRegister, registerBlockers } from './review-register.js';
+import {
+  changeTier,
+  fileTier,
+  nextReviewBase,
+  parseRegister,
+  registerBlockers,
+  roundAllowed,
+  roundOutcome,
+} from './review-register.js';
 
 let repo;
 const cwd = process.cwd();
@@ -21,9 +29,11 @@ function commit(files, message) {
   git('commit', '-q', '-m', message);
   return git('rev-parse', 'HEAD');
 }
-function register({ reviews, findings = [] }) {
+function register({ reviews, findings = [], status = 'complete' }) {
   return [
     '# Review register: F-900 — test',
+    '',
+    `- Status: ${status}`,
     '',
     '## Reviews',
     '',
@@ -192,24 +202,190 @@ describe('review evidence check', () => {
     assert.equal(eligibility(outcome), 'no: high risk, held for qualified approval');
   });
 
-  test("a fourth round needs the owner's label", () => {
-    branch('rounds');
+  // The owner's rule of 2026-11-09: 5 rounds; 6 to 8 only while issues fall; more only with
+  // the owner's label. `counts` are each round's issue counts (the Findings column).
+  function chainOf(name, counts) {
+    branch(name);
     const commits = [main];
-    for (let i = 0; i < 4; i += 1)
-      commits.push(commit({ 'apps/web/src/a.ts': `export const a = ${20 + i};\n` }, `c${i}`));
-    const reviews = [1, 2, 3, 4].map((n) => ({
-      round: String(n),
-      mode: n === 1 ? 'checkpoint' : 'rereview',
-      base: commits[n - 1],
-      reviewed: commits[n],
-      result: 'approve',
+    for (let i = 0; i < counts.length; i += 1)
+      commits.push(commit({ 'apps/web/src/a.ts': `export const a = ${100 + i};\n` }, `c${i}`));
+    const reviews = counts.map((findings, i) => ({
+      round: String(i + 1),
+      mode: i === 0 ? 'checkpoint' : 'rereview',
+      base: commits[i],
+      reviewed: commits[i + 1],
+      result: i === counts.length - 1 ? 'approve' : 'needs-attention',
+      findings,
     }));
-    const head = commit({ 'docs/reviews/F-900.md': register({ reviews }) }, 'register');
-    assert.ok(evaluate({ base: main, head }).blockers.some((b) => /4 code review rounds/.test(b)));
+    return commit({ 'docs/reviews/F-900.md': register({ reviews }) }, 'register');
+  }
+
+  test('five rounds need no progress', () => {
+    const head = chainOf('five', [2, 2, 2, 2, 0]);
+    assert.deepEqual(evaluate({ base: main, head }).blockers, []);
+  });
+
+  test('rounds 6 to 8 need falling issue counts', () => {
+    const stuck = chainOf('stuck', [3, 3, 3, 3, 3, 0]);
+    assert.ok(
+      evaluate({ base: main, head: stuck }).blockers.some((b) =>
+        /Review 6 should not have run: .*measurable progress/.test(b),
+      ),
+    );
+    const falling = chainOf('falling', [6, 5, 5, 4, 3, 2, 1, 0]);
+    assert.deepEqual(evaluate({ base: main, head: falling }).blockers, []);
+  });
+
+  test("a ninth round needs the owner's label, even with progress", () => {
+    const head = chainOf('nine', [9, 8, 7, 6, 5, 4, 3, 2, 0]);
+    assert.ok(
+      evaluate({ base: main, head }).blockers.some((b) =>
+        /Review 9 should not have run: 8 rounds ran/.test(b),
+      ),
+    );
     assert.deepEqual(
       evaluate({ base: main, head, labels: ['owner-approved-extra-review-round'] }).blockers,
       [],
     );
+  });
+
+  test('reaching a limit is never approval: an escalated register blocks', () => {
+    branch('escalated');
+    const c1 = commit({ 'apps/web/src/a.ts': 'export const a = 70;\n' }, 'code');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          status: 'escalated',
+          reviews: [
+            { round: '1', mode: 'checkpoint', base: main, reviewed: c1, result: 'approve' },
+          ],
+        }),
+      },
+      'register',
+    );
+    assert.ok(
+      evaluate({ base: main, head }).blockers.some((b) => /escalated to the owner/.test(b)),
+    );
+  });
+
+  test('the last review must approve unless it raised only P3 findings', () => {
+    branch('lastreview');
+    const c1 = commit({ 'apps/web/src/a.ts': 'export const a = 80;\n' }, 'code');
+    const reviews = [
+      { round: '1', mode: 'checkpoint', base: main, reviewed: c1, result: 'needs-attention' },
+    ];
+    // A P2 Claude rejected in the last round is a disagreement for the owner, not a pass.
+    const disputed = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews,
+          findings: [{ id: 'F-900-R1-01', sev: 'P2', status: 'rejected', evidence: 'disagree' }],
+        }),
+      },
+      'register',
+    );
+    assert.ok(
+      evaluate({ base: main, head: disputed }).blockers.some((b) =>
+        /round 1\) did not approve and raised F-900-R1-01/.test(b),
+      ),
+    );
+    const minor = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews,
+          findings: [{ id: 'F-900-R1-01', sev: 'P3', status: 'rejected', evidence: 'cosmetic' }],
+        }),
+      },
+      'register only P3',
+    );
+    assert.deepEqual(evaluate({ base: main, head: minor }).blockers, []);
+  });
+
+  // F-149-R1-03: a failed attempt is not a round.
+  test('a failed attempt does not count toward the limit', () => {
+    branch('failedattempt');
+    const commits = [main];
+    for (let i = 0; i < 3; i += 1)
+      commits.push(commit({ 'apps/web/src/a.ts': `export const a = ${40 + i};\n` }, `c${i}`));
+    const reviews = [
+      { round: '1', mode: 'checkpoint', base: main, reviewed: commits[1], result: 'failed' },
+      ...[1, 2, 3].map((n) => ({
+        round: String(n),
+        mode: n === 1 ? 'checkpoint' : 'rereview',
+        base: commits[n - 1],
+        reviewed: commits[n],
+        result: 'approve',
+      })),
+    ];
+    const head = commit({ 'docs/reviews/F-900.md': register({ reviews }) }, 'register');
+    assert.deepEqual(evaluate({ base: main, head }).blockers, []);
+  });
+
+  // F-149-D1-02 / R1-01: a fix counts only when a later code review saw it.
+  test('a fix verified by a review that did not include the fix commit is incomplete', () => {
+    branch('prefix');
+    const c1 = commit({ 'apps/web/src/a.ts': 'export const a = 50;\n' }, 'code');
+    const c2 = commit({ 'apps/web/src/a.ts': 'export const a = 51;\n' }, 'fix');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: '1', mode: 'checkpoint', base: main, reviewed: c1, result: 'needs-attention' },
+            { round: '2', mode: 'rereview', base: c1, reviewed: c2, result: 'approve' },
+          ],
+          findings: [
+            {
+              id: 'F-900-R1-01',
+              sev: 'P2',
+              status: 'fixed',
+              fix: 'deadbee',
+              test: 'a.test.ts',
+              verified: 'R2',
+            },
+            // Claims a fix made after the review that verified it.
+            { id: 'F-900-R1-02', sev: 'P2', status: 'fixed', fix: c2, test: 't', verified: 'R1' },
+          ],
+        }),
+      },
+      'register',
+    );
+    const blockers = evaluate({ base: main, head }).blockers;
+    assert.ok(blockers.some((b) => /F-900-R1-01.*fix commit deadbee/.test(b)));
+    assert.ok(blockers.some((b) => /F-900-R1-02.*verified in round 1/.test(b)));
+  });
+
+  // F-149-D1-02, Codex round 2: a Fix cell that is not a commit must not skip the check.
+  test('a fix cell that is not a bare commit hash is incomplete', () => {
+    branch('badfix');
+    const c1 = commit({ 'apps/web/src/a.ts': 'export const a = 60;\n' }, 'code');
+    const c2 = commit({ 'apps/web/src/a.ts': 'export const a = 61;\n' }, 'fix');
+    const fixed = (id, fix) => ({ id, sev: 'P2', status: 'fixed', fix, test: 't', verified: 'R2' });
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: '1', mode: 'checkpoint', base: main, reviewed: c1, result: 'needs-attention' },
+            { round: '2', mode: 'rereview', base: c1, reviewed: c2, result: 'approve' },
+          ],
+          findings: [
+            fixed('F-900-R1-01', `${c2.slice(0, 7)} (fix)`),
+            fixed('F-900-R1-02', 'not-a-commit'),
+            fixed('F-900-R1-03', `\`${c2.slice(0, 7)}\``),
+          ],
+        }),
+      },
+      'register',
+    );
+    const blockers = evaluate({ base: main, head }).blockers;
+    assert.ok(
+      blockers.some((b) => /F-900-R1-01.*not a commit hash/.test(b)),
+      blockers.join('\n'),
+    );
+    assert.ok(
+      blockers.some((b) => /F-900-R1-02.*not a commit hash/.test(b)),
+      blockers.join('\n'),
+    );
+    assert.ok(!blockers.some((b) => /F-900-R1-03/.test(b)), blockers.join('\n'));
   });
 });
 
@@ -242,6 +418,140 @@ describe('register rules', () => {
     assert.ok(blockers.some((b) => /R1-03 \(P2\) is fixed without a regression test/.test(b)));
     assert.ok(blockers.includes('Finding F-900-R1-04 is rejected without evidence.'));
   });
+  // F-149-D1-02 / R1-01: only a successful code review after the finding can verify it.
+  test('a fix verified by a design review, a failed review or its own round is not verified', () => {
+    const blockers = registerBlockers({
+      id: 'F-900',
+      problems: [],
+      reviews: [
+        { round: 'D1', mode: 'design', base: null, reviewed: 'a', result: 'needs-attention' },
+        { round: '1', mode: 'checkpoint', base: 'a', reviewed: 'b', result: 'needs-attention' },
+        { round: '2', mode: 'rereview', base: 'b', reviewed: 'c', result: 'failed' },
+        { round: '2', mode: 'rereview', base: 'b', reviewed: 'd', result: 'approve' },
+      ],
+      findings: [
+        { id: 'F-900-D1-01', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'D1' },
+        { id: 'F-900-R1-01', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'R1' },
+        { id: 'F-900-R1-02', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'R2' },
+        { id: 'F-900-D1-02', severity: 'P2', status: 'fixed', fix: 'x', test: 't', verified: 'R1' },
+      ],
+    });
+    assert.ok(blockers.some((b) => /F-900-D1-01 .*verified in round D1/.test(b)));
+    assert.ok(blockers.some((b) => /F-900-R1-01 .*verified in round 1/.test(b)));
+    assert.ok(!blockers.some((b) => /F-900-R1-02/.test(b)), blockers.join('\n'));
+    assert.ok(!blockers.some((b) => /F-900-D1-02/.test(b)), blockers.join('\n'));
+  });
+
+  // F-149-R1-02: successive checkpoints continue the chain.
+  test('the next review starts where the last completed code review stopped', () => {
+    assert.equal(nextReviewBase([], 'checkpoint'), null);
+    const rounds = [
+      { mode: 'design', status: 'completed', reviewed: 'd' },
+      { mode: 'checkpoint', status: 'completed', reviewed: 'b' },
+      { mode: 'checkpoint', status: 'failed', reviewed: 'c' },
+    ];
+    assert.equal(nextReviewBase(rounds, 'checkpoint'), 'b');
+    assert.equal(nextReviewBase(rounds, 'rereview'), 'b');
+  });
+
+  test('which rounds may run', () => {
+    assert.equal(roundAllowed(5, [9, 9, 9, 9]).allowed, true);
+    assert.equal(roundAllowed(6, [9, 9, 9, 9, 9]).allowed, false);
+    assert.equal(roundAllowed(6, [9, 9, 9, 9, 4]).allowed, true);
+    assert.equal(roundAllowed(8, [7, 6, 5, 4, 3, 2, 1]).allowed, true);
+    assert.equal(roundAllowed(9, [8, 7, 6, 5, 4, 3, 2, 1]).allowed, false);
+    assert.equal(roundAllowed(9, [8, 7, 6, 5, 4, 3, 2, 1], { ownerApproved: true }).allowed, true);
+    assert.equal(roundAllowed(2, [1], { escalated: true }).allowed, false);
+  });
+
+  test('a round counts each problem once, and stops on recurrence or disagreement', () => {
+    // Codex's own duplicate_of; the runner copies it, or a nearby known finding, into
+    // probable_duplicate_of.
+    const finding = (severity, dup = null) => ({
+      severity,
+      duplicate_of: dup,
+      probable_duplicate_of: dup,
+    });
+    // F-149-R4-01: a finding the runner only matched by nearness (Codex: duplicate_of null) is
+    // advisory; it neither escalates nor merges issues.
+    const nearby = { severity: 'P2', duplicate_of: null, probable_duplicate_of: 'X-R1-02' };
+    const unconfirmed = roundOutcome({
+      findings: [nearby],
+      verifiedFixes: [],
+      previous: null,
+      known: [{ id: 'X-R1-02', severity: 'P2', status: 'rejected' }],
+    });
+    assert.equal(unconfirmed.escalation, null);
+    assert.equal(
+      roundOutcome({
+        findings: [{ ...nearby, probable_duplicate_of: 'X-R1-01' }],
+        verifiedFixes: [{ id: 'X-R1-01', status: 'not-fixed', note: '' }],
+        previous: null,
+        known: [],
+      }).issues,
+      2,
+    );
+    const notFixed = (id) => ({ id, status: 'not-fixed', note: '' });
+    const known = [
+      { id: 'X-R1-01', severity: 'P2', status: 'fixed' },
+      { id: 'X-R1-02', severity: 'P2', status: 'rejected' },
+    ];
+    // A not-fixed fix that a new finding repeats is one issue, not two.
+    const repeated = roundOutcome({
+      findings: [finding('P2', 'X-R1-01')],
+      verifiedFixes: [notFixed('X-R1-01')],
+      previous: null,
+      known,
+    });
+    assert.equal(repeated.issues, 1);
+    assert.equal(repeated.escalation, null);
+    // Not fixed again with no fall in issues: recurring without progress.
+    const recurring = roundOutcome({
+      findings: [],
+      verifiedFixes: [notFixed('X-R1-01')],
+      previous: { issues: 1, notFixed: ['X-R1-01'] },
+      known,
+    });
+    assert.match(recurring.escalation ?? '', /recurring without progress: X-R1-01/);
+    // Not fixed again but issues fell: progress, keep going.
+    const progressing = roundOutcome({
+      findings: [],
+      verifiedFixes: [notFixed('X-R1-01')],
+      previous: { issues: 3, notFixed: ['X-R1-01'] },
+      known,
+    });
+    assert.equal(progressing.escalation, null);
+    // Codex raising again a P2 Claude rejected: a disagreement for the owner; a P3 is not.
+    assert.match(
+      roundOutcome({
+        findings: [finding('P2', 'X-R1-02')],
+        verifiedFixes: [],
+        previous: null,
+        known,
+      }).escalation ?? '',
+      /disagreement: Codex raises again X-R1-02 as P2/,
+    );
+    assert.equal(
+      roundOutcome({
+        findings: [finding('P3', 'X-R1-02')],
+        verifiedFixes: [],
+        previous: null,
+        known,
+      }).escalation,
+      null,
+    );
+    // A design review never escalates.
+    assert.equal(
+      roundOutcome({
+        findings: [finding('P2', 'X-R1-02')],
+        verifiedFixes: [],
+        previous: undefined,
+        known,
+      }).escalation,
+      null,
+    );
+  });
+
   test('malformed registers are reported', () => {
     const parsed = parseRegister('# Something else\n');
     assert.ok(parsed.problems.length >= 3);

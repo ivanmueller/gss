@@ -2,7 +2,9 @@
 //   - its risk tier (low, normal, high) from the files it changes;
 //   - whether its review register (docs/reviews/<ID>.md) is complete for the exact head commit:
 //     every code review round chained from a commit on the base branch to a commit after which only
-//     docs/reviews/ changed, no blocking finding, fixes verified by Codex, at most 3 rounds;
+//     docs/reviews/ changed, no blocking finding, fixes verified by Codex, the last review
+//     approving, not escalated, and every round within the limits (5; up to 8 with progress;
+//     more only with the owner's label);
 //   - whether it would be eligible for automatic merging (never for high risk). Automatic merging is
 //     not switched on: this only reports.
 // It reads git data only and never runs code from the pull request.
@@ -18,11 +20,11 @@ import {
   codeReviewChain,
   documentsOnly,
   isRegisterPath,
+  OWNER_APPROVAL_LABEL,
   parseRegister,
   registerBlockers,
+  verifyingReview,
 } from './review-register.js';
-
-const EXTRA_ROUND_LABEL = 'owner-approved-extra-review-round';
 
 function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
@@ -67,20 +69,39 @@ export function evaluate({ base, head, labels = [] }) {
   }
   result.register = registers[0];
   const register = parseRegister(git(['show', `${head}:${registers[0]}`]));
-  const extraRounds = labels.includes(EXTRA_ROUND_LABEL) ? 1 : 0;
-  result.blockers.push(...registerBlockers(register, { extraRounds }));
+  const ownerApproved = labels.includes(OWNER_APPROVAL_LABEL);
+  result.blockers.push(...registerBlockers(register, { ownerApproved }));
+
+  const known = (sha) => {
+    try {
+      git(['cat-file', '-e', `${sha}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // A fix counts only if the review that verified it saw the fix commit (F-149-D1-02).
+  for (const finding of register.findings.filter((f) => f.status === 'fixed')) {
+    const review = verifyingReview(register, finding);
+    const fix = (finding.fix ?? '').replace(/`/g, '').trim();
+    if (!review || fix === '' || fix === '—' || fix === '-') continue; // reported elsewhere
+    // Anything but a bare commit hash would skip the check below (Codex, F-149 round 2).
+    if (!/^[0-9a-f]{7,40}$/.test(fix)) {
+      result.blockers.push(
+        `Finding ${finding.id}: its Fix cell "${fix}" is not a commit hash (write the commit alone).`,
+      );
+      continue;
+    }
+    if (!known(fix) || !known(review.reviewed) || !isAncestor(fix, review.reviewed))
+      result.blockers.push(
+        `Finding ${finding.id}: fix commit ${fix} is not in the commit review ${review.round} saw (${review.reviewed}).`,
+      );
+  }
 
   // The chain of code reviews must cover every change from the base branch to the head.
   const chain = codeReviewChain(register);
   for (const [i, review] of chain.entries()) {
-    const known = (sha) => {
-      try {
-        git(['cat-file', '-e', `${sha}^{commit}`]);
-        return true;
-      } catch {
-        return false;
-      }
-    };
     if (!known(review.reviewed) || (review.base && !known(review.base))) {
       result.blockers.push(`Review ${review.round}: its commits are not in this repository.`);
       continue;
