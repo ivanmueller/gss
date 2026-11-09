@@ -39,7 +39,7 @@ import {
   quoteQuantity,
 } from '../lib/quotes';
 import { Link } from '../lib/router';
-import { useApiResource } from '../lib/useApiResource';
+import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
 
 function Term({ label, children }: { label: string; children: ReactNode }) {
@@ -190,6 +190,10 @@ export function QuotePage({ session, id }: { session: DirectorySession; id: stri
   function done(message: string) {
     setMode('view');
     setNotice(message);
+    // Every kept list of bids and offers (Bids & offers, a company's page, the workspace's order
+    // book) loads again rather than showing this quote as it was (T-01). This page keeps
+    // showing its own answer while it reloads.
+    forgetApiAnswers('/quotes');
     reload();
   }
 
