@@ -224,8 +224,13 @@ const accepted = existsSync(join(repoRoot, 'docs', 'reviews', 'ACCEPTED.md'))
       .filter((line) => /^\| A-\d+/.test(line))
   : [];
 const known = [
+  // A finding Claude set aside carries its evidence, so Codex can weigh it rather than repeat it.
   ...findingRows.map(
-    ([fid, sev, status, , , where, summary]) => `- ${fid} [${sev}, ${status}] ${where}: ${summary}`,
+    ([fid, sev, status, , , where, summary, evidence]) =>
+      `- ${fid} [${sev}, ${status}] ${where}: ${summary}` +
+      (['rejected', 'duplicate', 'accepted-limitation'].includes(status) && evidence
+        ? ` (Claude's evidence: ${evidence})`
+        : ''),
   ),
   ...accepted.map((line) => `- accepted limit ${line}`),
 ];
