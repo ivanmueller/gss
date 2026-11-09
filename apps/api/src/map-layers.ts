@@ -61,6 +61,13 @@ export function crc32(bytes: Uint8Array, start: number, end: number): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
+/**
+ * The widest and highest picture passed on: map squares are 256 pixels and legend pictures
+ * smaller, and unpacking a larger one would take more than Cloudflare's free plan allows a
+ * request (a 4096 by 4096 picture took about 0.4 s; Codex's re-review of 8306584).
+ */
+const MAX_PICTURE_SIDE = 512;
+
 /** Channels per pixel of each PNG colour type, and the bit depths it allows. */
 const PNG_COLOUR_TYPES: Record<number, { channels: number; depths: number[] }> = {
   0: { channels: 1, depths: [1, 2, 4, 8, 16] },
@@ -92,32 +99,42 @@ function pngRows(width: number, height: number, bitsPerPixel: number, interlaced
   );
 }
 
-/** Unpacks zlib data, stopping past `limit` bytes; null when it is not zlib data. */
-async function inflate(data: Uint8Array, limit: number): Promise<Uint8Array | null> {
+/**
+ * Whether zlib data unpacks to exactly the given rows, each starting with one of PNG's filters
+ * (0 to 4), checked as it unpacks: nothing is kept, so a picture that unpacks large uses no more
+ * memory than the piece being read (Codex's re-review of 8306584: 256 MB for a 4096 by 4096
+ * picture), and unpacking stops at the first byte too many.
+ */
+async function unpacksToRows(data: Uint8Array, rows: readonly number[]): Promise<boolean> {
+  let row = 0;
+  let left = rows[0] ?? 0;
+  let atStart = true;
   try {
     const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate'));
     const reader = stream.getReader();
-    const parts: Uint8Array[] = [];
-    let total = 0;
     for (;;) {
       const chunk = await reader.read();
-      if (chunk.done) break;
-      total += chunk.value.byteLength;
-      if (total > limit) {
-        await reader.cancel().catch(() => undefined);
-        return null;
+      if (chunk.done) return row === rows.length;
+      const bytes = chunk.value;
+      let p = 0;
+      while (p < bytes.length) {
+        if (row >= rows.length || (atStart && (bytes[p] ?? 255) > 4)) {
+          await reader.cancel().catch(() => undefined);
+          return false;
+        }
+        const take = Math.min(left, bytes.length - p);
+        p += take;
+        left -= take;
+        atStart = false;
+        if (left === 0) {
+          row += 1;
+          left = rows[row] ?? 0;
+          atStart = true;
+        }
       }
-      parts.push(chunk.value);
     }
-    const out = new Uint8Array(total);
-    let o = 0;
-    for (const part of parts) {
-      out.set(part, o);
-      o += part.byteLength;
-    }
-    return out;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -126,7 +143,7 @@ async function inflate(data: Uint8Array, limit: number): Promise<Uint8Array | nu
  * checksum; the header (IHDR) first, with a size above 0 and a colour type and bit depth PNG
  * allows; a palette (PLTE) for palette pictures; and the end (IEND) exactly last. Its picture
  * data (IDAT), unpacked, must be exactly the size the header gives (Codex's re-review of aca667e:
- * text inside IDAT passed), at most 4096 by 4096 pixels.
+ * text inside IDAT passed), at most MAX_PICTURE_SIDE pixels wide and high.
  */
 async function isPng(b: Uint8Array): Promise<boolean> {
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -158,8 +175,8 @@ async function isPng(b: Uint8Array): Promise<boolean> {
       if (
         width === 0 ||
         height === 0 ||
-        width > 4096 ||
-        height > 4096 ||
+        width > MAX_PICTURE_SIDE ||
+        height > MAX_PICTURE_SIDE ||
         !colour?.depths.includes(depth) ||
         compression !== 0 ||
         filter !== 0 ||
@@ -188,16 +205,10 @@ async function isPng(b: Uint8Array): Promise<boolean> {
       }
       // Unpacked, exactly the rows the header gives, each starting with a filter PNG has (0 to
       // 4; Codex's re-review of d9477cc).
-      const rows = pngRows(header.width, header.height, header.bits, header.interlaced);
-      const expected = rows.reduce((n, r) => n + r, 0);
-      const pixels = await inflate(packed, expected);
-      if (pixels?.length !== expected) return false;
-      let row = 0;
-      for (const length of rows) {
-        if ((pixels[row] ?? 255) > 4) return false;
-        row += length;
-      }
-      return true;
+      return unpacksToRows(
+        packed,
+        pngRows(header.width, header.height, header.bits, header.interlaced),
+      );
     }
     at = end;
   }
@@ -225,9 +236,18 @@ function huffmanTables(b: Uint8Array, start: number, end: number): boolean {
     const kind = (b[i] ?? 0) >> 4;
     const id = (b[i] ?? 0) & 15;
     if (kind > 1 || id > 3 || i + 17 > end) return false;
+    // The codes of each length must fit those left by shorter ones, so the table is a real code
+    // tree (Codex's re-review of 8306584: three one-bit codes passed).
     let codes = 0;
-    for (let k = 1; k <= 16; k += 1) codes += b[i + k] ?? 0;
-    if (codes < 1 || codes > 256) return false;
+    let room = 1;
+    for (let k = 1; k <= 16; k += 1) {
+      const count = b[i + k] ?? 0;
+      room = room * 2 - count;
+      if (room < 0) return false;
+      codes += count;
+    }
+    // JPEG has no code of all ones, so some room is always left.
+    if (codes < 1 || codes > 256 || room < 1) return false;
     i += 17 + codes;
   }
   return i === end;

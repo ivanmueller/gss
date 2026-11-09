@@ -1281,6 +1281,38 @@ describe('pictureType (Codex’s reviews of 4026e22, b9746f9 and aca667e)', () =
       ...chunk('IEND', new Uint8Array(0)),
     ]);
     expect(await pictureType(tooShort)).toBeNull();
+    // Rows to spare after the last: refused at the first byte too many.
+    const extra = deflateSync(new Uint8Array([0, 255, 0, 0, 0, 0, 255, 0, 1, 2, 3, 4, 5, 6]));
+    const tooLong = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', header),
+      ...chunk('IDAT', new Uint8Array(extra)),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(tooLong)).toBeNull();
+    // Larger than any map square or legend picture: refused before unpacking.
+    const big = new Uint8Array([0, 0, 2, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+    const tooWide = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      ...chunk('IHDR', big),
+      ...chunk('IDAT', new Uint8Array(deflateSync(new Uint8Array(1 + 513 * 3)))),
+      ...chunk('IEND', new Uint8Array(0)),
+    ]);
+    expect(await pictureType(tooWide)).toBeNull();
   });
 
   it('refuses a PNG row filter PNG does not have, and empty JPEG tables (Codex’s re-review of d9477cc)', async () => {
@@ -1343,6 +1375,28 @@ describe('pictureType (Codex’s reviews of 4026e22, b9746f9 and aca667e)', () =
     ]);
     expect(await pictureType(emptyHuffman)).toBeNull();
     // A frame component with sampling factor 0.
+    // Three one-bit codes where only two exist (Codex's re-review of 8306584).
+    const huffman = (counts: number[]) => {
+      const symbols = counts.reduce((n, c) => n + c, 0);
+      const body = [0x00, ...counts, ...Array.from({ length: symbols }, (_, k) => k)];
+      return new Uint8Array([
+        ...jpeg.slice(0, 71),
+        0xff,
+        0xc4,
+        0x00,
+        body.length + 2,
+        ...body,
+        ...jpeg.slice(71),
+      ]);
+    };
+    const pad = (counts: number[]) => [
+      ...counts,
+      ...Array.from({ length: 16 - counts.length }, () => 0),
+    ];
+    expect(await pictureType(huffman(pad([3])))).toBeNull();
+    expect(await pictureType(huffman(pad([2])))).toBeNull();
+    expect(await pictureType(huffman(pad([1, 1])))).toBe('image/jpeg');
+    expect(await pictureType(huffman(pad([0, 3])))).toBe('image/jpeg');
     const badFrame = jpeg.slice();
     badFrame[82] = 0x00;
     expect(await pictureType(badFrame)).toBeNull();
