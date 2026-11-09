@@ -7,7 +7,8 @@ const DIR = new URL('../.github/workflows/', import.meta.url);
 const workflows = Object.fromEntries(
   readdirSync(DIR)
     .filter((name) => /\.ya?ml$/.test(name))
-    .map((name) => [name, readFileSync(new URL(name, DIR), 'utf8')]),
+    // Line endings normalized: Windows checkouts have CRLF (F-150-R2-03).
+    .map((name) => [name, readFileSync(new URL(name, DIR), 'utf8').replace(/\r\n/g, '\n')]),
 );
 
 describe('merge workflows', () => {

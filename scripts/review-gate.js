@@ -182,6 +182,11 @@ export function evaluate({ base, head, labels = [] }) {
       result.blockers.push(
         `${tier} risk: the last code review must be a final review of the whole pull request from the base branch (run-review.js --mode final).`,
       );
+    // No P3-only exception here (F-150-R2-02).
+    else if (last.result !== 'approve')
+      result.blockers.push(
+        `${tier} risk: the final review (round ${last.round}) must approve; it says ${last.result}.`,
+      );
     const designs = register.reviews.filter(
       (review) => review.mode === 'design' && review.result !== 'failed',
     );

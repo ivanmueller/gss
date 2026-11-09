@@ -29,12 +29,20 @@ export function ownerApprovedHead({ owner, headSha, firstSeen, labelPresent, tim
       });
   });
   if (!named) return false;
-  return timeline.some(
-    (event) =>
-      event.event === 'labeled' &&
-      event.label?.name === APPROVAL_LABEL &&
-      event.actor?.login === owner &&
-      String(event.created_at) > String(firstSeen),
+  // Only the latest change of the label counts (F-150-R2-01): an approval the owner withdrew
+  // cannot be restored by anyone else adding the label again.
+  const latest = timeline
+    .filter(
+      (event) =>
+        (event.event === 'labeled' || event.event === 'unlabeled') &&
+        event.label?.name === APPROVAL_LABEL,
+    )
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .at(-1);
+  return (
+    latest?.event === 'labeled' &&
+    latest.actor?.login === owner &&
+    String(latest.created_at) > String(firstSeen)
   );
 }
 

@@ -253,6 +253,31 @@ describe('review evidence check', () => {
     );
   });
 
+  // F-150-R2-02: the final review must approve, even when it raised only P3 findings.
+  test('a high-risk final review that needs attention does not pass, even with only P3', () => {
+    branch('highfinalp3');
+    const d1 = commit({ 'docs/plan.md': 'plan\n' }, 'plan');
+    const c1 = commit({ 'apps/api/src/telnyx.ts': 'export const t = 1;\n' }, 'code');
+    const head = commit(
+      {
+        'docs/reviews/F-900.md': register({
+          reviews: [
+            { round: 'D1', mode: 'design', reviewed: d1, result: 'approve' },
+            { round: '1', mode: 'final', base: main, reviewed: c1, result: 'needs-attention' },
+          ],
+          findings: [{ id: 'F-900-R1-01', sev: 'P3', status: 'rejected', evidence: 'cosmetic' }],
+        }),
+      },
+      'register',
+    );
+    const outcome = evaluate({ base: main, head });
+    assert.ok(
+      outcome.blockers.some((b) => /final review .* must approve/.test(b)),
+      outcome.blockers.join('\n'),
+    );
+    assert.equal(mergeDecision(outcome).merge, false);
+  });
+
   test('a serious finding cannot be left as an accepted limitation in high risk', () => {
     branch('highaccepted');
     const d1 = commit({ 'docs/plan.md': 'plan\n' }, 'plan');

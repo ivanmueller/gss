@@ -65,6 +65,30 @@ describe("owner's approval of a governance pull request", () => {
     );
   });
 
+  // F-150-R2-01: only the latest change of the label counts.
+  test('an approval the owner withdrew cannot be restored by someone else re-adding the label', () => {
+    const at = (event, login, time) => ({
+      event,
+      label: { name: 'owner-approved-merge' },
+      actor: { login },
+      created_at: time,
+    });
+    const timeline = [
+      at('labeled', OWNER, '2026-11-09T20:10:00Z'),
+      at('unlabeled', OWNER, '2026-11-09T20:20:00Z'),
+      at('labeled', 'github-actions[bot]', '2026-11-09T20:30:00Z'),
+    ];
+    assert.equal(ownerApprovedHead({ ...base, timeline }), false);
+    // The owner labelling again afterwards approves.
+    assert.equal(
+      ownerApprovedHead({
+        ...base,
+        timeline: [...timeline, at('labeled', OWNER, '2026-11-09T20:40:00Z')],
+      }),
+      true,
+    );
+  });
+
   test('a short or partial commit name, or a mention inside other text, approves nothing', () => {
     for (const body of [
       `approve-merge ${HEAD.slice(0, 6)}`,
