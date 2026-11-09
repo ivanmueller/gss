@@ -84,10 +84,22 @@ export function evaluate({ base, head, labels = [] }) {
       result.blockers.push(
         `Migration ${path} is ${status === 'D' ? 'removed' : 'changed'}: migrations are only ever added (a new file).`,
       );
-  if (
-    migrations.some(([status]) => status === 'A') &&
-    !files.some((path) => path.startsWith('supabase/tests/database/'))
-  )
+  // Only an added or changed pgTAP test (*.test.sql) counts; a deleted test or another file does
+  // not (F-150-R5-02).
+  const testFields = git([
+    'diff',
+    '--name-status',
+    '-z',
+    '--no-renames',
+    mergeBase,
+    head,
+    '--',
+    'supabase/tests/database',
+  ]).split('\0');
+  let testAdded = false;
+  for (let i = 0; i + 1 < testFields.length; i += 2)
+    if (/^[AM]$/.test(testFields[i]) && /\.test\.sql$/.test(testFields[i + 1])) testAdded = true;
+  if (migrations.some(([status]) => status === 'A') && !testAdded)
     result.blockers.push(
       'A new migration without pgTAP tests: add or change a test in supabase/tests/database/.',
     );

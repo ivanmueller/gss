@@ -256,6 +256,36 @@ describe('review evidence check', () => {
     );
   });
 
+  // F-150-R5-02: only an added or changed pgTAP test counts for a new migration.
+  test('deleting a database test or adding a non-test file does not count as migration tests', () => {
+    git('switch', '-q', '-c', 'basewithtest', main);
+    const withTest = commit({ 'supabase/tests/database/old.test.sql': 'select 1;\n' }, 'old test');
+    git('switch', '-q', '-c', 'deletestest', withTest);
+    git('rm', '-q', 'supabase/tests/database/old.test.sql');
+    const head = commit(
+      { 'supabase/migrations/3_x.sql': 'select 3;\n' },
+      'migration, test deleted',
+    );
+    assert.ok(
+      evaluate({ base: withTest, head }).blockers.some((b) =>
+        /new migration without pgTAP/.test(b),
+      ),
+    );
+    git('switch', '-q', '-c', 'nontestfile', withTest);
+    const notes = commit(
+      {
+        'supabase/migrations/4_x.sql': 'select 4;\n',
+        'supabase/tests/database/README.md': 'notes\n',
+      },
+      'migration with a non-test file',
+    );
+    assert.ok(
+      evaluate({ base: withTest, head: notes }).blockers.some((b) =>
+        /new migration without pgTAP/.test(b),
+      ),
+    );
+  });
+
   test('a migration already on the base branch is never changed or removed', () => {
     git('switch', '-q', '-c', 'basewithmigration', main);
     const withMigration = commit({ 'supabase/migrations/0_old.sql': 'select 0;\n' }, 'old');
