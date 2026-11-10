@@ -13,7 +13,6 @@ on:
     paths:
       - 'scripts/review-*'
       - '.github/workflows/merge-policy.yml'
-      - '.github/workflows/review-evidence.yml'
       - '.github/workflows/policy-refresh.yml'
 
 permissions:
@@ -25,9 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
-      # To turn automatic merging off and say why.
+      # Turning automatic merging off is a merge action: GitHub refuses it without contents: write
+      # ("Resource not accessible by integration (disablePullRequestAutoMerge)", F-152). Only main's
+      # own copy runs here; branch protection still stops this token from pushing to main.
+      contents: write
       pull-requests: write
+      # To say why, in a comment on the pull request.
+      issues: write
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}

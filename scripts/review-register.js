@@ -63,7 +63,6 @@ export function roundAllowed(round, issues, { ownerApproved = false, escalated =
 export const RULE_PATHS = [
   'scripts/review-',
   '.github/workflows/merge-policy.yml',
-  '.github/workflows/review-evidence.yml',
   '.github/workflows/policy-refresh.yml',
 ];
 export const changesRules = (paths) =>

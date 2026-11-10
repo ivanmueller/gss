@@ -31,7 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
+      # To withdraw automatic merging from other pull requests before a rules change merges (a merge
+      # action: GitHub refuses it without contents: write, F-152). This job runs only main's copy of the
+      # scripts; the pull request's commits are data, checked out without credentials and never run.
+      contents: write
       actions: read
       # To read the timeline and comments, and post the approval instructions on a governance change.
       issues: write
