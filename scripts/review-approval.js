@@ -8,9 +8,9 @@
 // timeline), never from an event's payload, commit statuses or anything a workflow can write
 // (F-150-D1-01, R1-02). The line names the commit the owner inspected, so a push just before the label
 // approves nothing (D1-02); the label must come after GitHub first saw the head commit, and still be on
-// the pull request. Withdrawing an approval is removing the label, which runs the Merge policy again;
-// editing, deleting or dismissing the comment or review does not withdraw it (the owner's decision,
-// F-156-D1-01).
+// the pull request. Removing the label withdraws an approval (the Merge policy runs again); so does
+// editing, deleting or dismissing one of the owner's comments or reviews, through
+// .github/workflows/approval-withdrawn.yml (F-156-D1-01).
 //
 //   node scripts/review-approval.js <input.json>   prints "yes" or "no"
 //   input: { owner, headSha, firstSeen, labelPresent, timeline: [...], comments: [...], reviews: [...] }

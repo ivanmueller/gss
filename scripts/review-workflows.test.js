@@ -91,6 +91,23 @@ describe('merge workflows', () => {
     assert.deepEqual(target, ['merge-policy.yml']);
   });
 
+  // F-156-D1-01: editing, deleting or dismissing one of the owner's comments or reviews on a labelled
+  // pull request withdraws the approval: label off, automatic merging off, the Merge policy re-run.
+  test("editing or dismissing the owner's comment or review withdraws the approval", () => {
+    const text = workflows['approval-withdrawn.yml'] ?? '';
+    const on = /^on:\n((?:[ \t].*\n|\n)*)/m.exec(text)?.[1] ?? '';
+    assert.match(on, /^ {2}issue_comment:\n {4}types: \[edited, deleted\]/m);
+    assert.match(on, /^ {2}pull_request_review:\n {4}types: \[edited, dismissed\]/m);
+    assert.match(text, /github\.event\.comment\.user\.login == github\.repository_owner/);
+    assert.match(text, /github\.event\.review\.user\.login == github\.repository_owner/);
+    assert.match(text, /--disable-auto/);
+    assert.match(text, /--remove-label owner-approved-merge/);
+    assert.match(text, /workflows\/merge-policy\.yml\/runs\?head_sha=\$head/);
+    assert.match(text, /gh run rerun/);
+    // It only cancels: it never adds the label, comments an approval line or turns merging on.
+    assert.doesNotMatch(text, /--add-label|gh pr merge [^\n]*--auto(?!\S)|gh pr review|checkout/);
+  });
+
   // F-151-R1-02: every open pull request, not only the first page of 30.
   test('the withdrawal reads every page of open pull requests', () => {
     const script = readFileSync(new URL('review-withdraw-auto.sh', import.meta.url), 'utf8');

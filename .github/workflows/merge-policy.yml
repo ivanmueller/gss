@@ -114,7 +114,7 @@ jobs:
           \`\`\`
           $line
           \`\`\`
-          An ordinary comment or a review both count. A later push needs a new approval. To withdraw an approval, remove the label (editing or deleting the comment does not withdraw it)." || true
+          An ordinary comment or a review both count. A later push needs a new approval. Removing the label, or editing, deleting or dismissing the comment or review, withdraws the approval." || true
           fi
           # A rules change about to pass (rulesChanged): automatic merging is withdrawn from the other
           # open pull requests first, so none can merge on a pass under the old rules (F-151-R1-01).
