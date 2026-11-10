@@ -91,6 +91,15 @@ describe('merge workflows', () => {
     assert.deepEqual(target, ['merge-policy.yml']);
   });
 
+  // F-156: GitHub saved the owner's line on #208 as a review, which does not count. The waiting
+  // message gives the exact command, which always posts an ordinary comment.
+  test('the waiting message gives the exact command that posts the approval line as a comment', () => {
+    const text = workflows['merge-policy.yml'];
+    assert.match(text, /gh pr comment \$PR --repo \$REPO --body \\"\$line\\"/);
+    assert.match(text, /does not count/);
+    assert.match(text, /add the label \*\*owner-approved-merge\*\*/);
+  });
+
   // F-151-R1-02: every open pull request, not only the first page of 30.
   test('the withdrawal reads every page of open pull requests', () => {
     const script = readFileSync(new URL('review-withdraw-auto.sh', import.meta.url), 'utf8');
