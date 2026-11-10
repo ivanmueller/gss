@@ -6,6 +6,8 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
+import { changesRules } from '../../scripts/review-register.js';
+
 const REQUIRED_CHECK = 'Merge policy';
 
 function block(reason) {
@@ -42,16 +44,25 @@ for (const merge of merges) {
 }
 if (!needsEnforcement) process.exit(0);
 
+// GitHub's data, or for the tests (scripts/guard-merge.test.js) the hook's own environment variable,
+// which a command Claude runs cannot set (hooks run in Claude Code's environment).
+const testData = process.env.GSS_GUARD_TEST_DATA
+  ? JSON.parse(process.env.GSS_GUARD_TEST_DATA)
+  : null;
+const gh = (args) => {
+  try {
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+};
+const repo = testData
+  ? 'test/test'
+  : gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']).trim();
+
 // Automatic merging only once GitHub enforces the Merge policy on main.
 function requiredChecks() {
-  const gh = (args) => {
-    try {
-      return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch {
-      return '';
-    }
-  };
-  const repo = gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']).trim();
+  if (testData) return testData.requiredChecks;
   if (!repo) return null;
   const classic = gh([
     'api',
@@ -76,4 +87,41 @@ if (!checks.includes(REQUIRED_CHECK))
   block(
     `GitHub does not yet require the "${REQUIRED_CHECK}" check on main, so automatic merging is not switched on (docs/AI_WORKFLOW.md §11.6).`,
   );
+
+// While a change of the merge rules is open, no other pull request gets automatic merging, so none
+// can merge under the old rules between the rules change's approval and its merge (F-151-R2-01).
+const openPullRequests = testData
+  ? testData.openPullRequests
+  : JSON.parse(
+      gh([
+        'pr',
+        'list',
+        '--repo',
+        repo,
+        '--base',
+        'main',
+        '--state',
+        'open',
+        '--limit',
+        '1000',
+        '--json',
+        'number,files',
+      ]) || 'null',
+    );
+if (!Array.isArray(openPullRequests))
+  block('could not list the open pull requests with gh; not merging.');
+const rulesChanges = openPullRequests
+  .filter((pr) => changesRules((pr.files ?? []).map((file) => file.path)))
+  .map((pr) => String(pr.number));
+for (const merge of merges) {
+  if (/(^|\s)--disable-auto\b/.test(merge)) continue;
+  const target = /\bpr\s+merge\s+#?(\d+)/.exec(merge)?.[1];
+  const others = rulesChanges.filter((number) => number !== target);
+  if (!target || others.length)
+    block(
+      target
+        ? `a change of the merge rules (#${others.join(', #')}) is open: no automatic merging of other pull requests until it is merged or closed (docs/AI_WORKFLOW.md §11.6).`
+        : 'name the pull request number in `gh pr merge <n> --auto --squash`.',
+    );
+}
 process.exit(0);

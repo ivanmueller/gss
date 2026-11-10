@@ -55,6 +55,20 @@ export function roundAllowed(round, issues, { ownerApproved = false, escalated =
   };
 }
 
+/**
+ * The files whose change on main changes the merge rules GitHub enforces (F-151): the gate scripts
+ * and the workflows that run them. A change to them withdraws automatic merging from other open pull
+ * requests until they are checked again (policy-refresh.yml lists the same paths).
+ */
+export const RULE_PATHS = [
+  'scripts/review-',
+  '.github/workflows/merge-policy.yml',
+  '.github/workflows/review-evidence.yml',
+  '.github/workflows/policy-refresh.yml',
+];
+export const changesRules = (paths) =>
+  paths.some((path) => RULE_PATHS.some((rule) => path.startsWith(rule)));
+
 /** Files that are never a register: the folder's own guide and the project-wide accepted limits. */
 export const REGISTER_EXCLUDED = ['docs/reviews/README.md', 'docs/reviews/ACCEPTED.md'];
 export const isRegisterPath = (path) =>

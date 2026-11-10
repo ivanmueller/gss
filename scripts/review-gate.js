@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import {
   changeTier,
+  changesRules,
   fileTier,
   codeReviewChain,
   documentsOnly,
@@ -58,6 +59,7 @@ export function evaluate({ base, head, labels = [] }) {
     because,
     blockers: [],
     register: null,
+    rulesChanged: changesRules(files),
   };
 
   if (files.length === 0) return { ...result, evidence: 'not-needed', note: 'No changed files.' };

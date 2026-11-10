@@ -76,6 +76,16 @@ describe('review evidence check', () => {
     git('switch', '-q', '-c', name, main);
   };
 
+  // F-151-R1-01: the Merge policy withdraws automatic merging elsewhere before a rules change merges.
+  test('a change of the merge rules is reported as such', () => {
+    branch('ruleschange');
+    const head = commit({ 'scripts/review-gate.js': '// stricter\n' }, 'rules');
+    assert.equal(evaluate({ base: main, head }).rulesChanged, true);
+    branch('notrules');
+    const other = commit({ 'apps/web/src/a.ts': 'export const a = 99;\n' }, 'code');
+    assert.equal(evaluate({ base: main, head: other }).rulesChanged, false);
+  });
+
   test('documents only need no review', () => {
     branch('docs');
     const head = commit({ 'docs/NOTES.md': 'x\n' }, 'docs');

@@ -15,7 +15,8 @@ name: Merge policy
 # workflow can write, so a push always needs a new approval (F-150-R1-02).
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    # edited: also when the pull request is pointed at another base branch (F-151-D1-01).
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -34,23 +35,26 @@ jobs:
       actions: read
       # To read the timeline and comments, and post the approval instructions on a governance change.
       issues: write
-      # Only to take the approval label off after a push, so it is not mistaken for approval.
+      # To take the approval label off after a push (so it is not mistaken for approval), and to
+      # withdraw automatic merging from other pull requests before a rules change merges.
       pull-requests: write
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       OWNER: ${{ github.repository_owner }}
       PR: ${{ github.event.pull_request.number }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      # The base branch, used as data: the point the pull request is measured from.
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: A push withdraws the owner's approval label
         if: github.event.action == 'synchronize'
         run: gh pr edit "$PR" --repo "$REPO" --remove-label owner-approved-merge || true
-      # The check itself, from main.
+      # The check itself: always protected main's current copy, never the pull request's fork point or
+      # base branch, which may be unprotected (F-151, F-151-D1-01).
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.repository.default_branch }}
           path: gate
           persist-credentials: false
       # The pull request's history, as data.
@@ -87,11 +91,15 @@ jobs:
           APPROVED: ${{ steps.approval.outputs.approved }}
           ACTION: ${{ github.event.action }}
         run: |
-          git fetch --no-tags --quiet origin "$BASE_SHA"
+          # The base branch's current tip, as data; the gate measures from its merge base with the head.
+          git fetch --no-tags --quiet origin "refs/heads/$BASE_REF"
+          base=$(git rev-parse FETCH_HEAD)
+          echo "Rules: main at $(git -C ../gate rev-parse --short HEAD); measured from $BASE_REF at ${base:0:7}"
           approval=()
           if [ "$APPROVED" = yes ]; then approval=(--owner-approved-head); fi
-          gate=(node ../gate/scripts/review-gate.js --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS" "${approval[@]}")
-          tier=$("${gate[@]}" --json | jq -r '.tier' || true)
+          gate=(node ../gate/scripts/review-gate.js --base "$base" --head "$HEAD_SHA" --labels "$LABELS" "${approval[@]}")
+          report=$("${gate[@]}" --json || true)
+          tier=$(jq -r '.tier' <<< "$report")
           # A governance change waiting for the owner: say exactly how to approve this commit.
           if [ "$tier" = governance ] && [ "$APPROVED" != yes ] && [[ "$ACTION" =~ ^(opened|synchronize|reopened|ready_for_review)$ ]]; then
             line=$(node -e "import('../gate/scripts/review-approval.js').then(m => console.log(m.approvalLine(process.argv[1])))" "$HEAD_SHA")
@@ -101,5 +109,10 @@ jobs:
           $line
           \`\`\`
           A later push needs a new approval." || true
+          fi
+          # A rules change about to pass (rulesChanged): automatic merging is withdrawn from the other
+          # open pull requests first, so none can merge on a pass under the old rules (F-151-R1-01).
+          if [ "$(jq -r '.merge' <<< "$report")" = true ] && [ "$(jq -r '.rulesChanged' <<< "$report")" = true ]; then
+            bash ../gate/scripts/review-withdraw-auto.sh "$REPO" "A change of the merge rules (#$PR) is about to merge, so this pull request's Merge policy result will no longer count. Automatic merging is off until the Merge policy runs again under the new rules." "$PR"
           fi
           "${gate[@]}" --policy
