@@ -61,7 +61,7 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
-Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Before any change: Cloudflare's paid limits (computing time per request and per scheduled run, request size) read from its published pages and recorded in `docs/DECISIONS.md`, and the Worker's own limit set in `apps/api/wrangler.jsonc` (`limits.cpu_ms`) if needed. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).
+Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).
 
 | ID | Item | Status | What it is |
 |---|---|---|---|
