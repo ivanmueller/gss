@@ -4,13 +4,21 @@
     "allow": [
       "Bash(node .claude/skills/codex-review/run-review.js:*)",
       "Bash(node scripts/review-gate.js:*)",
-      "Bash(node --test scripts/:*)"
+      "Bash(node --test scripts/:*)",
+      "Bash(gh pr merge * --auto --squash)",
+      "Bash(gh pr ready:*)"
     ],
     "deny": [
-      "Bash(gh pr merge:*)",
+      "Bash(gh pr merge *--admin*)",
+      "Bash(gh pr merge * -A*)",
       "Bash(gh pr review:*)",
       "Bash(gh pr edit * --add-label*)",
+      "Bash(gh pr create *--label*)",
       "Bash(gh label:*)",
+      "Bash(gh api *labels*)",
+      "Bash(gh pr comment *approve-merge*)",
+      "Bash(gh issue comment *approve-merge*)",
+      "Bash(gh api *comments*)",
       "Bash(gh workflow run:*)",
       "Bash(gh workflow enable:*)",
       "Bash(gh secret:*)",
@@ -33,7 +41,8 @@
       "Bash(supabase db push:*)",
       "Bash(supabase db reset --linked:*)",
       "Bash(codex *--dangerously-bypass-approvals-and-sandbox*)",
-      "PowerShell(gh pr merge:*)",
+      "PowerShell(gh pr merge *--admin*)",
+      "PowerShell(gh api *labels*)",
       "PowerShell(gh pr review:*)",
       "PowerShell(gh workflow run:*)",
       "PowerShell(gh secret:*)",
@@ -46,6 +55,20 @@
       "PowerShell(npx wrangler deploy:*)",
       "PowerShell(pnpm --filter @grain/api exec wrangler deploy:*)",
       "PowerShell(supabase db push:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-merge.js\"",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

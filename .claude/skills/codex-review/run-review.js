@@ -4,6 +4,7 @@
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode checkpoint [--sha HEAD] [--base <ref>]
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode rereview   [--sha HEAD] [--base <ref>]
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode design --plan <file> [--sha <ref>]
+//   node .claude/skills/codex-review/run-review.js --id F-149 --mode final [--sha HEAD]   (high risk: whole PR)
 //   options: --owner-approved (only when the owner allowed rounds beyond the limits),
 //            --dry-run (prompt only, no Codex)
 //
@@ -82,10 +83,14 @@ const git = (...args) =>
 
 const id = option('id');
 const mode = option('mode');
-if (!id || !/^[A-Za-z0-9-]+$/.test(id) || !['design', 'checkpoint', 'rereview'].includes(mode))
+if (
+  !id ||
+  !/^[A-Za-z0-9-]+$/.test(id) ||
+  !['design', 'checkpoint', 'rereview', 'final'].includes(mode)
+)
   fail(
     2,
-    'Usage: run-review.js --id <F-###> --mode design|checkpoint|rereview [--sha] [--base] [--plan]',
+    'Usage: run-review.js --id <F-###> --mode design|checkpoint|rereview|final [--sha] [--base] [--plan]',
   );
 if (mode === 'design' && !option('plan')) fail(2, 'A design review needs --plan <file>.');
 
@@ -152,12 +157,14 @@ const allocation = withLock((state) => {
   }
   // Each code review starts where the last completed one stopped, so the rounds form the chain
   // the evidence check requires (F-149-R1-02); the first starts at the merge base with main.
-  let base = option('base') ?? (mode === 'design' ? null : nextReviewBase(state.rounds));
+  // A final review (high risk and governance) always reads the whole pull request from the merge base.
+  let base =
+    option('base') ?? (mode === 'design' || mode === 'final' ? null : nextReviewBase(state.rounds));
   if (mode === 'rereview' && !base)
     return {
       refused: 'No completed code review to re-review from; run a checkpoint review first.',
     };
-  if (mode === 'checkpoint' && !base) {
+  if ((mode === 'checkpoint' || mode === 'final') && !base) {
     try {
       base = git('merge-base', 'origin/main', sha);
     } catch {
@@ -217,8 +224,13 @@ const accepted = existsSync(join(repoRoot, 'docs', 'reviews', 'ACCEPTED.md'))
       .filter((line) => /^\| A-\d+/.test(line))
   : [];
 const known = [
+  // A finding Claude set aside carries its evidence, so Codex can weigh it rather than repeat it.
   ...findingRows.map(
-    ([fid, sev, status, , , where, summary]) => `- ${fid} [${sev}, ${status}] ${where}: ${summary}`,
+    ([fid, sev, status, , , where, summary, evidence]) =>
+      `- ${fid} [${sev}, ${status}] ${where}: ${summary}` +
+      (['rejected', 'duplicate', 'accepted-limitation'].includes(status) && evidence
+        ? ` (Claude's evidence: ${evidence})`
+        : ''),
   ),
   ...accepted.map((line) => `- accepted limit ${line}`),
 ];
@@ -232,6 +244,10 @@ if (mode === 'design') {
   scope = `Review this plan before it is implemented. Use file "PLAN" for findings about the plan itself.\n\n${readFileSync(resolve(option('plan')), 'utf8')}`;
 } else if (mode === 'checkpoint') {
   scope = `Review every change from ${base} to ${sha}: run \`git diff ${base} ${sha}\` and read the changed files whole where needed.`;
+} else if (mode === 'final') {
+  scope =
+    `FINAL review of a high-risk or governance pull request, the last before it merges automatically. Review the WHOLE pull request, every change from ${base} (on the base branch) to ${sha}: run \`git diff ${base} ${sha}\` and read every changed file whole. ` +
+    'Challenge the design as well as the code: security, permissions and organization isolation, money and FX, migrations and data integrity, failure modes, missing tests. Earlier rounds do not vouch for anything: approve only if you would merge this exact commit yourself.';
 } else {
   scope =
     `Targeted re-review. Review only what changed from ${base} (already reviewed) to ${sha}: run \`git diff ${base} ${sha}\`. ` +

@@ -5,8 +5,9 @@
 //     docs/reviews/ changed, no blocking finding, fixes verified by Codex, the last review
 //     approving, not escalated, and every round within the limits (5; up to 8 with progress;
 //     more only with the owner's label);
-//   - whether it would be eligible for automatic merging (never for high risk). Automatic merging is
-//     not switched on: this only reports.
+//   - whether it may merge (mergeDecision, F-150): low and normal risk with complete evidence; high
+//     risk only with the owner's label owner-approved-merge on this head. With --policy this is the
+//     exit code: the Merge policy check, which GitHub can require before any merge.
 // It reads git data only and never runs code from the pull request.
 //
 //   node scripts/review-gate.js --base <base sha or ref> --head <head sha> [--labels a,b] [--json]
@@ -17,10 +18,13 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import {
   changeTier,
+  fileTier,
   codeReviewChain,
   documentsOnly,
   isRegisterPath,
   OWNER_APPROVAL_LABEL,
+  OWNER_MERGE_LABEL,
+  STRONG_TIERS,
   parseRegister,
   registerBlockers,
   verifyingReview,
@@ -37,8 +41,10 @@ const isAncestor = (a, b) => {
     return false;
   }
 };
+// Exact paths, NUL-separated: by default git quotes and escapes non-ASCII paths, which then matched
+// no tier rule (F-150-R4-01).
 const changedFiles = (from, to) =>
-  git(['diff', '--name-only', '--no-renames', from, to]).split('\n').filter(Boolean);
+  git(['diff', '--name-only', '-z', '--no-renames', from, to]).split('\0').filter(Boolean);
 
 export function evaluate({ base, head, labels = [] }) {
   const mergeBase = git(['merge-base', base, head]);
@@ -57,6 +63,47 @@ export function evaluate({ base, head, labels = [] }) {
   if (files.length === 0) return { ...result, evidence: 'not-needed', note: 'No changed files.' };
   if (documentsOnly(files))
     return { ...result, evidence: 'not-needed', note: 'Documents only: no Codex review needed.' };
+
+  // Automated database checks (AGENTS.md, "Database rules"): a migration is never edited or removed
+  // once it is on the base branch, and a new migration comes with pgTAP tests.
+  // With -z, git writes status and path as separate NUL-terminated fields (F-150-R4-01).
+  const fields = git([
+    'diff',
+    '--name-status',
+    '-z',
+    '--no-renames',
+    mergeBase,
+    head,
+    '--',
+    'supabase/migrations',
+  ]).split('\0');
+  const migrations = [];
+  for (let i = 0; i + 1 < fields.length; i += 2)
+    if (fields[i]) migrations.push([fields[i], fields[i + 1]]);
+  for (const [status, path] of migrations)
+    if (status !== 'A')
+      result.blockers.push(
+        `Migration ${path} is ${status === 'D' ? 'removed' : 'changed'}: migrations are only ever added (a new file).`,
+      );
+  // Only an added or changed pgTAP test (*.test.sql) counts; a deleted test or another file does
+  // not (F-150-R5-02).
+  const testFields = git([
+    'diff',
+    '--name-status',
+    '-z',
+    '--no-renames',
+    mergeBase,
+    head,
+    '--',
+    'supabase/tests/database',
+  ]).split('\0');
+  let testAdded = false;
+  for (let i = 0; i + 1 < testFields.length; i += 2)
+    if (/^[AM]$/.test(testFields[i]) && /\.test\.sql$/.test(testFields[i + 1])) testAdded = true;
+  if (migrations.some(([status]) => status === 'A') && !testAdded)
+    result.blockers.push(
+      'A new migration without pgTAP tests: add or change a test in supabase/tests/database/.',
+    );
 
   const registers = files.filter(isRegisterPath);
   if (registers.length !== 1) {
@@ -99,19 +146,30 @@ export function evaluate({ base, head, labels = [] }) {
       );
   }
 
-  // The chain of code reviews must cover every change from the base branch to the head.
+  // The chain of code reviews must cover every change from the base branch to the head. Coverage
+  // starts at the latest review that starts on the base branch (a full review of the whole pull
+  // request, such as a high-risk final review); each review after it continues where the previous
+  // one stopped.
   const chain = codeReviewChain(register);
+  const onBase = (review) => known(review.base) && isAncestor(review.base, mergeBase);
+  let start = -1;
+  for (let i = chain.length - 1; i >= 0; i -= 1)
+    if (onBase(chain[i])) {
+      start = i;
+      break;
+    }
+  if (chain.length && start < 0)
+    result.blockers.push(
+      `Review ${chain[0].round} starts at ${chain[0].base}, which is not on the base branch: no review covers the whole pull request.`,
+    );
   for (const [i, review] of chain.entries()) {
     if (!known(review.reviewed) || (review.base && !known(review.base))) {
       result.blockers.push(`Review ${review.round}: its commits are not in this repository.`);
       continue;
     }
-    if (i === 0) {
-      if (!isAncestor(review.base, mergeBase))
-        result.blockers.push(
-          `Review ${review.round} starts at ${review.base}, which is not on the base branch: it does not cover the whole pull request.`,
-        );
-    } else if (
+    if (
+      i > start &&
+      i > 0 &&
       !chain[i - 1].reviewed.startsWith(review.base) &&
       !review.base.startsWith(chain[i - 1].reviewed)
     ) {
@@ -134,23 +192,81 @@ export function evaluate({ base, head, labels = [] }) {
         `Changed after the last review (${last.reviewed}), outside docs/reviews/: ${after.join(', ')}. A re-review must cover them.`,
       );
   }
+
+  // Stronger requirements for high risk and governance (the owner's decision, 2026-11-09).
+  if (STRONG_TIERS.includes(tier)) {
+    if (!last || last.mode !== 'final' || start !== chain.length - 1)
+      result.blockers.push(
+        `${tier} risk: the last code review must be a final review of the whole pull request from the base branch (run-review.js --mode final).`,
+      );
+    // No P3-only exception here (F-150-R2-02).
+    else if (last.result !== 'approve')
+      result.blockers.push(
+        `${tier} risk: the final review (round ${last.round}) must approve; it says ${last.result}.`,
+      );
+    const designs = register.reviews.filter(
+      (review) => review.mode === 'design' && review.result !== 'failed',
+    );
+    if (designs.length === 0)
+      result.blockers.push(`${tier} risk: no design review (D round) of the plan is recorded.`);
+    else if (
+      last &&
+      !designs.some((d) => {
+        if (!known(d.reviewed) || !isAncestor(d.reviewed, last.reviewed)) return false;
+        // Before the code (F-150-R6-01, R7-01): measured from the design snapshot's own fork point
+        // from the base branch (so a later update from the base branch changes nothing), at most
+        // the plan changed: ordinary documents, never code and never governance documents such as
+        // AGENTS.md. A snapshot already on the base branch is before the code too.
+        const fork = git(['merge-base', d.reviewed, base]);
+        return changedFiles(fork, d.reviewed).every(
+          (path) => path.endsWith('.md') && fileTier(path) === 'low',
+        );
+      })
+    )
+      result.blockers.push(
+        `${tier} risk: the design review must come before the code: it must review a commit in this history with no change but Markdown since the base branch (${last.reviewed} is the last reviewed).`,
+      );
+    for (const finding of register.findings)
+      if (finding.severity !== 'P3' && finding.status === 'accepted-limitation')
+        result.blockers.push(
+          `${tier} risk: ${finding.id} (${finding.severity}) is an accepted limitation; a serious finding left unfixed needs the owner's decision (requires-decision).`,
+        );
+  }
   return { ...result, evidence: result.blockers.length ? 'incomplete' : 'complete' };
 }
 
-export function eligibility(outcome) {
-  if (outcome.evidence === 'incomplete') return 'no: review evidence incomplete';
-  if (outcome.tier === 'high') return 'no: high risk, held for qualified approval';
-  return 'yes (automatic merging is not switched on)';
+/**
+ * The merge policy (F-150; the owner's decisions of 2026-11-09): low, normal and high risk merge
+ * automatically once the review evidence is complete (or not needed); high risk's evidence already
+ * includes its stronger requirements (evaluate). Governance, the rules and machinery of merging,
+ * also needs the owner's approval of this exact head commit: `ownerApprovedHead`, which the trusted
+ * Merge policy workflow sets only when it finds its own `owner-approved-merge` commit status on the
+ * head SHA (posted when the owner labels the pull request). Labels in an event are never trusted
+ * (F-150-R1-02): a new push is a new commit without approval. Required checks (CI) are GitHub's to
+ * enforce beside this one.
+ */
+export function mergeDecision(outcome, { ownerApprovedHead = false } = {}) {
+  if (outcome.evidence === 'incomplete')
+    return { merge: false, reason: 'no: review evidence incomplete' };
+  if (outcome.tier !== 'governance') return { merge: true, reason: `yes (${outcome.tier} risk)` };
+  if (ownerApprovedHead)
+    return { merge: true, reason: 'yes (governance, the owner approved this exact commit)' };
+  return {
+    merge: false,
+    reason: `no: governance change, held for the owner's approval of this commit (label ${OWNER_MERGE_LABEL})`,
+  };
 }
 
-function report(outcome) {
+export const eligibility = (outcome, options) => mergeDecision(outcome, options).reason;
+
+function report(outcome, options) {
   const lines = [
     `Risk tier: ${outcome.tier}${outcome.because.length ? ` (${outcome.because.slice(0, 8).join(', ')}${outcome.because.length > 8 ? ', …' : ''})` : ''}`,
     `Head commit: ${outcome.head}`,
     `Review evidence: ${outcome.evidence}${outcome.note ? ` (${outcome.note})` : ''}`,
     ...(outcome.register ? [`Register: ${outcome.register}`] : []),
     ...outcome.blockers.map((blocker) => `  - ${blocker}`),
-    `Eligible for automatic merge: ${eligibility(outcome)}`,
+    `May merge: ${eligibility(outcome, options)}`,
   ];
   return lines.join('\n');
 }
@@ -164,32 +280,34 @@ function main(argv) {
   const head = option('head');
   if (!base || !head) {
     console.error(
-      'Usage: node scripts/review-gate.js --base <ref> --head <sha> [--labels a,b] [--json]',
+      'Usage: node scripts/review-gate.js --base <ref> --head <sha> [--labels a,b] [--policy] [--owner-approved-head] [--json]',
     );
     return 2;
   }
+  const labels = (option('labels') ?? '').split(',').filter(Boolean);
+  const options = { ownerApprovedHead: argv.includes('--owner-approved-head') };
   let outcome;
   try {
-    outcome = evaluate({
-      base,
-      head: git(['rev-parse', `${head}^{commit}`]),
-      labels: (option('labels') ?? '').split(',').filter(Boolean),
-    });
+    outcome = evaluate({ base, head: git(['rev-parse', `${head}^{commit}`]), labels });
   } catch (error) {
     console.error(`Git error: ${error.message}`);
     return 2;
   }
-  const text = report(outcome);
+  const text = report(outcome, options);
+  const decision = mergeDecision(outcome, options);
   console.log(
     argv.includes('--json')
-      ? JSON.stringify({ ...outcome, eligible: eligibility(outcome) }, null, 2)
+      ? JSON.stringify({ ...outcome, merge: decision.merge, reason: decision.reason }, null, 2)
       : text,
   );
+  const policy = argv.includes('--policy');
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
-      `## Review evidence\n\n\`\`\`\n${text}\n\`\`\`\n`,
+      `## ${policy ? 'Merge policy' : 'Review evidence'}\n\n\`\`\`\n${text}\n\`\`\`\n`,
     );
+  // --policy (the Merge policy check): pass only when this pull request may merge.
+  if (policy) return decision.merge ? 0 : 1;
   return outcome.evidence === 'incomplete' ? 1 : 0;
 }
 

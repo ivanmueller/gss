@@ -1,0 +1,105 @@
+name: Merge policy
+
+# The check GitHub requires before any merge to main (F-150, docs/AI_WORKFLOW.md §11.6).
+#
+# Only pull_request_target runs this file, so it is always main's copy, which a pull request cannot
+# change, and no pull_request run can create a skipped (GitHub counts skipped as passing) check of the
+# same name (F-150-R1-01). It checks out the pull request's commits as data only (no install, no build,
+# no code from the pull request) and has no secrets.
+#
+# Low, normal and high risk pass once the review evidence is complete (high risk's evidence includes its
+# stronger requirements). Governance (the rules and machinery of merging) also needs the owner's
+# approval of the exact head commit: the label owner-approved-merge, added by the repository owner
+# after GitHub first saw that commit. Both times come from GitHub's own records (the pull request's
+# timeline and the workflow runs for that commit), never from the event's payload or anything a
+# workflow can write, so a push always needs a new approval (F-150-R1-02).
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    name: Merge policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      # To read the timeline and comments, and post the approval instructions on a governance change.
+      issues: write
+      # Only to take the approval label off after a push, so it is not mistaken for approval.
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      OWNER: ${{ github.repository_owner }}
+      PR: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: A push withdraws the owner's approval label
+        if: github.event.action == 'synchronize'
+        run: gh pr edit "$PR" --repo "$REPO" --remove-label owner-approved-merge || true
+      # The check itself, from main.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: gate
+          persist-credentials: false
+      # The pull request's history, as data.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # The owner's approval of this exact commit, from GitHub's own records only (scripts/review-approval.js).
+      - name: Did the owner approve this exact commit?
+        id: approval
+        run: |
+          # When GitHub first saw this commit on the pull request (its first workflow run).
+          seen=$(gh api --paginate "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&event=pull_request_target&per_page=100" \
+            --jq '.workflow_runs[].created_at' | sort | head -n 1)
+          present=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[] | select(.name == "owner-approved-merge")] | length')
+          gh api --paginate "repos/$REPO/issues/$PR/timeline?per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/timeline.json"
+          gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/comments.json"
+          jq -n --arg owner "$OWNER" --arg head "$HEAD_SHA" --arg seen "$seen" --argjson present "${present:-0}" \
+            --slurpfile timeline "$RUNNER_TEMP/timeline.json" --slurpfile comments "$RUNNER_TEMP/comments.json" \
+            '{owner: $owner, headSha: $head, firstSeen: $seen, labelPresent: ($present > 0), timeline: $timeline[0], comments: $comments[0]}' \
+            > "$RUNNER_TEMP/approval.json"
+          approved=$(node gate/scripts/review-approval.js "$RUNNER_TEMP/approval.json")
+          echo "Commit first seen: ${seen:-unknown}; approval label present: ${present:-0}; owner approved this commit: $approved"
+          echo "approved=$approved" >> "$GITHUB_OUTPUT"
+      - name: Decide whether this pull request may merge
+        working-directory: pr
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          APPROVED: ${{ steps.approval.outputs.approved }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          git fetch --no-tags --quiet origin "$BASE_SHA"
+          approval=()
+          if [ "$APPROVED" = yes ]; then approval=(--owner-approved-head); fi
+          gate=(node ../gate/scripts/review-gate.js --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS" "${approval[@]}")
+          tier=$("${gate[@]}" --json | jq -r '.tier' || true)
+          # A governance change waiting for the owner: say exactly how to approve this commit.
+          if [ "$tier" = governance ] && [ "$APPROVED" != yes ] && [[ "$ACTION" =~ ^(opened|synchronize|reopened|ready_for_review)$ ]]; then
+            line=$(node -e "import('../gate/scripts/review-approval.js').then(m => console.log(m.approvalLine(process.argv[1])))" "$HEAD_SHA")
+            gh pr comment "$PR" --repo "$REPO" --body "This pull request changes the rules or machinery of merging (governance), so it waits for the owner. To approve exactly this commit, comment the line below, then add the label **owner-approved-merge**:
+
+          \`\`\`
+          $line
+          \`\`\`
+          A later push needs a new approval." || true
+          fi
+          "${gate[@]}" --policy
