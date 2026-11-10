@@ -29,10 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # The check itself: the pull request's copy on pull_request, main's on pull_request_target.
+      # The check itself: the pull request's copy on pull_request; on pull_request_target always
+      # protected main's current copy, never the fork point or base branch (F-151).
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.repository.default_branch || github.event.pull_request.head.sha }}
           path: gate
           persist-credentials: false
       # The pull request's history, as data.
@@ -52,9 +53,10 @@ jobs:
       - name: Check the review evidence
         working-directory: pr
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
-          git fetch --no-tags --quiet origin "$BASE_SHA"
-          node ../gate/scripts/review-gate.js --base "$BASE_SHA" --head "$HEAD_SHA" --labels "$LABELS"
+          # The base branch's current tip, as data.
+          git fetch --no-tags --quiet origin "refs/heads/$BASE_REF"
+          node ../gate/scripts/review-gate.js --base "$(git rev-parse FETCH_HEAD)" --head "$HEAD_SHA" --labels "$LABELS"
