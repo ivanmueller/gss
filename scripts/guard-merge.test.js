@@ -62,4 +62,49 @@ describe('merge guard hook', () => {
   test('always lets automatic merging be turned off', () => {
     assert.equal(run('gh pr merge 194 --disable-auto').status, 0);
   });
+
+  // F-151-R2-01: while a change of the merge rules is open, no other pull request gets automatic
+  // merging, so none can merge under the old rules between the rules change's approval and merge.
+  const withData = (command, data) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+      encoding: 'utf8',
+      env: { ...process.env, GSS_GUARD_TEST_DATA: JSON.stringify(data) },
+    });
+  const enforced = ['check', 'Merge policy'];
+  test('no automatic merging of another pull request while a rules change is open', () => {
+    const open = [
+      { number: 194, files: [{ path: 'apps/web/src/pages/QuotePage.tsx' }] },
+      { number: 198, files: [{ path: '.github/workflows/merge-policy.yml' }] },
+    ];
+    const blocked = withData('gh pr merge 194 --auto --squash', {
+      requiredChecks: enforced,
+      openPullRequests: open,
+    });
+    assert.equal(blocked.status, 2);
+    assert.match(blocked.stderr, /change of the merge rules \(#198\) is open/);
+    // The rules change itself may be set to merge (it still waits for the owner's approval).
+    assert.equal(
+      withData('gh pr merge 198 --auto --squash', {
+        requiredChecks: enforced,
+        openPullRequests: open,
+      }).status,
+      0,
+    );
+    // With no rules change open, automatic merging is allowed once the policy is required.
+    assert.equal(
+      withData('gh pr merge 194 --auto --squash', {
+        requiredChecks: enforced,
+        openPullRequests: [open[0]],
+      }).status,
+      0,
+    );
+    assert.equal(
+      withData('gh pr merge 194 --auto --squash', {
+        requiredChecks: ['check'],
+        openPullRequests: [],
+      }).status,
+      2,
+    );
+  });
 });
