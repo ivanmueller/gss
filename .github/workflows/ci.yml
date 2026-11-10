@@ -35,6 +35,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # The merge gate's own tests (scripts/review-*, guard-merge), the pull request's copy, so a change
+      # to the gate is tested in its own pull request. A file pattern: Node 22 takes globs, not folders.
+      - name: Tests of the merge gate
+        run: node --test 'scripts/*.test.js'
       - uses: supabase/setup-cli@v1
         with:
           version: 2.122.0
