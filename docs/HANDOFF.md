@@ -556,6 +556,7 @@ Earlier: ivanmueller/gss#22 (`0411a71`, the project guide brought in line with t
 4. Geocoding: Geocodio's free plan, built (ivanmueller/gss#21); the owner reports the key set and Find coordinates run on staging (2026-10-28).
 5. Farm-location visibility (specification §6) deferred by the owner until farms are added.
 6. FX: the Bank of Canada connector is built (ivanmueller/gss#54) and its stored rate was seen on staging by the owner (2026-10-29). Claude Code cloud sessions cannot reach `www.bankofcanada.ca` until the owner allows it in the environment's network settings. The Bank's terms of use are to be checked before production.
+7. Cloudflare (owner, 2026-11-09): the account is on the Workers paid plan, and the business domain's DNS moved from IONOS to Cloudflare (nameservers changed at IONOS; its records copied, the mail records as DNS only). The domain's mailboxes stay at IONOS (its MX records), so the platform's email replies are to use a subdomain (F-114). The app also opens at `app.torvenco.com`, a Custom Domain of the staging Worker (F-153, checked by the owner 2026-11-10). Transferring the domain's registration to Cloudflare was discussed, for later, once mail is confirmed working.
 
 ## Next exact task
 
