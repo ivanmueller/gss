@@ -290,6 +290,66 @@ export function isLayerPictureUrl(url: string): boolean {
   return url.startsWith(`${window.location.origin}/api/v1/map-layers/`);
 }
 
+/**
+ * What a map's failed request means. Only Mapbox refusing its own token (401 or 403) hides
+ * the map. A map layer's pictures are refused with 401 when the person's sign-in lapsed (an
+ * hour idle, a computer asleep): they are asked for again once it renews, the map kept.
+ */
+export function mapRequestRefusal(error: unknown): 'mapbox-token' | 'sign-in' | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const status: unknown = 'status' in error ? error.status : undefined;
+  if (status !== 401 && status !== 403) return null;
+  const url: unknown = 'url' in error ? error.url : undefined;
+  return typeof url === 'string' && isLayerPictureUrl(url) ? 'sign-in' : 'mapbox-token';
+}
+
+/** The most picture addresses whose sign-in is remembered (a map asks for a few hundred). */
+const MAX_SENT_PICTURES = 1000;
+
+/**
+ * When a map layer's pictures refused for a lapsed sign-in are asked for again: at once if
+ * the sign-in already renewed since the refused one was sent, else when it renews. Remembers
+ * the sign-in sent with each picture, so a late refusal of an old request is never taken for
+ * a refusal of the new sign-in (Codex's review of F-157). One reload per sign-in.
+ */
+export class PictureSignIns {
+  private readonly sentWith = new Map<string, string>();
+  /** The sign-in a refused picture was sent with, while waiting for a renewed one. */
+  private waitingOn: string | null = null;
+  private reloadedWith: string | undefined;
+
+  /** A picture asked for with this sign-in. */
+  sent(url: string, auth: string): void {
+    this.sentWith.delete(url);
+    this.sentWith.set(url, auth);
+    if (this.sentWith.size > MAX_SENT_PICTURES) {
+      const oldest = this.sentWith.keys().next().value;
+      if (oldest !== undefined) this.sentWith.delete(oldest);
+    }
+  }
+
+  /** A picture refused for the sign-in; true when the pictures are to be reloaded now. */
+  refused(url: string, current: string | undefined): boolean {
+    const used = this.sentWith.get(url);
+    if (current && used !== undefined && current !== used) return this.reload(current);
+    this.waitingOn = used ?? current ?? '';
+    return false;
+  }
+
+  /** The sign-in changed; true when the pictures are to be reloaded now. */
+  renewed(current: string | undefined): boolean {
+    if (!current || this.waitingOn === null || current === this.waitingOn) return false;
+    return this.reload(current);
+  }
+
+  private reload(current: string): boolean {
+    this.waitingOn = null;
+    if (this.reloadedWith === current) return false;
+    this.reloadedWith = current;
+    return true;
+  }
+}
+
 function asCollection(value: unknown): { features: GeoJSON.Feature[]; exceeded: boolean } | null {
   if (typeof value !== 'object' || value === null) return null;
   const body = value as {
