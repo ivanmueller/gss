@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { BID, QUOTE_ID, REVISION_1 } from '../test/quotes';
 import { QuotePage } from './QuotePage';
+import { QuotesPage } from './QuotesPage';
 
 const PATH = `/quotes/${QUOTE_ID}`;
+const LIVE = `GET /quotes?organization_id=${ORG.id}`;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -133,6 +135,49 @@ describe('QuotePage', () => {
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Record new terms' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Last terms' })).toBeInTheDocument();
+  });
+
+  // T-01: a list of bids and offers kept from before must not show a withdrawn or changed quote
+  // as it was while it loads again (the browser test of CI run #331 saw it so).
+  it.each([
+    ['withdrawing', 'Withdraw', `POST ${PATH}/withdraw`],
+    ['recording new terms', 'Record new terms', `POST ${PATH}/revisions`],
+  ])('after %s, kept lists of bids and offers load again', async (_, button, post) => {
+    let changed = false;
+    mockApi({
+      // Before the change the list answers at once; after it, never, so the test sees exactly
+      // what the list shows while it loads again.
+      [LIVE]: () =>
+        changed
+          ? new Promise<Response>(() => undefined)
+          : Response.json({ quotes: [BID], truncated: false }),
+      'GET /commodities': () => Response.json({ commodities: [] }),
+      [`GET ${PATH}`]: () => Response.json(BID),
+      [post]: () => {
+        changed = true;
+        return Response.json(BID, { status: 201 });
+      },
+    });
+    const list = render(<QuotesPage session={SESSION} />);
+    expect(await screen.findByRole('link', { name: 'Flaxseed' })).toBeInTheDocument();
+    list.unmount();
+
+    const page = render(<QuotePage session={SESSION} id={QUOTE_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: button }));
+    if (button === 'Withdraw') {
+      const confirm = screen.getByRole('group', { name: 'Withdraw this quote' });
+      await userEvent.click(within(confirm).getByRole('button', { name: 'Withdraw' }));
+    } else {
+      await userEvent.click(screen.getByRole('button', { name: 'Save new terms' }));
+    }
+    await waitFor(() => {
+      expect(changed).toBe(true);
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent(/Withdrawn|New terms saved/);
+    page.unmount();
+
+    render(<QuotesPage session={SESSION} />);
+    expect(screen.queryByRole('link', { name: 'Flaxseed' })).toBeNull();
   });
 
   it('says when a quote expired, and offers no changes to viewers', async () => {
