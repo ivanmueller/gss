@@ -19,8 +19,12 @@ on:
 permissions:
   contents: read
 
+# One queue per pull request (F-156-R4-01): GitHub keeps one waiting run per group, so a shared group
+# would let a change on one pull request replace the waiting withdrawal of another. A waiting run is
+# replaced only by a later change naming the same pull request (its number, or its head commit for a
+# review's signal), which withdraws it outright all the same.
 concurrency:
-  group: approval-withdrawn
+  group: approval-withdrawn-${{ github.event.issue.number || github.event.workflow_run.head_sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
