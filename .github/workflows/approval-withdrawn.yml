@@ -2,30 +2,36 @@ name: Approval withdrawn
 
 # The owner approves a governance change by an `approve-merge <commit>` line, as a comment or a review,
 # and the label owner-approved-merge (scripts/review-approval.js, F-156). Editing, deleting or
-# dismissing one of the owner's comments or reviews on a pull request carrying that label withdraws
-# the approval (F-156-D1-01): this takes the label off, turns automatic merging off and runs the
-# Merge policy again, so its earlier pass no longer stands. It only ever cancels an approval, never
-# grants one, and reads no pull request code. A comment's events run main's copy; a review's run the
-# pull request's copy, which a governance change (this file) only reaches with the owner's approval.
+# dismissing one of the owner's comments or reviews can end that approval (F-156-D1-01): this then
+# re-checks every open pull request carrying the label against GitHub's records and, where the
+# approval no longer holds, takes the label off, turns automatic merging off and runs the Merge policy
+# again once any run in progress has finished (scripts/review-withdraw-approval.js). It only ever
+# cancels an approval, never grants one. Both triggers run main's own copy with its own token: a
+# comment's events directly, a review's through review-changed.yml finishing (F-156-R2-02). No pull
+# request code is checked out or run.
 on:
   issue_comment:
     types: [edited, deleted]
-  pull_request_review:
-    types: [edited, dismissed]
+  workflow_run:
+    workflows: [Review changed]
+    types: [completed]
 
 permissions:
   contents: read
 
+concurrency:
+  group: approval-withdrawn
+  cancel-in-progress: false
+
 jobs:
   withdraw:
-    name: Withdraw the owner's approval
+    name: Withdraw approvals that no longer hold
     if: >-
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
       github.event.comment.user.login == github.repository_owner) ||
-      (github.event_name == 'pull_request_review' &&
-      github.event.review.user.login == github.repository_owner)
+      github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       # Turning automatic merging off is a merge action: GitHub refuses it without contents: write
       # (F-152). Branch protection still stops this token from pushing to main.
@@ -38,18 +44,15 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+      OWNER: ${{ github.repository_owner }}
     steps:
-      - name: Take the approval off
-        run: |
-          present=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[] | select(.name == "owner-approved-merge")] | length')
-          if [ "${present:-0}" -eq 0 ]; then echo "No approval label on #$PR: nothing to withdraw."; exit 0; fi
-          gh pr merge "$PR" --repo "$REPO" --disable-auto || true
-          gh pr edit "$PR" --repo "$REPO" --remove-label owner-approved-merge
-          # A label removed with this token starts no workflow, so run the Merge policy again directly:
-          # it reads GitHub's records afresh and no longer finds the label.
-          head=$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid)
-          run=$(gh api "repos/$REPO/actions/workflows/merge-policy.yml/runs?head_sha=$head&event=pull_request_target&per_page=1" --jq '.workflow_runs[0].id // empty')
-          if [ -n "$run" ]; then gh run rerun "$run" --repo "$REPO" || echo "Merge policy run $run could not be re-run (still running?)."; fi
-          gh pr comment "$PR" --repo "$REPO" --body "An approval comment or review of the owner's was edited, deleted or dismissed, so the approval is withdrawn: the label **owner-approved-merge** is off and automatic merging is off. To approve again, comment the \`approve-merge\` line for the current commit, then add the label."
-          echo "Approval withdrawn on #$PR."
+      # main's own copy of the scripts.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Withdraw approvals that no longer hold
+        run: node scripts/review-withdraw-approval.js "$REPO" "$OWNER"

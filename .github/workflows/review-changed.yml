@@ -1,0 +1,20 @@
+name: Review changed
+
+# A signal only (F-156-R2-02): when one of the owner's reviews is edited or dismissed, this finishes,
+# and its completion starts approval-withdrawn.yml from main's own copy with the write access it
+# needs. Review events run the pull request's copy of a workflow, with a read-only token for
+# Dependabot and fork pull requests, so nothing is done here: no permissions, no checkout, no code.
+on:
+  pull_request_review:
+    types: [edited, dismissed]
+
+permissions: {}
+
+jobs:
+  signal:
+    name: Signal a changed review
+    if: github.event.review.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "One of the owner's reviews was edited or dismissed; approval-withdrawn.yml re-checks approvals."

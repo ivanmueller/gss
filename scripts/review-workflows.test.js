@@ -93,19 +93,30 @@ describe('merge workflows', () => {
 
   // F-156-D1-01: editing, deleting or dismissing one of the owner's comments or reviews on a labelled
   // pull request withdraws the approval: label off, automatic merging off, the Merge policy re-run.
-  test("editing or dismissing the owner's comment or review withdraws the approval", () => {
-    const text = workflows['approval-withdrawn.yml'] ?? '';
-    const on = /^on:\n((?:[ \t].*\n|\n)*)/m.exec(text)?.[1] ?? '';
-    assert.match(on, /^ {2}issue_comment:\n {4}types: \[edited, deleted\]/m);
-    assert.match(on, /^ {2}pull_request_review:\n {4}types: \[edited, dismissed\]/m);
-    assert.match(text, /github\.event\.comment\.user\.login == github\.repository_owner/);
-    assert.match(text, /github\.event\.review\.user\.login == github\.repository_owner/);
-    assert.match(text, /--disable-auto/);
-    assert.match(text, /--remove-label owner-approved-merge/);
-    assert.match(text, /workflows\/merge-policy\.yml\/runs\?head_sha=\$head/);
-    assert.match(text, /gh run rerun/);
-    // It only cancels: it never adds the label, comments an approval line or turns merging on.
-    assert.doesNotMatch(text, /--add-label|gh pr merge [^\n]*--auto(?!\S)|gh pr review|checkout/);
+  // R2-02: review events run the pull request's copy with a read-only token for Dependabot and fork
+  // pull requests, so the withdrawal itself always runs main's copy (issue_comment, workflow_run).
+  test("editing or dismissing the owner's comment or review withdraws the approval, from main's copy", () => {
+    const events = (text) =>
+      [...(/^on:\n((?:[ \t].*\n|\n)*)/m.exec(text)?.[1] ?? '').matchAll(/^ {2}(\w+):/gm)].map(
+        (m) => m[1],
+      );
+    const withdraw = workflows['approval-withdrawn.yml'] ?? '';
+    assert.deepEqual(events(withdraw), ['issue_comment', 'workflow_run']);
+    assert.match(withdraw, /^ {2}issue_comment:\n {4}types: \[edited, deleted\]/m);
+    assert.match(withdraw, /^ {2}workflow_run:\n {4}workflows: \[Review changed\]/m);
+    assert.match(withdraw, /github\.event\.comment\.user\.login == github\.repository_owner/);
+    assert.match(withdraw, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+    assert.match(withdraw, /persist-credentials: false/);
+    assert.match(withdraw, /run: node scripts\/review-withdraw-approval\.js "\$REPO" "\$OWNER"/);
+    // It only cancels: it never adds the label, approves or turns automatic merging on.
+    assert.doesNotMatch(withdraw, /--add-label|--auto\b|gh pr review|pnpm|npm /);
+
+    const signal = workflows['review-changed.yml'] ?? '';
+    assert.match(signal, /^name: Review changed$/m);
+    assert.deepEqual(events(signal), ['pull_request_review']);
+    assert.match(signal, /types: \[edited, dismissed\]/);
+    assert.match(signal, /^permissions: \{\}$/m);
+    assert.doesNotMatch(signal, /uses:|GH_TOKEN|\bgh (api|pr|run) /);
   });
 
   // F-151-R1-02: every open pull request, not only the first page of 30.
