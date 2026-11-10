@@ -93,7 +93,16 @@ export function withdrawStaleApprovals({
       log(`#${pr.number}: the owner still approves ${headSha.slice(0, 7)}.`);
       continue;
     }
-    if (pr.auto_merge) gh(['pr', 'merge', String(pr.number), '--repo', repo, '--disable-auto']);
+    // Safe to repeat (several withdrawals may run at once, F-156-R5-01): automatic merging turned off
+    // by another run meanwhile is fine; still on after a refusal is not.
+    if (pr.auto_merge) {
+      try {
+        gh(['pr', 'merge', String(pr.number), '--repo', repo, '--disable-auto']);
+      } catch (error) {
+        const now = JSON.parse(gh(['api', `repos/${repo}/pulls/${pr.number}`]));
+        if (now.auto_merge) throw error;
+      }
+    }
     gh(['pr', 'edit', String(pr.number), '--repo', repo, '--remove-label', APPROVAL_LABEL]);
     gh([
       'pr',

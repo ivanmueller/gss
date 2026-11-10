@@ -108,12 +108,8 @@ describe('merge workflows', () => {
     assert.match(withdraw, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
     assert.match(withdraw, /persist-credentials: false/);
     assert.match(withdraw, /run: node scripts\/review-withdraw-approval\.js "\$REPO" "\$OWNER"/);
-    // R4-01: no shared waiting slot, so one pull request's withdrawal cannot replace another's.
-    assert.match(
-      withdraw,
-      /^ {2}group: approval-withdrawn-\$\{\{ github\.event\.issue\.number \|\| github\.event\.workflow_run\.head_sha \|\| github\.run_id \}\}$/m,
-    );
-    assert.doesNotMatch(withdraw, /^ {2}group: approval-withdrawn$/m);
+    // R4-01, R5-01: no concurrency group at all, so no event's withdrawal can replace another's.
+    assert.doesNotMatch(withdraw, /concurrency:|^\s*group:/m);
     // R3-01: the changed pull request is named; a review's only when its signal job ran.
     assert.match(
       withdraw,

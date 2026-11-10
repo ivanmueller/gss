@@ -16,6 +16,8 @@ function fakeGh({
   runs = [{ id: 7, status: 'completed' }],
   rerunFails = 0,
   autoMerge = true,
+  disableFails = false,
+  autoMergeAfter = null,
 } = {}) {
   const calls = [];
   let rerunFailures = rerunFails;
@@ -51,8 +53,11 @@ function fakeGh({
         ]);
       if (path.includes('/comments')) return pages(comments);
       if (path.includes('/reviews')) return pages(reviews);
+      if (path === `repos/${REPO}/pulls/5`) return JSON.stringify({ auto_merge: autoMergeAfter });
       throw new Error(`unexpected api ${path}`);
     }
+    if (cmd === 'pr' && sub === 'merge' && disableFails)
+      throw new Error('Pull request is not in the correct state to disable auto-merge');
     if (cmd === 'run' && sub === 'rerun' && rerunFailures > 0) {
       rerunFailures--;
       throw new Error('This workflow run cannot be rerun');
@@ -162,6 +167,21 @@ describe("withdrawing the owner's approval (F-156-D1-01)", () => {
   test('an approval comment edited to remove the line withdraws', () => {
     const { gh } = fakeGh({ comments: [{ user: { login: OWNER }, body: 'looks fine' }] });
     assert.deepEqual(withdrawStaleApprovals({ gh, repo: REPO, owner: OWNER, log: quiet }), [5]);
+  });
+
+  // F-156-R5-01: withdrawals run at once (no concurrency group), so each step must be safe to repeat.
+  test('automatic merging turned off meanwhile by another withdrawal is fine; still on is not', () => {
+    const quietly = fakeGh({ disableFails: true, autoMergeAfter: null });
+    assert.deepEqual(
+      withdrawStaleApprovals({ gh: quietly.gh, repo: REPO, owner: OWNER, log: quiet }),
+      [5],
+    );
+    assert.equal(ran(quietly.calls, 'run', 'rerun').length, 1);
+    const stuck = fakeGh({ disableFails: true, autoMergeAfter: {} });
+    assert.throws(
+      () => withdrawStaleApprovals({ gh: stuck.gh, repo: REPO, owner: OWNER, log: quiet }),
+      /not in the correct state/,
+    );
   });
 
   test('automatic merging already off is not turned off again', () => {
