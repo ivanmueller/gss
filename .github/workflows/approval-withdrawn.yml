@@ -55,4 +55,10 @@ jobs:
         with:
           node-version: 22
       - name: Withdraw approvals that no longer hold
+        env:
+          # The pull request whose owner's comment or review changed: its approval is withdrawn
+          # outright (F-156-R3-01). A review's run names its head commit (no pull request for forks),
+          # and only when review-changed.yml ran its job, for one of the owner's reviews.
+          AFFECTED_PR: ${{ github.event_name == 'issue_comment' && github.event.issue.number || '' }}
+          AFFECTED_HEAD: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_sha || '' }}
         run: node scripts/review-withdraw-approval.js "$REPO" "$OWNER"

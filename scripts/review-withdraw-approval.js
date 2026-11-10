@@ -66,14 +66,30 @@ export function rerunPolicy(gh, repo, headSha, { attempts = 3 } = {}) {
   );
 }
 
-export function withdrawStaleApprovals({ gh = runGh, repo, owner, log = console.log }) {
+/**
+ * `affected`: the pull request whose owner's comment or review was just edited, deleted or dismissed,
+ * by number (a comment's event) or head commit (a review's, read through workflow_run, which names no
+ * pull request for forks). Its approval is withdrawn outright, even if another copy of the line still
+ * matches (F-156-R3-01): the owner changed something in the approval, so it must be given afresh. The
+ * other labelled pull requests are re-checked and withdrawn only where the approval no longer holds.
+ */
+export function withdrawStaleApprovals({
+  gh = runGh,
+  repo,
+  owner,
+  affected = {},
+  log = console.log,
+}) {
   const open = json(gh, `repos/${repo}/pulls?state=open&base=main&per_page=100`).filter((pr) =>
     (pr.labels ?? []).some((label) => label.name === APPROVAL_LABEL),
   );
+  const isAffected = (pr) =>
+    (affected.pr !== undefined && String(pr.number) === String(affected.pr)) ||
+    (affected.head !== undefined && pr.head?.sha === affected.head);
   const withdrawn = [];
   for (const pr of open) {
     const headSha = pr.head?.sha;
-    if (ownerApprovedHead(approvalInput(gh, repo, owner, pr.number, headSha))) {
+    if (!isAffected(pr) && ownerApprovedHead(approvalInput(gh, repo, owner, pr.number, headSha))) {
       log(`#${pr.number}: the owner still approves ${headSha.slice(0, 7)}.`);
       continue;
     }
@@ -86,7 +102,7 @@ export function withdrawStaleApprovals({ gh = runGh, repo, owner, log = console.
       '--repo',
       repo,
       '--body',
-      "The owner's approval of this commit no longer holds (an approval comment or review was edited, deleted or dismissed), so it is withdrawn: the label **owner-approved-merge** is off and automatic merging is off. To approve again, comment the `approve-merge` line for the current commit, then add the label.",
+      "One of the owner's comments or reviews here was edited, deleted or dismissed, so the approval of this commit is withdrawn: the label **owner-approved-merge** is off and automatic merging is off. To approve again, comment the `approve-merge` line for the current commit, then add the label.",
     ]);
     log(`#${pr.number}: approval withdrawn; ${rerunPolicy(gh, repo, headSha)}.`);
     withdrawn.push(pr.number);
@@ -97,5 +113,15 @@ export function withdrawStaleApprovals({ gh = runGh, repo, owner, log = console.
 if (process.argv[1]?.endsWith('review-withdraw-approval.js')) {
   const [repo, owner] = process.argv.slice(2);
   if (!repo || !owner) throw new Error('usage: review-withdraw-approval.js <owner/repo> <owner>');
-  withdrawStaleApprovals({ repo, owner });
+  // From the workflow's environment: the pull request (a comment's event) or the head commit (a
+  // review's, when review-changed.yml ran its job for one of the owner's reviews).
+  const { AFFECTED_PR, AFFECTED_HEAD } = process.env;
+  withdrawStaleApprovals({
+    repo,
+    owner,
+    affected: {
+      pr: /^\d+$/.test(AFFECTED_PR ?? '') ? AFFECTED_PR : undefined,
+      head: /^[0-9a-f]{40}$/.test(AFFECTED_HEAD ?? '') ? AFFECTED_HEAD : undefined,
+    },
+  });
 }

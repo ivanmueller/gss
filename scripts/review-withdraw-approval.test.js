@@ -73,6 +73,58 @@ describe("withdrawing the owner's approval (F-156-D1-01)", () => {
     assert.equal(ran(calls, 'run').length, 0);
   });
 
+  // F-156-R3-01: two copies of the line (as on #208), one dismissed: the change still withdraws.
+  describe('the pull request whose owner comment or review changed', () => {
+    const twoReviews = [
+      { user: { login: OWNER }, state: 'COMMENTED', body: LINE },
+      { user: { login: OWNER }, state: 'DISMISSED', body: LINE },
+    ];
+
+    test('a dismissed review withdraws even when another copy of the line still matches (by head commit)', () => {
+      const { gh, calls } = fakeGh({ reviews: twoReviews });
+      assert.deepEqual(
+        withdrawStaleApprovals({
+          gh,
+          repo: REPO,
+          owner: OWNER,
+          affected: { head: HEAD },
+          log: quiet,
+        }),
+        [5],
+      );
+      assert.equal(ran(calls, 'pr', 'edit').length, 1);
+      assert.equal(ran(calls, 'run', 'rerun').length, 1);
+      // Without naming the pull request, the surviving copy keeps it approved.
+      const unnamed = fakeGh({ reviews: twoReviews });
+      assert.deepEqual(
+        withdrawStaleApprovals({ gh: unnamed.gh, repo: REPO, owner: OWNER, log: quiet }),
+        [],
+      );
+    });
+
+    test("an edited or deleted owner comment withdraws its pull request's approval outright (by number)", () => {
+      const { gh } = fakeGh({ comments: [{ user: { login: OWNER }, body: LINE }] });
+      assert.deepEqual(
+        withdrawStaleApprovals({ gh, repo: REPO, owner: OWNER, affected: { pr: '5' }, log: quiet }),
+        [5],
+      );
+    });
+
+    test('another pull request named leaves a still-valid approval alone', () => {
+      const { gh } = fakeGh({ comments: [{ user: { login: OWNER }, body: LINE }] });
+      assert.deepEqual(
+        withdrawStaleApprovals({
+          gh,
+          repo: REPO,
+          owner: OWNER,
+          affected: { pr: '6', head: 'e'.repeat(40) },
+          log: quiet,
+        }),
+        [],
+      );
+    });
+  });
+
   test('a dismissed approving review withdraws: automatic merging off, label off, Merge policy again', () => {
     const { gh, calls } = fakeGh({
       reviews: [{ user: { login: OWNER }, state: 'DISMISSED', body: LINE }],

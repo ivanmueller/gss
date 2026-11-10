@@ -108,6 +108,15 @@ describe('merge workflows', () => {
     assert.match(withdraw, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
     assert.match(withdraw, /persist-credentials: false/);
     assert.match(withdraw, /run: node scripts\/review-withdraw-approval\.js "\$REPO" "\$OWNER"/);
+    // R3-01: the changed pull request is named; a review's only when its signal job ran.
+    assert.match(
+      withdraw,
+      /AFFECTED_PR: \$\{\{ github\.event_name == 'issue_comment' && github\.event\.issue\.number/,
+    );
+    assert.match(
+      withdraw,
+      /AFFECTED_HEAD: [^\n]*workflow_run\.conclusion == 'success'[^\n]*workflow_run\.head_sha/,
+    );
     // It only cancels: it never adds the label, approves or turns automatic merging on.
     assert.doesNotMatch(withdraw, /--add-label|--auto\b|gh pr review|pnpm|npm /);
 
