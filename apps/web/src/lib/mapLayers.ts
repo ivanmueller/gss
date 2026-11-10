@@ -290,6 +290,19 @@ export function isLayerPictureUrl(url: string): boolean {
   return url.startsWith(`${window.location.origin}/api/v1/map-layers/`);
 }
 
+/**
+ * What a map's failed request means. Only Mapbox refusing its own token (401 or 403) hides
+ * the map. A map layer's pictures are refused with 401 when the person's sign-in lapsed (an
+ * hour idle, a computer asleep): they are asked for again once it renews, the map kept.
+ */
+export function mapRequestRefusal(error: unknown): 'mapbox-token' | 'sign-in' | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const status: unknown = 'status' in error ? error.status : undefined;
+  if (status !== 401 && status !== 403) return null;
+  const url: unknown = 'url' in error ? error.url : undefined;
+  return typeof url === 'string' && isLayerPictureUrl(url) ? 'sign-in' : 'mapbox-token';
+}
+
 function asCollection(value: unknown): { features: GeoJSON.Feature[]; exceeded: boolean } | null {
   if (typeof value !== 'object' || value === null) return null;
   const body = value as {

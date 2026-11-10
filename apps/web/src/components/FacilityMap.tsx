@@ -19,6 +19,7 @@ import {
 import type { LaneAreas } from '../lib/lanes';
 import {
   isLayerPictureUrl,
+  mapRequestRefusal,
   USUAL_LOOK,
   type MapOverlay,
   type OverlayLook,
@@ -356,8 +357,25 @@ export default function FacilityMap(props: FacilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const shownStyle = useRef(basemapStyle(basemap, theme));
+  // A map layer's pictures were refused because the person's sign-in lapsed.
+  const picturesRefused = useRef(false);
+  // The sign-in last sent with a picture request, and the one pictures were last reloaded with.
+  const picturesSentWith = useRef<string | undefined>(undefined);
+  const picturesReloadedWith = useRef<string | undefined>(undefined);
   // The latest props, read by map event handlers that are registered once.
   const latest = useRef({ ...props, data: pinFeatures(pins) });
+  // A map layer's pictures asked for again with a renewed sign-in, once per sign-in.
+  const reloadPictures = (instance: mapboxgl.Map, auth: string) => {
+    picturesRefused.current = false;
+    if (picturesReloadedWith.current === auth) return;
+    picturesReloadedWith.current = auth;
+    for (const overlay of latest.current.overlays ?? []) {
+      if (overlay.kind !== 'pictures') continue;
+      const source = instance.getSource(`${OVERLAY}${overlay.id}`);
+      if (source?.type === 'raster') source.reload();
+    }
+  };
+
   useEffect(() => {
     latest.current = { ...props, data: pinFeatures(props.pins) };
   });
@@ -382,9 +400,9 @@ export default function FacilityMap(props: FacilityMapProps) {
       // A map layer's pictures come from the app's API, which needs the person's sign-in.
       transformRequest: (url) => {
         const auth = latest.current.authToken;
-        return auth && isLayerPictureUrl(url)
-          ? { url, headers: { Authorization: `Bearer ${auth}` } }
-          : { url };
+        if (!auth || !isLayerPictureUrl(url)) return { url };
+        picturesSentWith.current = auth;
+        return { url, headers: { Authorization: `Bearer ${auth}` } };
       },
     });
     const side = latest.current.controls ?? 'top-right';
@@ -447,11 +465,14 @@ export default function FacilityMap(props: FacilityMapProps) {
       instance.getCanvas().style.cursor = '';
     });
     instance.on('error', (event: { error?: unknown }) => {
-      const status: unknown =
-        typeof event.error === 'object' && event.error !== null && 'status' in event.error
-          ? event.error.status
-          : undefined;
-      if (status === 401 || status === 403) latest.current.onTokenRefused();
+      const refusal = mapRequestRefusal(event.error);
+      if (refusal === 'mapbox-token') latest.current.onTokenRefused();
+      if (refusal !== 'sign-in') return;
+      // The person's sign-in lapsed: the pictures load again once it renews (below), or at
+      // once if it renewed while this answer was on its way.
+      const renewed = latest.current.authToken;
+      if (renewed && renewed !== picturesSentWith.current) reloadPictures(instance, renewed);
+      else picturesRefused.current = true;
     });
     map.current = instance;
     return () => {
@@ -459,6 +480,12 @@ export default function FacilityMap(props: FacilityMapProps) {
       map.current = null;
     };
   }, [token]);
+
+  const { authToken } = props;
+  useEffect(() => {
+    const instance = map.current;
+    if (instance && authToken && picturesRefused.current) reloadPictures(instance, authToken);
+  }, [authToken]);
 
   useEffect(() => {
     const instance = map.current;
