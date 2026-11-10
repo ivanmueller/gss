@@ -1,0 +1,1 @@
+Temporary file for an isolated test of the Merge policy refresh (F-152). Never to be merged; the pull request is closed and this branch deleted after the test.
