@@ -80,9 +80,12 @@ jobs:
           present=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[] | select(.name == "owner-approved-merge")] | length')
           gh api --paginate "repos/$REPO/issues/$PR/timeline?per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/timeline.json"
           gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/comments.json"
+          # The line may also be in a submitted review: GitHub can save what the owner types as one (F-156).
+          gh api --paginate "repos/$REPO/pulls/$PR/reviews?per_page=100" | jq -s 'add // []' > "$RUNNER_TEMP/reviews.json"
           jq -n --arg owner "$OWNER" --arg head "$HEAD_SHA" --arg seen "$seen" --argjson present "${present:-0}" \
             --slurpfile timeline "$RUNNER_TEMP/timeline.json" --slurpfile comments "$RUNNER_TEMP/comments.json" \
-            '{owner: $owner, headSha: $head, firstSeen: $seen, labelPresent: ($present > 0), timeline: $timeline[0], comments: $comments[0]}' \
+            --slurpfile reviews "$RUNNER_TEMP/reviews.json" \
+            '{owner: $owner, headSha: $head, firstSeen: $seen, labelPresent: ($present > 0), timeline: $timeline[0], comments: $comments[0], reviews: $reviews[0]}' \
             > "$RUNNER_TEMP/approval.json"
           approved=$(node gate/scripts/review-approval.js "$RUNNER_TEMP/approval.json")
           echo "Commit first seen: ${seen:-unknown}; approval label present: ${present:-0}; owner approved this commit: $approved"
@@ -111,7 +114,7 @@ jobs:
           \`\`\`
           $line
           \`\`\`
-          A later push needs a new approval." || true
+          An ordinary comment or a review both count. A later push needs a new approval. To withdraw an approval, remove the label (editing or deleting the comment does not withdraw it)." || true
           fi
           # A rules change about to pass (rulesChanged): automatic merging is withdrawn from the other
           # open pull requests first, so none can merge on a pass under the old rules (F-151-R1-01).

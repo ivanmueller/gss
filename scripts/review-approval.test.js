@@ -89,6 +89,64 @@ describe("owner's approval of a governance pull request", () => {
     );
   });
 
+  // F-156: GitHub may save the owner's line as a pull request review instead of a comment.
+  describe('the line in a review (F-156)', () => {
+    const review = (fields = {}) => ({
+      user: { login: OWNER },
+      state: 'COMMENTED',
+      body: `approve-merge ${HEAD.slice(0, 12)}`,
+      submitted_at: '2026-11-09T20:09:00Z',
+      ...fields,
+    });
+    const viaReview = (reviews, extra = {}) =>
+      ownerApprovedHead({ ...base, comments: [], reviews, ...extra });
+
+    test("the owner's submitted review naming the head approves, without a comment", () => {
+      assert.equal(viaReview([review()]), true);
+      assert.equal(viaReview([review({ state: 'APPROVED' })]), true);
+    });
+
+    test('a draft, dismissed or changes-requested review approves nothing', () => {
+      for (const state of ['PENDING', 'DISMISSED', 'CHANGES_REQUESTED', undefined])
+        assert.equal(viaReview([review({ state })]), false, String(state));
+    });
+
+    test("someone else's review approves nothing", () => {
+      assert.equal(viaReview([review({ user: { login: 'github-actions[bot]' } })]), false);
+      assert.equal(viaReview([review({ user: undefined })]), false);
+    });
+
+    test('a review naming another commit, a short name or the line inside other text approves nothing', () => {
+      for (const body of [
+        `approve-merge ${OLD.slice(0, 12)}`,
+        `approve-merge ${HEAD.slice(0, 6)}`,
+        `please do not approve-merge ${HEAD.slice(0, 7)}`,
+        '',
+        undefined,
+      ])
+        assert.equal(viaReview([review({ body })]), false, String(body));
+    });
+
+    test('the label rules still apply to an approval by review', () => {
+      assert.equal(viaReview([review()], { labelPresent: false }), false);
+      assert.equal(viaReview([review()], { firstSeen: '2026-11-09T20:15:00Z' }), false);
+      assert.equal(
+        viaReview([review()], {
+          timeline: [
+            ...base.timeline,
+            { ...base.timeline[0], event: 'unlabeled', created_at: '2026-11-09T20:20:00Z' },
+          ],
+        }),
+        false,
+      );
+    });
+
+    test('an input without reviews still reads comments', () => {
+      assert.equal('reviews' in base, false);
+      assert.equal(ownerApprovedHead(base), true);
+    });
+  });
+
   test('a short or partial commit name, or a mention inside other text, approves nothing', () => {
     for (const body of [
       `approve-merge ${HEAD.slice(0, 6)}`,
