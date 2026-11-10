@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
+import { RULE_PATHS } from './review-register.js';
 
 const DIR = new URL('../.github/workflows/', import.meta.url);
 const workflows = Object.fromEntries(
@@ -42,13 +43,25 @@ describe('merge workflows', () => {
     assert.match(workflows['merge-policy.yml'], /types:\s*\[[^\]]*\bedited\b[^\]]*\]/);
   });
 
-  // F-151-D1-02: a change of the rules on main withdraws automatic merging from every open pull
-  // request, so a pass under the old rules cannot merge it.
-  test('a change of the merge rules on main turns automatic merging off on open pull requests', () => {
-    const text = workflows['policy-refresh.yml'] ?? '';
-    assert.match(text, /^on:\n {2}push:\n {4}branches: \[main\]/m);
-    for (const path of ['scripts/review-', '.github/workflows/merge-policy.yml'])
-      assert.ok(text.includes(path), path);
-    assert.match(text, /--disable-auto/);
+  // F-151-D1-02, R1-01: a change of the rules withdraws automatic merging from the other open pull
+  // requests before it merges (the Merge policy of the approved change), and again after it reaches
+  // main (policy-refresh.yml), so a pass under the old rules cannot merge anything.
+  test('a change of the merge rules turns automatic merging off on open pull requests, before and after', () => {
+    const refresh = workflows['policy-refresh.yml'] ?? '';
+    assert.match(refresh, /^on:\n {2}push:\n {4}branches: \[main\]/m);
+    for (const path of RULE_PATHS) assert.ok(refresh.includes(`'${path}`), path);
+    assert.match(refresh, /scripts\/review-withdraw-auto\.sh/);
+    assert.match(workflows['merge-policy.yml'], /rulesChanged[\s\S]*review-withdraw-auto\.sh/);
+  });
+
+  // F-151-R1-02: every open pull request, not only the first page of 30.
+  test('the withdrawal reads every page of open pull requests', () => {
+    const script = readFileSync(new URL('review-withdraw-auto.sh', import.meta.url), 'utf8');
+    assert.match(
+      script,
+      /gh api --paginate "repos\/\$repo\/pulls\?state=open&base=main&per_page=100"/,
+    );
+    assert.match(script, /auto_merge != null/);
+    assert.match(script, /--disable-auto/);
   });
 });

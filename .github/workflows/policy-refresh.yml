@@ -4,6 +4,9 @@ name: Merge policy refresh
 # anything (F-151-D1-02). This turns automatic merging off on every open pull request into main and says
 # why; Claude then has each one checked again under the new rules (a new event) before turning it back
 # on (docs/AI_WORKFLOW.md §11.6). It runs main's own copy (push to main) and reads no pull request code.
+# It is the backstop: an approved rules change already withdraws automatic merging from the others in
+# its own Merge policy run, before it merges (F-151-R1-01). The paths are RULE_PATHS in
+# scripts/review-register.js.
 on:
   push:
     branches: [main]
@@ -30,11 +33,10 @@ jobs:
       REPO: ${{ github.repository }}
       SHA: ${{ github.sha }}
     steps:
+      # main's own copy of the script (this push).
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Turn automatic merging off on open pull requests into main
         run: |
-          for pr in $(gh pr list --repo "$REPO" --base main --state open --json number,autoMergeRequest \
-                        --jq '.[] | select(.autoMergeRequest != null) | .number'); do
-            gh pr merge "$pr" --repo "$REPO" --disable-auto
-            gh pr comment "$pr" --repo "$REPO" --body "The merge rules changed on main (${SHA:0:7}), so this pull request's earlier Merge policy result no longer counts. Automatic merging is off until the Merge policy runs again under the new rules (any new event: a push, or the pull request reopened)."
-            echo "Automatic merging turned off on #$pr"
-          done
+          bash scripts/review-withdraw-auto.sh "$REPO" "The merge rules changed on main (${SHA:0:7}), so this pull request's earlier Merge policy result no longer counts. Automatic merging is off until the Merge policy runs again under the new rules (any new event: a push, or the pull request reopened)."
