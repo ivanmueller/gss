@@ -165,10 +165,30 @@ export function buildOverview(
   return { type: 'FeatureCollection', features };
 }
 
-/** The most a part of a view may weigh as JSON, so the Worker checks it within Cloudflare's free plan. */
-export const OVERVIEW_PART_BYTES = 96 * 1024;
-/** The most parts a view may have (about 6 MB). */
+/**
+ * The most a part of a view may weigh as JSON, as sent. Cloudflare's paid plan (2026-11-09) lets
+ * the Worker check a larger part than the free plan's 96 KB; it stays well inside the 256 KB a part
+ * may be kept at (F-146).
+ */
+export const OVERVIEW_PART_BYTES = 192 * 1024;
+/** The most parts a view may have (the Worker and the database allow parts 0 to 63). */
 export const MAX_OVERVIEW_PARTS = 64;
+/**
+ * The most a whole view may weigh as sent, 6 MiB: what 64 parts of 96 KB allowed before F-146,
+ * so larger parts neither refuse a view taken before nor let a much larger one through.
+ */
+export const MAX_OVERVIEW_BYTES = 64 * 96 * 1024;
+
+/** Whether a view's parts are too many or, together, too heavy to be sent and kept. */
+export function overviewTooLarge(parts: readonly (readonly unknown[])[]): boolean {
+  if (parts.length > MAX_OVERVIEW_PARTS) return true;
+  let total = 0;
+  for (const part of parts) {
+    total += utf8Length(JSON.stringify({ features: part }));
+    if (total > MAX_OVERVIEW_BYTES) return true;
+  }
+  return false;
+}
 
 type OverviewFeature = LayerFeatureCollection['features'][number];
 

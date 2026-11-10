@@ -1,7 +1,7 @@
 import {
   cleanValue,
   groupingOf,
-  MAX_OVERVIEW_PARTS,
+  overviewTooLarge,
   valuesOf,
   VALUES_PROPERTY,
   type MapLayerView,
@@ -16,8 +16,8 @@ import { runOverviewJob, type OverviewJob, type OverviewResult } from './overvie
 // 2026-11-07, F-134): the whole layer is read through the Worker, page by page in ArcGIS's
 // compact format (about 8 MB for North American Rail Network Lines' 302,774 pieces), checking
 // every piece arrived; each value's pieces are joined into lines and simplified away from the
-// page's thread; and the result is sent in parts of about 100 KB (so the Worker checks each
-// within Cloudflare's free plan) and published once all have arrived. Only lines are kept;
+// page's thread; and the result is sent in parts of about 200 KB, each checked again by the
+// Worker, and published once all have arrived (at most 6 MiB in all; F-146). Only lines are kept;
 // areas and points are drawn by map squares as before.
 
 /** How many pages are read, or parts sent, at once. */
@@ -254,7 +254,7 @@ async function prepare(
   if (features === 0) {
     throw new Error('This layer has no lines, so it is drawn by map squares only.');
   }
-  if (parts.length > MAX_OVERVIEW_PARTS) {
+  if (overviewTooLarge(parts)) {
     throw new Error('Its zoomed-out view would be too large; it is drawn by map squares only.');
   }
   const version = crypto.randomUUID();

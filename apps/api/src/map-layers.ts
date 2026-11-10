@@ -62,9 +62,10 @@ export function crc32(bytes: Uint8Array, start: number, end: number): number {
 }
 
 /**
- * The widest and highest picture passed on: map squares are 256 pixels and legend pictures
- * smaller, and unpacking a larger one would take more than Cloudflare's free plan allows a
- * request (a 4096 by 4096 picture took about 0.4 s; Codex's re-review of 8306584).
+ * The widest and highest picture passed on: map squares are asked for at 256 pixels and legend
+ * pictures are smaller, so nothing larger is needed (F-145, 2026-11-10); unpacking a picture costs
+ * computing in proportion to its size (a 4096 by 4096 one took about 0.4 s; Codex's re-review of
+ * 8306584).
  */
 const MAX_PICTURE_SIDE = 512;
 
@@ -737,8 +738,8 @@ export function pictureUrl(source: MapLayerSource, tile: Tile): string {
 /** ArcGIS's compact answer (PBF), for reading a whole layer for its zoomed-out view (F-134). */
 const PBF = /^application\/(x-protobuf|octet-stream|vnd\.google\.protobuf)$/;
 const MAX_PAGE_BYTES = 20 * 1024 * 1024;
-/** A part of a zoomed-out view as sent (about 96 KB of features, with room to spare). */
-const MAX_PART_BYTES = 160 * 1024;
+/** A part of a zoomed-out view as sent (about 192 KB of features, with room to spare; F-146). */
+const MAX_PART_BYTES = 224 * 1024;
 /** A part as kept once checked (the database's limit). */
 const MAX_STORED_PART_BYTES = 256 * 1024;
 
@@ -1343,8 +1344,8 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   });
 
   // One part of the zoomed-out view an admin's browser prepared, checked again here. The view
-  // comes in parts of about 100 KB so each is checked within Cloudflare's free plan's limit on
-  // computing per request (the whole view takes about 115 ms to check).
+  // comes in parts of about 192 KB (F-146), each kept at most 256 KB, and is published only once
+  // every part has arrived.
   routes.put('/:id/overview/:version/:part', async (c) => {
     c.header('Cache-Control', 'no-store');
     const id = c.req.param('id');
