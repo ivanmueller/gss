@@ -106,12 +106,19 @@ jobs:
           # A governance change waiting for the owner: say exactly how to approve this commit.
           if [ "$tier" = governance ] && [ "$APPROVED" != yes ] && [[ "$ACTION" =~ ^(opened|synchronize|reopened|ready_for_review)$ ]]; then
             line=$(node -e "import('../gate/scripts/review-approval.js').then(m => console.log(m.approvalLine(process.argv[1])))" "$HEAD_SHA")
-            gh pr comment "$PR" --repo "$REPO" --body "This pull request changes the rules or machinery of merging (governance), so it waits for the owner. To approve exactly this commit, comment the line below, then add the label **owner-approved-merge**:
+            # The exact command too (F-156): GitHub may save a line typed on the page as a review, which
+            # does not count; this command always posts an ordinary comment.
+            gh pr comment "$PR" --repo "$REPO" --body "This pull request changes the rules or machinery of merging (governance), so it waits for the owner. To approve exactly this commit:
+
+          1. In a terminal (VS Code → Terminal → New Terminal), paste this and press Enter:
 
           \`\`\`
-          $line
+          gh pr comment $PR --repo $REPO --body \"$line\"
           \`\`\`
-          A later push needs a new approval." || true
+
+          2. Then add the label **owner-approved-merge**.
+
+          The command posts this line as an ordinary comment: \`$line\`. A line that GitHub shows as \"reviewed\" (a review, not a comment) does not count. A later push needs a new approval." || true
           fi
           # A rules change about to pass (rulesChanged): automatic merging is withdrawn from the other
           # open pull requests first, so none can merge on a pass under the old rules (F-151-R1-01).
