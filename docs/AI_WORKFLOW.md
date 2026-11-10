@@ -25,7 +25,7 @@ These are process assignments, not claims about permanent model superiority. Rot
 3. Work occurs on a separate branch/worktree. No concurrent agents write to the same worktree.
 4. Implementer supplies PR with change summary, migration notes, screenshots for UI work, test output, business-rule impacts and risk.
 5. Independent reviewer actively looks for errors and adds tests for disputed assumptions.
-6. CI passes; human owner approves; merge updates architectural decisions/docs. **After** merge, the integration owner updates `docs/HANDOFF.md`; agents do not edit it concurrently on independent feature branches.
+6. CI passes; human owner approves; merge updates architectural decisions/docs. **After** merge, the integration owner updates `docs/HANDOFF.md` (one records pull request per session for all its merges); agents do not edit it concurrently on independent feature branches.
 7. Deploy staging; run the relevant acceptance flow; promote production only after the release gate is met.
 
 **AI must never:** invent quotes or market data, treat hypotheticals as live, auto-execute trades, skip tenant isolation, edit production records ad hoc, bypass CI, commit secrets, or conceal unverified assumptions.
@@ -40,7 +40,9 @@ These are process assignments, not claims about permanent model superiority. Rot
 - `docs/BUILD_PLAN.md`: ordered stages and issues.
 - `docs/ACCEPTANCE_TESTS.md`: cross-model golden fixtures, security gates.
 - `docs/DECISIONS.md`: unresolved decisions + dated architecture decisions.
-- `docs/HANDOFF.md`: current merged implementation state, last verified commit, open blockers, next exact task; maintained by integration owner after merge.
+- `docs/HANDOFF.md`: current merged implementation state, latest verified merges, open blockers, next exact task; maintained by integration owner after merge and kept short.
+- `docs/HANDOFF_HISTORY.md`: older merge records, past status and test records, moved word for word from `docs/HANDOFF.md`; searched, not read whole.
+- `docs/FEATURES.md`: what is built, to build and still to check; `docs/FEATURES_DONE.md`: finished items moved word for word from it.
 - `docs/AI_CODING_SYSTEM.md`: recommended tools and operational multi-model coding process; no competing domain rules.
 - `docs/reviews/`: one Codex review findings register per pull request, and `ACCEPTED.md` for project-wide accepted limits (§11.5).
 
@@ -114,6 +116,9 @@ grain-trading-platform/
     ACCEPTANCE_TESTS.md
     DECISIONS.md
     HANDOFF.md
+    HANDOFF_HISTORY.md
+    FEATURES.md
+    FEATURES_DONE.md
   apps/
     web/                    # React + Vite SPA, map, table, dialogs
     api/                    # Cloudflare Worker + Hono; same deploy or separate Worker
