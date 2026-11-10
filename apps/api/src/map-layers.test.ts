@@ -1,4 +1,5 @@
 import type { LayerInspection, MapLayerView } from '@grain/domain';
+import { OVERVIEW_PART_BYTES, splitOverview, utf8Length } from '@grain/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
@@ -669,6 +670,32 @@ describe('a zoomed-out view', () => {
     expect(kept[0]?.properties).toEqual({ OWNER: 'AAA' });
   });
 
+  it('keeps a full part of about 192 KB, as the browser now sends them (F-146)', async () => {
+    const lines = Array.from({ length: 6_000 }, (_, i): [number, number][] => [
+      [-110.123456, 50 + i / 10_000],
+      [-109.987654, 50 + i / 10_000],
+    ]);
+    const parts = splitOverview({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 1,
+          geometry: { type: 'MultiLineString', coordinates: lines },
+          properties: { OWNER: 'AAA' },
+        },
+      ],
+    });
+    const first = parts[0] ?? [];
+    const sent = utf8Length(JSON.stringify({ features: first }));
+    expect(sent).toBeGreaterThan(160 * 1024);
+    expect(sent).toBeLessThanOrEqual(OVERVIEW_PART_BYTES);
+    const res = await send(`/${LAYER}/overview/${VERSION}/0`, 'PUT', { features: first });
+    expect(res.status).toBe(200);
+    const [, , part] = db.saveMapLayerOverviewPart.mock.calls[0] ?? [];
+    expect(part?.features.byteLength).toBeLessThanOrEqual(256 * 1024);
+  });
+
   it('refuses a part that is not GeoJSON, too big, or misnumbered', async () => {
     expect(
       (await send(`/${LAYER}/overview/${VERSION}/0`, 'PUT', { features: [{ type: 'Feature' }] }))
@@ -682,7 +709,7 @@ describe('a zoomed-out view', () => {
     );
     const big = await app.request(
       `/api/v1/map-layers/${LAYER}/overview/${VERSION}/0`,
-      { method: 'PUT', headers: AUTH, body: JSON.stringify({ features: ['x'.repeat(200_000)] }) },
+      { method: 'PUT', headers: AUTH, body: JSON.stringify({ features: ['x'.repeat(240_000)] }) },
       ENV,
     );
     expect(big.status).toBe(413);

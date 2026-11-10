@@ -4,7 +4,10 @@ import { normalizeFeatureCollection } from './mapLayers';
 import {
   buildOverview,
   joinLines,
+  MAX_OVERVIEW_BYTES,
+  MAX_OVERVIEW_PARTS,
   OVERVIEW_PART_BYTES,
+  overviewTooLarge,
   simplifyLine,
   splitOverview,
   utf8Length,
@@ -165,7 +168,8 @@ describe('splitOverview', () => {
       ],
     };
     const parts = splitOverview(collection);
-    expect(parts.length).toBeGreaterThan(3);
+    // Several parts at any part size (F-146-D1-02: three at 192 KB, more at 96 KB).
+    expect(parts.length).toBeGreaterThan(1);
     for (const part of parts) {
       expect(utf8Length(JSON.stringify({ features: part }))).toBeLessThanOrEqual(
         OVERVIEW_PART_BYTES,
@@ -271,5 +275,43 @@ describe('buildOverview', () => {
     ];
     const overview = buildOverview(new Map([['A', { properties: {}, lines }]]));
     expect(overview.features).toEqual([]);
+  });
+});
+
+// F-146: parts of about 192 KB on Cloudflare's paid plan, the whole view still at most 6 MiB.
+describe('overviewTooLarge', () => {
+  const view = (groups: number, lines: number) => ({
+    type: 'FeatureCollection' as const,
+    features: Array.from({ length: groups }, (_, g) => ({
+      type: 'Feature' as const,
+      id: g + 1,
+      geometry: {
+        type: 'MultiLineString' as const,
+        coordinates: Array.from({ length: lines }, (_, i): [number, number][] => [
+          [-110, 50 + i / 1000],
+          [-109.99, 50 + i / 1000],
+        ]),
+      },
+      properties: { OWNER: `R${String(g)}` },
+    })),
+  });
+
+  it('takes a view taken before F-146 that needs more than 32 parts (F-146-D1-01)', () => {
+    // Codex's case: 20 values of 7,000 short lines, about 4.6 MB, 60 parts of 96 KB.
+    const parts = splitOverview(view(20, 7_000));
+    expect(parts.length).toBeGreaterThan(32);
+    expect(parts.length).toBeLessThanOrEqual(MAX_OVERVIEW_PARTS);
+    expect(overviewTooLarge(parts)).toBe(false);
+    expect(overviewTooLarge(splitOverview(view(20, 7_000), 96 * 1024))).toBe(false);
+  });
+
+  it('refuses a view over 6 MiB in all, or with more than 64 parts', () => {
+    const parts = splitOverview(view(30, 7_000));
+    expect(parts.length).toBeLessThanOrEqual(MAX_OVERVIEW_PARTS);
+    const total = parts.reduce((n, p) => n + utf8Length(JSON.stringify({ features: p })), 0);
+    expect(total).toBeGreaterThan(MAX_OVERVIEW_BYTES);
+    expect(overviewTooLarge(parts)).toBe(true);
+    expect(overviewTooLarge(Array.from({ length: MAX_OVERVIEW_PARTS + 1 }, () => []))).toBe(true);
+    expect(overviewTooLarge(Array.from({ length: MAX_OVERVIEW_PARTS }, () => []))).toBe(false);
   });
 });
