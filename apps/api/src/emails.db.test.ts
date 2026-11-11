@@ -199,4 +199,46 @@ describe('the Worker keeping a received message (F-114 step 4a)', () => {
     expect(await db.receiveEmail(received)).toMatchObject({ status: 'received', duplicate: true });
     await production.end();
   });
+
+  it('keeps an attachment whose name has an emoji at the length limit (R3-02)', async () => {
+    const production = postgres(API_URL, connectionOptions(API_URL));
+    const db = createDatabase(production);
+    const name = `${'a'.repeat(254)}${String.fromCodePoint(0x1f33e)}.pdf`;
+    const raw = new TextEncoder().encode(
+      [
+        `From: Synthetic Farmer <${sender}>`,
+        'To: info@gss.example',
+        `Message-ID: <${id()}@synthetic.example>`,
+        'Content-Type: multipart/mixed; boundary="b"',
+        '',
+        '--b',
+        'Content-Type: text/html',
+        '',
+        '<table><tr><td>250</td><td>100</td></tr></table>',
+        '--b',
+        'Content-Type: application/pdf',
+        `Content-Disposition: attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        'JVBERi0xLjQK',
+        '--b--',
+      ].join(CRLF),
+    );
+    const sha = await sha256Hex(raw);
+    const email = await readInbound(raw, sha, { from: sender, to: 'info@gss.example' });
+    const kept = await db.receiveEmail({
+      organizationId: org,
+      email,
+      rawKey: `raw/${org}/${sha}.eml`,
+      rawSize: raw.byteLength,
+      receivedAt: new Date(),
+    });
+    expect(kept).toMatchObject({ status: 'received', duplicate: false });
+    const [row] = await admin<{ file_name: string; body_text: string }[]>`
+      select a.file_name, e.body_text
+        from app.email_attachments a join app.emails e on e.id = a.email_id
+       where e.organization_id = ${org} and e.message_id = ${email.messageId}`;
+    expect(row).toEqual({ file_name: 'a'.repeat(254), body_text: '250	100' });
+    await production.end();
+  });
 });

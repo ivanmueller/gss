@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   cleanAddress,
+  cut,
   dmarcResult,
   envelopeOnDomain,
   headerTokens,
   htmlToText,
   inboundConfig,
   isAutomatic,
+  wellFormed,
   MAX_BODY_CHARS,
   readInbound,
   sha256Hex,
@@ -276,5 +278,61 @@ describe('readInbound', () => {
   it('keeps the sender from the envelope when the From header is unusable', async () => {
     const email = await read(['From: not an address', 'Message-ID: <f@x>', '', 'Body']);
     expect(email.fromAddress).toBe('buyer@farm.example');
+  });
+});
+
+describe('Codex final review, round 3', () => {
+  it('turns hostile HTML into text in time that grows only with its length (R3-01)', () => {
+    for (const piece of ['<', '<a', '<!--', '<script', '&#1', '</td']) {
+      const started = performance.now();
+      htmlToText(piece.repeat(200_000));
+      expect(performance.now() - started).toBeLessThan(1500);
+    }
+  });
+
+  it('keeps table cells apart in an HTML-only email (R3-03)', async () => {
+    expect(
+      htmlToText(
+        '<table><tr><th>Price</th><th>Tonnes</th></tr><tr><td>250</td><td>100</td></tr></table>',
+      ),
+    ).toBe('Price\tTonnes\n250\t100');
+    const email = await read([
+      'From: pat@farm.example',
+      'To: info@example.com',
+      'Message-ID: <table@x>',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<table><tr><td>250</td><td>100</td></tr></table>',
+    ]);
+    expect(email.body).toBe('250\t100');
+  });
+
+  it('never cuts a character in half, and replaces half characters (R3-02)', async () => {
+    expect(cut('ab\u{1F33E}c', 3)).toBe('ab');
+    expect(cut('ab\u{1F33E}c', 4)).toBe('ab\u{1F33E}');
+    expect(wellFormed('a\uD83Db')).toBe('a�b');
+    const name = `${'a'.repeat(254)}\u{1F33E}.pdf`;
+    const email = await read([
+      'From: pat@farm.example',
+      'To: info@example.com',
+      'Message-ID: <emoji@x>',
+      'Content-Type: multipart/mixed; boundary="b"',
+      '',
+      '--b',
+      'Content-Type: text/plain',
+      '',
+      'See file.',
+      '--b',
+      'Content-Type: application/pdf',
+      `Content-Disposition: attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      'JVBERi0xLjQK',
+      '--b--',
+    ]);
+    const fileName = email.attachments[0]?.fileName ?? '';
+    expect(fileName).toBe('a'.repeat(254));
+    // JSON writes a half character as a \ud800–\udfff escape.
+    expect(JSON.stringify(email)).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/i);
   });
 });

@@ -5,9 +5,11 @@ import {
   inboundConfig,
   MAX_RAW_BYTES,
   readInbound,
+  unreadableEmail,
   sha256Hex,
   type InboundBindings,
   type InboundConfig,
+  type InboundEmail,
 } from './inbound-email';
 
 // The Worker's email handler and its replay job (F-114 step 4a; register
@@ -101,14 +103,33 @@ async function keep(
   envelope: { from: string; to: string },
   receivedAt: Date,
 ): Promise<string> {
-  const email = await readInbound(raw, sha, envelope);
-  const result = await db.receiveEmail({
-    organizationId: config.organizationId,
-    email,
-    rawKey: rawKey(config, sha),
-    rawSize: raw.byteLength,
-    receivedAt,
-  });
+  const read = await readInbound(raw, sha, envelope);
+  const store = (email: InboundEmail) =>
+    db.receiveEmail({
+      organizationId: config.organizationId,
+      email,
+      rawKey: rawKey(config, sha),
+      rawSize: raw.byteLength,
+      receivedAt,
+    });
+  // When the database refuses the message as read (a value it cannot take), it is kept as
+  // unreadable instead, under its own Message-ID, then under one from its contents: the raw copy
+  // holds everything, and the email is never left waiting for good (Codex's final review, R3-02).
+  let email = read;
+  let result;
+  try {
+    result = await store(email);
+  } catch (error) {
+    if (!databaseAnswered(error)) throw error;
+    email = unreadableEmail(sha, envelope, read.messageId);
+    try {
+      result = await store(email);
+    } catch (again) {
+      if (!databaseAnswered(again)) throw again;
+      email = unreadableEmail(sha, envelope);
+      result = await store(email);
+    }
+  }
   if (result.status === 'unknown_organization') throw new Error('Unknown organization');
   return result.status === 'received'
     ? `${result.duplicate ? 'duplicate' : 'kept'} matched=${result.counterpartyId === null ? 'no' : 'yes'} dmarc=${email.dmarc} automatic=${String(email.automatic)} attachments=${String(email.attachments.length)}`

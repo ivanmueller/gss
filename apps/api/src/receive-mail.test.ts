@@ -195,7 +195,7 @@ describe('receiveMessage', () => {
   });
 
   it('keeps the marker when the database fails after storing', async () => {
-    db.receiveEmail.mockRejectedValueOnce(answeredError);
+    db.receiveEmail.mockRejectedValue(answeredError);
     const m = message();
     expect(await receiveMessage(m, env, open)).toBe('spooled database_error');
     expect(m.setReject).not.toHaveBeenCalled();
@@ -286,7 +286,7 @@ describe('replayPendingMail', () => {
     await spool(30);
     // The oldest message always fails; the others are kept.
     db.receiveEmail.mockImplementation((received) =>
-      received.email.messageId === '<reply-0@farm.example>'
+      received.receivedAt.getTime() === Date.UTC(2026, 10, 11, 0, 0, 0)
         ? Promise.reject(answeredError)
         : Promise.resolve({ status: 'received', id: 'x', counterpartyId: null, duplicate: false }),
     );
@@ -299,5 +299,44 @@ describe('replayPendingMail', () => {
   it('does nothing when nothing waits', async () => {
     await replayPendingMail(env, open);
     expect(db.receiveEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('when the database refuses the message as read (R3-02)', () => {
+  it('keeps it as unreadable under its own Message-ID instead', async () => {
+    db.receiveEmail.mockRejectedValueOnce(answeredError).mockResolvedValueOnce({
+      status: 'received',
+      id: 'x',
+      counterpartyId: null,
+      duplicate: false,
+    });
+    const m = message();
+    const outcome = await receiveMessage(m, env, open);
+    expect(outcome).toMatch(/^kept /);
+    expect(db.receiveEmail).toHaveBeenCalledTimes(2);
+    const second = db.receiveEmail.mock.calls[1]?.[0];
+    expect(second?.email).toMatchObject({
+      parseFailed: true,
+      subject: '(could not be read)',
+      messageId: '<reply-1@farm.example>',
+      attachments: [],
+    });
+    expect(bucket.keys('pending/')).toEqual([]);
+  });
+
+  it('then under a Message-ID from its contents', async () => {
+    db.receiveEmail
+      .mockRejectedValueOnce(answeredError)
+      .mockRejectedValueOnce(answeredError)
+      .mockResolvedValueOnce({
+        status: 'received',
+        id: 'x',
+        counterpartyId: null,
+        duplicate: false,
+      });
+    await receiveMessage(message(), env, open);
+    expect(db.receiveEmail.mock.calls[2]?.[0].email.messageId).toMatch(
+      /^<[0-9a-f]{64}@missing\.invalid>$/,
+    );
   });
 });

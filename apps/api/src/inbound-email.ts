@@ -49,7 +49,9 @@ export function inboundConfig(env: InboundBindings): InboundConfig | null {
 
 /** An address as kept, or null. */
 export function cleanAddress(value: string | null | undefined): string | null {
-  const address = (value ?? '').trim().toLowerCase();
+  const address = wellFormed(value ?? '')
+    .trim()
+    .toLowerCase();
   return address.length <= 254 && ADDRESS.test(address) ? address : null;
 }
 
@@ -60,13 +62,33 @@ export function envelopeOnDomain(to: string, config: InboundConfig): string | nu
   return address.slice(address.lastIndexOf('@') + 1) === config.domain ? address : null;
 }
 
+// A UTF-16 half of a character with no other half (a malformed name, or a cut in the middle of an
+// emoji): JSON keeps it as \ud83d, which PostgreSQL's jsonb refuses (Codex's final review, R3-02).
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** Text the database accepts: lone surrogate halves replaced by U+FFFD. */
+export function wellFormed(value: string): string {
+  return value.replace(LONE_SURROGATE, '�');
+}
+
+/** At most `max` UTF-16 units, never ending in half a character. */
+export function cut(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const code = value.charCodeAt(max - 1);
+  return value.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
+
 /** One line of text: control characters (CR and LF among them) become spaces. */
 function oneLine(value: string | null | undefined, max: number): string {
-  return (value ?? '').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const line = wellFormed(value ?? '')
+    .replace(CONTROL, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cut(line, max).trim();
 }
 
 function headerToken(value: string | null | undefined): string | null {
-  const token = (value ?? '').trim();
+  const token = wellFormed(value ?? '').trim();
   return TOKEN.test(token) ? token : null;
 }
 
@@ -102,21 +124,85 @@ const ENTITIES: Record<string, string> = {
   nbsp: ' ',
 };
 
-/** Plain text from an HTML body, for mail sent without a text part. The HTML is never kept. */
+// Tags whose end starts a new line, and those whose end separates cells (Codex's final review,
+// R3-03: "<td>250</td><td>100</td>" must not read as 250100).
+const LINE_TAGS = new Set([
+  'p',
+  'div',
+  'tr',
+  'li',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'blockquote',
+  'table',
+  'ul',
+  'ol',
+]);
+const CELL_TAGS = new Set(['td', 'th']);
+const SKIPPED_TAGS = new Set(['script', 'style', 'head', 'title']);
+const TAG_NAME = /^<\/?\s*([a-z][a-z0-9]*)/i;
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{2,8});/gi, (whole, name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.startsWith('#x')) return safeCodePoint(Number.parseInt(lower.slice(2), 16), whole);
+    if (lower.startsWith('#')) return safeCodePoint(Number.parseInt(lower.slice(1), 10), whole);
+    return ENTITIES[lower] ?? whole;
+  });
+}
+
+/**
+ * Plain text from an HTML body, for mail sent without a text part. The HTML is never kept. One
+ * pass from left to right, each search starting where the last one ended, so its time grows only
+ * with the length of the HTML, whatever it contains (Codex's final review, R3-01).
+ */
 export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style|head|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<br\b[^>]*>/gi, '\n')
-    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote|table)\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, name: string) => {
-      const lower = name.toLowerCase();
-      if (lower.startsWith('#x')) return safeCodePoint(Number.parseInt(lower.slice(2), 16), whole);
-      if (lower.startsWith('#')) return safeCodePoint(Number.parseInt(lower.slice(1), 10), whole);
-      return ENTITIES[lower] ?? whole;
-    })
-    .replace(/[ \t]+\n/g, '\n')
+  const lower = html.toLowerCase();
+  const parts: string[] = [];
+  let at = 0;
+  while (at < html.length) {
+    const open = html.indexOf('<', at);
+    if (open === -1) {
+      parts.push(decodeEntities(html.slice(at)));
+      break;
+    }
+    parts.push(decodeEntities(html.slice(at, open)));
+    if (html.startsWith('<!--', open)) {
+      const end = html.indexOf('-->', open + 4);
+      if (end === -1) break;
+      at = end + 3;
+      continue;
+    }
+    const close = html.indexOf('>', open + 1);
+    // No > anywhere after it: the rest is text, not a tag.
+    if (close === -1) {
+      parts.push(decodeEntities(html.slice(open)));
+      break;
+    }
+    const name = TAG_NAME.exec(html.slice(open, Math.min(close, open + 40)))?.[1]?.toLowerCase();
+    const ending = html.charAt(open + 1) === '/';
+    at = close + 1;
+    if (name === undefined) continue;
+    if (!ending && SKIPPED_TAGS.has(name)) {
+      const end = lower.indexOf(`</${name}`, at);
+      if (end === -1) break;
+      const endClose = html.indexOf('>', end);
+      if (endClose === -1) break;
+      at = endClose + 1;
+      continue;
+    }
+    if (name === 'br' || (ending && LINE_TAGS.has(name))) parts.push('\n');
+    else if (ending && CELL_TAGS.has(name)) parts.push('\t');
+  }
+  return parts
+    .join('')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -130,9 +216,9 @@ function safeCodePoint(code: number, fallback: string): string {
 /** The body as kept: text (or text from the HTML), NUL removed, cut to the limit. */
 function bodyText(email: Email): { text: string; truncated: boolean } {
   const source = email.text ?? (email.html === undefined ? '' : htmlToText(email.html));
-  const text = source.replaceAll(String.fromCharCode(0), '').trimEnd();
+  const text = wellFormed(source.replaceAll(String.fromCharCode(0), '')).trimEnd();
   return text.length > MAX_BODY_CHARS
-    ? { text: text.slice(0, MAX_BODY_CHARS), truncated: true }
+    ? { text: cut(text, MAX_BODY_CHARS), truncated: true }
     : { text, truncated: false };
 }
 
@@ -224,6 +310,37 @@ function attachmentBytes(content: ArrayBuffer | Uint8Array | string): Uint8Array
 }
 
 /**
+ * The message kept as unreadable: its sender from the envelope, its time, and its raw copy, which
+ * is stored whatever happens. Also what the Worker keeps when the database refuses the message as
+ * read (so it never waits forever: Codex's final review, R3-02).
+ */
+export function unreadableEmail(
+  rawSha256: string,
+  envelope: { from: string; to: string },
+  messageId = `<${rawSha256}@missing.invalid>`,
+): InboundEmail {
+  return {
+    envelopeTo: cleanAddress(envelope.to) ?? 'unknown@invalid',
+    fromAddress: cleanAddress(envelope.from) ?? 'unknown@invalid',
+    fromName: null,
+    to: [],
+    cc: [],
+    replyTo: null,
+    subject: '(could not be read)',
+    body: '',
+    bodyTruncated: false,
+    messageId,
+    inReplyTo: null,
+    references: [],
+    dmarc: 'missing',
+    automatic: isAutomatic([], envelope.from),
+    parseFailed: true,
+    attachments: [],
+    attachmentsNotListed: 0,
+  };
+}
+
+/**
  * One received message read for keeping. `rawSha256` is the hash of the raw bytes (the stored
  * object's key and the Message-ID used when the message has none). A message that cannot be
  * parsed is still kept, marked, with its sender from the envelope (nothing is lost: the raw
@@ -245,25 +362,7 @@ export async function readInbound(
       maxPartCount: 1000,
     });
   } catch {
-    return {
-      envelopeTo,
-      fromAddress: fallbackFrom,
-      fromName: null,
-      to: [],
-      cc: [],
-      replyTo: null,
-      subject: '(could not be read)',
-      body: '',
-      bodyTruncated: false,
-      messageId: syntheticId,
-      inReplyTo: null,
-      references: [],
-      dmarc: 'missing',
-      automatic: isAutomatic([], envelope.from),
-      parseFailed: true,
-      attachments: [],
-      attachmentsNotListed: 0,
-    };
+    return unreadableEmail(rawSha256, envelope);
   }
 
   const from = mailboxes(email.from)[0];
