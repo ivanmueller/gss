@@ -277,9 +277,7 @@ describe('the email form', () => {
     await within(dialog).findByText('The server could not be reached.');
 
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    expect(confirm).toHaveBeenLastCalledWith(
-      expect.stringContaining('may already have been sent'),
-    );
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('may already have been sent'));
     expect(screen.queryByRole('dialog')).toBeNull();
 
     // Opened again: the same email, locked, under the same key.
