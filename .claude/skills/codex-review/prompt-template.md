@@ -8,11 +8,27 @@ Do not use any connector or website: review only this snapshot.
 
 {{SCOPE}}
 
-Project rules: read AGENTS.md first, then only the docs it points to for the areas touched. Weigh especially:
-organization isolation and RLS (every new table, policy and grant), migrations never edited after reaching
-main, decimal money (never JS float), missing FX/freight/unit blocking rather than zero, quote and scenario
-history never overwritten, Telnyx and Anthropic called from the Worker only with their checks, secrets never in
-the browser or Git, Alberta time, no real business data in the repository.
+Reading budget (Codex usage is limited; read what the review needs, nothing more):
+- Do not open AGENTS.md, CLAUDE.md, docs/HANDOFF.md, docs/HANDOFF_HISTORY.md, docs/FEATURES.md,
+  docs/FEATURES_DONE.md, MASTER_PROJECT_SPECIFICATION.md, README.md or docs/reviews/: the project rules
+  that matter are below, and the known findings are listed further down.
+- Other documents (docs/API.md, docs/DATA_MODEL.md, docs/DECISIONS.md, ...) only to check a specific
+  claim, with `rg -n` for the lines needed, never whole.
+- Source files: the diff first; outside it, search with `rg -n` and read only the line ranges you need. Do not
+  read a long file whole (such as apps/api/src/db.ts), and do not read the same file twice.
+- Do not run the project's test suites or install anything (the authors and CI run them); a short command
+  that demonstrates one specific suspected problem is fine.
+
+Project rules. Weigh especially: organization isolation and RLS (every new table in the private `app` schema
+enables row level security, has policies for `app_api` on organization membership, is revoked from public,
+anon, authenticated and service_role, and ships with pgTAP tests including cross-organization denials; new
+functions revoked the same way), migrations only added, never edited after reaching main, decimal money (never
+JS float), missing FX/freight/unit blocking rather than zero, quote and scenario history, revisions, contact
+history and emails never overwritten or deleted (corrections are new versions, removals are marked), Telnyx
+and Anthropic called from the Worker only with their checks and nothing Claude drafts saved until a person
+verifies it, no AI committing a trade or sending anything by itself, secrets never in the browser or Git,
+times shown and typed in Alberta time and stored in UTC, the platform serving GSS staff only, no real
+business data in the repository.
 
 Severity: P1 = must fix before merge (data loss, security hole, wrong money, broken core flow); P2 = should fix
 (real bug in a realistic case, missing check, missing test for risky logic); P3 = minor. Report only real
