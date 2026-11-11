@@ -45,7 +45,9 @@ import {
   Wheat,
 } from 'lucide-react';
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type ClipboardEvent,
@@ -56,7 +58,13 @@ import {
 import { BackLink } from '../components/BackLink';
 import { CarrierLanes, isCrossBorder } from '../components/CarrierLanes';
 import { CallingProvider, PhoneNumber } from '../components/Calling';
-import { ContactEmail, EmailProvider, EmailsCard, useEmailComposer } from '../components/Emails';
+import {
+  ContactEmail,
+  EmailProvider,
+  EmailsCard,
+  useEmailComposer,
+  useEmailsSent,
+} from '../components/Emails';
 import {
   ContactHistoryCard,
   crmDraftPlace,
@@ -572,6 +580,16 @@ function CounterpartyView({
       quotes.reload();
     },
   });
+  // An email sent is logged in the contact history (F-114 step 3): it, and Last contact, are
+  // loaded again after each (Codex's review of F-114-3, R1-03).
+  const emailsSent = useEmailsSent();
+  const crmChanged = useRef(crm.changed);
+  useEffect(() => {
+    crmChanged.current = crm.changed;
+  });
+  useEffect(() => {
+    if (emailsSent > 0) crmChanged.current('');
+  }, [emailsSent]);
   // Two columns on a computer screen (Tailwind's `xl`); one, in order of use, below it.
   const wide = useMediaQuery('(min-width: 1280px)', true);
 

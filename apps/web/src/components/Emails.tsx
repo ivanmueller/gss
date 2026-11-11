@@ -34,6 +34,11 @@ interface Composer {
 const ComposerContext = createContext<Composer | null>(null);
 const ReloadContext = createContext(0);
 
+/** How many emails were sent from this page: the contact history is loaded again on each. */
+export function useEmailsSent(): number {
+  return useContext(ReloadContext);
+}
+
 /** The form's opener on a company's page; null where email cannot be written. */
 export function useEmailComposer(): Composer | null {
   return useContext(ComposerContext);
@@ -113,6 +118,17 @@ export function ContactEmail({ contact }: { contact: Contact }) {
   );
 }
 
+interface SendPayload {
+  counterpartyId: string;
+  contactId: string | null;
+  from: 'own' | 'shared';
+  to: string[];
+  cc: string[];
+  subject: string;
+  message: string;
+  sendKey: string;
+}
+
 function splitAddresses(text: string): string[] {
   return text
     .split(/[\s,;]+/)
@@ -150,6 +166,9 @@ function EmailDialog({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [sent, setSent] = useState(false);
+  // The email submitted and not yet known to be sent or refused: kept as it was, not editable.
+  const [pending, setPending] = useState<SendPayload | null>(null);
+  const locked = sent || busy || pending !== null;
 
   useEffect(() => {
     let cancelled = false;
@@ -209,9 +228,9 @@ function EmailDialog({
   );
 
   function send() {
-    setBusy(true);
-    setResult(null);
-    sendJson<{ email: EmailView }>(`/emails?organization_id=${organization.id}`, token, 'POST', {
+    // What a lost answer may already have sent is sent again exactly, under the same key, until
+    // its outcome is known (Codex's review of F-114-3, R1-02).
+    const payload: SendPayload = pending ?? {
       counterpartyId,
       contactId: matchedContact?.id ?? null,
       from: chosenFrom,
@@ -220,7 +239,16 @@ function EmailDialog({
       subject: subjectLine.trim(),
       message,
       sendKey,
-    })
+    };
+    setPending(payload);
+    setBusy(true);
+    setResult(null);
+    sendJson<{ email: EmailView }>(
+      `/emails?organization_id=${organization.id}`,
+      token,
+      'POST',
+      payload,
+    )
       .then(() => {
         setSent(true);
         setResult({ ok: true, text: 'Sent. It is kept in the company’s Emails.' });
@@ -228,15 +256,21 @@ function EmailDialog({
       })
       .catch((reason: unknown) => {
         const code = reason instanceof ApiError ? reason.code : '';
+        const status = reason instanceof ApiError ? reason.status : 0;
         if (code === 'EMAIL_REFUSED') {
           // Nothing went: correct it and send again as a new attempt (the refused one is kept).
           setSendKey(crypto.randomUUID());
+          setPending(null);
           onSent();
         } else if (code === 'EMAIL_UNCONFIRMED' || code === 'EMAIL_IN_PROGRESS') {
           // It may have gone: never offered again from this form.
           setSent(true);
           onSent();
+        } else if (status >= 400 && status < 500) {
+          // Refused before anything was kept or sent: correct it and send.
+          setPending(null);
         }
+        // Otherwise (no answer, or the server failed) the same email is offered again as is.
         setResult({
           ok: false,
           text: reason instanceof Error ? reason.message : 'The email could not be sent.',
@@ -290,7 +324,7 @@ function EmailDialog({
                 id={`${id}-from`}
                 className="h-9 rounded-control border border-input bg-background px-2"
                 value={chosenFrom}
-                disabled={sent}
+                disabled={locked}
                 onChange={(event) => {
                   setFrom(event.target.value === 'own' ? 'own' : 'shared');
                 }}
@@ -315,14 +349,14 @@ function EmailDialog({
               <Input
                 id={`${id}-to`}
                 value={to}
-                disabled={sent}
+                disabled={locked}
                 aria-invalid={toList.some((a) => normalizeEmailAddress(a) === null)}
                 onChange={(event) => {
                   setTo(event.target.value);
                 }}
               />
             </label>
-            {withOthers.length > 0 && !sent && (
+            {withOthers.length > 0 && !locked && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
                 <span className="text-muted-foreground">Add:</span>
                 {withOthers.map((other) => (
@@ -346,7 +380,7 @@ function EmailDialog({
               <Input
                 id={`${id}-cc`}
                 value={cc}
-                disabled={sent}
+                disabled={locked}
                 aria-invalid={ccList.some((a) => normalizeEmailAddress(a) === null)}
                 onChange={(event) => {
                   setCc(event.target.value);
@@ -369,7 +403,7 @@ function EmailDialog({
                 id={`${id}-subject`}
                 value={subject}
                 maxLength={EMAIL_SUBJECT_MAX}
-                disabled={sent}
+                disabled={locked}
                 onChange={(event) => {
                   setSubject(event.target.value);
                 }}
@@ -382,7 +416,7 @@ function EmailDialog({
                 rows={10}
                 maxLength={EMAIL_MESSAGE_MAX}
                 value={message}
-                disabled={sent}
+                disabled={locked}
                 onChange={(event) => {
                   setMessage(event.target.value);
                 }}
@@ -408,7 +442,7 @@ function EmailDialog({
               {!sent && (
                 <Button type="submit" disabled={!canSend}>
                   <Send aria-hidden="true" />
-                  {busy ? 'Sending…' : 'Send'}
+                  {busy ? 'Sending…' : pending === null ? 'Send' : 'Send again'}
                 </Button>
               )}
             </div>
@@ -469,7 +503,7 @@ export function EmailsCard({
     if (last === undefined) return;
     setLoadingOlder(true);
     apiJson<{ emails: EmailView[] }>(
-      `${path}&before_at=${encodeURIComponent(last.occurredAt)}&before_id=${last.id}`,
+      `${path}&before_at=${encodeURIComponent(last.cursorAt)}&before_id=${last.id}`,
       token,
     )
       .then((answer) => {

@@ -197,6 +197,8 @@ export interface EmailView {
   failure: string | null;
   /** UTC instant. */
   occurredAt: string;
+  /** The same instant to the microsecond, for asking for the page after it (before_at). */
+  cursorAt: string;
   /** Only in the single-email answer. */
   body?: string;
   bodyTruncated?: boolean;

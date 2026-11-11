@@ -55,9 +55,15 @@ function cursorOf(c: ApiContext): EmailCursor | null | 'invalid' {
   const id = c.req.query('before_id');
   if (at === undefined && id === undefined) return null;
   if (at === undefined || id === undefined || !isUuid(id)) return 'invalid';
-  const time = new Date(at);
-  if (!/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(at) || Number.isNaN(time.getTime())) return 'invalid';
-  return { occurredAt: time.toISOString(), id };
+  // Kept as given, to the microsecond: Postgres keeps microseconds, and a cursor rounded to the
+  // millisecond skips emails at a page's edge (Codex's review of F-114-3, R1-01).
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/.test(at) ||
+    Number.isNaN(new Date(at).getTime())
+  ) {
+    return 'invalid';
+  }
+  return { occurredAt: at, id };
 }
 
 async function settingsView(

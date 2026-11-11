@@ -60,6 +60,7 @@ function emailRow(overrides: Partial<EmailView> = {}): EmailView {
     contactName: 'Pat Buyer',
     failure: null,
     occurredAt: '2026-11-10T21:00:00.000Z',
+    cursorAt: '2026-11-10T21:00:00.000000Z',
     ...overrides,
   };
 }
@@ -405,12 +406,12 @@ describe('GET /emails', () => {
     expect(first.status).toBe(200);
     expect(db.listEmails).toHaveBeenLastCalledWith(expect.anything(), ORG, COMPANY, null);
     await app.request(
-      `/api/v1/emails?counterparty_id=${COMPANY}&before_at=2026-11-10T21:00:00.000Z&before_id=${EMAIL_ID}`,
+      `/api/v1/emails?counterparty_id=${COMPANY}&before_at=2026-11-10T21:00:00.123456Z&before_id=${EMAIL_ID}`,
       { headers: AUTH },
       EMAIL_ENV,
     );
     expect(db.listEmails).toHaveBeenLastCalledWith(expect.anything(), ORG, COMPANY, {
-      occurredAt: '2026-11-10T21:00:00.000Z',
+      occurredAt: '2026-11-10T21:00:00.123456Z',
       id: EMAIL_ID,
     });
   });

@@ -59,6 +59,7 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     contactName: 'Pat Buyer',
     failure: null,
     occurredAt: '2026-11-10T21:00:00.000Z',
+    cursorAt: '2026-11-10T21:00:00.123456Z',
     ...overrides,
   };
 }
@@ -205,13 +206,16 @@ describe('the email form', () => {
     const dialog = await write(user);
     await user.click(within(dialog).getByRole('button', { name: 'Send' }));
     await within(dialog).findByText('The database is unavailable.');
-    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    // It may have gone: what was submitted cannot be changed before it is sent again (R1-02).
+    for (const label of ['To', 'Cc', 'Subject', 'Message', 'From']) {
+      expect(within(dialog).getByLabelText(label)).toBeDisabled();
+    }
+    await user.click(within(dialog).getByRole('button', { name: 'Send again' }));
     await within(dialog).findByText('Cloudflare did not confirm the email.');
-    const keys = calls
-      .filter((call) => call.method === 'POST')
-      .map((call) => (call.body as { sendKey: string }).sendKey);
-    expect(keys[0]).toBe(keys[1]);
-    expect(within(dialog).queryByRole('button', { name: 'Send' })).toBeNull();
+    const posts = calls.filter((call) => call.method === 'POST').map((call) => call.body);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(within(dialog).queryByRole('button', { name: /^Send/ })).toBeNull();
   });
 
   it('says so when email is not set up, and offers no Email on an archived company', async () => {
@@ -245,7 +249,7 @@ describe('the Emails card', () => {
       }),
     );
     const last = page[199];
-    const older = `${LIST_PATH}&before_at=${encodeURIComponent(last?.occurredAt ?? '')}&before_id=${last?.id ?? ''}`;
+    const older = `${LIST_PATH}&before_at=${encodeURIComponent(last?.cursorAt ?? '')}&before_id=${last?.id ?? ''}`;
     mockApi({
       [LIST_PATH]: () => Response.json({ emails: page }),
       [older]: () =>

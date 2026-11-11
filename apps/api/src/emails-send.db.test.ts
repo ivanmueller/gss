@@ -158,20 +158,65 @@ describe('sending', () => {
     expect(retry.status).toBe('started');
   });
 
+  it('logs a sent email in the contact history once, and a refused one not at all (R1-03)', async () => {
+    const entries = async () => {
+      const rows = await admin<
+        { channel: string; contact_name: string; notes: string; recorded_by: string }[]
+      >`
+        select r.channel::text as channel, r.contact_name, r.notes, r.recorded_by
+          from app.contact_log_entries e join app.contact_log_revisions r on r.entry_id = e.id
+         where e.counterparty_id = ${company} and r.notes like 'Email sent: Synthetic subject%'`;
+      return rows;
+    };
+    const before = (await entries()).length;
+    const refused = await start(id());
+    if (refused.status !== 'started') throw new Error('not started');
+    await db.finishOutgoingEmail(as(people.tom), refused.id, {
+      ok: false,
+      failure: 'E_X: refused',
+    });
+    expect(await entries()).toHaveLength(before);
+
+    const sent = await start(id());
+    if (sent.status !== 'started') throw new Error('not started');
+    expect(
+      await db.finishOutgoingEmail(as(people.tom), sent.id, { ok: true, providerId: 'cf-1' }),
+    ).toBe('done');
+    expect(
+      await db.finishOutgoingEmail(as(people.tom), sent.id, { ok: true, providerId: 'cf-1' }),
+    ).toBe('already_finished');
+    const after = await entries();
+    expect(after).toHaveLength(before + 1);
+    expect(after[after.length - 1]).toMatchObject({
+      channel: 'email',
+      contact_name: 'pat@buyer.example.test',
+      notes: 'Email sent: Synthetic subject',
+      recorded_by: people.tom,
+    });
+    // The list reads the addresses back as a list.
+    expect((await db.getEmail(as(people.tom), org, sent.id))?.to).toEqual([
+      'pat@buyer.example.test',
+    ]);
+  });
+
   it('pages through every email of a company, including equal times (F-114-3-D1-03)', async () => {
     const pageCompany = id();
     await admin`insert into app.counterparties
         (id, organization_id, legal_name, types, primary_country, source, created_by)
       values (${pageCompany}, ${org}, ${`Synthetic Paged ${pageCompany}`}, '{buyer}', 'CA', 'manual', ${people.adam})`;
     const count = EMAIL_LIST_LIMIT + 3;
-    // Inserted by the table owner with one time for all, so the order rests on the id alone.
+    // One statement: the trigger gives every email the same now(), to the microsecond, so the
+    // order rests on the id alone and a cursor rounded to the millisecond would skip the rest
+    // (Codex's review of F-114-3, R1-01).
     await admin`
       insert into app.emails (organization_id, direction, status, counterparty_id, sent_by, sent_by_name,
-                              from_address, to_addresses, subject, body_text, message_id, occurred_at)
+                              from_address, to_addresses, subject, body_text, message_id)
       select ${org}, 'outgoing', 'sending', ${pageCompany}, ${people.tom}, 'tom', 'tom@gss.example.test',
-             '{pat@buyer.example.test}', 'Synthetic', 'Synthetic body.', 'gss-page-' || gen_random_uuid(),
-             '2026-11-10T21:00:00Z'
+             '{pat@buyer.example.test}', 'Synthetic', 'Synthetic body.', 'gss-page-' || gen_random_uuid()
         from generate_series(1, ${count})`;
+    const [shared] = await admin<{ n: number }[]>`
+      select count(distinct occurred_at)::int as n from app.emails where counterparty_id = ${pageCompany}`;
+    expect(shared?.n).toBe(1);
     const seen = new Set<string>();
     let before: { occurredAt: string; id: string } | null = null;
     for (let page = 0; page < 5; page += 1) {
@@ -180,7 +225,7 @@ describe('sending', () => {
       for (const email of emails) seen.add(email.id);
       const last = emails[emails.length - 1];
       if (last === undefined) break;
-      before = { occurredAt: last.occurredAt, id: last.id };
+      before = { occurredAt: last.cursorAt, id: last.id };
     }
     expect(seen.size).toBe(count);
   });

@@ -138,6 +138,7 @@ interface EmailRow {
   contact_name: string | null;
   failure: string | null;
   occurred_at: Date;
+  cursor_at: string;
   body_text?: string;
   body_truncated?: boolean;
 }
@@ -158,6 +159,7 @@ function emailView(row: EmailRow): EmailView {
     contactName: row.contact_name,
     failure: row.failure,
     occurredAt: row.occurred_at.toISOString(),
+    cursorAt: row.cursor_at,
     ...(row.body_text === undefined
       ? {}
       : { body: row.body_text, bodyTruncated: row.body_truncated ?? false }),
@@ -185,9 +187,11 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
 export function emailQueries(asUser: AsUser): EmailsDatabase {
   // A sending email unfinished after ten minutes is shown as not confirmed (EMAIL_UNCONFIRMED_AFTER_MS).
   const columns = (tx: postgres.TransactionSql) => tx`
-    e.id, e.direction, e.from_address, e.from_name, e.to_addresses::text[] as to_addresses,
-    e.cc_addresses::text[] as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
+    e.id, e.direction, e.from_address, e.from_name, to_jsonb(e.to_addresses::text[]) as to_addresses,
+    to_jsonb(e.cc_addresses::text[]) as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
     e.occurred_at,
+    -- The exact time, to the microsecond, for the page cursor (Codex's review of F-114-3, R1-01).
+    to_char(e.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as cursor_at,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
@@ -279,7 +283,13 @@ export function emailQueries(asUser: AsUser): EmailsDatabase {
           const [row] = await tx<{ result: { status?: unknown; id?: unknown } }[]>`
             select app.start_outgoing_email(
               ${email.organizationId}, ${email.counterpartyId}, ${email.contactId}, ${email.fromLocalPart},
-              ${email.domain}, ${email.to}::text[], ${email.cc}::text[], ${email.subject}, ${email.body},
+              ${email.domain},
+              -- Lists go as JSON: without fetch_types, postgres.js sends an array as text.
+              array(select t.x from jsonb_array_elements_text(${JSON.stringify(email.to)}::jsonb)
+                      with ordinality t(x, n) order by t.n),
+              array(select t.x from jsonb_array_elements_text(${JSON.stringify(email.cc)}::jsonb)
+                      with ordinality t(x, n) order by t.n),
+              ${email.subject}, ${email.body},
               ${email.messageId}) as result`;
           const status = row?.result.status;
           if (status === 'started' && typeof row?.result.id === 'string') {
