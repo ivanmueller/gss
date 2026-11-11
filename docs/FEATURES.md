@@ -32,7 +32,7 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 
 #### 1. F-114 — Email through the platform, written by hand and drafted by Claude
 
-**Status:** Planned (all questions answered 2026-11-10; step 1 next). **Asked:** 2026-11-06 (as an idea), direction given 2026-11-09: email sent by hand and drafted by Claude (as Claude drafts from call transcripts today); no Microsoft 365 for the business yet; the business has its own domain; Cloudflare on the Workers paid plan.
+**Status:** In progress (step 1, branch `claude/f114-step1-decisions`; all questions answered 2026-11-10). **Asked:** 2026-11-06 (as an idea), direction given 2026-11-09: email sent by hand and drafted by Claude (as Claude drafts from call transcripts today); no Microsoft 365 for the business yet; the business has its own domain; Cloudflare on the Workers paid plan.
 
 **Approach (proposed by an agent 2026-11-09, to be recorded in `docs/DECISIONS.md` once the owner answers):**
 - **Sending:** Cloudflare Email Service from the existing API Worker (its `send_email` binding), from a GSS address on the owner's domain. Not Cloudflare's Agents SDK or "email agents": no runtime agent framework (`AGENTS.md` rule 9), and nothing answers an email by itself.
