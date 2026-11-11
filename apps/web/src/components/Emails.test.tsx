@@ -249,6 +249,52 @@ describe('the email form', () => {
     expect(posts[2]).toEqual(posts[0]);
   });
 
+  it('cannot be closed while sending, and keeps an uncertain email across closing (R4-01)', async () => {
+    let answer = 0;
+    let release: (response: Response) => void = () => undefined;
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [`POST /emails?organization_id=${ORG.id}`]: () => {
+        answer += 1;
+        if (answer === 1) {
+          // Held until the test lets it go, then lost.
+          return new Promise<Response>((resolve) => {
+            release = resolve;
+          }).then(() => Promise.reject(new TypeError('network')));
+        }
+        return Response.json({ email: email() }, { status: 200 });
+      },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    show();
+    const user = userEvent.setup();
+    const dialog = await write(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog', { name: 'New email' })).toBeInTheDocument();
+    release(new Response());
+    await within(dialog).findByText('The server could not be reached.');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(confirm).toHaveBeenLastCalledWith(
+      expect.stringContaining('may already have been sent'),
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Opened again: the same email, locked, under the same key.
+    await user.click(screen.getByRole('button', { name: 'Email Pat Buyer' }));
+    const again = await screen.findByRole('dialog', { name: 'New email' });
+    await within(again).findByLabelText('Message');
+    expect(within(again).getByLabelText('Message')).toHaveValue('Hello Pat');
+    expect(within(again).getByLabelText('Message')).toBeDisabled();
+    await user.click(within(again).getByRole('button', { name: 'Send again' }));
+    expect(await within(again).findByRole('status')).toHaveTextContent('Sent.');
+    const posts = calls.filter((call) => call.method === 'POST').map((call) => call.body);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+  });
+
   it('unlocks a first attempt refused before anything was kept', async () => {
     mockApi({
       [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),

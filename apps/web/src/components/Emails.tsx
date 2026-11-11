@@ -60,6 +60,8 @@ export function EmailProvider({
 }) {
   const [open, setOpen] = useState<{ contact: Contact | null; key: number } | null>(null);
   const [sentCount, setSentCount] = useState(0);
+  // An email whose outcome is not known, kept while the form is closed (R4-01).
+  const [held, setHeld] = useState<SendPayload | null>(null);
   const composer: Composer | null = enabled
     ? {
         compose: (contact) => {
@@ -78,6 +80,8 @@ export function EmailProvider({
             counterpartyId={counterpartyId}
             contacts={contacts}
             contact={open.contact}
+            held={held}
+            onHold={setHeld}
             onClose={() => {
               setOpen(null);
             }}
@@ -141,6 +145,8 @@ function EmailDialog({
   counterpartyId,
   contacts,
   contact,
+  held,
+  onHold,
   onClose,
   onSent,
 }: {
@@ -148,6 +154,9 @@ function EmailDialog({
   counterpartyId: string;
   contacts: Contact[];
   contact: Contact | null;
+  /** An email submitted earlier whose outcome is not known: reopened as it was, locked. */
+  held: SendPayload | null;
+  onHold: (payload: SendPayload | null) => void;
   onClose: () => void;
   onSent: () => void;
 }) {
@@ -155,21 +164,28 @@ function EmailDialog({
   const { token, organization } = session;
   const [settings, setSettings] = useState<EmailSettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [from, setFrom] = useState<'own' | 'shared' | null>(null);
-  const [to, setTo] = useState(contact?.email ?? '');
-  const [cc, setCc] = useState('');
-  const [subject, setSubject] = useState('');
-  const [message, setMessage] = useState('');
+  const [from, setFrom] = useState<'own' | 'shared' | null>(held?.from ?? null);
+  const [to, setTo] = useState(held ? held.to.join(', ') : (contact?.email ?? ''));
+  const [cc, setCc] = useState(held ? held.cc.join(', ') : '');
+  const [subject, setSubject] = useState(held?.subject ?? '');
+  const [message, setMessage] = useState(held?.message ?? '');
   // One key per attempt: a second click or a retry after a lost answer never sends twice; a
   // new key only after Cloudflare refused it (Codex's design review of F-114-3, D1-02).
-  const [sendKey, setSendKey] = useState(() => crypto.randomUUID());
+  const [sendKey, setSendKey] = useState(() => held?.sendKey ?? crypto.randomUUID());
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(
+    held === null
+      ? null
+      : {
+          ok: false,
+          text: 'This email may already have been sent. Send it again (it is never sent twice), or check the company’s Emails.',
+        },
+  );
   const [sent, setSent] = useState(false);
   // The email submitted and not yet known to be sent or refused: kept as it was, not editable.
-  const [pending, setPending] = useState<SendPayload | null>(null);
+  const [pending, setPending] = useState<SendPayload | null>(held);
   // An attempt under the current key had no clear answer: it may have been sent.
-  const [uncertain, setUncertain] = useState(false);
+  const [uncertain, setUncertain] = useState(held !== null);
   const locked = sent || busy || pending !== null;
 
   useEffect(() => {
@@ -253,6 +269,7 @@ function EmailDialog({
     )
       .then(() => {
         setSent(true);
+        onHold(null);
         setResult({ ok: true, text: 'Sent. It is kept in the company’s Emails.' });
         onSent();
       })
@@ -264,10 +281,12 @@ function EmailDialog({
           setSendKey(crypto.randomUUID());
           setPending(null);
           setUncertain(false);
+          onHold(null);
           onSent();
         } else if (code === 'EMAIL_UNCONFIRMED' || code === 'EMAIL_IN_PROGRESS') {
           // It may have gone: never offered again from this form.
           setSent(true);
+          onHold(null);
           onSent();
         } else if (status >= 400 && status < 500 && !uncertain) {
           // A first attempt refused before anything was kept or sent: correct it and send.
@@ -277,6 +296,10 @@ function EmailDialog({
           // the key itself, the email stays as submitted, even if a retry is then refused for
           // another reason, such as an expired sign-in (Codex's review of F-114-3, R2-02).
           setUncertain(true);
+          // Kept by the page, so closing the form and opening it again finds it, locked, under
+          // the same key (Codex's final review of F-114-3, R4-01).
+          onHold(payload);
+          onSent();
         }
         // Otherwise the same email is offered again as is.
         setResult({
@@ -291,7 +314,23 @@ function EmailDialog({
 
   const written = message.trim() !== '' || subject.trim() !== '';
   function close() {
-    if (!sent && written && !window.confirm('Discard this email? It is not kept.')) return;
+    // While sending, closing could not stop it: the form stays (Codex's final review, R4-01).
+    if (busy) return;
+    if (!sent && pending !== null && uncertain) {
+      if (
+        !window.confirm(
+          'This email may already have been sent: closing does not stop it. It stays here to send again (never twice) or to check in the company’s Emails. Close?',
+        )
+      )
+        return;
+    } else if (
+      !sent &&
+      pending === null &&
+      written &&
+      !window.confirm('Discard this email? It is not kept.')
+    ) {
+      return;
+    }
     onClose();
   }
 
@@ -444,7 +483,7 @@ function EmailDialog({
               </p>
             )}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={close}>
+              <Button type="button" variant="outline" disabled={busy} onClick={close}>
                 {sent ? 'Close' : 'Cancel'}
               </Button>
               {!sent && (
