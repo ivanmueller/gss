@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  admissionIdentity,
   cleanAddress,
   cut,
   dmarcResult,
@@ -334,5 +335,51 @@ describe('Codex final review, round 3', () => {
     expect(fileName).toBe('a'.repeat(254));
     // JSON writes a half character as a \ud800–\udfff escape.
     expect(JSON.stringify(email)).not.toMatch(/\\ud[89a-f][0-9a-f]{2}/i);
+  });
+});
+
+describe('Codex final review, round 4', () => {
+  it('stops converting once the body limit is reached, however many tags follow (R4-01)', async () => {
+    const html = '<i>ab</i>'.repeat(2_700_000);
+    const text = htmlToText(html);
+    expect(text.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+    const email = await read([
+      'From: pat@farm.example',
+      'To: info@example.com',
+      'Message-ID: <big-html@x>',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<i>ab</i>'.repeat(300_000),
+    ]);
+    expect(email.body.length).toBe(MAX_BODY_CHARS);
+    expect(email.bodyTruncated).toBe(true);
+  });
+
+  it('keeps cells apart when the sender left out their closing tags (R4-02)', async () => {
+    expect(htmlToText('<table><tr><td>250<td>100</tr></table>')).toBe('250\t100');
+    expect(htmlToText('<table><tr><th>Price<th>Tonnes<tr><td>250<td>100</table>')).toBe(
+      'Price\tTonnes\n250\t100',
+    );
+    const email = await read([
+      'From: pat@farm.example',
+      'To: info@example.com',
+      'Message-ID: <open-cells@x>',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<table><tr><td>250<td>100</table>',
+    ]);
+    expect(email.body).toBe('250\t100');
+  });
+
+  it('reads the sender and Message-ID from the headers alone', () => {
+    const headers = new Headers({ From: 'Pat <Pat@Farm.Example>', 'Message-ID': ' <m-1@x> ' });
+    expect(admissionIdentity(headers, 'a'.repeat(64), 'bounce@x.example')).toEqual({
+      sender: 'pat@farm.example',
+      messageId: '<m-1@x>',
+    });
+    expect(admissionIdentity(new Headers(), 'a'.repeat(64), 'Bounce@X.example')).toEqual({
+      sender: 'bounce@x.example',
+      messageId: `<${'a'.repeat(64)}@missing.invalid>`,
+    });
   });
 });

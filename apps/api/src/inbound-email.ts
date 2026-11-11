@@ -1,4 +1,4 @@
-import PostalMime, { type Address, type Email, type Header } from 'postal-mime';
+import PostalMime, { addressParser, type Address, type Email, type Header } from 'postal-mime';
 
 // Email received by the Worker (F-114 step 4a; the owner's answers 13 to 15 of 2026-11-11 in
 // docs/FEATURES.md). Cloudflare Email Routing hands each message for the business's domain to the
@@ -124,8 +124,7 @@ const ENTITIES: Record<string, string> = {
   nbsp: ' ',
 };
 
-// Tags whose end starts a new line, and those whose end separates cells (Codex's final review,
-// R3-03: "<td>250</td><td>100</td>" must not read as 250100).
+// Tags that start a new line where they open or end (Codex's final review, R3-03).
 const LINE_TAGS = new Set([
   'p',
   'div',
@@ -155,22 +154,44 @@ function decodeEntities(text: string): string {
   });
 }
 
+/** Where the end tag `</name` starts at or after `from`, in any case, or -1. Linear. */
+function endTagAt(html: string, name: string, from: number): number {
+  let at = from;
+  for (;;) {
+    const found = html.indexOf('</', at);
+    if (found === -1) return -1;
+    if (html.slice(found + 2, found + 2 + name.length).toLowerCase() === name) return found;
+    at = found + 2;
+  }
+}
+
 /**
- * Plain text from an HTML body, for mail sent without a text part. The HTML is never kept. One
- * pass from left to right, each search starting where the last one ended, so its time grows only
- * with the length of the HTML, whatever it contains (Codex's final review, R3-01).
+ * Plain text from an HTML body, for mail sent without a text part. The HTML is never kept.
+ * - One pass from left to right, each search starting where the last one ended, so its time grows
+ *   only with the length of the HTML (Codex's final review, R3-01).
+ * - It stops once it holds more than `limit` characters and keeps no copy of the HTML, so its
+ *   memory stays small whatever the message holds (round 4, R4-01).
+ * - A cell after another of its row starts with a tab, a row on a new line, whether or not the
+ *   sender closed them (R3-03, R4-02: "<td>250<td>100" reads as 250, a tab, 100).
  */
-export function htmlToText(html: string): string {
-  const lower = html.toLowerCase();
-  const parts: string[] = [];
+export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
+  let out = '';
+  let cellInRow = false;
+  const text = (value: string) => {
+    if (out.length < limit) out += decodeEntities(value.slice(0, (limit - out.length) * 10 + 16));
+  };
+  const newLine = () => {
+    cellInRow = false;
+    if (out.length < limit && out !== '' && !out.endsWith('\n')) out += '\n';
+  };
   let at = 0;
-  while (at < html.length) {
+  while (at < html.length && out.length < limit) {
     const open = html.indexOf('<', at);
     if (open === -1) {
-      parts.push(decodeEntities(html.slice(at)));
+      text(html.slice(at));
       break;
     }
-    parts.push(decodeEntities(html.slice(at, open)));
+    text(html.slice(at, open));
     if (html.startsWith('<!--', open)) {
       const end = html.indexOf('-->', open + 4);
       if (end === -1) break;
@@ -180,7 +201,7 @@ export function htmlToText(html: string): string {
     const close = html.indexOf('>', open + 1);
     // No > anywhere after it: the rest is text, not a tag.
     if (close === -1) {
-      parts.push(decodeEntities(html.slice(open)));
+      text(html.slice(open));
       break;
     }
     const name = TAG_NAME.exec(html.slice(open, Math.min(close, open + 40)))?.[1]?.toLowerCase();
@@ -188,18 +209,23 @@ export function htmlToText(html: string): string {
     at = close + 1;
     if (name === undefined) continue;
     if (!ending && SKIPPED_TAGS.has(name)) {
-      const end = lower.indexOf(`</${name}`, at);
+      const end = endTagAt(html, name, at);
       if (end === -1) break;
       const endClose = html.indexOf('>', end);
       if (endClose === -1) break;
       at = endClose + 1;
       continue;
     }
-    if (name === 'br' || (ending && LINE_TAGS.has(name))) parts.push('\n');
-    else if (ending && CELL_TAGS.has(name)) parts.push('\t');
+    if (CELL_TAGS.has(name)) {
+      if (!ending) {
+        if (cellInRow && out.length < limit) out += '\t';
+        cellInRow = true;
+      }
+    } else if (name === 'br' || LINE_TAGS.has(name)) {
+      newLine();
+    }
   }
-  return parts
-    .join('')
+  return cut(out, limit)
     .split('\n')
     .map((line) => line.trimEnd())
     .join('\n')
@@ -307,6 +333,29 @@ export async function sha256Hex(data: ArrayBuffer | Uint8Array | string): Promis
 function attachmentBytes(content: ArrayBuffer | Uint8Array | string): Uint8Array {
   if (typeof content === 'string') return new TextEncoder().encode(content);
   return content instanceof Uint8Array ? content : new Uint8Array(content);
+}
+
+/**
+ * The sender and Message-ID from the headers alone, for admission before the message is read
+ * and stored (Codex's final review, R4-01: nothing heavy runs before the raw copy is safe). The
+ * same rules as readInbound; where they differ on a malformed header, the database's own
+ * duplicate and own-copy checks still apply when the message is kept.
+ */
+export function admissionIdentity(
+  headers: { get(name: string): string | null },
+  rawSha256: string,
+  envelopeFrom: string,
+): { sender: string; messageId: string } {
+  let from: string | null;
+  try {
+    from = cleanAddress(mailboxes(addressParser(headers.get('from') ?? ''))[0]?.address);
+  } catch {
+    from = null;
+  }
+  return {
+    sender: from ?? cleanAddress(envelopeFrom) ?? 'unknown@invalid',
+    messageId: headerTokens(headers.get('message-id'))[0] ?? `<${rawSha256}@missing.invalid>`,
+  };
 }
 
 /**

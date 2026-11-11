@@ -4,6 +4,7 @@ import {
   envelopeOnDomain,
   inboundConfig,
   MAX_RAW_BYTES,
+  admissionIdentity,
   readInbound,
   unreadableEmail,
   sha256Hex,
@@ -54,6 +55,7 @@ export interface IncomingMessage {
   readonly to: string;
   readonly raw: ReadableStream<Uint8Array>;
   readonly rawSize: number;
+  readonly headers: { get(name: string): string | null };
   setReject(reason: string): void;
 }
 
@@ -61,6 +63,8 @@ export interface IncomingMessage {
 export const SPOOL_CAP = 500;
 /** Markers finished per run of the 2-minute job. */
 export const REPLAY_PER_RUN = 25;
+/** Times reading a waiting message may begin before it is kept unreadable without reading. */
+export const REPLAY_STARTS = 5;
 /** Processing errors (the database answered with an error) before a marker is set aside. */
 export const REPLAY_ATTEMPTS = 10;
 
@@ -95,22 +99,36 @@ function openDb(env: MailBindings, openDatabase: DatabaseFactory) {
   return openDatabase(url, { viaHyperdrive: env.HYPERDRIVE !== undefined });
 }
 
+interface Stored {
+  sha: string;
+  size: number;
+  envelope: { from: string; to: string };
+  messageId: string;
+  receivedAt: Date;
+}
+
+/**
+ * Keeps a stored message: read from its raw bytes (`raw`), or, when `raw` is null, as unreadable
+ * without reading it (a message whose reading kept stopping the Worker; R4-01).
+ */
 async function keep(
   db: EmailsDatabase,
   config: InboundConfig,
-  raw: Uint8Array,
-  sha: string,
-  envelope: { from: string; to: string },
-  receivedAt: Date,
+  stored: Stored,
+  raw: Uint8Array | null,
 ): Promise<string> {
-  const read = await readInbound(raw, sha, envelope);
+  const { sha, envelope } = stored;
+  const read =
+    raw === null
+      ? unreadableEmail(sha, envelope, stored.messageId)
+      : await readInbound(raw, sha, envelope);
   const store = (email: InboundEmail) =>
     db.receiveEmail({
       organizationId: config.organizationId,
       email,
       rawKey: rawKey(config, sha),
-      rawSize: raw.byteLength,
-      receivedAt,
+      rawSize: stored.size,
+      receivedAt: stored.receivedAt,
     });
   // When the database refuses the message as read (a value it cannot take), it is kept as
   // unreadable instead, under its own Message-ID, then under one from its contents: the raw copy
@@ -167,7 +185,8 @@ export async function receiveMessage(
   }
   const sha = await sha256Hex(raw);
   const envelope = { from: message.from, to: envelopeTo };
-  const email = await readInbound(raw, sha, envelope);
+  // Only the headers are read before the raw copy is stored (R4-01).
+  const identity = admissionIdentity(message.headers, sha, message.from);
 
   const db = openDb(env, openDatabase);
   try {
@@ -177,8 +196,8 @@ export async function receiveMessage(
       try {
         const admission = await db.admitEmail(
           config.organizationId,
-          email.fromAddress,
-          email.messageId,
+          identity.sender,
+          identity.messageId,
         );
         if (admission === 'duplicate' || admission === 'own_copy') return admission;
         if (admission === 'too_many') {
@@ -209,8 +228,17 @@ export async function receiveMessage(
       await bucket.put(rawKey(config, sha), raw, {
         httpMetadata: { contentType: 'message/rfc822' },
       });
+      // `starts` counts the times reading it began: a message whose reading stops the Worker
+      // itself (memory, time) is kept unreadable after REPLAY_STARTS (R4-01).
       await bucket.put(marker, '', {
-        customMetadata: { from: envelope.from, to: envelope.to, attempts: '0' },
+        customMetadata: {
+          from: envelope.from,
+          to: envelope.to,
+          messageId: identity.messageId,
+          size: String(raw.byteLength),
+          attempts: '0',
+          starts: '1',
+        },
       });
     } catch {
       message.setReject(REJECT_UNAVAILABLE);
@@ -218,9 +246,17 @@ export async function receiveMessage(
     }
     if (!reachable || db === null) return 'spooled database_unreachable';
 
-    // 3. Kept in the database; the marker removed. On any failure the marker stays for the job.
+    // 3. Read and kept in the database; the marker removed. On any failure, or if reading stops
+    //    the Worker, the marker stays for the job.
     try {
-      const outcome = await keep(db, config, raw, sha, envelope, receivedAt);
+      const stored = {
+        sha,
+        size: raw.byteLength,
+        envelope,
+        messageId: identity.messageId,
+        receivedAt,
+      };
+      const outcome = await keep(db, config, stored, raw);
       await bucket.delete(marker);
       return outcome;
     } catch (error) {
@@ -274,26 +310,42 @@ export async function replayPendingMail(
       const sha = object.key.slice(object.key.lastIndexOf('-') + 1);
       const head = await bucket.head(object.key);
       const meta = head?.customMetadata ?? object.customMetadata ?? {};
-      const stored = /^[0-9a-f]{64}$/.test(sha) ? await bucket.get(rawKey(config, sha)) : null;
-      if (stored === null) {
+      const object_ = /^[0-9a-f]{64}$/.test(sha) ? await bucket.get(rawKey(config, sha)) : null;
+      if (object_ === null) {
         await setAside(bucket, object.key, meta);
         failed += 1;
         continue;
       }
-      const raw = new Uint8Array(await stored.arrayBuffer());
+      const raw = new Uint8Array(await object_.arrayBuffer());
+      const starts = Number.parseInt(meta.starts ?? '0', 10) || 0;
+      // Counted before reading, so a message whose reading stops the Worker cannot stop every
+      // run: after REPLAY_STARTS it is kept unreadable, without reading it (R4-01).
+      const readIt = starts < REPLAY_STARTS;
+      if (readIt) {
+        await bucket.put(object.key, '', {
+          customMetadata: { ...meta, starts: String(starts + 1) },
+        });
+      }
+      const stored = {
+        sha,
+        size: raw.byteLength,
+        envelope: { from: meta.from ?? '', to: meta.to ?? '' },
+        messageId: meta.messageId ?? `<${sha}@missing.invalid>`,
+        receivedAt: receivedAtOf(object.key, prefix),
+      };
       try {
-        await keep(
-          db,
-          config,
-          raw,
-          sha,
-          { from: meta.from ?? '', to: meta.to ?? '' },
-          receivedAtOf(object.key, prefix),
-        );
+        await keep(db, config, stored, readIt ? raw : null);
         await bucket.delete(object.key);
         kept += 1;
       } catch (error) {
-        if (!databaseAnswered(error)) break;
+        if (!databaseAnswered(error)) {
+          // Not reached: the start is given back, so an outage uses none up (D2-03).
+          if (readIt)
+            await bucket.put(object.key, '', {
+              customMetadata: { ...meta, starts: String(starts) },
+            });
+          break;
+        }
         const attempts = Number.parseInt(meta.attempts ?? '0', 10) + 1;
         if (attempts >= REPLAY_ATTEMPTS) {
           await setAside(bucket, object.key, { ...meta, attempts: String(attempts) });

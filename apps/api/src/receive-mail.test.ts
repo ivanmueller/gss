@@ -11,6 +11,7 @@ import {
   REJECT_UNAVAILABLE,
   replayPendingMail,
   REPLAY_ATTEMPTS,
+  REPLAY_STARTS,
   SPOOL_CAP,
   type IncomingMessage,
   type MailBucket,
@@ -78,11 +79,22 @@ const RAW = [
   'Yes.',
 ].join('\r\n');
 
+/** The headers as Cloudflare hands them over (only the top block, before the blank line). */
+function headersOf(raw: string): Headers {
+  const headers = new Headers();
+  for (const line of raw.split('\r\n\r\n')[0]?.split('\r\n') ?? []) {
+    const colon = line.indexOf(':');
+    if (colon > 0) headers.append(line.slice(0, colon), line.slice(colon + 1).trim());
+  }
+  return headers;
+}
+
 function message(raw = RAW, to = 'info@example.com', rawSize?: number) {
   const bytes = new TextEncoder().encode(raw);
   return {
     from: 'pat@farm.example',
     to,
+    headers: headersOf(raw),
     raw: new Response(bytes).body as ReadableStream<Uint8Array>,
     rawSize: rawSize ?? bytes.byteLength,
     setReject: vi.fn<IncomingMessage['setReject']>(),
@@ -338,5 +350,58 @@ describe('when the database refuses the message as read (R3-02)', () => {
     expect(db.receiveEmail.mock.calls[2]?.[0].email.messageId).toMatch(
       /^<[0-9a-f]{64}@missing\.invalid>$/,
     );
+  });
+});
+
+describe('the raw copy before reading (R4-01)', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  it('admits on the headers alone and stores the raw copy before reading it', async () => {
+    const order: string[] = [];
+    bucket.put.mockImplementation((key: string) => {
+      order.push(`put ${key.split('/')[0] ?? ''}`);
+      return Promise.resolve(null);
+    });
+    db.receiveEmail.mockImplementation(() => {
+      order.push('keep');
+      return Promise.resolve({
+        status: 'received',
+        id: 'x',
+        counterpartyId: null,
+        duplicate: false,
+      });
+    });
+    await receiveMessage(message(), env, open);
+    expect(db.admitEmail).toHaveBeenCalledWith(ORG, 'pat@farm.example', '<reply-1@farm.example>');
+    expect(order).toEqual(['put raw', 'put pending', 'keep']);
+  });
+
+  it('counts each start of reading before it, and gives it back when the database is out', async () => {
+    db.admitEmail.mockRejectedValue(unreachable);
+    await receiveMessage(message(), env, open);
+    db.admitEmail.mockReset();
+    const [key = ''] = bucket.keys('pending/');
+    expect(bucket.objects.get(key)?.meta.starts).toBe('1');
+    db.receiveEmail.mockRejectedValueOnce(unreachable);
+    await replayPendingMail(env, open);
+    expect(bucket.objects.get(key)?.meta.starts).toBe('1');
+  });
+
+  it('keeps a message whose reading kept stopping the Worker as unreadable, without reading it', async () => {
+    db.admitEmail.mockRejectedValue(unreachable);
+    await receiveMessage(message(), env, open);
+    db.admitEmail.mockReset();
+    const [key = ''] = bucket.keys('pending/');
+    const entry = bucket.objects.get(key);
+    if (entry) entry.meta = { ...entry.meta, starts: String(REPLAY_STARTS) };
+    await replayPendingMail(env, open);
+    expect(db.receiveEmail.mock.calls[0]?.[0].email).toMatchObject({
+      parseFailed: true,
+      messageId: '<reply-1@farm.example>',
+      fromAddress: 'pat@farm.example',
+    });
+    expect(bucket.keys('pending/')).toEqual([]);
   });
 });
