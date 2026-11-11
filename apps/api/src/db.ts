@@ -144,7 +144,13 @@ export interface CounterpartyCommodity {
 
 /** The outcome of a change to a counterparty, its contacts or its locations. */
 /** What a counterparty has that keeps it from being deleted: records that keep their history. */
-export type CounterpartyHistory = 'quotes' | 'freight' | 'contact_log' | 'follow_ups';
+export type CounterpartyHistory =
+  | 'quotes'
+  | 'freight'
+  | 'contact_log'
+  | 'follow_ups'
+  | 'calls'
+  | 'emails';
 
 export type DeleteResult =
   | { status: 'deleted' }
@@ -1739,7 +1745,8 @@ export function createDatabase(sql: postgres.Sql): Database {
                                                           q.destination_facility_id)))
                   or exists (select from app.contact_log_entries e where e.counterparty_id = c.id)
                   or exists (select from app.follow_ups u where u.counterparty_id = c.id)
-                  or exists (select from app.calls k where k.counterparty_id = c.id))`
+                  or exists (select from app.calls k where k.counterparty_id = c.id)
+                  or exists (select from app.emails m where m.counterparty_id = c.id))`
           ).map((row) => row.id),
         );
         const kept = created.flatMap((row): UndoImportPlan['kept'] =>
@@ -1933,8 +1940,12 @@ export function createDatabase(sql: postgres.Sql): Database {
                               and f.id in (q.origin_facility_id, q.destination_facility_id))
             ) as freight,
             exists (select from app.contact_log_entries where counterparty_id = ${id}) as contact_log,
-            exists (select from app.follow_ups where counterparty_id = ${id}) as follow_ups`;
-        const history = (['quotes', 'freight', 'contact_log', 'follow_ups'] as const).filter(
+            exists (select from app.follow_ups where counterparty_id = ${id}) as follow_ups,
+            exists (select from app.calls where counterparty_id = ${id}) as calls,
+            exists (select from app.emails where counterparty_id = ${id}) as emails`;
+        const history = (
+          ['quotes', 'freight', 'contact_log', 'follow_ups', 'calls', 'emails'] as const
+        ).filter(
           (what) => kept?.[what] === true,
         );
         if (history.length > 0) return { status: 'has_history', history };

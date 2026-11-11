@@ -523,8 +523,23 @@ begin
     end if;
   end if;
 
+  -- A share lock on the company, then its state seen again: archived or deleted since it was
+  -- matched, the mail is left to link by hand (Codex's review of F-114-2, finding R1-03).
   if company is not null then
-    perform 1 from app.counterparties c where c.organization_id = org and c.id = company for share;
+    perform 1 from app.counterparties c
+     where c.organization_id = org and c.id = company and c.archived_at is null
+       for share;
+    if not found then
+      company := null;
+      person := null;
+    end if;
+  end if;
+  -- The contact only while it is still one of that company's (a contact removed since GSS's
+  -- email was sent leaves the reply on the company alone; Codex's review, finding R1-01).
+  if person is not null and not exists (
+       select 1 from app.counterparty_contacts k
+        where k.organization_id = org and k.counterparty_id = company and k.id = person) then
+    person := null;
   end if;
 
   insert into app.emails (organization_id, direction, status, counterparty_id, contact_id,

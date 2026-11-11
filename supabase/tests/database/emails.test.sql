@@ -9,7 +9,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(84);
+select plan(86);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), adam (org_admin), victor (viewer), sue (suspended). Org B: bob (org_admin).
@@ -294,8 +294,20 @@ select is((select cardinality(to_addresses) || '|' || envelope_to::text || '|' |
 select is(pg_temp.receive('<in8@x>', 'list@else.example',
                           to_list => (select array_agg('r' || i || '@x.example') from generate_series(1, 60) i)) ->> 'status',
   'received', 'mail to more than 50 people is kept');
+-- Codex's review of F-114-2, finding R1-01: a reply to an email whose contact was removed since.
+insert into app.counterparty_contacts (id, organization_id, counterparty_id, name, email, created_by) values
+  ('00000000-0000-4000-8000-00000000d6aa', '00000000-0000-4000-8000-0000000000aa',
+   '00000000-0000-4000-8000-00000000c1aa', 'Kim Buyer', 'kim@buyer.example', '00000000-0000-4000-8000-0000000022aa');
+select is(pg_temp.start('00000000-0000-4000-8000-0000000044aa', '00000000-0000-4000-8000-00000000c1aa',
+                        '00000000-0000-4000-8000-00000000d6aa', 'tom', '{kim@buyer.example}', '<out3@gss.example>') ->> 'status',
+  'started', 'an email to a contact who is removed afterwards');
+delete from app.counterparty_contacts where id = '00000000-0000-4000-8000-00000000d6aa';
+select is((select coalesce(counterparty_id::text, 'none') || '|' || coalesce(contact_id::text, 'none')
+             from app.emails
+            where id = (pg_temp.receive('<in9@x>', 'kim@buyer.example', answers => '<out3@gss.example>') ->> 'id')::uuid),
+  '00000000-0000-4000-8000-00000000c1aa|none', 'its reply is kept on the company, without the removed contact');
 select is((select count(*)::int from app.emails where organization_id = '00000000-0000-4000-8000-0000000000aa'
-             and direction = 'incoming'), 8, 'eight received emails kept in org A');
+             and direction = 'incoming'), 9, 'nine received emails kept in org A');
 
 -- Reading -------------------------------------------------------------------------
 select is(pg_temp.api('00000000-0000-4000-8000-0000000033aa', 'select count(*)::text from app.emails'),

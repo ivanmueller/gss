@@ -578,6 +578,27 @@ describe('a correction waiting while an entry is removed (Codex, ac2d085, findin
   });
 });
 
+describe('deleting a counterparty whose only history is an email, as app_api', () => {
+  // Codex's review of F-114-2, finding R1-02: refused with has_history, not a database error.
+  it('keeps it, archived, and says why', async () => {
+    const mailed = id();
+    await admin`insert into app.counterparties
+        (id, organization_id, legal_name, types, primary_country, source, created_by, archived_at)
+      values (${mailed}, ${orgs.a}, ${`Synthetic Mailed ${mailed}`}, '{seller}', 'CA', 'manual',
+              ${users.ada}, now())`;
+    await admin`insert into app.emails
+        (organization_id, direction, status, counterparty_id, envelope_to, from_address,
+         body_text, message_id)
+      values (${orgs.a}, 'incoming', 'received', ${mailed}, 'info@gss.example',
+              'farmer@synthetic.example', 'Synthetic email.', ${`<${id()}@synthetic.example>`})`;
+    expect(await db.deleteCounterparty(as(users.ada), mailed)).toEqual({
+      status: 'has_history',
+      history: ['emails'],
+    });
+    expect(await db.getCounterparty(as(users.ada), mailed)).not.toBeNull();
+  });
+});
+
 describe('deleting a counterparty with a contact history, as app_api', () => {
   it('keeps it, archived, and says why', async () => {
     expect((await db.setArchived(as(users.ada), counterparties.buyer, true)).status).toBe('saved');

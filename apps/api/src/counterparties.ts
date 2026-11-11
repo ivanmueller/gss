@@ -659,6 +659,8 @@ const HISTORY_NAMES: Record<CounterpartyHistory, string> = {
   freight: 'freight rates',
   contact_log: 'a contact history',
   follow_ups: 'follow-ups',
+  calls: 'calls',
+  emails: 'emails',
 };
 
 /** "a", "a and b", "a, b and c". */
