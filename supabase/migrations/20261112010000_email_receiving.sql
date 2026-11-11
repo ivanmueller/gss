@@ -168,12 +168,13 @@ drop function app.receive_email(uuid, text, text, text, text[], text[], text, te
 -- sent (In-Reply-To first, then the latest reference, on GSS's id or the sending service's), or
 -- when its sender passed DMARC and is a contact of exactly one company. Answers
 -- {"status": "received", "id", "counterparty_id", "duplicate"}, {"status": "own_copy"},
--- {"status": "unknown_organization"} or {"status": "forbidden"}.
+-- {"status": "unknown_organization"} or {"status": "forbidden"}. Its time is when the Worker
+-- accepted it (Codex's review, finding R1-02), so mail kept after an outage keeps its own.
 create function app.receive_email(
   org uuid, envelope text, sender text, sender_name text, to_list text[], cc_list text[],
   reply_address text, subject_text text, body text, truncated boolean, message text,
   answers text, refs text[], dmarc_passed boolean, is_automatic boolean, failed_parse boolean,
-  stored_key text, stored_size integer, attachments jsonb)
+  stored_key text, stored_size integer, attachments jsonb, received_at timestamptz)
 returns jsonb
 language plpgsql
 security definer
@@ -271,7 +272,7 @@ begin
                           envelope_to, gss_member, from_address, from_name, to_addresses,
                           cc_addresses, reply_to, subject, body_text, body_truncated, message_id,
                           in_reply_to, reference_ids, auth_passed, automatic, parse_failed,
-                          raw_key, raw_size)
+                          raw_key, raw_size, occurred_at)
   values (org, 'incoming', 'received', company, person, envelope_address, member, sender_address,
           nullif(left(regexp_replace(btrim(sender_name), '[[:cntrl:]]', ' ', 'g'), 200), ''),
           (select coalesce(array_agg(lower(btrim(t))), '{}') from unnest(to_list) t),
@@ -279,7 +280,11 @@ begin
           nullif(lower(btrim(reply_address)), ''),
           coalesce(subject_text, ''), body, coalesce(truncated, false), message, answers,
           coalesce(refs, '{}'), coalesce(dmarc_passed, false), coalesce(is_automatic, false),
-          coalesce(failed_parse, false), stored_key, stored_size)
+          coalesce(failed_parse, false), stored_key, stored_size,
+          -- When the Worker accepted it (mail kept after an outage keeps its own time), never
+          -- in the future nor before the outage could have started (30 days of waiting at most).
+          case when received_at between now() - interval '30 days' and now() then received_at
+               else now() end)
   on conflict (organization_id, direction, message_id) do nothing
   returning id into new_id;
 
@@ -316,11 +321,11 @@ revoke all on function
   app.check_email_attachment(), app.email_id_core(text), app.is_own_email_copy(uuid, text, text),
   app.admit_email(uuid, text, text),
   app.receive_email(uuid, text, text, text, text[], text[], text, text, text, boolean, text, text,
-                    text[], boolean, boolean, boolean, text, integer, jsonb)
+                    text[], boolean, boolean, boolean, text, integer, jsonb, timestamptz)
   from public, anon, authenticated, service_role, app_api;
 grant select on app.email_attachments to app_api;
 grant execute on function
   app.admit_email(uuid, text, text),
   app.receive_email(uuid, text, text, text, text[], text[], text, text, text, boolean, text, text,
-                    text[], boolean, boolean, boolean, text, integer, jsonb)
+                    text[], boolean, boolean, boolean, text, integer, jsonb, timestamptz)
   to app_api;

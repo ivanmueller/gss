@@ -1,7 +1,7 @@
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createDatabase } from './db';
+import { connectionOptions, createDatabase } from './db';
 import { readInbound, sha256Hex } from './inbound-email';
 
 // Integration test of received emails (F-114 step 2) where two connections matter: the real
@@ -69,7 +69,7 @@ describe('receiving an email while its company is being archived', () => {
       select app.receive_email(${org}, 'info@gss.example', ${sender}, 'Synthetic Farmer',
         ${['info@gss.example']}::text[], ${[]}::text[], null, 'Synthetic subject',
         'Synthetic body.', false, ${`<${id()}@synthetic.example>`}, null, ${[]}::text[], true,
-        false, false, ${`raw/${org}/${'a'.repeat(64)}.eml`}, 10, '[]'::jsonb
+        false, false, ${`raw/${org}/${'a'.repeat(64)}.eml`}, 10, '[]'::jsonb, now()
       ) as result`.execute();
     // Postgres.js sends a query only when asked (Codex's round 2): it is sent now, and seen
     // waiting on the archive's lock before the archive commits.
@@ -144,7 +144,9 @@ describe('the Worker keeping a received message (F-114 step 4a)', () => {
   const CRLF = String.fromCharCode(13, 10);
 
   it('admits, keeps with its attachments, then calls a second delivery a duplicate', async () => {
-    const db = createDatabase(worker);
+    // The Worker's own connection settings (no fetch_types; Codex's review, finding R1-01).
+    const production = postgres(API_URL, connectionOptions(API_URL));
+    const db = createDatabase(production);
     const raw = new TextEncoder().encode(
       [
         'Authentication-Results: mx.cloudflare.net; spf=pass; dkim=pass; dmarc=pass',
@@ -170,20 +172,31 @@ describe('the Worker keeping a received message (F-114 step 4a)', () => {
     const sha = await sha256Hex(raw);
     const email = await readInbound(raw, sha, { from: sender, to: 'info@gss.example' });
     expect(await db.admitEmail(org, email.fromAddress, email.messageId)).toBe('admit');
+    const receivedAt = new Date(Date.now() - 3 * 60 * 60 * 1000);
     const received = {
       organizationId: org,
       email,
       rawKey: `raw/${org}/${sha}.eml`,
       rawSize: raw.byteLength,
+      receivedAt,
     };
     const kept = await db.receiveEmail(received);
     expect(kept).toMatchObject({ status: 'received', duplicate: false });
-    const [row] = await admin<{ auth_passed: boolean; files: number; raw_key: string }[]>`
-      select e.auth_passed, e.raw_key,
+    const [row] = await admin<
+      { auth_passed: boolean; files: number; raw_key: string; to: string[]; occurred_at: Date }[]
+    >`
+      select e.auth_passed, e.raw_key, e.to_addresses::text[] as to, e.occurred_at,
              (select count(*)::int from app.email_attachments a where a.email_id = e.id) as files
         from app.emails e where e.organization_id = ${org} and e.message_id = ${email.messageId}`;
-    expect(row).toEqual({ auth_passed: true, raw_key: `raw/${org}/${sha}.eml`, files: 1 });
+    expect(row).toEqual({
+      auth_passed: true,
+      raw_key: `raw/${org}/${sha}.eml`,
+      files: 1,
+      to: ['info@gss.example'],
+      occurred_at: receivedAt,
+    });
     expect(await db.admitEmail(org, email.fromAddress, email.messageId)).toBe('duplicate');
     expect(await db.receiveEmail(received)).toMatchObject({ status: 'received', duplicate: true });
+    await production.end();
   });
 });

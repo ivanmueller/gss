@@ -61,6 +61,8 @@ export interface ReceivedEmail {
   email: InboundEmail;
   rawKey: string;
   rawSize: number;
+  /** When the Worker accepted the message (kept as its time, also when kept later). */
+  receivedAt: Date;
 }
 
 export type ReceiveEmailResult =
@@ -243,7 +245,7 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
       return answer;
     },
 
-    async receiveEmail({ organizationId, email, rawKey, rawSize }) {
+    async receiveEmail({ organizationId, email, rawKey, rawSize, receivedAt }) {
       const attachments = email.attachments.map((a) => ({
         position: a.position,
         file_name: a.fileName,
@@ -256,10 +258,15 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
       const [row] = await sql<{ result: Record<string, unknown> }[]>`
         select app.receive_email(
           ${organizationId}, ${email.envelopeTo}, ${email.fromAddress}, ${email.fromName},
-          ${email.to}::text[], ${email.cc}::text[], ${email.replyTo}, ${email.subject},
-          ${email.body}, ${email.bodyTruncated}, ${email.messageId}, ${email.inReplyTo},
-          ${email.references}::text[], ${email.dmarc === 'pass'}, ${email.automatic},
-          ${email.parseFailed}, ${rawKey}, ${rawSize}, ${sql.json(attachments)}) as result`;
+          -- Lists go as JSON: without fetch_types (the Worker's connection), postgres.js sends
+          -- an array as text (as for sending; Codex's review, finding R1-01).
+          array(select t.x from jsonb_array_elements_text(${sql.json(email.to)}::jsonb) as t(x)),
+          array(select t.x from jsonb_array_elements_text(${sql.json(email.cc)}::jsonb) as t(x)),
+          ${email.replyTo}, ${email.subject}, ${email.body}, ${email.bodyTruncated},
+          ${email.messageId}, ${email.inReplyTo},
+          array(select t.x from jsonb_array_elements_text(${sql.json(email.references)}::jsonb) as t(x)),
+          ${email.dmarc === 'pass'}, ${email.automatic}, ${email.parseFailed}, ${rawKey},
+          ${rawSize}, ${sql.json(attachments)}::jsonb, ${receivedAt.toISOString()}::timestamptz) as result`;
       const result = row?.result ?? {};
       if (result.status === 'own_copy' || result.status === 'unknown_organization') {
         return { status: result.status };

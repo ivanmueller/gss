@@ -9,7 +9,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(46);
+select plan(50);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader, own address tom@), bob in org B.
@@ -77,15 +77,16 @@ create function pg_temp.receive(msg text, sender text default 'pat@buyer.example
                                 dmarc boolean default true,
                                 envelope text default 'info@gss.example',
                                 files jsonb default '[]',
+                                at timestamptz default now(),
                                 org text default '00000000-0000-4000-8000-0000000000aa',
                                 uid text default null)
 returns jsonb
 language sql as $fn$
   select pg_temp.api(uid, format(
-    'select app.receive_email(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
+    'select app.receive_email(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
     org, envelope, sender, 'Sender', '{info@gss.example}'::text[], '{}'::text[], null, 'Re: Offer',
     'Reply', false, msg, answers, refs, dmarc, false, false,
-    'raw/' || org || '/' || encode(sha256(convert_to(msg, 'UTF8')), 'hex') || '.eml', 100, files))::jsonb
+    'raw/' || org || '/' || encode(sha256(convert_to(msg, 'UTF8')), 'hex') || '.eml', 100, files, at))::jsonb
 $fn$;
 
 create function pg_temp.kept(msg text) returns app.emails
@@ -106,7 +107,7 @@ select ok(not has_table_privilege('authenticated', 'app.email_attachments', 'sel
 select ok(has_function_privilege('app_api', 'app.admit_email(uuid, text, text)', 'execute')
           and not has_function_privilege('authenticated', 'app.admit_email(uuid, text, text)', 'execute')
           and not has_function_privilege('authenticated',
-            'app.receive_email(uuid, text, text, text, text[], text[], text, text, text, boolean, text, text, text[], boolean, boolean, boolean, text, integer, jsonb)', 'execute'),
+            'app.receive_email(uuid, text, text, text, text[], text[], text, text, text, boolean, text, text, text[], boolean, boolean, boolean, text, integer, jsonb, timestamptz)', 'execute'),
   'only app_api admits and receives');
 select ok(not has_function_privilege('app_api', 'app.is_own_email_copy(uuid, text, text)', 'execute')
           and not has_function_privilege('app_api', 'app.email_id_core(text)', 'execute')
@@ -211,7 +212,7 @@ select throws_ok($$insert into app.email_attachments (organization_id, email_id,
 select throws_ok(format($$select app.receive_email('00000000-0000-4000-8000-0000000000aa', 'info@gss.example',
     'pat@buyer.example', 'P', '{}', '{}', null, 'S', 'B', false, '<bad-file@x>', null, '{}', true, false, false,
     'raw/00000000-0000-4000-8000-0000000000aa/%s.eml', 1,
-    '[{"position": 0, "content_type": "not a type", "size_bytes": 1, "sha256": "%s", "disposition": "attachment"}]')$$,
+    '[{"position": 0, "content_type": "not a type", "size_bytes": 1, "sha256": "%s", "disposition": "attachment"}]', now())$$,
     repeat('d', 64), repeat('e', 64)), '23514', null,
   'a malformed attachment refuses the whole message, nothing half kept');
 select is((select count(*)::int from app.emails where message_id = '<bad-file@x>'), 0,
@@ -235,6 +236,16 @@ select throws_ok($$insert into app.emails (organization_id, direction, status, e
 select is((pg_temp.kept('<reply-1@buyer.example>')).raw_key,
           'raw/00000000-0000-4000-8000-0000000000aa/' || encode(sha256(convert_to('<reply-1@buyer.example>', 'UTF8')), 'hex') || '.eml',
   'the raw object''s key is kept');
+
+-- The time it was accepted (Codex's review, finding R1-02) ----------------------
+select is(pg_temp.receive('<late-1@buyer.example>', at => now() - interval '5 hours') ->> 'duplicate', 'false',
+  'mail kept after an outage is kept');
+select is((pg_temp.kept('<late-1@buyer.example>')).occurred_at, now() - interval '5 hours',
+  'with the time the Worker accepted it');
+select is(pg_temp.receive('<future-1@buyer.example>', at => now() + interval '1 day') ->> 'duplicate', 'false',
+  'mail with a time in the future is kept');
+select is((pg_temp.kept('<future-1@buyer.example>')).occurred_at, now(),
+  'at the time it is kept, never in the future');
 
 -- Cross-organization ----------------------------------------------------------
 select is(pg_temp.receive('<b-1@buyer.example>', answers => '<cf-1@gss.example>',

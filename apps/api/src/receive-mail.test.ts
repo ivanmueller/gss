@@ -265,6 +265,14 @@ describe('replayPendingMail', () => {
     expect(bucket.keys('raw/')).toHaveLength(3);
   });
 
+  it('keeps a waiting message with the time it was accepted (R1-02)', async () => {
+    await spool(1);
+    await replayPendingMail(env, open);
+    expect(db.receiveEmail.mock.calls[0]?.[0].receivedAt).toEqual(
+      new Date(Date.UTC(2026, 10, 11, 0, 0, 0)),
+    );
+  });
+
   it('counts no attempt while the database cannot be reached', async () => {
     await spool(2);
     db.receiveEmail.mockRejectedValue(unreachable);

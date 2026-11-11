@@ -99,10 +99,10 @@ create function pg_temp.receive(msg text, sender text, answers text default null
 returns jsonb
 language sql as $fn$
   select pg_temp.api(uid, format(
-    'select app.receive_email(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
+    'select app.receive_email(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
     org, envelope, sender, 'Sender Name', to_list, '{}'::text[], null, 'Re: Hello', 'Reply body',
     false, msg, answers, refs, dmarc, false, false,
-    'raw/' || org || '/' || encode(sha256(convert_to(msg, 'UTF8')), 'hex') || '.eml', 100, '[]'))::jsonb
+    'raw/' || org || '/' || encode(sha256(convert_to(msg, 'UTF8')), 'hex') || '.eml', 100, '[]', now()))::jsonb
 $fn$;
 
 create temp table ids (name text primary key, id uuid);
@@ -122,7 +122,7 @@ select ok(not has_table_privilege('app_api', 'app.email_removals', 'insert')
           and not has_table_privilege('app_api', 'app.member_email_addresses', 'insert'),
   'app_api writes removals, settings and addresses only through the functions');
 select ok(not has_function_privilege('authenticated',
-            'app.receive_email(uuid, text, text, text, text[], text[], text, text, text, boolean, text, text, text[], boolean, boolean, boolean, text, integer, jsonb)', 'execute')
+            'app.receive_email(uuid, text, text, text, text[], text[], text, text, text, boolean, text, text, text[], boolean, boolean, boolean, text, integer, jsonb, timestamptz)', 'execute')
           and not has_function_privilege('anon', 'app.link_email(uuid, uuid, uuid)', 'execute'),
   'the Supabase API roles cannot call the email functions');
 select ok(not has_function_privilege('app_api', 'app.check_email()', 'execute')

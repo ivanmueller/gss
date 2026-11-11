@@ -99,6 +99,7 @@ async function keep(
   raw: Uint8Array,
   sha: string,
   envelope: { from: string; to: string },
+  receivedAt: Date,
 ): Promise<string> {
   const email = await readInbound(raw, sha, envelope);
   const result = await db.receiveEmail({
@@ -106,6 +107,7 @@ async function keep(
     email,
     rawKey: rawKey(config, sha),
     rawSize: raw.byteLength,
+    receivedAt,
   });
   if (result.status === 'unknown_organization') throw new Error('Unknown organization');
   return result.status === 'received'
@@ -180,7 +182,8 @@ export async function receiveMessage(
     }
 
     // 2. The raw message, then its marker: from here on the message is never lost.
-    const marker = markerKey(config, now().toISOString(), sha);
+    const receivedAt = now();
+    const marker = markerKey(config, receivedAt.toISOString(), sha);
     try {
       await bucket.put(rawKey(config, sha), raw, {
         httpMetadata: { contentType: 'message/rfc822' },
@@ -196,7 +199,7 @@ export async function receiveMessage(
 
     // 3. Kept in the database; the marker removed. On any failure the marker stays for the job.
     try {
-      const outcome = await keep(db, config, raw, sha, envelope);
+      const outcome = await keep(db, config, raw, sha, envelope, receivedAt);
       await bucket.delete(marker);
       return outcome;
     } catch (error) {
@@ -258,7 +261,14 @@ export async function replayPendingMail(
       }
       const raw = new Uint8Array(await stored.arrayBuffer());
       try {
-        await keep(db, config, raw, sha, { from: meta.from ?? '', to: meta.to ?? '' });
+        await keep(
+          db,
+          config,
+          raw,
+          sha,
+          { from: meta.from ?? '', to: meta.to ?? '' },
+          receivedAtOf(object.key, prefix),
+        );
         await bucket.delete(object.key);
         kept += 1;
       } catch (error) {
@@ -280,6 +290,16 @@ export async function replayPendingMail(
   console.log(
     `Email replay: kept=${String(kept)} set_aside=${String(failed)} listed=${String(pending.objects.length)}`,
   );
+}
+
+/** When a waiting message was accepted, from its marker's key (`<ISO time>-<sha>`). */
+export function receivedAtOf(key: string, prefix: string): Date {
+  const stamp = key.slice(prefix.length, key.lastIndexOf('-'));
+  const time = new Date(stamp);
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(stamp) &&
+    !Number.isNaN(time.getTime())
+    ? time
+    : new Date();
 }
 
 async function setAside(bucket: MailBucket, key: string, meta: Record<string, string>) {
