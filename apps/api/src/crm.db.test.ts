@@ -588,9 +588,10 @@ describe('deleting a counterparty whose only history is an email, as app_api', (
               ${users.ada}, now())`;
     await admin`insert into app.emails
         (organization_id, direction, status, counterparty_id, envelope_to, from_address,
-         body_text, message_id)
+         body_text, message_id, raw_key, raw_size)
       values (${orgs.a}, 'incoming', 'received', ${mailed}, 'info@gss.example',
-              'farmer@synthetic.example', 'Synthetic email.', ${`<${id()}@synthetic.example>`})`;
+              'farmer@synthetic.example', 'Synthetic email.', ${`<${id()}@synthetic.example>`},
+              ${`raw/${orgs.a}/${'b'.repeat(64)}.eml`}, 10)`;
     expect(await db.deleteCounterparty(as(users.ada), mailed)).toEqual({
       status: 'has_history',
       history: ['emails'],

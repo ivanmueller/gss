@@ -15,6 +15,7 @@ import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
 import { cloudflareMailer, type MailerFactory } from './email';
 import { emailRoutes } from './emails';
+import { handleEmail, replayPendingMail } from './receive-mail';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
@@ -154,14 +155,21 @@ export default {
   fetch: app.fetch,
   // wrangler.jsonc, triggers: the Bank of Canada's USD/CAD rate twice a day, and every 2 minutes
   // (RECORDINGS_CRON) new recordings transcribed by side, call audio 24 hours old deleted, and
-  // new transcripts read by Claude, and the company summaries that are due written by Claude.
+  // new transcripts read by Claude, the company summaries that are due written by Claude, and
+  // received mail kept while the database could not be reached (src/receive-mail.ts).
   scheduled(controller, env, ctx) {
     if (controller.cron === RECORDINGS_CRON) {
       ctx.waitUntil(runRecordingsJob(env, postgresDatabase));
       ctx.waitUntil(readNewTranscripts(env, postgresDatabase));
       ctx.waitUntil(writeDueSummaries(env, postgresDatabase));
+      ctx.waitUntil(replayPendingMail(env, postgresDatabase));
       return;
     }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));
+  },
+  // Cloudflare Email Routing: the business domain's mail (F-114 step 4a). Awaited, not
+  // waitUntil: whether the message is rejected must be decided before the handler returns.
+  async email(message, env) {
+    await handleEmail(message, env, postgresDatabase);
   },
 } satisfies ExportedHandler<ApiEnv['Bindings']>;

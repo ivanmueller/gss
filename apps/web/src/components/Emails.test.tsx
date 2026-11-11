@@ -59,6 +59,9 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     contactName: 'Pat Buyer',
     failure: null,
     occurredAt: '2026-11-10T21:00:00.000Z',
+    unverifiedSender: false,
+    automatic: false,
+    parseFailed: false,
     ...overrides,
   };
 }
@@ -363,5 +366,34 @@ describe('the Emails card', () => {
     await user.click(screen.getByRole('button', { name: 'Load older' }));
     expect(await screen.findByText('Oldest')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load older' })).toBeNull();
+  });
+
+  it('warns on received mail whose sender is not verified, and tags automatic mail (D1-04)', async () => {
+    mockApi({
+      [LIST_PATH]: () =>
+        Response.json({
+          emails: [
+            email({
+              id: '00000000-0000-4000-8000-0000000e1b01',
+              direction: 'incoming',
+              state: 'received',
+              subject: 'Re: Feed oats',
+              fromAddress: 'pat@buyer.example.test',
+              unverifiedSender: true,
+            }),
+            email({
+              id: '00000000-0000-4000-8000-0000000e1b02',
+              direction: 'incoming',
+              state: 'received',
+              subject: 'Out of office',
+              automatic: true,
+            }),
+          ],
+        }),
+    });
+    show();
+    expect(await screen.findByText('Re: Feed oats')).toBeInTheDocument();
+    expect(screen.getAllByText(/Sender not verified/)).toHaveLength(1);
+    expect(screen.getAllByText('Automatic')).toHaveLength(1);
   });
 });

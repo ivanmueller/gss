@@ -197,6 +197,15 @@ export interface EmailView {
   failure: string | null;
   /** UTC instant. */
   occurredAt: string;
+  /**
+   * Received mail whose sender Cloudflare could not verify (no DMARC pass): it may not be from
+   * who it says (F-114 step 4a, the owner's answer 14). Always false for sent email.
+   */
+  unverifiedSender: boolean;
+  /** Received automatically (an out-of-office reply, a delivery report, a mailing). */
+  automatic: boolean;
+  /** Received mail that could not be read; its original is kept. */
+  parseFailed: boolean;
   /** Only in the single-email answer. */
   body?: string;
   bodyTruncated?: boolean;

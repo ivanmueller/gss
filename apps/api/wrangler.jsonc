@@ -35,6 +35,11 @@
       // secrets the owner adds (EMAIL_DOMAIN, EMAIL_ORGANIZATION_ID); without them, sending
       // answers "not set up".
       "send_email": [{ "name": "EMAIL" }],
+      // Received mail (src/receive-mail.ts, F-114 step 4a): each message's raw bytes, kept for
+      // good, and the markers of messages waiting for the database. Private: only this Worker
+      // reads it (no public access, no key anywhere). Created once by the owner in the
+      // dashboard (Cloudflare → R2 → Create bucket) before the first deploy that names it.
+      "r2_buckets": [{ "binding": "EMAIL_FILES", "bucket_name": "gss-mail-staging" }],
       // The Bank of Canada's USD/CAD rate (src/fx.ts), times in UTC. The Bank publishes by
       // 16:30 Ottawa time on business days: 22:15 UTC is after that all year (17:15 or 18:15
       // in Ottawa), and 14:15 UTC the next morning picks up a rate published late or a run
