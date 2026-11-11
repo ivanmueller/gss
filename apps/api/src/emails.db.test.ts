@@ -20,12 +20,19 @@ const user = id();
 const org = id();
 const company = id();
 const sender = `farmer-${company}@synthetic.example`;
+// Two admins of the organization: one is demoted while saving.
+const admins = { kept: id(), demoted: id() };
 
 beforeAll(async () => {
   await admin`insert into auth.users (id, email) values (${user}, ${`ada-${user}@example.test`})`;
   await admin`insert into app.organizations (id, display_name) values (${org}, ${`Synthetic Org ${org}`})`;
   await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at)
     values (${org}, ${user}, 'org_admin', 'active', now())`;
+  for (const adminId of Object.values(admins)) {
+    await admin`insert into auth.users (id, email) values (${adminId}, ${`admin-${adminId}@example.test`})`;
+    await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at)
+      values (${org}, ${adminId}, 'org_admin', 'active', now())`;
+  }
   await admin`insert into app.counterparties
       (id, organization_id, legal_name, types, primary_country, source, created_by)
     values (${company}, ${org}, ${`Synthetic Farm ${company}`}, '{seller}', 'CA', 'manual', ${user})`;
@@ -78,5 +85,53 @@ describe('receiving an email while its company is being archived', () => {
     const [row] = await receiving;
     expect(row?.result.status).toBe('received');
     expect(row?.result.counterparty_id).toBeNull();
+  });
+});
+
+describe('saving an email address while being demoted', () => {
+  // Codex's final review of F-114-2, finding R4-01: the admin check is made after the
+  // organization's lock, so a demotion committed during the wait is seen.
+  it('refuses the save once the demotion commits, and changes nothing', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked: () => void = () => undefined;
+    const isLocked = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const demoting = archiver.begin(async (tx) => {
+      await tx`update app.organization_members set role = 'viewer'
+        where organization_id = ${org} and user_id = ${admins.demoted}`;
+      locked();
+      await held;
+    });
+    await isLocked;
+
+    const saving = worker
+      .begin(async (tx) => {
+        await tx`select set_config('app.user_id', ${admins.demoted}, true)`;
+        return tx<{ result: string }[]>`
+          select app.save_member_email_address(${org}, ${admins.kept}, 'kept') as result`;
+      })
+      .then((rows) => rows[0]?.result);
+    let waiting = false;
+    for (let tries = 0; tries < 100 && !waiting; tries += 1) {
+      const [row] = await admin<{ n: number }[]>`
+        select count(*)::int as n from pg_stat_activity
+        where wait_event_type = 'Lock' and query like '%app.save_member_email_address%'
+          and pid <> pg_backend_pid()`;
+      waiting = (row?.n ?? 0) > 0;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(waiting).toBe(true);
+    release();
+    await demoting;
+
+    expect(await saving).toBe('forbidden');
+    const [count] = await admin<{ n: number }[]>`
+      select count(*)::int as n from app.member_email_addresses
+      where organization_id = ${org} and user_id = ${admins.kept}`;
+    expect(count?.n).toBe(0);
   });
 });

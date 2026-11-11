@@ -308,11 +308,16 @@ declare
   shared text := lower(btrim(new_shared_local_part));
   sig text := nullif(btrim(new_signature), '');
 begin
-  if uid is null or not app.is_org_admin(org) then
+  if uid is null or not app.is_active_member(org) then
     return 'forbidden';
   end if;
-  -- One settings row per organization, locked so an address saved at the same time is seen.
+  -- The organization locked first (as a change of role locks it), so an address saved at the
+  -- same time is seen and the admin check below sees a demotion that committed while this
+  -- waited (Codex's final review of F-114-2, finding R4-01).
   perform 1 from app.organizations o where o.id = org for update;
+  if not app.is_org_admin(org) then
+    return 'forbidden';
+  end if;
   if exists (select 1 from app.member_email_addresses a
               where a.organization_id = org and a.local_part = shared) then
     return 'address_taken';
@@ -339,10 +344,14 @@ declare
   uid uuid := app.current_user_id();
   wanted text := lower(btrim(new_local_part));
 begin
-  if uid is null or not app.is_org_admin(org) then
+  if uid is null or not app.is_active_member(org) then
     return 'forbidden';
   end if;
+  -- Locked before the admin check, as in app.save_email_settings.
   perform 1 from app.organizations o where o.id = org for update;
+  if not app.is_org_admin(org) then
+    return 'forbidden';
+  end if;
   if not exists (select 1 from app.organization_members m
                   where m.organization_id = org and m.user_id = member) then
     return 'not_a_member';
