@@ -4,6 +4,12 @@ Moved word for word from `docs/HANDOFF.md` and `AGENTS.md` on 2026-11-10 (F-155)
 
 ## Merge records
 
+Before it: `a759644`, ivanmueller/gss#217, merged automatically (documents only: the records of #215 and #216; F-114 setup done by the owner on 2026-11-10). CI run #505 and Merge policy run #46 green on the pull request, CI run #506 green on `main`; Deploy staging run #202 succeeded.
+
+Before it: `5783ffb`, ivanmueller/gss#216, merged automatically (normal risk, documents only: F-114 step 1, the email decisions in `docs/DECISIONS.md`: anyone on the team sends, from their own address or info@; option A, the platform receives all the domain's mail, nothing forwarded; option B, real mailboxes, later; text only at first; one signature edited by admins; kept forever; Claude drafts from every received email matched to a company; what Cloudflare's Email Service documentation says, read 2026-11-10. Codex: round 1 approved, 0 findings; register `docs/reviews/F-114.md`.) CI run #503 and Merge policy run #45 green on the pull request, CI run #504 green on `main`; Deploy staging run #201 succeeded.
+
+Before it: `867d2c9`, ivanmueller/gss#215, merged automatically (documents only: F-114 option A chosen by the owner, the records of #213 and #214). CI run #501 and Merge policy run #44 green on the pull request, CI run #502 green on `main`; Deploy staging run #200 succeeded.
+
 Before it: `03172a2`, ivanmueller/gss#214, merged automatically (documents only: F-114, the owner's answers of 2026-11-10 on email and what Cloudflare's Email Service documentation says). CI run #499 and Merge policy run #43 green on the pull request, CI run #500 green on `main`; Deploy staging run #199 succeeded.
 
 Before it: `d8d8057`, ivanmueller/gss#213, merged automatically (documents only: the records of #211 and #212; F-157 live, check pending, F-224). CI run #497 and Merge policy run #42 green on the pull request, CI run #498 green on `main`; Deploy staging run #198 succeeded.
