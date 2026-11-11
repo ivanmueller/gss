@@ -173,19 +173,36 @@ function endTagAt(html: string, name: string, from: number): number {
  *   memory stays small whatever the message holds (round 4, R4-01).
  * - A cell after another of its row starts with a tab, a row on a new line, whether or not the
  *   sender closed them (R3-03, R4-02: "<td>250<td>100" reads as 250, a tab, 100).
+ * - The text is gathered in pieces of at most CHUNK characters, joined once at the end, and the
+ *   last character is remembered rather than read back, so a growing string is never re-read
+ *   (round 5, R5-01: reading it back made many short paragraphs take seconds).
  */
 export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
-  let out = '';
+  const CHUNK = 4096;
+  const chunks: string[] = [];
+  let current = '';
+  let length = 0;
+  let last = '';
   let cellInRow = false;
+  const emit = (value: string) => {
+    if (value === '' || length >= limit) return;
+    current += value;
+    length += value.length;
+    last = value.charAt(value.length - 1);
+    if (current.length >= CHUNK) {
+      chunks.push(current);
+      current = '';
+    }
+  };
   const text = (value: string) => {
-    if (out.length < limit) out += decodeEntities(value.slice(0, (limit - out.length) * 10 + 16));
+    if (length < limit) emit(decodeEntities(value.slice(0, (limit - length) * 10 + 16)));
   };
   const newLine = () => {
     cellInRow = false;
-    if (out.length < limit && out !== '' && !out.endsWith('\n')) out += '\n';
+    if (length > 0 && last !== '\n') emit('\n');
   };
   let at = 0;
-  while (at < html.length && out.length < limit) {
+  while (at < html.length && length < limit) {
     const open = html.indexOf('<', at);
     if (open === -1) {
       text(html.slice(at));
@@ -218,14 +235,15 @@ export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
     }
     if (CELL_TAGS.has(name)) {
       if (!ending) {
-        if (cellInRow && out.length < limit) out += '\t';
+        if (cellInRow) emit('\t');
         cellInRow = true;
       }
     } else if (name === 'br' || LINE_TAGS.has(name)) {
       newLine();
     }
   }
-  return cut(out, limit)
+  chunks.push(current);
+  return cut(chunks.join(''), limit)
     .split('\n')
     .map((line) => line.trimEnd())
     .join('\n')

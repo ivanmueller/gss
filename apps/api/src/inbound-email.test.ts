@@ -383,3 +383,14 @@ describe('Codex final review, round 4', () => {
     });
   });
 });
+
+describe('Codex final review, round 5', () => {
+  it('converts many short paragraphs, lines and cells in time that grows with the length (R5-01)', () => {
+    for (const piece of ['<p>a</p>', 'a<br>', '<div>ab</div>', '<tr><td>1<td>2', '<li>x']) {
+      const started = performance.now();
+      const text = htmlToText(piece.repeat(250_000));
+      expect(text.length).toBeGreaterThan(0);
+      expect(performance.now() - started).toBeLessThan(1500);
+    }
+  });
+});
