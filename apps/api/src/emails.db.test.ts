@@ -40,11 +40,11 @@ afterAll(async () => {
 describe('receiving an email while its company is being archived', () => {
   // Codex's review of F-114-2, finding R1-03: the match is seen again under the company's lock.
   it('leaves the email to link by hand once the archive commits', async () => {
-    let release: () => void = () => {};
+    let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let locked: () => void = () => {};
+    let locked: () => void = () => undefined;
     const isLocked = new Promise<void>((resolve) => {
       locked = resolve;
     });
@@ -59,9 +59,19 @@ describe('receiving an email while its company is being archived', () => {
       select app.receive_email(${org}, 'info@gss.example', ${sender}, 'Synthetic Farmer',
         ${['info@gss.example']}::text[], ${[]}::text[], null, 'Synthetic subject',
         'Synthetic body.', false, ${`<${id()}@synthetic.example>`}, null, ${[]}::text[], true
-      ) as result`;
-    // The receiving waits on the archive's lock; then the archive commits.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+      ) as result`.execute();
+    // Postgres.js sends a query only when asked (Codex's round 2): it is sent now, and seen
+    // waiting on the archive's lock before the archive commits.
+    let waiting = false;
+    for (let tries = 0; tries < 100 && !waiting; tries += 1) {
+      const [row] = await admin<{ n: number }[]>`
+        select count(*)::int as n from pg_stat_activity
+        where wait_event_type = 'Lock' and query like '%app.receive_email%'
+          and pid <> pg_backend_pid()`;
+      waiting = (row?.n ?? 0) > 0;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(waiting).toBe(true);
     release();
     await archiving;
 

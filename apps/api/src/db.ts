@@ -145,12 +145,7 @@ export interface CounterpartyCommodity {
 /** The outcome of a change to a counterparty, its contacts or its locations. */
 /** What a counterparty has that keeps it from being deleted: records that keep their history. */
 export type CounterpartyHistory =
-  | 'quotes'
-  | 'freight'
-  | 'contact_log'
-  | 'follow_ups'
-  | 'calls'
-  | 'emails';
+  'quotes' | 'freight' | 'contact_log' | 'follow_ups' | 'calls' | 'emails';
 
 export type DeleteResult =
   | { status: 'deleted' }
@@ -1945,9 +1940,7 @@ export function createDatabase(sql: postgres.Sql): Database {
             exists (select from app.emails where counterparty_id = ${id}) as emails`;
         const history = (
           ['quotes', 'freight', 'contact_log', 'follow_ups', 'calls', 'emails'] as const
-        ).filter(
-          (what) => kept?.[what] === true,
-        );
+        ).filter((what) => kept?.[what] === true);
         if (history.length > 0) return { status: 'has_history', history };
         await tx`delete from app.counterparty_commodities where counterparty_id = ${id}`;
         await tx`delete from app.carrier_lanes where carrier_id = ${id}`;
