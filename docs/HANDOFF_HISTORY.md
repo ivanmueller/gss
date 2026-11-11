@@ -4,6 +4,8 @@ Moved word for word from `docs/HANDOFF.md` and `AGENTS.md` on 2026-11-10 (F-155)
 
 ## Merge records
 
+Before it: `ed96fc9`, ivanmueller/gss#218, merged automatically (high risk: F-114 step 2, emails stored: `20261111010000_emails.sql`, the emails table, removals, email settings and each person's address, and the database functions for sending and receiving. Codex: design D1 and code rounds 1 to 5, the final review approved; 9 findings fixed and verified; register `docs/reviews/F-114-2.md`.) CI run #513 and Merge policy run #55 green on the pull request, CI run #514 green on `main`; Deploy staging run #203 succeeded.
+
 Before it: `a759644`, ivanmueller/gss#217, merged automatically (documents only: the records of #215 and #216; F-114 setup done by the owner on 2026-11-10). CI run #505 and Merge policy run #46 green on the pull request, CI run #506 green on `main`; Deploy staging run #202 succeeded.
 
 Before it: `5783ffb`, ivanmueller/gss#216, merged automatically (normal risk, documents only: F-114 step 1, the email decisions in `docs/DECISIONS.md`: anyone on the team sends, from their own address or info@; option A, the platform receives all the domain's mail, nothing forwarded; option B, real mailboxes, later; text only at first; one signature edited by admins; kept forever; Claude drafts from every received email matched to a company; what Cloudflare's Email Service documentation says, read 2026-11-10. Codex: round 1 approved, 0 findings; register `docs/reviews/F-114.md`.) CI run #503 and Merge policy run #45 green on the pull request, CI run #504 green on `main`; Deploy staging run #201 succeeded.
