@@ -24,9 +24,15 @@ export function mockApi(handlers: Record<string, Handler>): Call[] {
       const call = { method, path, headers: new Headers(init.headers), body };
       calls.push(call);
       const handler = handlers[`${method} ${path}`];
-      return handler
-        ? handler(call)
-        : Response.json({ error: { code: 'NOT_FOUND', message: 'Not found.' } }, { status: 404 });
+      if (handler) return handler(call);
+      // A company's page lists its emails (F-114): none, unless a test says otherwise.
+      if (method === 'GET' && path.startsWith('/emails?') && path.includes('counterparty_id=')) {
+        return Response.json({ emails: [] });
+      }
+      return Response.json(
+        { error: { code: 'NOT_FOUND', message: 'Not found.' } },
+        { status: 404 },
+      );
     }),
   );
   return calls;
