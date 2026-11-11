@@ -32,7 +32,7 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 
 #### 1. F-114 — Email through the platform, written by hand and drafted by Claude
 
-**Status:** Needs owner input (the questions below), then Planned. **Asked:** 2026-11-06 (as an idea), direction given 2026-11-09: email sent by hand and drafted by Claude (as Claude drafts from call transcripts today); no Microsoft 365 for the business yet; the business has its own domain; Cloudflare on the Workers paid plan.
+**Status:** Needs owner input (two follow-up questions under 1 and 5, and the subdomain trial), then Planned. **Asked:** 2026-11-06 (as an idea), direction given 2026-11-09: email sent by hand and drafted by Claude (as Claude drafts from call transcripts today); no Microsoft 365 for the business yet; the business has its own domain; Cloudflare on the Workers paid plan.
 
 **Approach (proposed by an agent 2026-11-09, to be recorded in `docs/DECISIONS.md` once the owner answers):**
 - **Sending:** Cloudflare Email Service from the existing API Worker (its `send_email` binding), from a GSS address on the owner's domain. Not Cloudflare's Agents SDK or "email agents": no runtime agent framework (`AGENTS.md` rule 9), and nothing answers an email by itself.
@@ -50,14 +50,16 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 5. **Claude:** **Draft with Claude** on the form (a draft in Claude's colours, edited, then sent by the person), and drafts from each received reply, as from transcripts.
 6. **Owner checks on staging**, then the handoff record.
 
-**Owner decisions still open:**
-1. The sending address: each person's own (name@ the domain) or one shared (trading@ the domain)?
-2. ~~Is the domain's DNS on Cloudflare?~~ Answered 2026-11-09: moved from IONOS to Cloudflare that day; the domain's mailboxes stay at IONOS. Still open: which subdomain for replies.
-3. Who may send: everyone on the team, or traders and admins only?
-4. Attachments (photos, PDFs), or text only at first?
-5. A standard GSS signature; saved templates?
-6. How long emails are kept (like call transcripts, forever; or deleted after a time)?
-7. Should Claude draft from received replies automatically, as from calls?
+**Owner's answers (2026-11-10):**
+1. **Sending address:** both. A person sends from their own address (name@ the domain) or picks GSS's shared address on the form. Asked again: the shared address's name, and whether each person has their own mailbox at IONOS (replies are forwarded there).
+2. **Replies:** on a subdomain kept for the platform (`reply.` + the domain), provided it keeps linking Outlook or another provider easy later. It does: sending stays in one module, and with Microsoft 365 the platform would send through each person's Outlook and read replies from their mailbox, the reply subdomain then retired; emails already kept stay as they are.
+3. **Who may send:** everyone on the team.
+4. **Attachments:** text only at first; PDFs and photos once sending and replies are checked on staging.
+5. **Signature:** one standard GSS signature for the whole team, with each person's own details (such as name, title, phone). Asked again: who edits the standard signature (admins?), and which details vary by person. Saved templates: not asked for.
+6. **How long emails are kept:** forever, as call transcripts.
+7. **Claude on replies:** yes, Claude reads every received reply and drafts bids, offers, follow-ups and contact details, verified by a person as from calls.
+
+**Read from Cloudflare's documentation on 2026-11-10** (developers.cloudflare.com, Email Service pages; to be recorded in `docs/DECISIONS.md` in step 1): sending to any address needs a sending domain onboarded on Cloudflare DNS and Workers Paid; From any address on that domain, with a display name; a **Reply-To can be set** (`replyTo`); text and HTML; at most 50 recipients and 25 MiB per email, 32 attachments; 3,000 emails a month included on Workers Paid, then USD 0.35 per 1,000, new accounts on a daily quota that grows (no number published); still called a beta; sending's own DNS records go on a separate `cf-bounce` name, leaving the domain's SPF and IONOS mail untouched. Receiving (Email Routing) forwards only to verified addresses (each person's inbox verified once) and takes messages up to 25 MiB. **Not confirmed:** turning on Email Routing for a subdomain while the domain's own mail (MX records) stays at IONOS. Cloudflare's pages say Email Routing puts its records on the main domain and refuses to start while other mail records exist there. Must be tried in the dashboard with exact steps before building step 4, never by switching on Email Routing for the main domain (it would replace IONOS's mail records). If it cannot be done, replies would need another route (to be decided with the owner).
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
