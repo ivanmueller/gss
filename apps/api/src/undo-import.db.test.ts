@@ -228,6 +228,10 @@ describe('undoing an import as app_api', () => {
           line: 4,
           values: { legalName: 'Synthetic Plain Farm', country: 'CA', city: 'Olds', region: 'AB' },
         },
+        {
+          line: 5,
+          values: { legalName: 'Synthetic Mailed Farm', country: 'CA', city: 'Olds', region: 'AB' },
+        },
       ],
       '3'.repeat(64),
     );
@@ -239,6 +243,13 @@ describe('undoing an import as app_api', () => {
     };
     const called = await named('Synthetic Called Farm');
     const retyped = await named('Synthetic Retyped Farm');
+    // Codex's review of F-114-2, finding R1-02: a company whose only history is an email.
+    const mailed = await named('Synthetic Mailed Farm');
+    await admin`insert into app.emails
+        (organization_id, direction, status, counterparty_id, envelope_to, from_address,
+         body_text, message_id)
+      values (${orgs.a}, 'incoming', 'received', ${mailed}, 'info@gss.example',
+              'farmer@synthetic.example', 'Synthetic email.', ${`<${id()}@synthetic.example>`})`;
     // A contact logged with one, and the other made a buyer too, under Edit details.
     expect(
       await db.createContactLog(as(users.olivia), {
@@ -277,13 +288,18 @@ describe('undoing an import as app_api', () => {
         kept: expect.arrayContaining([
           { id: called, name: 'Synthetic Called Farm', reason: 'history' },
           { id: retyped, name: 'Synthetic Retyped Farm', reason: 'retyped' },
+          { id: mailed, name: 'Synthetic Mailed Farm', reason: 'history' },
         ]) as unknown,
       },
     });
     expect(await db.undoImport(as(users.adam), batch, true, 1)).toMatchObject({ status: 'ok' });
     const names = (await db.listCounterparties(as(users.adam), orgs.a)).map((r) => r.legalName);
     expect(names).toEqual(
-      expect.arrayContaining(['Synthetic Called Farm', 'Synthetic Retyped Farm']),
+      expect.arrayContaining([
+        'Synthetic Called Farm',
+        'Synthetic Retyped Farm',
+        'Synthetic Mailed Farm',
+      ]),
     );
     expect(names).not.toContain('Synthetic Plain Farm');
   });
