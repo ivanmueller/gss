@@ -249,10 +249,8 @@ describe('CounterpartyPage', () => {
     expect(screen.getByText('27 Oct 2026, 8:05 am MT')).toBeInTheDocument();
 
     const contacts = screen.getByRole('region', { name: 'Contacts (1)' });
-    expect(within(contacts).getByRole('link', { name: 'merch@example.test' })).toHaveAttribute(
-      'href',
-      'mailto:merch@example.test',
-    );
+    expect(contacts).toHaveTextContent('merch@example.test');
+    expect(within(contacts).getByRole('button', { name: /^Email / })).toBeInTheDocument();
     expect(within(contacts).getByRole('link', { name: '+1 (306) 555-0100' })).toHaveAttribute(
       'href',
       'tel:+13065550100',
@@ -776,7 +774,7 @@ describe('CounterpartyPage editing', () => {
       />,
     );
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
-    for (const name of ['More actions', 'Edit details', 'Archive', 'Add contact', 'Add location']) {
+    for (const name of ['Edit details', 'Archive', 'Add contact', 'Add location']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
     expect(

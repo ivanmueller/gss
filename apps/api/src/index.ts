@@ -13,6 +13,8 @@ import { counterpartyRoutes } from './counterparties';
 import { callbackRoutes } from './callbacks';
 import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
+import { cloudflareMailer, type MailerFactory } from './email';
+import { emailRoutes } from './emails';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
@@ -27,8 +29,12 @@ import { telnyxClient, type TelnyxFactory } from './telnyx';
 
 export type { ApiEnv, DatabaseFactory } from './respond';
 
-export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: TelnyxFactory } = {}) {
+export function createApp(
+  openDatabase: DatabaseFactory,
+  options: { telnyx?: TelnyxFactory; mailer?: MailerFactory } = {},
+) {
   const telnyx = options.telnyx ?? telnyxClient;
+  const mailer = options.mailer ?? cloudflareMailer;
   const app = new Hono<ApiEnv>().basePath('/api/v1');
 
   // Every response carries a request id; writes record it in the audit trail.
@@ -137,6 +143,7 @@ export function createApp(openDatabase: DatabaseFactory, options: { telnyx?: Tel
   app.route('/calls', callRoutes(openDatabase, telnyx));
   app.route('/callbacks', callbackRoutes(openDatabase, telnyx));
   app.route('/map-layers', mapLayerRoutes(openDatabase));
+  app.route('/emails', emailRoutes(openDatabase, mailer));
 
   return app;
 }

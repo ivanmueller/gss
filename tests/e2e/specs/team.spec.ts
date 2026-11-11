@@ -39,6 +39,14 @@ test('the Team page lists the admin and needs a first name for a new login', asy
   await expect(me).toContainText('Synthetic');
 });
 
+test('the Email card says when sending is not set up in Cloudflare', async ({ page }) => {
+  // CI's Worker has no email binding or domain (F-114 step 3).
+  await page.goto('/team');
+  const card = page.getByRole('region', { name: 'Email' });
+  await expect(card).toContainText('Email is not set up yet');
+  await expect(card.getByRole('button', { name: 'Save' })).toHaveCount(0);
+});
+
 test('an admin makes a login; the new person sets up their authenticator and own password', async ({
   page,
   browser,

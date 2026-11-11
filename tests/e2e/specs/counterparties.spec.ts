@@ -212,6 +212,14 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await expect(page.getByTitle('Seller kind')).toHaveText('Farm');
   await expect(page.getByText('About 4,500 t a year')).toBeVisible();
   await expect(page.getByText('Entered by hand')).toBeVisible();
+  // Email (F-114 step 3): none yet, and sending is not set up in CI (no Cloudflare binding).
+  await expect(page.getByRole('region', { name: 'Emails' })).toContainText('No emails yet.');
+  await page.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'New email' }).click();
+  const emailForm = page.getByRole('dialog', { name: 'New email' });
+  await expect(emailForm.getByRole('alert')).toContainText('Email is not set up yet');
+  await emailForm.getByRole('button', { name: 'Close' }).click();
+  await expect(emailForm).toHaveCount(0);
   await page.getByRole('button', { name: 'Add contact' }).click();
   const newContact = page.getByRole('form', { name: 'New contact' });
   await newContact.getByLabel('Name (required)').fill('Synthetic Farmer');

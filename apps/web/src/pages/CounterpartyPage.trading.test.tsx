@@ -224,10 +224,11 @@ describe('a buyer’s or seller’s page', () => {
       'href',
       'tel:+13065550100',
     );
-    expect(within(main).getByRole('link', { name: 'merch@example.test' })).toHaveAttribute(
-      'href',
-      'mailto:merch@example.test',
-    );
+    // The address, with Email beside it to write from the platform (F-114).
+    expect(main).toHaveTextContent('merch@example.test');
+    expect(
+      within(main).getByRole('button', { name: 'Email Synthetic Merchandiser' }),
+    ).toBeInTheDocument();
     // The main contact is marked in the list too, and listed first by the API.
     const contacts = screen.getByRole('region', { name: 'Contacts (2)' });
     expect(within(contacts).getAllByRole('listitem')[0]).toHaveTextContent('Main contact');
@@ -249,6 +250,7 @@ describe('a buyer’s or seller’s page', () => {
     await screen.findByRole('menuitem', { name: 'Plan follow-up' });
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'New bid',
+      'New email',
       'Plan follow-up',
     ]);
     expect(screen.getByRole('menuitem', { name: 'New bid' })).toHaveAttribute(
@@ -404,9 +406,12 @@ describe('a buyer’s or seller’s page', () => {
     mockApi();
     show('viewer');
     await screen.findByRole('heading', { name: 'Synthetic Prairie Mills' });
-    for (const name of [/^Make /, 'Log contact', 'Plan follow-up', 'More actions']) {
+    for (const name of [/^Make /, 'Log contact', 'Plan follow-up']) {
       expect(screen.queryByRole('button', { name })).toBeNull();
     }
+    // Everyone on the team sends email (the owner's answer, 2026-11-10): the menu has only that.
+    await userEvent.setup().click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['New email']);
     expect(screen.queryByText(/choose one under Contacts/)).toBeNull();
     expect(screen.queryByRole('link', { name: 'New bid' })).toBeNull();
   });
@@ -420,6 +425,7 @@ describe('a buyer’s or seller’s page', () => {
       'Bids and offers',
       'Follow-ups',
       'Contact history',
+      'Emails',
       'Contacts',
       'What they buy',
       'Locations',
@@ -443,6 +449,7 @@ describe('a buyer’s or seller’s page', () => {
       'Bids and offers',
       'Contacts',
       'Contact history',
+      'Emails',
       'What they buy',
       'Locations',
       'Freight to and from its locations',
@@ -485,6 +492,7 @@ describe('a carrier’s page', () => {
     await screen.findByRole('menuitem', { name: 'Plan follow-up' });
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'New freight rate',
+      'New email',
       'Plan follow-up',
       'Edit details',
       'Add logo',
@@ -506,6 +514,7 @@ describe('a carrier’s page', () => {
       'Freight rates',
       'Follow-ups',
       'Contact history',
+      'Emails',
       'Lanes',
       'Contacts',
       'Locations',
@@ -534,6 +543,7 @@ describe('a carrier’s page', () => {
       'Freight rates',
       'Contacts',
       'Contact history',
+      'Emails',
       'Locations',
     ]);
   });

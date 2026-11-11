@@ -45,7 +45,9 @@ import {
   Wheat,
 } from 'lucide-react';
 import {
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type ClipboardEvent,
@@ -56,6 +58,13 @@ import {
 import { BackLink } from '../components/BackLink';
 import { CarrierLanes, isCrossBorder } from '../components/CarrierLanes';
 import { CallingProvider, PhoneNumber } from '../components/Calling';
+import {
+  ContactEmail,
+  EmailProvider,
+  EmailsCard,
+  useEmailComposer,
+  useEmailsSent,
+} from '../components/Emails';
 import {
   ContactHistoryCard,
   crmDraftPlace,
@@ -520,7 +529,14 @@ export function CounterpartyPage({ session, id }: { session: DirectorySession; i
         </p>
       )}
       {resource.status === 'ok' && (
-        <CounterpartyView session={session} detail={resource.data} reload={reload} />
+        <EmailProvider
+          session={session}
+          counterpartyId={resource.data.id}
+          contacts={resource.data.contacts}
+          enabled={resource.data.archivedAt === null}
+        >
+          <CounterpartyView session={session} detail={resource.data} reload={reload} />
+        </EmailProvider>
       )}
     </section>
   );
@@ -564,6 +580,16 @@ function CounterpartyView({
       quotes.reload();
     },
   });
+  // An email sent is logged in the contact history (F-114 step 3): it, and Last contact, are
+  // loaded again after each (Codex's review of F-114-3, R1-03).
+  const emailsSent = useEmailsSent();
+  const crmChanged = useRef(crm.changed);
+  useEffect(() => {
+    crmChanged.current = crm.changed;
+  });
+  useEffect(() => {
+    if (emailsSent > 0) crmChanged.current('');
+  }, [emailsSent]);
   // Two columns on a computer screen (Tailwind's `xl`); one, in order of use, below it.
   const wide = useMediaQuery('(min-width: 1280px)', true);
 
@@ -704,7 +730,8 @@ function CounterpartyView({
   const places = [detail.regions.join(', '), countryName(detail.primaryCountry)].filter(Boolean);
   // Only Log contact stays visible; the rest is in the "…" menu (the owner's request of
   // 2026-11-03).
-  const menu = canQuote || canFreight || crm.canPlan || canChange;
+  const composer = useEmailComposer();
+  const menu = canQuote || canFreight || crm.canPlan || canChange || composer !== null;
 
   // Who they are, whom to call, and the day's actions; a carrier's with its equipment and
   // whether it crosses the border.
@@ -790,6 +817,16 @@ function CounterpartyView({
                       <Plus aria-hidden="true" />
                       New freight rate
                     </Link>
+                  </DropdownMenuItem>
+                )}
+                {composer !== null && (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      composer.compose();
+                    }}
+                  >
+                    <Mail aria-hidden="true" />
+                    New email
                   </DropdownMenuItem>
                 )}
                 {crm.canPlan && (
@@ -1370,6 +1407,7 @@ function CounterpartyView({
               {quotesCard}
               <FollowUpsCard crm={crm} />
               <ContactHistoryCard crm={crm} />
+              <EmailsCard session={session} counterpartyId={detail.id} />
             </div>
             <div className="flex min-w-0 flex-col gap-4">
               {contactsCard}
@@ -1386,6 +1424,7 @@ function CounterpartyView({
             {quotesCard}
             {contactsCard}
             <ContactHistoryCard crm={crm} />
+            <EmailsCard session={session} counterpartyId={detail.id} />
             {commoditiesCard}
             {lanesCard}
             {locationsCard}
@@ -1401,6 +1440,7 @@ function CounterpartyView({
               {freightCard}
               <FollowUpsCard crm={crm} />
               <ContactHistoryCard crm={crm} />
+              <EmailsCard session={session} counterpartyId={detail.id} />
             </div>
             <div className="flex min-w-0 flex-col gap-4">
               {lanesCard}
@@ -1416,6 +1456,7 @@ function CounterpartyView({
             {freightCard}
             {contactsCard}
             <ContactHistoryCard crm={crm} />
+            <EmailsCard session={session} counterpartyId={detail.id} />
             {locationsCard}
             {detailsCard}
           </>
@@ -1436,15 +1477,7 @@ function ContactLinks({ contact }: { contact: Contact }) {
           href={telHref(contact.phone)}
         />
       )}
-      {contact.email && (
-        <a
-          href={`mailto:${contact.email}`}
-          className="flex w-fit items-center gap-1.5 break-all underline underline-offset-4"
-        >
-          <Mail aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-          {contact.email}
-        </a>
-      )}
+      <ContactEmail contact={contact} />
     </>
   );
 }

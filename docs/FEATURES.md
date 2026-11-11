@@ -64,7 +64,12 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 9. **Mail that matches no company:** kept forever, with a way to delete it by hand (an agent's reading, to be confirmed: deleting hides it from every list and keeps the row, as the contact history's removals).
 10. **Who links unmatched mail to a company (and deletes it):** anyone on the team.
 
-Step 2 (branch `claude/f114-step2-emails`, register `docs/reviews/F-114-2.md`): the emails table and its database functions, design review by Codex first.
+**Owner's answers for step 3 (2026-11-10):**
+11. **Phone in the signature:** a number admins type on Team for each person (beside their address); a person's private cell stays private.
+12. **Title in the signature:** set by admins on Team for each person, with their address.
+The owner also confirmed answer 9's reading (deleting hides the email and keeps the row) the same day.
+
+Step 2 merged (ivanmueller/gss#218, 2026-11-10). Step 3 (branch `claude/f114-step3-send`, register `docs/reviews/F-114-3.md`): send by hand, design review by Codex first. Found while planning: Cloudflare sets each email's Message-ID itself (custom Message-ID headers are refused) and returns its id from `send()`; the platform keeps that id, and step 4 matches replies against it once a real reply is seen on staging.
 
 **Read from Cloudflare's documentation on 2026-11-10** (developers.cloudflare.com, Email Service pages; to be recorded in `docs/DECISIONS.md` in step 1): sending to any address needs a sending domain onboarded on Cloudflare DNS and Workers Paid; From any address on that domain, with a display name; a **Reply-To can be set** (`replyTo`); text and HTML; at most 50 recipients and 25 MiB per email, 32 attachments; 3,000 emails a month included on Workers Paid, then USD 0.35 per 1,000, new accounts on a daily quota that grows (no number published); still called a beta; sending's own DNS records go on a separate `cf-bounce` name, leaving the domain's SPF and IONOS mail untouched. Receiving (Email Routing) forwards only to verified addresses (each person's inbox verified once) and takes messages up to 25 MiB. Email Routing puts its records on the main domain and refuses to start while other mail records exist there. **The domain's DNS on Cloudflare (seen by the owner, 2026-11-10):** IONOS's default mail records, with no mailboxes behind them (two MX, an SPF TXT, two DKIM and a DMARC CNAME, and autodiscover); for option A they are removed in step 1, then Cloudflare adds its own; a DMARC record is also recommended by Cloudflare. Nothing is to be changed before step 1's exact steps.
 
