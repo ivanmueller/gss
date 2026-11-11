@@ -49,21 +49,11 @@ function sendingFor(config: EmailConfig | null, organizationId: string): EmailCo
   return config !== null && config.organizationId === organizationId.toLowerCase() ? config : null;
 }
 
-/** A page cursor from `before_at` and `before_id`, absent, or invalid. */
+/** A page cursor (`before_id`: the last email of the page before), absent, or invalid. */
 function cursorOf(c: ApiContext): EmailCursor | null | 'invalid' {
-  const at = c.req.query('before_at');
   const id = c.req.query('before_id');
-  if (at === undefined && id === undefined) return null;
-  if (at === undefined || id === undefined || !isUuid(id)) return 'invalid';
-  // Kept as given, to the microsecond: Postgres keeps microseconds, and a cursor rounded to the
-  // millisecond skips emails at a page's edge (Codex's review of F-114-3, R1-01).
-  if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/.test(at) ||
-    Number.isNaN(new Date(at).getTime())
-  ) {
-    return 'invalid';
-  }
-  return { occurredAt: at, id };
+  if (id === undefined) return null;
+  return isUuid(id) ? { id } : 'invalid';
 }
 
 async function settingsView(

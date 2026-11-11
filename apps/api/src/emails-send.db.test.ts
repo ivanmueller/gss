@@ -22,7 +22,8 @@ const id = () => crypto.randomUUID();
 const as = (userId: string): RequestContext => ({ userId, requestId: id() });
 const org = id();
 const company = id();
-const people = { adam: id(), tom: id(), demoted: id() };
+const people = { adam: id(), tom: id(), demoted: id(), vera: id(), ana: id() };
+const ROLES: Record<string, string> = { tom: 'trader', vera: 'viewer', ana: 'analyst' };
 
 beforeAll(async () => {
   await admin`insert into app.organizations (id, display_name) values (${org}, ${`Synthetic Org ${org}`})`;
@@ -30,7 +31,7 @@ beforeAll(async () => {
     await admin`insert into auth.users (id, email, raw_user_meta_data)
       values (${userId}, ${`${name}-${userId}@example.test`}, ${admin.json({ first_name: name })})`;
     await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at)
-      values (${org}, ${userId}, ${name === 'tom' ? 'trader' : 'org_admin'}, 'active', now())`;
+      values (${org}, ${userId}, ${ROLES[name] ?? 'org_admin'}, 'active', now())`;
   }
   await admin`insert into app.counterparties
       (id, organization_id, legal_name, types, primary_country, source, created_by)
@@ -199,6 +200,32 @@ describe('sending', () => {
     ]);
   });
 
+  it('lets a viewer and an analyst finish a sent email, kept but not in the history (R2-01)', async () => {
+    for (const sender of [people.vera, people.ana]) {
+      const started = await db.startOutgoingEmail(as(sender), {
+        organizationId: org,
+        counterpartyId: company,
+        contactId: null,
+        fromLocalPart: 'info',
+        domain: 'gss.example.test',
+        to: ['pat@buyer.example.test'],
+        cc: [],
+        subject: 'Synthetic read-only sender',
+        body: 'Synthetic body.',
+        messageId: `gss-${id()}`,
+      });
+      if (started.status !== 'started') throw new Error(`not started: ${started.status}`);
+      expect(
+        await db.finishOutgoingEmail(as(sender), started.id, { ok: true, providerId: 'cf-2' }),
+      ).toBe('done');
+      expect((await db.getEmail(as(sender), org, started.id))?.state).toBe('sent');
+    }
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from app.contact_log_revisions r
+       where r.notes = 'Email sent: Synthetic read-only sender'`;
+    expect(row?.n).toBe(0);
+  });
+
   it('pages through every email of a company, including equal times (F-114-3-D1-03)', async () => {
     const pageCompany = id();
     await admin`insert into app.counterparties
@@ -218,14 +245,14 @@ describe('sending', () => {
       select count(distinct occurred_at)::int as n from app.emails where counterparty_id = ${pageCompany}`;
     expect(shared?.n).toBe(1);
     const seen = new Set<string>();
-    let before: { occurredAt: string; id: string } | null = null;
+    let before: { id: string } | null = null;
     for (let page = 0; page < 5; page += 1) {
       const emails = await db.listEmails(as(people.tom), org, pageCompany, before);
       if (emails === null || emails.length === 0) break;
       for (const email of emails) seen.add(email.id);
       const last = emails[emails.length - 1];
       if (last === undefined) break;
-      before = { occurredAt: last.cursorAt, id: last.id };
+      before = { id: last.id };
     }
     expect(seen.size).toBe(count);
   });

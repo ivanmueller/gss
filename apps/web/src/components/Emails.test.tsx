@@ -59,7 +59,6 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     contactName: 'Pat Buyer',
     failure: null,
     occurredAt: '2026-11-10T21:00:00.000Z',
-    cursorAt: '2026-11-10T21:00:00.123456Z',
     ...overrides,
   };
 }
@@ -218,6 +217,55 @@ describe('the email form', () => {
     expect(within(dialog).queryByRole('button', { name: /^Send/ })).toBeNull();
   });
 
+  it('stays locked after a lost answer even when a retry is refused for an expired sign-in (R2-02)', async () => {
+    let answer = 0;
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [`POST /emails?organization_id=${ORG.id}`]: () => {
+        answer += 1;
+        if (answer === 1) return Promise.reject(new TypeError('network'));
+        if (answer === 2) {
+          return Response.json(
+            { error: { code: 'UNAUTHORIZED', message: 'Sign in again.' } },
+            { status: 401 },
+          );
+        }
+        return Response.json({ email: email() }, { status: 200 });
+      },
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await write(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    await within(dialog).findByText('The server could not be reached.');
+    await user.click(within(dialog).getByRole('button', { name: 'Send again' }));
+    await within(dialog).findByText('Sign in again.');
+    expect(within(dialog).getByLabelText('Message')).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Send again' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const posts = calls.filter((call) => call.method === 'POST').map((call) => call.body);
+    expect(posts).toHaveLength(3);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(posts[2]).toEqual(posts[0]);
+  });
+
+  it('unlocks a first attempt refused before anything was kept', async () => {
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [`POST /emails?organization_id=${ORG.id}`]: () =>
+        Response.json(
+          { error: { code: 'ARCHIVED', message: 'This counterparty is archived.' } },
+          { status: 409 },
+        ),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await write(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    await within(dialog).findByText('This counterparty is archived.');
+    expect(within(dialog).getByLabelText('Message')).toBeEnabled();
+  });
+
   it('says so when email is not set up, and offers no Email on an archived company', async () => {
     mockApi({
       [SETTINGS_PATH]: () =>
@@ -249,7 +297,7 @@ describe('the Emails card', () => {
       }),
     );
     const last = page[199];
-    const older = `${LIST_PATH}&before_at=${encodeURIComponent(last?.cursorAt ?? '')}&before_id=${last?.id ?? ''}`;
+    const older = `${LIST_PATH}&before_id=${last?.id ?? ''}`;
     mockApi({
       [LIST_PATH]: () => Response.json({ emails: page }),
       [older]: () =>

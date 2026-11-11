@@ -168,6 +168,8 @@ function EmailDialog({
   const [sent, setSent] = useState(false);
   // The email submitted and not yet known to be sent or refused: kept as it was, not editable.
   const [pending, setPending] = useState<SendPayload | null>(null);
+  // An attempt under the current key had no clear answer: it may have been sent.
+  const [uncertain, setUncertain] = useState(false);
   const locked = sent || busy || pending !== null;
 
   useEffect(() => {
@@ -261,16 +263,22 @@ function EmailDialog({
           // Nothing went: correct it and send again as a new attempt (the refused one is kept).
           setSendKey(crypto.randomUUID());
           setPending(null);
+          setUncertain(false);
           onSent();
         } else if (code === 'EMAIL_UNCONFIRMED' || code === 'EMAIL_IN_PROGRESS') {
           // It may have gone: never offered again from this form.
           setSent(true);
           onSent();
-        } else if (status >= 400 && status < 500) {
-          // Refused before anything was kept or sent: correct it and send.
+        } else if (status >= 400 && status < 500 && !uncertain) {
+          // A first attempt refused before anything was kept or sent: correct it and send.
           setPending(null);
+        } else if (status === 0 || status >= 500) {
+          // No answer, or the server failed: this key may have sent it. Until an answer about
+          // the key itself, the email stays as submitted, even if a retry is then refused for
+          // another reason, such as an expired sign-in (Codex's review of F-114-3, R2-02).
+          setUncertain(true);
         }
-        // Otherwise (no answer, or the server failed) the same email is offered again as is.
+        // Otherwise the same email is offered again as is.
         setResult({
           ok: false,
           text: reason instanceof Error ? reason.message : 'The email could not be sent.',
@@ -502,10 +510,7 @@ export function EmailsCard({
     const last = emails?.[emails.length - 1];
     if (last === undefined) return;
     setLoadingOlder(true);
-    apiJson<{ emails: EmailView[] }>(
-      `${path}&before_at=${encodeURIComponent(last.cursorAt)}&before_id=${last.id}`,
-      token,
-    )
+    apiJson<{ emails: EmailView[] }>(`${path}&before_id=${last.id}`, token)
       .then((answer) => {
         setEmails((current) => [...(current ?? []), ...answer.emails]);
         setMore(answer.emails.length >= PAGE);

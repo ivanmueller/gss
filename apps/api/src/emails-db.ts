@@ -88,9 +88,11 @@ export interface EmailsDatabase {
   getEmail: (ctx: RequestContext, organizationId: string, id: string) => Promise<EmailView | null>;
 }
 
-/** Where a page of emails ends: the last email's time (UTC instant) and id. */
+/**
+ * Where a page of emails ends: the last email listed. The database reads its exact time itself,
+ * so no time is rounded on its way through the browser (Codex's review of F-114-3, R1-01).
+ */
 export interface EmailCursor {
-  occurredAt: string;
   id: string;
 }
 
@@ -138,7 +140,6 @@ interface EmailRow {
   contact_name: string | null;
   failure: string | null;
   occurred_at: Date;
-  cursor_at: string;
   body_text?: string;
   body_truncated?: boolean;
 }
@@ -159,7 +160,6 @@ function emailView(row: EmailRow): EmailView {
     contactName: row.contact_name,
     failure: row.failure,
     occurredAt: row.occurred_at.toISOString(),
-    cursorAt: row.cursor_at,
     ...(row.body_text === undefined
       ? {}
       : { body: row.body_text, bodyTruncated: row.body_truncated ?? false }),
@@ -190,8 +190,6 @@ export function emailQueries(asUser: AsUser): EmailsDatabase {
     e.id, e.direction, e.from_address, e.from_name, to_jsonb(e.to_addresses::text[]) as to_addresses,
     to_jsonb(e.cc_addresses::text[]) as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
     e.occurred_at,
-    -- The exact time, to the microsecond, for the page cursor (Codex's review of F-114-3, R1-01).
-    to_char(e.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as cursor_at,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
@@ -285,9 +283,9 @@ export function emailQueries(asUser: AsUser): EmailsDatabase {
               ${email.organizationId}, ${email.counterpartyId}, ${email.contactId}, ${email.fromLocalPart},
               ${email.domain},
               -- Lists go as JSON: without fetch_types, postgres.js sends an array as text.
-              array(select t.x from jsonb_array_elements_text(${JSON.stringify(email.to)}::jsonb)
+              array(select t.x from jsonb_array_elements_text(${tx.json(email.to)}::jsonb)
                       with ordinality t(x, n) order by t.n),
-              array(select t.x from jsonb_array_elements_text(${JSON.stringify(email.cc)}::jsonb)
+              array(select t.x from jsonb_array_elements_text(${tx.json(email.cc)}::jsonb)
                       with ordinality t(x, n) order by t.n),
               ${email.subject}, ${email.body},
               ${email.messageId}) as result`;
@@ -340,7 +338,14 @@ export function emailQueries(asUser: AsUser): EmailsDatabase {
             from app.emails e
            where e.organization_id = ${organizationId} and e.counterparty_id = ${counterpartyId}
              and not exists (select 1 from app.email_removals x where x.email_id = e.id)
-             ${before === null ? tx`` : tx`and (e.occurred_at, e.id) < (${before.occurredAt}::timestamptz, ${before.id}::uuid)`}
+             ${
+               before === null
+                 ? tx``
+                 : tx`and (e.occurred_at, e.id) < (
+                       select o.occurred_at, o.id from app.emails o
+                        where o.organization_id = ${organizationId}
+                          and o.counterparty_id = ${counterpartyId} and o.id = ${before.id})`
+             }
            order by e.occurred_at desc, e.id desc
            limit ${EMAIL_LIST_LIMIT}`;
         return rows.map(emailView);

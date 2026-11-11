@@ -4,7 +4,8 @@
 -- transaction that marks it sent writes one contact history entry (channel email, by the
 -- person who sent it, at the time it was sent). An email moves from sending to sent only once
 -- (the row is locked and its status checked), so it is logged once; a refused or unconfirmed
--- email is not logged. The entry is an ordinary one: corrected or removed as any other.
+-- email is not logged, and neither is one sent by a role that does not log contacts (viewers,
+-- analysts). The entry is an ordinary one: corrected or removed as any other.
 
 create or replace function app.finish_outgoing_email(email uuid, ok boolean, provider_id text, failure_text text)
 returns text
@@ -29,6 +30,13 @@ begin
     update app.emails e
        set status = 'sent', provider_message_id = provider_id, occurred_at = sent_at
      where e.id = m.id;
+    -- Only roles that log contacts write the contact history (app.number_contact_log_revision);
+    -- an email sent by a viewer or analyst is kept and shown with the company's emails, and is
+    -- not put in the history, so finishing it never fails after it was sent (Codex's review of
+    -- F-114-3, R2-01).
+    if not app.can_log_contacts(m.organization_id) then
+      return 'done';
+    end if;
     insert into app.contact_log_entries (organization_id, counterparty_id, created_by)
     values (m.organization_id, m.counterparty_id, uid)
     returning id into entry;
