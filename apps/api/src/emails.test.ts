@@ -60,6 +60,9 @@ function emailRow(overrides: Partial<EmailView> = {}): EmailView {
     contactName: 'Pat Buyer',
     failure: null,
     occurredAt: '2026-11-10T21:00:00.000Z',
+    unverifiedSender: false,
+    automatic: false,
+    parseFailed: false,
     ...overrides,
   };
 }

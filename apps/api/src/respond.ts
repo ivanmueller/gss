@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { AnthropicBindings } from './anthropic';
 import type { AuthBindings, AuthUser } from './auth';
 import type { EmailBindings } from './email';
+import type { MailBucket } from './receive-mail';
 import type { TelnyxBindings } from './telnyx';
 import type { Database, RequestContext } from './db';
 
@@ -23,6 +24,8 @@ export interface ApiEnv {
       GEOCODIO_API_KEY?: string;
       /** Supabase secret key (Worker secret), only for creating logins and setting passwords. */
       SUPABASE_SECRET_KEY?: string;
+      /** Private R2 bucket for received mail (F-114 step 4a, src/receive-mail.ts). */
+      EMAIL_FILES?: MailBucket;
     };
   Variables: { user: AuthUser; requestId: string };
 }

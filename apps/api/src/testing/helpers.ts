@@ -248,6 +248,10 @@ export function fakeDatabase(): Mocked<Database> {
     finishOutgoingEmail: vi.fn<Database['finishOutgoingEmail']>(() => Promise.resolve('done')),
     listEmails: vi.fn<Database['listEmails']>(() => Promise.resolve([])),
     getEmail: vi.fn<Database['getEmail']>(() => Promise.resolve(null)),
+    admitEmail: vi.fn<Database['admitEmail']>(() => Promise.resolve('admit')),
+    receiveEmail: vi.fn<Database['receiveEmail']>(() =>
+      Promise.resolve({ status: 'received', id: 'e1', counterpartyId: null, duplicate: false }),
+    ),
     listCallbackReturns: vi.fn<Database['listCallbackReturns']>(() => Promise.resolve([])),
     countCallbackReturns: vi.fn<Database['countCallbackReturns']>(() => Promise.resolve(0)),
     settleCallbackReturn: vi.fn<Database['settleCallbackReturn']>(() => Promise.resolve('done')),

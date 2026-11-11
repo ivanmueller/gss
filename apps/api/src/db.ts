@@ -971,7 +971,7 @@ export function createDatabase(sql: postgres.Sql): Database {
     ...readingQueries(asUser, sql),
     ...summaryQueries(asUser, sql),
     ...mapLayerQueries(asUser),
-    ...emailQueries(asUser),
+    ...emailQueries(asUser, sql),
 
     async memberships(userId) {
       const rows = await sql.begin(async (tx) => {

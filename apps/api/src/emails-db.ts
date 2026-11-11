@@ -2,6 +2,7 @@ import type { EmailState, EmailView, MemberEmailView } from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { RequestContext } from './db';
+import type { InboundEmail } from './inbound-email';
 
 // Emails in Postgres (20261111010000_emails.sql, 20261111020000_email_signatures.sql; F-114).
 // Every write goes through the database's own functions, as the signed-in person; app_api only
@@ -50,7 +51,34 @@ export interface StartEmail {
   messageId: string;
 }
 
+/** app.admit_email's answer: whether a delivery may be stored and kept. */
+export type EmailAdmission =
+  'admit' | 'duplicate' | 'own_copy' | 'too_many' | 'unknown_organization';
+
+/** A received message as the Worker passes it to app.receive_email (F-114 step 4a). */
+export interface ReceivedEmail {
+  organizationId: string;
+  email: InboundEmail;
+  rawKey: string;
+  rawSize: number;
+  /** When the Worker accepted the message (kept as its time, also when kept later). */
+  receivedAt: Date;
+}
+
+export type ReceiveEmailResult =
+  | { status: 'received'; id: string; counterpartyId: string | null; duplicate: boolean }
+  | { status: 'own_copy' }
+  | { status: 'unknown_organization' };
+
 export interface EmailsDatabase {
+  /** Before anything is stored; the Worker's email handler, with nobody signed in. */
+  admitEmail: (
+    organizationId: string,
+    sender: string,
+    messageId: string,
+  ) => Promise<EmailAdmission>;
+  /** Keeps a received message and its attachment list; nobody signed in. */
+  receiveEmail: (received: ReceivedEmail) => Promise<ReceiveEmailResult>;
   getEmailSettings: (
     ctx: RequestContext,
     organizationId: string,
@@ -140,6 +168,9 @@ interface EmailRow {
   contact_name: string | null;
   failure: string | null;
   occurred_at: Date;
+  auth_passed: boolean | null;
+  automatic: boolean;
+  parse_failed: boolean;
   body_text?: string;
   body_truncated?: boolean;
 }
@@ -160,6 +191,9 @@ function emailView(row: EmailRow): EmailView {
     contactName: row.contact_name,
     failure: row.failure,
     occurredAt: row.occurred_at.toISOString(),
+    unverifiedSender: row.direction === 'incoming' && row.auth_passed !== true,
+    automatic: row.automatic,
+    parseFailed: row.parse_failed,
     ...(row.body_text === undefined
       ? {}
       : { body: row.body_text, bodyTruncated: row.body_truncated ?? false }),
@@ -184,16 +218,71 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
   );
 }
 
-export function emailQueries(asUser: AsUser): EmailsDatabase {
+const ADMISSIONS: readonly EmailAdmission[] = [
+  'admit',
+  'duplicate',
+  'own_copy',
+  'too_many',
+  'unknown_organization',
+];
+
+export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase {
   // A sending email unfinished after ten minutes is shown as not confirmed (EMAIL_UNCONFIRMED_AFTER_MS).
   const columns = (tx: postgres.TransactionSql) => tx`
     e.id, e.direction, e.from_address, e.from_name, to_jsonb(e.to_addresses::text[]) as to_addresses,
     to_jsonb(e.cc_addresses::text[]) as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
-    e.occurred_at,
+    e.occurred_at, e.auth_passed, e.automatic, e.parse_failed,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
   return {
+    async admitEmail(organizationId, sender, messageId) {
+      // No app.user_id is set: the Worker acts for nobody, as the function requires.
+      const [row] = await sql<{ answer: string }[]>`
+        select app.admit_email(${organizationId}, ${sender}, ${messageId}) as answer`;
+      const answer = ADMISSIONS.find((value) => value === row?.answer);
+      if (answer === undefined) throw new Error('Unexpected admission answer');
+      return answer;
+    },
+
+    async receiveEmail({ organizationId, email, rawKey, rawSize, receivedAt }) {
+      const attachments = email.attachments.map((a) => ({
+        position: a.position,
+        file_name: a.fileName,
+        content_type: a.contentType,
+        size_bytes: a.sizeBytes,
+        sha256: a.sha256,
+        disposition: a.disposition,
+        content_id: a.contentId,
+      }));
+      const [row] = await sql<{ result: Record<string, unknown> }[]>`
+        select app.receive_email(
+          ${organizationId}, ${email.envelopeTo}, ${email.fromAddress}, ${email.fromName},
+          -- Lists go as JSON: without fetch_types (the Worker's connection), postgres.js sends
+          -- an array as text (as for sending; Codex's review, finding R1-01).
+          array(select t.x from jsonb_array_elements_text(${sql.json(email.to)}::jsonb) as t(x)),
+          array(select t.x from jsonb_array_elements_text(${sql.json(email.cc)}::jsonb) as t(x)),
+          ${email.replyTo}, ${email.subject}, ${email.body}, ${email.bodyTruncated},
+          ${email.messageId}, ${email.inReplyTo},
+          array(select t.x from jsonb_array_elements_text(${sql.json(email.references)}::jsonb) as t(x)),
+          ${email.dmarc === 'pass'}, ${email.automatic}, ${email.parseFailed}, ${rawKey},
+          ${rawSize}, ${sql.json(attachments)}::jsonb, ${receivedAt.toISOString()}::timestamptz) as result`;
+      const result = row?.result ?? {};
+      if (result.status === 'own_copy' || result.status === 'unknown_organization') {
+        return { status: result.status };
+      }
+      if (result.status === 'received' && typeof result.id === 'string') {
+        return {
+          status: 'received',
+          id: result.id,
+          counterpartyId:
+            typeof result.counterparty_id === 'string' ? result.counterparty_id : null,
+          duplicate: result.duplicate === true,
+        };
+      }
+      throw new Error('Unexpected answer from app.receive_email');
+    },
+
     getEmailSettings(ctx, organizationId) {
       return asUser(ctx, async (tx) => {
         const [member] = await tx<

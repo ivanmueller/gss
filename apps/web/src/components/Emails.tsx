@@ -668,7 +668,14 @@ function EmailItem({
         onClick={onToggle}
       >
         <span className="flex w-full flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">{email.subject || '(no subject)'}</span>
+          <span className="font-medium">
+            {email.subject || '(no subject)'}
+            {email.automatic && (
+              <Badge variant="neutral" className="ml-2">
+                Automatic
+              </Badge>
+            )}
+          </span>
           <Badge variant={STATE_BADGES[email.state]}>
             {email.state === 'unconfirmed' ? 'Not confirmed' : EMAIL_STATE_LABELS[email.state]}
           </Badge>
@@ -677,6 +684,16 @@ function EmailItem({
           {formatAlberta(email.occurredAt)} · {who}
         </span>
       </button>
+      {email.unverifiedSender && (
+        <p className="mt-1 text-xs text-warning">
+          Sender not verified: this email may not be from who it says.
+        </p>
+      )}
+      {email.parseFailed && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          This email could not be read. Its original is kept.
+        </p>
+      )}
       {email.state === 'failed' && email.failure !== null && (
         <p className="mt-1 text-xs text-danger">{email.failure}</p>
       )}

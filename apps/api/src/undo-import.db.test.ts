@@ -247,9 +247,10 @@ describe('undoing an import as app_api', () => {
     const mailed = await named('Synthetic Mailed Farm');
     await admin`insert into app.emails
         (organization_id, direction, status, counterparty_id, envelope_to, from_address,
-         body_text, message_id)
+         body_text, message_id, raw_key, raw_size)
       values (${orgs.a}, 'incoming', 'received', ${mailed}, 'info@gss.example',
-              'farmer@synthetic.example', 'Synthetic email.', ${`<${id()}@synthetic.example>`})`;
+              'farmer@synthetic.example', 'Synthetic email.', ${`<${id()}@synthetic.example>`},
+              ${`raw/${orgs.a}/${'b'.repeat(64)}.eml`}, 10)`;
     // A contact logged with one, and the other made a buyer too, under Edit details.
     expect(
       await db.createContactLog(as(users.olivia), {

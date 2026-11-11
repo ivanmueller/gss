@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^1.5.0",
     "@grain/domain": "workspace:*",
     "hono": "^4.13.14",
+    "postal-mime": "4.1.4",
     "postgres": "^3.4.9"
   },
   "devDependencies": {
