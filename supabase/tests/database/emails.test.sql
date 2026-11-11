@@ -302,9 +302,10 @@ select is(pg_temp.start('00000000-0000-4000-8000-0000000044aa', '00000000-0000-4
                         '00000000-0000-4000-8000-00000000d6aa', 'tom', '{kim@buyer.example}', '<out3@gss.example>') ->> 'status',
   'started', 'an email to a contact who is removed afterwards');
 delete from app.counterparty_contacts where id = '00000000-0000-4000-8000-00000000d6aa';
+-- Received first, read in the next statement (a statement does not see a row its own function call inserts).
+insert into ids select 'orphan', (pg_temp.receive('<in9@x>', 'kim@buyer.example', answers => '<out3@gss.example>') ->> 'id')::uuid;
 select is((select coalesce(counterparty_id::text, 'none') || '|' || coalesce(contact_id::text, 'none')
-             from app.emails
-            where id = (pg_temp.receive('<in9@x>', 'kim@buyer.example', answers => '<out3@gss.example>') ->> 'id')::uuid),
+             from app.emails where id = (select id from ids where name = 'orphan')),
   '00000000-0000-4000-8000-00000000c1aa|none', 'its reply is kept on the company, without the removed contact');
 select is((select count(*)::int from app.emails where organization_id = '00000000-0000-4000-8000-0000000000aa'
              and direction = 'incoming'), 9, 'nine received emails kept in org A');
