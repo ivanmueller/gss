@@ -95,6 +95,9 @@ export const callReadingSchema = z.object({
       lines: z.array(z.number()),
     }),
   ),
+  // Whether GSS should send an email now (F-114 step 5c): the call asked for one, or the
+  // received email needs an answer. The draft itself is a second request.
+  email: z.object({ wanted: z.boolean(), about: nullableText, lines: z.array(z.number()) }),
 });
 export type CallReading = z.infer<typeof callReadingSchema>;
 
@@ -196,6 +199,17 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
       lines: lineNumbers,
     }),
   },
+  email: object({
+    wanted: {
+      type: 'boolean',
+      description:
+        'True when GSS should now send the counterparty an email (see the instructions).',
+    },
+    about: text(
+      'When wanted: one short plain line on what that email should cover, e.g. "the barley GSS has for March". Empty otherwise.',
+    ),
+    lines: lineNumbers,
+  }),
 });
 
 /** What checkReading needs to know about the call. */
@@ -254,6 +268,23 @@ export interface CheckedReading {
   voicemail: boolean;
   summary: string | null;
   drafts: DraftInput[];
+  /**
+   * What an email GSS should send now should cover (F-114 step 5c): Claude's one line, at most
+   * EMAIL_ABOUT_MAX characters; null when no email is wanted, or the answer named no line.
+   */
+  emailAbout: string | null;
+}
+
+/** The about line of an email wanted, at most this many characters. */
+export const EMAIL_ABOUT_MAX = 200;
+
+/** Cut at no more than `max` UTF-16 units, never leaving half of a surrogate pair. */
+function cutText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  let end = max;
+  const last = value.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return value.slice(0, end).trimEnd();
 }
 
 /** A line of text without control characters, or null when empty or too long. */
@@ -838,10 +869,21 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     });
   }
 
+  // An email wanted: kept only with a line it comes from and a non-empty about line.
+  let emailAbout: string | null = null;
+  if (reading.email.wanted && evidence(reading.email.lines).lines.length > 0) {
+    const about = (reading.email.about ?? '')
+      .replace(/\p{Cc}/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    emailAbout = about === '' ? null : cutText(about, EMAIL_ABOUT_MAX);
+  }
+
   return {
     voicemail: reading.voicemail,
     summary: notes(reading.summary, READING_SUMMARY_MAX),
     drafts,
+    emailAbout,
   };
 }
 

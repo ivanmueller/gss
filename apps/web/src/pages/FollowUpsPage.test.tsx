@@ -136,3 +136,55 @@ describe('FollowUpsPage', () => {
     window.removeEventListener('app:follow-ups-changed', changed);
   });
 });
+
+describe('FollowUpsPage: Claude’s email drafts (F-114 step 5c)', () => {
+  it('lists the emails to send for the person and anyone, and Open goes to the company', async () => {
+    const draft = {
+      id: '00000000-0000-4000-8000-0000000a0d01',
+      counterpartyId: '00000000-0000-4000-8000-00000000c001',
+      counterpartyName: 'Synthetic Prairie Mills Ltd.',
+      source: 'call',
+      about: 'The barley GSS has',
+      callAt: '2026-10-30T15:00:00.000Z',
+      callContactName: 'Pat Buyer',
+      callBy: 'Tess Trader',
+      emailId: null,
+      emailFrom: null,
+      emailSubject: null,
+      emailAt: null,
+      assignedTo: ME,
+      assignedToName: 'Tess Trader',
+      fromChoice: 'own',
+      to: [],
+      subject: 'Barley',
+      message: 'Hi Pat',
+      checkThis: [],
+      placeholders: [],
+      draftedAt: '2026-10-30T15:30:00.000Z',
+      answeredSince: null,
+    };
+    const calls = mockApi({
+      [`GET /follow-ups?organization_id=${ORG.id}&assigned_to=me`]: () =>
+        Response.json({ followUps: [], truncated: false }),
+      [`GET /email-auto-drafts?organization_id=${ORG.id}&assigned=me`]: () =>
+        Response.json({ drafts: [draft], truncated: false }),
+    });
+    render(
+      <FollowUpsPage
+        session={{ ...SESSION, organization: { ...ORG, role: 'viewer' }, userId: ME }}
+      />,
+    );
+    const card = await screen.findByRole('region', { name: 'Emails to send (1)' });
+    expect(card).toHaveTextContent('Email after the call with Pat Buyer');
+    expect(card).toHaveTextContent('for Tess Trader · today');
+    expect(
+      within(card).getByRole('link', { name: 'Synthetic Prairie Mills Ltd.' }),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(card).getByRole('button', { name: /^Open Claude’s draft/ }));
+    expect(window.location.pathname + window.location.search).toBe(
+      `/counterparties/${draft.counterpartyId}?email_draft=${draft.id}`,
+    );
+    expect(calls.some((call) => call.path.startsWith('/email-auto-drafts?'))).toBe(true);
+  });
+});

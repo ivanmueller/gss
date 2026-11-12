@@ -265,7 +265,9 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
         select app.keep_call_reading(${claim.recordingId}, ${claim.token}, ${model},
                                      ${reading.voicemail},
                                      ${reading.summary}, ${sql.json(json)}::jsonb,
-                                     ${inputTokens}, ${outputTokens}) as kept`;
+                                     ${inputTokens}, ${outputTokens},
+                                     ${reading.emailAbout !== null}::boolean,
+                                     ${reading.emailAbout}::text) as kept`;
       return row?.kept === true;
     },
 
@@ -301,7 +303,9 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
                                       ${answer?.reading.summary ?? null},
                                       ${sql.json([...lines])}::jsonb, ${cut},
                                       ${sql.json(json)}::jsonb, ${answer?.inputTokens ?? null},
-                                      ${answer?.outputTokens ?? null}) as kept`;
+                                      ${answer?.outputTokens ?? null},
+                                      ${(answer?.reading.emailAbout ?? null) !== null}::boolean,
+                                      ${answer?.reading.emailAbout ?? null}::text) as kept`;
       return row?.kept === true;
     },
 

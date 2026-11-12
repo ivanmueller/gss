@@ -154,6 +154,7 @@ describe('POST /emails', () => {
       messageId: `gss-${KEY}`,
       replyToEmailId: null,
       claudeDraftId: null,
+      autoDraftId: null,
     });
     expect(mailer.send).toHaveBeenCalledWith({
       fromAddress: 'tom@gss.example.test',

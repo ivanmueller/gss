@@ -81,6 +81,7 @@ describe('a reply drafted with Claude', () => {
       messageId: `gss-${id()}`,
       replyToEmailId: received,
       claudeDraftId: started.id,
+      autoDraftId: null,
     };
     const sending = await db.startOutgoingEmail(as(people.vera), reply);
     if (sending.status !== 'started') throw new Error(sending.status);

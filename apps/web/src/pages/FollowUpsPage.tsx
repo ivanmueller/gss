@@ -1,15 +1,16 @@
-import type { FollowUp } from '@grain/domain';
+import type { EmailAutoDraftListResponse, FollowUp } from '@grain/domain';
 import { useState } from 'react';
 
 import { CallbackReturns } from '../components/CallbackReturns';
 import { UnmatchedEmails } from '../components/UnmatchedEmails';
 import { useTeam, type FollowUpListResponse } from '../components/CounterpartyCrm';
 import { ClaudeDraftList, draftsOf, useOpenDrafts } from '../components/ClaudeDrafts';
+import { AutoDraftList } from '../components/EmailAutoDrafts';
 import { FollowUpItem } from '../components/FollowUpItem';
 import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { SegmentedControl } from '../components/ui/segmented-control';
-import { dueState, type DueState } from '../lib/crm';
-import { setSearchParams, useSearch } from '../lib/router';
+import { dueState, noteFollowUpsChanged, type DueState } from '../lib/crm';
+import { navigate, setSearchParams, useSearch } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
 
@@ -38,6 +39,11 @@ export function FollowUpsPage({ session }: { session: DirectorySession }) {
     token,
   );
   const team = useTeam(session);
+  // Claude's email drafts waiting (F-114 step 5c): the person's own and anyone's, or everyone's.
+  const [emailDrafts, reloadEmailDrafts] = useApiResource<EmailAutoDraftListResponse>(
+    `/email-auto-drafts?organization_id=${organization.id}&assigned=${everyone ? 'everyone' : 'me'}`,
+    token,
+  );
   // Claude's drafts of follow-ups from calls: the person's own (for them) unless Everyone (F-115).
   const [draftList, reloadDrafts] = useOpenDrafts(session, { kind: 'follow_up' });
   const [notice, setNotice] = useState<string | null>(null);
@@ -90,6 +96,31 @@ export function FollowUpsPage({ session }: { session: DirectorySession }) {
       <CallbackReturns session={session} />
       <UnmatchedEmails session={session} />
 
+      {emailDrafts.status === 'ok' && emailDrafts.data.drafts.length > 0 && (
+        <Card asChild className="overflow-hidden">
+          <section aria-labelledby="email-drafts-heading">
+            <CardHeader>
+              <CardTitle id="email-drafts-heading">
+                Emails to send ({emailDrafts.data.drafts.length})
+              </CardTitle>
+            </CardHeader>
+            <div className="px-4 py-3">
+              <AutoDraftList
+                session={session}
+                drafts={emailDrafts.data.drafts}
+                showCompany
+                onOpen={(draft) => {
+                  navigate(`/counterparties/${draft.counterpartyId}?email_draft=${draft.id}`);
+                }}
+                onChanged={() => {
+                  reloadEmailDrafts();
+                  noteFollowUpsChanged();
+                }}
+              />
+            </div>
+          </section>
+        </Card>
+      )}
       {notice !== null && (
         <p role="status" className="text-sm text-success">
           {notice}

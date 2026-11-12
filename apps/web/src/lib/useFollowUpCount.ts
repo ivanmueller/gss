@@ -9,7 +9,8 @@ const REFRESH_MS = 60_000;
 
 /**
  * The signed-in person's follow-ups overdue or due today, and the calls to GSS's number waiting
- * on them (theirs, and nobody's for an admin; F-132), for the menu: asked for every minute, when
+ * on them (theirs, and nobody's for an admin; F-132), and Claude's email drafts waiting for them
+ * or for anyone (F-114 step 5c, the owner's answer 34), for the menu: asked for every minute, when
  * the page is shown again and after a follow-up changes; 0 until known or when the server cannot
  * be reached (the Follow-ups page says more).
  */
@@ -34,11 +35,17 @@ export function useFollowUpCount(
         apiJson<{ open: number }>(`/callbacks/count?organization_id=${organizationId}`, token, {
           signal,
         }).catch(() => ({ open: 0 })),
+        apiJson<{ waiting: number }>(
+          `/email-auto-drafts/count?organization_id=${organizationId}`,
+          token,
+          { signal },
+        ).catch(() => ({ waiting: 0 })),
       ])
-        .then(([answer, callbacks]) => {
+        .then(([answer, callbacks, drafts]) => {
           // An answer without a number (callbacks not set up, say) counts nothing.
           const waiting = Number.isFinite(callbacks.open) ? callbacks.open : 0;
-          if (!signal.aborted) setCount(answer.overdue + answer.dueToday + waiting);
+          const emails = Number.isFinite(drafts.waiting) ? drafts.waiting : 0;
+          if (!signal.aborted) setCount(answer.overdue + answer.dueToday + waiting + emails);
         })
         .catch(() => {
           // Keep the last count; the menu is a reminder, not the record.

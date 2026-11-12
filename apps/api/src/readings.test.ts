@@ -51,6 +51,7 @@ const CONTEXT: ReadingContextRow = {
 
 const ANSWER: CallReading = {
   voicemail: false,
+  email: { wanted: false, about: null, lines: [] },
   summary: 'Pat bids on canola delivered.',
   quotes: [
     {

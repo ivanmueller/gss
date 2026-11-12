@@ -138,6 +138,7 @@ describe('sending', () => {
       messageId: `gss-${key}`,
       replyToEmailId: null,
       claudeDraftId: null,
+      autoDraftId: null,
     });
 
   it('starts once per send key and answers the earlier email after (F-114-3-D1-02)', async () => {
@@ -217,6 +218,7 @@ describe('sending', () => {
         messageId: `gss-${id()}`,
         replyToEmailId: null,
         claudeDraftId: null,
+        autoDraftId: null,
       });
       if (started.status !== 'started') throw new Error(`not started: ${started.status}`);
       expect(

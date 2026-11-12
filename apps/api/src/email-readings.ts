@@ -48,6 +48,8 @@ followUps: each thing the email asks GSS to do, or that GSS should do in answer 
 
 contacts: the sender and each other person at the counterparty named in the email with a role, phone or email (a signature counts), and each new detail of a listed contact (give that contact's id). Leave out details already listed.
 
+email: wanted is true only when the email asks GSS a question or makes a request that GSS should answer by email. False for thanks, confirmations, out-of-office replies, newsletters and mail sent only for information; then about is empty and lines has none. about: one short plain line on what GSS's answer should cover; lines: the lines with the question or request.
+
 lines: for every quote, follow-up and contact, the numbers of the lines it comes from.
 
 Commodity codes: ${COMMODITIES.map((commodity) => `${commodity.code} (${commodity.name})`).join(', ')}.

@@ -78,6 +78,7 @@ const reading = (overrides: Partial<CallReading> = {}): CallReading => ({
   quotes: [],
   followUps: [],
   contacts: [],
+  email: { wanted: false, about: null, lines: [] },
   ...overrides,
 });
 
@@ -750,6 +751,30 @@ describe('checkReading: notes and voicemail', () => {
   it('keeps at most 10 drafts of a kind', () => {
     const many = Array.from({ length: 12 }, () => ({ task: 'Call back', dueAt: null, lines: [2] }));
     expect(checkReading(reading({ followUps: many }), context()).drafts).toHaveLength(10);
+  });
+});
+
+describe('checkReading: an email wanted (F-114 step 5c)', () => {
+  const wanted = (email: CallReading['email']) =>
+    checkReading(reading({ email }), context()).emailAbout;
+
+  it('keeps the about line, tidied, when a line it comes from is cited', () => {
+    expect(wanted({ wanted: true, about: '  The canola\u0007 bid \n terms ', lines: [2] })).toBe(
+      'The canola bid terms',
+    );
+  });
+
+  it('wants none without a cited line, without an about line, or when not wanted', () => {
+    expect(wanted({ wanted: true, about: 'The canola bid', lines: [] })).toBeNull();
+    expect(wanted({ wanted: true, about: 'The canola bid', lines: [99] })).toBeNull();
+    expect(wanted({ wanted: true, about: '   ', lines: [2] })).toBeNull();
+    expect(wanted({ wanted: false, about: 'The canola bid', lines: [2] })).toBeNull();
+  });
+
+  it('cuts a long about line to 200 characters, never through a character pair', () => {
+    const long = wanted({ wanted: true, about: `${'a'.repeat(199)}\u{1F33E}tail`, lines: [2] });
+    expect(long).toBe('a'.repeat(199));
+    expect(wanted({ wanted: true, about: 'b'.repeat(500), lines: [2] })).toHaveLength(200);
   });
 });
 

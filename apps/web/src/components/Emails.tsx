@@ -10,17 +10,30 @@ import {
   formatAlberta,
   normalizeEmailAddress,
   replySubject,
+  type EmailAutoDraftListResponse,
+  type EmailAutoDraftView,
   type EmailDraftView,
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
 import { Download, Mail, Paperclip, Reply, Send } from 'lucide-react';
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import { apiJson, ApiError, sendJson, type Contact } from '../lib/api';
 import { saveDownload } from '../lib/download';
+import { noteFollowUpsChanged } from '../lib/crm';
+import { setSearchParams, useSearch } from '../lib/router';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ClaudeMark } from './ClaudeMark';
+import { AutoDraftList } from './EmailAutoDrafts';
 import { Badge, type BadgeVariant } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -44,8 +57,11 @@ export interface ReplyTo {
 }
 
 interface Composer {
-  /** Opens the form, addressed to a contact when given, or as a reply to a received email. */
-  compose: (contact?: Contact, reply?: ReplyTo) => void;
+  /**
+   * Opens the form, addressed to a contact when given, or as a reply to a received email, or
+   * filled with a draft Claude made by itself (F-114 step 5c).
+   */
+  compose: (contact?: Contact, reply?: ReplyTo, auto?: EmailAutoDraftView) => void;
 }
 
 const ComposerContext = createContext<Composer | null>(null);
@@ -78,6 +94,7 @@ export function EmailProvider({
   const [open, setOpen] = useState<{
     contact: Contact | null;
     reply: ReplyTo | null;
+    auto: EmailAutoDraftView | null;
     key: number;
   } | null>(null);
   const [sentCount, setSentCount] = useState(0);
@@ -85,8 +102,13 @@ export function EmailProvider({
   const [held, setHeld] = useState<SendPayload | null>(null);
   const composer: Composer | null = enabled
     ? {
-        compose: (contact, reply) => {
-          setOpen({ contact: contact ?? null, reply: reply ?? null, key: Date.now() });
+        compose: (contact, reply, auto) => {
+          setOpen({
+            contact: contact ?? null,
+            reply: reply ?? null,
+            auto: auto ?? null,
+            key: Date.now(),
+          });
         },
       }
     : null;
@@ -102,6 +124,7 @@ export function EmailProvider({
             contacts={contacts}
             contact={open.contact}
             reply={open.reply}
+            auto={open.auto}
             held={held}
             onHold={setHeld}
             onClose={() => {
@@ -109,6 +132,7 @@ export function EmailProvider({
             }}
             onSent={() => {
               setSentCount((count) => count + 1);
+              noteFollowUpsChanged();
             }}
           />
         )}
@@ -155,11 +179,13 @@ interface SendPayload {
   sendKey: string;
   replyToEmailId: string | null;
   claudeDraftId: string | null;
+  autoDraftId: string | null;
 }
 
 /** Claude's draft as it filled the form, to check what is still in the text. */
 interface DraftShown {
-  draftId: string;
+  /** The Draft with Claude request; null for a draft Claude made by itself. */
+  draftId: string | null;
   checkThis: string[];
   placeholders: string[];
 }
@@ -177,6 +203,7 @@ function EmailDialog({
   contacts,
   contact,
   reply: replyTo,
+  auto,
   held,
   onHold,
   onClose,
@@ -188,6 +215,8 @@ function EmailDialog({
   contact: Contact | null;
   /** The received email this answers (Reply). */
   reply: ReplyTo | null;
+  /** A draft Claude made by itself, opened from the drafts waiting (F-114 step 5c). */
+  auto: EmailAutoDraftView | null;
   /** An email submitted earlier whose outcome is not known: reopened as it was, locked. */
   held: SendPayload | null;
   onHold: (payload: SendPayload | null) => void;
@@ -198,27 +227,41 @@ function EmailDialog({
   const { token, organization } = session;
   const [settings, setSettings] = useState<EmailSettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [from, setFrom] = useState<'own' | 'shared' | null>(held?.from ?? null);
+  const [from, setFrom] = useState<'own' | 'shared' | null>(held?.from ?? auto?.fromChoice ?? null);
   const [to, setTo] = useState(
-    held ? held.to.join(', ') : (replyTo?.fromAddress ?? contact?.email ?? ''),
+    held
+      ? held.to.join(', ')
+      : auto !== null
+        ? auto.to.join(', ')
+        : (replyTo?.fromAddress ?? contact?.email ?? ''),
   );
   const [cc, setCc] = useState(held ? held.cc.join(', ') : '');
   const [subject, setSubject] = useState(
-    held?.subject ?? (replyTo === null ? '' : replySubject(replyTo.subject)),
+    held?.subject ?? auto?.subject ?? (replyTo === null ? '' : replySubject(replyTo.subject)),
   );
   // The received email answered; cleared when it was deleted and the person sends it as new.
   const [answering, setAnswering] = useState<string | null>(
-    held === null ? (replyTo?.id ?? null) : held.replyToEmailId,
+    held === null ? (auto !== null ? auto.emailId : (replyTo?.id ?? null)) : held.replyToEmailId,
   );
+  // The automatic draft this email is sent from; cleared when someone else sent or dismissed it
+  // and the person sends it as a new email.
+  const [autoDraftId, setAutoDraftId] = useState<string | null>(
+    held === null ? (auto?.id ?? null) : held.autoDraftId,
+  );
+  const [autoGone, setAutoGone] = useState(false);
   const [about, setAbout] = useState('');
   const [drafting, setDrafting] = useState<AbortController | null>(null);
   const heldDraft = held?.claudeDraftId ?? null;
   const [draft, setDraft] = useState<DraftShown | null>(
-    heldDraft === null ? null : { draftId: heldDraft, checkThis: [], placeholders: [] },
+    heldDraft !== null
+      ? { draftId: heldDraft, checkThis: [], placeholders: [] }
+      : held === null && auto !== null
+        ? { draftId: null, checkThis: auto.checkThis, placeholders: auto.placeholders }
+        : null,
   );
   const [draftError, setDraftError] = useState<string | null>(null);
   const [replyGone, setReplyGone] = useState(false);
-  const [message, setMessage] = useState(held?.message ?? '');
+  const [message, setMessage] = useState(held?.message ?? auto?.message ?? '');
   // One key per attempt: a second click or a retry after a lost answer never sends twice; a
   // new key only after Cloudflare refused it (Codex's design review of F-114-3, D1-02).
   const [sendKey, setSendKey] = useState(() => held?.sendKey ?? crypto.randomUUID());
@@ -260,7 +303,11 @@ function EmailDialog({
 
   const me = settings?.you ?? null;
   const ready = settings !== null && settings.configured && settings.sharedLocalPart !== null;
-  const chosenFrom = from ?? (settings?.ownLocalPart ? 'own' : 'shared');
+  // A draft's own address when the person has none of their own: the shared one.
+  const chosenFrom =
+    from === 'own' && settings !== null && settings.ownLocalPart === null
+      ? 'shared'
+      : (from ?? (settings?.ownLocalPart ? 'own' : 'shared'));
   const fromLocal = chosenFrom === 'own' ? settings?.ownLocalPart : settings?.sharedLocalPart;
   const fromAddress = fromLocal && settings?.domain ? `${fromLocal}@${settings.domain}` : null;
   const signature =
@@ -317,6 +364,7 @@ function EmailDialog({
       sendKey,
       replyToEmailId: answering,
       claudeDraftId: draft?.draftId ?? null,
+      autoDraftId,
     };
     setPending(payload);
     setBusy(true);
@@ -340,6 +388,10 @@ function EmailDialog({
           // The email answered was deleted meanwhile: nothing was kept or sent.
           setPending(null);
           setReplyGone(true);
+        } else if ((code === 'AUTO_DRAFT_USED' || code === 'AUTO_DRAFT_NOT_FOUND') && !uncertain) {
+          // Someone else sent or dismissed Claude's draft meanwhile: nothing was kept or sent.
+          setPending(null);
+          setAutoGone(true);
         } else if (code === 'EMAIL_REFUSED') {
           // Nothing went: correct it and send again as a new attempt (the refused one is kept).
           setSendKey(crypto.randomUUID());
@@ -452,7 +504,15 @@ function EmailDialog({
       }}
     >
       <DialogContent
-        title={sent && result?.ok ? 'Email sent' : replyTo !== null ? 'Reply' : 'New email'}
+        title={
+          sent && result?.ok
+            ? 'Email sent'
+            : auto !== null
+              ? 'Claude’s draft'
+              : replyTo !== null
+                ? 'Reply'
+                : 'New email'
+        }
         className="max-w-2xl"
       >
         {loadError !== null && (
@@ -569,6 +629,23 @@ function EmailDialog({
                     setReplyGone(false);
                     setResult(null);
                     setDraftError(null);
+                  }}
+                >
+                  Send as a new email
+                </Button>
+              </div>
+            )}
+            {autoGone && autoDraftId !== null && !sent && (
+              <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
+                Claude’s draft was sent or dismissed by someone else.
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setAutoDraftId(null);
+                    setAutoGone(false);
+                    setResult(null);
                   }}
                 >
                   Send as a new email
@@ -740,8 +817,41 @@ export function EmailsCard({
   const [more, setMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  // Claude's email drafts waiting (F-114 step 5c), loaded again after each send or dismissal.
+  const [autoDrafts, setAutoDrafts] = useState<EmailAutoDraftView[]>([]);
+  const [autoReload, setAutoReload] = useState(0);
+  const [autoMissing, setAutoMissing] = useState(false);
+  // ?email_draft={id}: Open from Follow-ups, the form opened here once the drafts are loaded.
+  const wanted = new URLSearchParams(useSearch()).get('email_draft');
+  const composerRef = useRef(composer);
+  useEffect(() => {
+    composerRef.current = composer;
+  });
 
   const path = `/emails?organization_id=${organization.id}&counterparty_id=${counterpartyId}`;
+  useEffect(() => {
+    let cancelled = false;
+    apiJson<EmailAutoDraftListResponse>(
+      `/email-auto-drafts?organization_id=${organization.id}&counterparty_id=${counterpartyId}`,
+      token,
+    )
+      .then((answer) => {
+        if (cancelled) return;
+        setAutoDrafts(answer.drafts);
+        const open = composerRef.current;
+        if (wanted === null || open === null) return;
+        const draft = answer.drafts.find((item) => item.id === wanted);
+        setSearchParams({ email_draft: null });
+        if (draft === undefined) setAutoMissing(true);
+        else open.compose(undefined, undefined, draft);
+      })
+      .catch(() => {
+        // The emails still show; the drafts come back on the next load.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organization.id, counterpartyId, token, reload, autoReload, wanted]);
   useEffect(() => {
     let cancelled = false;
     apiJson<{ emails: EmailView[] }>(path, token)
@@ -798,6 +908,27 @@ export function EmailsCard({
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm">
+          {autoMissing && (
+            <p role="status" className="text-muted-foreground">
+              That draft of Claude’s is no longer waiting: it was sent or dismissed.
+            </p>
+          )}
+          {autoDrafts.length > 0 && (
+            <section aria-label="Claude’s email drafts" className="flex flex-col gap-2 pb-2">
+              <h3 className="text-sm font-medium">Claude’s email drafts ({autoDrafts.length})</h3>
+              <AutoDraftList
+                session={session}
+                drafts={autoDrafts}
+                onOpen={(draft) => {
+                  composer?.compose(undefined, undefined, draft);
+                }}
+                onChanged={() => {
+                  setAutoReload((count) => count + 1);
+                  noteFollowUpsChanged();
+                }}
+              />
+            </section>
+          )}
           {error !== null && (
             <p role="alert" className="text-danger">
               {error}
