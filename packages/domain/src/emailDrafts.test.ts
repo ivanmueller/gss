@@ -77,9 +77,9 @@ describe('checkEmailDraft', () => {
 
   it('runs in linear time on a long hostile text', () => {
     const hostile = `${'1,'.repeat(50_000)}x ${'(403) '.repeat(10_000)}`;
-    const started = performance.now();
+    const started = Date.now();
     checkEmailDraft({ subject: 'x', message: hostile }, hostile);
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });
 

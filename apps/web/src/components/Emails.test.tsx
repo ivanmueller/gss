@@ -33,6 +33,7 @@ const ME = {
 };
 const SETTINGS: EmailSettingsView = {
   configured: true,
+  claudeConfigured: false,
   domain: 'gss.example.test',
   sharedLocalPart: 'info',
   signature: '{name}\n{title}\nPhone: {phone}\n{email}',
@@ -65,6 +66,8 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     counterpartyId: COMPANY,
     sentTo: null,
     attachmentCount: 0,
+    inReplyToSubject: null,
+    draftedByClaude: false,
     ...overrides,
   };
 }

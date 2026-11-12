@@ -67,6 +67,8 @@ function emailRow(overrides: Partial<EmailView> = {}): EmailView {
     counterpartyId: COMPANY,
     sentTo: null,
     attachmentCount: 0,
+    inReplyToSubject: null,
+    draftedByClaude: false,
     ...overrides,
   };
 }
@@ -148,6 +150,8 @@ describe('POST /emails', () => {
       subject: 'Feed oats',
       body: text,
       messageId: `gss-${KEY}`,
+      replyToEmailId: null,
+      claudeDraftId: null,
     });
     expect(mailer.send).toHaveBeenCalledWith({
       fromAddress: 'tom@gss.example.test',

@@ -5,13 +5,16 @@ import {
   linkEmailSchema,
   saveEmailSettingsSchema,
   saveMemberEmailSchema,
+  draftEmailSchema,
   sendEmailSchema,
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
 import { Hono } from 'hono';
 
+import { claudeClient, type ClaudeFactory } from './anthropic';
 import type { Database, RequestContext } from './db';
+import { draftEmail } from './email-drafts';
 import { emailConfig, gssAddress, type EmailConfig, type MailerFactory } from './email';
 import type { EmailCursor } from './emails-db';
 import { attachmentFromOriginal, MAX_RAW_BYTES } from './inbound-email';
@@ -33,6 +36,7 @@ import {
 /** A message of 100,000 characters, which JSON may write as up to six bytes each, and the rest. */
 const MAX_SEND_BYTES = 640 * 1024;
 const MAX_SETTINGS_BYTES = 16 * 1024;
+const MAX_DRAFT_BYTES = 16 * 1024;
 const NOT_MEMBER = 'You are not a member of this organization.';
 const NOT_CONFIGURED = 'Email is not set up yet. An admin adds the email settings in Cloudflare.';
 const NOT_THIS_ORGANIZATION = 'Email is not set up for this organization.';
@@ -66,12 +70,14 @@ async function settingsView(
   ctx: RequestContext,
   organizationId: string,
   config: EmailConfig | null,
+  claudeConfigured = false,
 ): Promise<EmailSettingsView | null> {
   const settings = await db.getEmailSettings(ctx, organizationId);
   if (settings === null) return null;
   const sending = sendingFor(config, organizationId);
   return {
     configured: sending !== null,
+    claudeConfigured: sending !== null && claudeConfigured,
     domain: sending?.domain ?? null,
     sharedLocalPart: settings.sharedLocalPart,
     signature: settings.signature,
@@ -83,7 +89,11 @@ async function settingsView(
   };
 }
 
-export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory) {
+export function emailRoutes(
+  openDatabase: DatabaseFactory,
+  mailer: MailerFactory,
+  claude: ClaudeFactory = claudeClient,
+) {
   const routes = new Hono<ApiEnv>();
 
   routes.get('/settings', (c) => {
@@ -92,7 +102,7 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
-      const settings = await settingsView(db, ctx, org, config);
+      const settings = await settingsView(db, ctx, org, config, claude(c.env) !== null);
       return settings === null ? apiError(c, 403, 'FORBIDDEN', NOT_MEMBER) : c.json({ settings });
     });
   });
@@ -129,7 +139,7 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
         case 'saved':
           break;
       }
-      return c.json({ settings: await settingsView(db, ctx, org, config) });
+      return c.json({ settings: await settingsView(db, ctx, org, config, claude(c.env) !== null) });
     });
   });
 
@@ -169,7 +179,7 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
         case 'saved':
           break;
       }
-      return c.json({ settings: await settingsView(db, ctx, org, config) });
+      return c.json({ settings: await settingsView(db, ctx, org, config, claude(c.env) !== null) });
     });
   });
 
@@ -314,6 +324,125 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
     });
   });
 
+  // Draft with Claude (F-114 step 5b): a subject and a message for the form, never sent or
+  // kept; the request is recorded with what it cost. Every active member may draft, as every
+  // member sends (the owner's answers 3 and 23).
+  routes.post('/draft', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const body = await readJson(c, MAX_DRAFT_BYTES);
+    if (!body.ok) return body.response;
+    const parsed = draftEmailSchema.safeParse(body.value);
+    if (!parsed.success) {
+      return apiError(
+        c,
+        422,
+        'VALIDATION_FAILED',
+        parsed.error.issues[0]?.message ?? 'The request is malformed.',
+      );
+    }
+    const request = parsed.data;
+    const config = emailConfig(c.env);
+    if (config === null) return apiError(c, 503, 'EMAIL_NOT_CONFIGURED', NOT_CONFIGURED);
+    const client = claude(c.env);
+    if (client === null) {
+      return apiError(c, 503, 'CLAUDE_NOT_CONFIGURED', 'Claude is not set up yet.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      if (sendingFor(config, org) === null)
+        return apiError(c, 403, 'FORBIDDEN', NOT_THIS_ORGANIZATION);
+      const settings = await db.getEmailSettings(ctx, org);
+      const me = settings?.members.find((m) => m.userId === ctx.userId);
+      if (settings === null || me === undefined) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+
+      const started = await db.startEmailDraft(
+        ctx,
+        org,
+        request.counterpartyId,
+        request.replyToEmailId,
+        request.draftKey,
+      );
+      switch (started.status) {
+        case 'started':
+          break;
+        case 'forbidden':
+          return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+        case 'not_found':
+          return apiError(c, 404, 'NOT_FOUND', 'No such counterparty.');
+        case 'archived':
+          return apiError(
+            c,
+            409,
+            'ARCHIVED',
+            'This counterparty is archived. Restore it before emailing.',
+          );
+        case 'reply_not_found':
+          return apiError(c, 409, 'REPLY_NOT_FOUND', 'The email you are answering was deleted.');
+        case 'already':
+          return apiError(c, 409, 'DRAFT_ALREADY_ASKED', 'This draft was already asked for.');
+        case 'in_progress':
+          return apiError(
+            c,
+            409,
+            'DRAFT_IN_PROGRESS',
+            'Claude is still drafting your last email. Wait a moment and try again.',
+          );
+      }
+
+      const context = await db.emailDraftContext(
+        ctx,
+        org,
+        request.counterpartyId,
+        request.replyToEmailId,
+      );
+      if (context === null) {
+        // Archived or removed between the two reads: nothing was asked of Claude.
+        await db.finishEmailDraft(ctx, started.id, {
+          drafted: false,
+          model: null,
+          inputTokens: 0,
+          outputTokens: 0,
+        });
+        return apiError(c, 409, 'NOT_DRAFTABLE', 'This email can no longer be drafted.');
+      }
+      const outcome = await draftEmail(
+        db,
+        ctx,
+        client,
+        started.id,
+        context,
+        {
+          senderName: me.name,
+          senderTitle: me.title,
+          shared: request.from === 'shared',
+          to: request.to,
+          about: request.about,
+        },
+        new Date(),
+      );
+      switch (outcome.status) {
+        case 'drafted':
+          return c.json({ draft: outcome.draft });
+        case 'failed':
+        case 'error':
+          return apiError(
+            c,
+            502,
+            'DRAFT_FAILED',
+            'Claude could not draft this email. Write it yourself or try again.',
+          );
+        case 'timeout':
+          return apiError(
+            c,
+            504,
+            'DRAFT_TIMEOUT',
+            'Claude took too long to draft this email. Try again, or write it yourself.',
+          );
+      }
+    });
+  });
+
   routes.post('/', async (c) => {
     c.header('Cache-Control', 'no-store');
     const body = await readJson(c, MAX_SEND_BYTES);
@@ -373,6 +502,8 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
         subject: request.subject,
         body: text,
         messageId: `gss-${request.sendKey}`,
+        replyToEmailId: request.replyToEmailId,
+        claudeDraftId: request.claudeDraftId,
       });
       switch (started.status) {
         case 'started':
@@ -408,6 +539,20 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
           );
         case 'bad_recipients':
           return apiError(c, 422, 'VALIDATION_FAILED', 'Add one to 50 recipients.');
+        case 'reply_not_found':
+          return apiError(
+            c,
+            409,
+            'REPLY_NOT_FOUND',
+            'The email you are answering was deleted. Send this as a new email instead.',
+          );
+        case 'draft_not_found':
+          return apiError(
+            c,
+            409,
+            'DRAFT_NOT_FOUND',
+            'Claude’s draft for this email was not found.',
+          );
       }
 
       const outcome = await sender.send({

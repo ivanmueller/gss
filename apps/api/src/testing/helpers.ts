@@ -250,6 +250,11 @@ export function fakeDatabase(): Mocked<Database> {
       Promise.resolve({ status: 'started', id: 'email-1' } as const),
     ),
     finishOutgoingEmail: vi.fn<Database['finishOutgoingEmail']>(() => Promise.resolve('done')),
+    startEmailDraft: vi.fn<Database['startEmailDraft']>(() =>
+      Promise.resolve({ status: 'started', id: 'draft-1' } as const),
+    ),
+    finishEmailDraft: vi.fn<Database['finishEmailDraft']>(() => Promise.resolve()),
+    emailDraftContext: vi.fn<Database['emailDraftContext']>(() => Promise.resolve(null)),
     listEmails: vi.fn<Database['listEmails']>(() => Promise.resolve([])),
     getEmail: vi.fn<Database['getEmail']>(() => Promise.resolve(null)),
     listUnmatchedEmails: vi.fn<Database['listUnmatchedEmails']>(() =>
