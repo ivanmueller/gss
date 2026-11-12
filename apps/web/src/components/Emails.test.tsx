@@ -1,4 +1,4 @@
-import type { EmailSettingsView, EmailView } from '@grain/domain';
+import type { EmailAutoDraftView, EmailSettingsView, EmailView } from '@grain/domain';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -594,5 +594,154 @@ describe('Reply and Draft with Claude (F-114 step 5b)', () => {
     show();
     expect(await screen.findByText('In reply to “RE: Barley”')).toBeInTheDocument();
     expect(screen.getByText('Drafted with Claude')).toBeInTheDocument();
+  });
+});
+
+describe('Claude’s email drafts on the Emails card (F-114 step 5c)', () => {
+  const DRAFTS_PATH = `GET /email-auto-drafts?organization_id=${ORG.id}&counterparty_id=${COMPANY}`;
+  const RECEIVED = '00000000-0000-4000-8000-0000000e1aa9';
+  const DRAFT: EmailAutoDraftView = {
+    id: '00000000-0000-4000-8000-0000000a0d01',
+    counterpartyId: COMPANY,
+    counterpartyName: 'Synthetic Buyer',
+    source: 'email',
+    about: 'The barley GSS has',
+    callAt: null,
+    callContactName: null,
+    callBy: null,
+    emailId: RECEIVED,
+    emailFrom: 'Pat Buyer',
+    emailSubject: 'Barley?',
+    emailAt: '2026-11-10T21:00:00.000Z',
+    assignedTo: null,
+    assignedToName: null,
+    fromChoice: 'shared',
+    to: ['orders@buyer.example.test'],
+    subject: 'Re: Barley?',
+    message: 'Hi Pat, we have 500 MT of barley at [price].',
+    checkThis: [],
+    placeholders: ['[price]'],
+    draftedAt: '2026-11-09T21:00:00.000Z',
+    answeredSince: null,
+  };
+
+  it('lists a draft with its age, opens it filled in, and sends it with its id once the blank is filled', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [DRAFTS_PATH]: () => Response.json({ drafts: [DRAFT], truncated: false }),
+      [`POST /emails?organization_id=${ORG.id}`]: () =>
+        Response.json({ email: email() }, { status: 201 }),
+    });
+    show();
+    const user = userEvent.setup();
+    expect(await screen.findByText('Reply to Pat Buyer’s email “Barley?”')).toBeInTheDocument();
+    expect(screen.getByText(/for anyone · \d+ days old/)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Open Claude’s draft: Reply to Pat Buyer’s email “Barley?”',
+      }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Claude’s draft' });
+    await within(dialog).findByLabelText('Subject');
+    expect(within(dialog).getByLabelText('To')).toHaveValue('orders@buyer.example.test');
+    expect(within(dialog).getByLabelText('From')).toHaveValue('shared');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Barley?');
+    // The blank keeps Send off until it is filled.
+    expect(within(dialog).getByRole('button', { name: 'Send' })).toBeDisabled();
+    const message = within(dialog).getByLabelText('Message');
+    await user.clear(message);
+    await user.type(message, 'Hi Pat, we have 500 MT of barley at 300.');
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const post = calls.find((call) => call.method === 'POST');
+    expect(post?.body).toMatchObject({
+      from: 'shared',
+      to: ['orders@buyer.example.test'],
+      replyToEmailId: RECEIVED,
+      claudeDraftId: null,
+      autoDraftId: DRAFT.id,
+    });
+  });
+
+  it('offers to send as a new email when someone else sent or dismissed the draft', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [DRAFTS_PATH]: () =>
+        Response.json({ drafts: [{ ...DRAFT, placeholders: [] }], truncated: false }),
+      [`POST /emails?organization_id=${ORG.id}`]: (call) =>
+        (call.body as { autoDraftId: string | null }).autoDraftId === null
+          ? Response.json({ email: email() }, { status: 201 })
+          : Response.json(
+              { error: { code: 'AUTO_DRAFT_USED', message: 'Claude’s draft was already sent.' } },
+              { status: 409 },
+            ),
+    });
+    show();
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Open Claude’s draft: Reply to Pat Buyer’s email “Barley?”',
+      }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Claude’s draft' });
+    await within(dialog).findByLabelText('Subject');
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(
+      await within(dialog).findByText('Claude’s draft was sent or dismissed by someone else.'),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Send as a new email' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const posts = calls.filter((call) => call.method === 'POST' && call.path.startsWith('/emails'));
+    expect(posts.map((call) => (call.body as { autoDraftId: string | null }).autoDraftId)).toEqual([
+      DRAFT.id,
+      null,
+    ]);
+  });
+
+  it('opens the draft named in the address (Open on Follow-ups), once', async () => {
+    window.history.replaceState(null, '', `/counterparties/${COMPANY}?email_draft=${DRAFT.id}`);
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [DRAFTS_PATH]: () => Response.json({ drafts: [DRAFT], truncated: false }),
+    });
+    show();
+    expect(await screen.findByRole('dialog', { name: 'Claude’s draft' })).toBeInTheDocument();
+    expect(window.location.search).toBe('');
+  });
+
+  it('says so when the draft named in the address is no longer waiting', async () => {
+    window.history.replaceState(null, '', `/counterparties/${COMPANY}?email_draft=${DRAFT.id}`);
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [DRAFTS_PATH]: () => Response.json({ drafts: [], truncated: false }),
+    });
+    show();
+    expect(
+      await screen.findByText(
+        'That draft of Claude’s is no longer waiting: it was sent or dismissed.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('dismisses a draft after asking', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [DRAFTS_PATH]: () => Response.json({ drafts: [DRAFT], truncated: false }),
+      [`POST /email-auto-drafts/${DRAFT.id}/dismiss?organization_id=${ORG.id}`]: () =>
+        Response.json({ dismissed: true }),
+    });
+    show();
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Dismiss Claude’s draft: Reply to Pat Buyer’s email “Barley?”',
+      }),
+    );
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path.startsWith('/email-auto-drafts?'))).toHaveLength(2);
+    });
   });
 });

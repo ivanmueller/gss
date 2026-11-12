@@ -48,6 +48,7 @@ async function receive(message: string): Promise<string> {
 function reading(tess: string): CheckedReading {
   return {
     voicemail: false,
+    emailAbout: null,
     summary: 'Pat asks for the contract.',
     drafts: [
       {

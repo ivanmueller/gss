@@ -27,7 +27,9 @@ export type StartEmailRefusal =
   | 'contact_not_found'
   | 'bad_recipients'
   | 'reply_not_found'
-  | 'draft_not_found';
+  | 'draft_not_found'
+  | 'auto_draft_not_found'
+  | 'auto_draft_used';
 export type StartEmailResult =
   | { status: 'started'; id: string }
   /**
@@ -63,6 +65,8 @@ export interface StartEmail {
   replyToEmailId: string | null;
   /** The Draft with Claude request it started from. */
   claudeDraftId: string | null;
+  /** The automatic draft it was opened from (F-114 step 5c). */
+  autoDraftId: string | null;
 }
 
 /** app.start_email_draft's answer (F-114 step 5b). */
@@ -307,6 +311,8 @@ const START_REFUSALS: readonly StartEmailRefusal[] = [
   'bad_recipients',
   'reply_not_found',
   'draft_not_found',
+  'auto_draft_not_found',
+  'auto_draft_used',
 ];
 const DRAFT_REFUSALS = [
   'forbidden',
@@ -428,7 +434,7 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
       where r.organization_id = e.organization_id and r.id = e.reply_to_email_id
         and not exists (select 1 from app.email_removals x where x.email_id = r.id))
       as in_reply_to_subject,
-    e.claude_draft_id is not null as drafted_by_claude,
+    (e.claude_draft_id is not null or e.auto_draft_id is not null) as drafted_by_claude,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
@@ -574,7 +580,8 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
               array(select t.x from jsonb_array_elements_text(${tx.json(email.cc)}::jsonb)
                       with ordinality t(x, n) order by t.n),
               ${email.subject}, ${email.body},
-              ${email.messageId}, ${email.replyToEmailId}::uuid, ${email.claudeDraftId}::uuid) as result`;
+              ${email.messageId}, ${email.replyToEmailId}::uuid, ${email.claudeDraftId}::uuid,
+              ${email.autoDraftId}::uuid) as result`;
           const status = row?.result.status;
           if (status === 'started' && typeof row?.result.id === 'string') {
             return { status: 'started' as const, id: row.result.id };

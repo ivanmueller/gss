@@ -510,6 +510,7 @@ export function emailRoutes(
         messageId: `gss-${request.sendKey}`,
         replyToEmailId: request.replyToEmailId,
         claudeDraftId: request.claudeDraftId,
+        autoDraftId: request.autoDraftId,
       });
       switch (started.status) {
         case 'started':
@@ -558,6 +559,20 @@ export function emailRoutes(
             409,
             'DRAFT_NOT_FOUND',
             'Claude’s draft for this email was not found.',
+          );
+        case 'auto_draft_not_found':
+          return apiError(
+            c,
+            409,
+            'AUTO_DRAFT_NOT_FOUND',
+            'Claude’s draft is no longer waiting. Send this as a new email instead.',
+          );
+        case 'auto_draft_used':
+          return apiError(
+            c,
+            409,
+            'AUTO_DRAFT_USED',
+            'Claude’s draft was already sent or dismissed by someone. Send this as a new email instead.',
           );
       }
 

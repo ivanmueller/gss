@@ -95,8 +95,44 @@ export interface DraftRequestFacts {
   shared: boolean;
   /** The recipients the person put in To. */
   to: string[];
-  /** The line the person typed, if any. */
+  /** The line the person typed, if any (for an automatic draft: Claude's own, F-114 step 5c). */
   about: string | null;
+  /** Why an automatic draft is written: fixed wording, never generated text (F-114-5c-D1-02). */
+  reason?: string | null;
+  /** What GSS has, for a buyer (automatic drafts): never a price or a seller's name. */
+  offers?: readonly OfferLine[];
+}
+
+/** One live offer GSS has, as an automatic draft to a buyer may mention it (answer 27). */
+export interface OfferLine {
+  commodity: string;
+  grade: string | null;
+  firmness: string;
+  quantityMinMt: string | null;
+  quantityMaxMt: string;
+  deliveryStart: string | null;
+  deliveryEnd: string | null;
+  region: string | null;
+  country: string | null;
+}
+
+/** An offer as one line: grain, grade, firmness, quantity, delivery period and area only. */
+export function offerLine(offer: OfferLine): string {
+  return [
+    `- ${commodityName(offer.commodity)}${offer.grade === null ? '' : ` ${offer.grade}`}`,
+    offer.firmness,
+    offer.quantityMinMt === null
+      ? `up to ${plainQuantity(offer.quantityMaxMt)} MT`
+      : `${plainQuantity(offer.quantityMinMt)} to ${plainQuantity(offer.quantityMaxMt)} MT`,
+    offer.deliveryStart === null && offer.deliveryEnd === null
+      ? null
+      : `delivery ${offer.deliveryStart ?? ''} to ${offer.deliveryEnd ?? ''}`.trim(),
+    offer.region === null && offer.country === null
+      ? null
+      : `from ${[offer.region, offer.country].filter(Boolean).join(', ')}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 }
 
 /**
@@ -118,6 +154,7 @@ export function draftMessage(
   let locations = [...context.locations];
   let followUps = [...context.followUps];
   let notes = context.notes;
+  let offers = [...(facts.offers ?? [])];
   // At most 10 recipients named; the rest counted (F-114-5b-R1-01).
   const recipients =
     facts.to.length <= RECIPIENTS_NAMED
@@ -130,6 +167,7 @@ export function draftMessage(
       `From: ${facts.senderName}${facts.senderTitle === null ? '' : `, ${facts.senderTitle}`}, GSS${facts.shared ? ' (sent from the shared GSS address)' : ''}.`,
       `To: ${facts.to.length === 0 ? 'not chosen yet' : recipients}.`,
       `What it is about: ${facts.about ?? 'not given'}.`,
+      ...(facts.reason == null ? [] : [`Why this email: ${facts.reason}`]),
       '',
       `Company: ${context.name} (${context.types.join(' and ')}, ${context.country})`,
       `Contacts: ${
@@ -196,6 +234,13 @@ export function draftMessage(
               .filter(Boolean)
               .join('; '),
           )),
+      ...(facts.offers === undefined
+        ? []
+        : [
+            '',
+            'What GSS has to offer (never give a price or name the seller):',
+            ...(offers.length === 0 ? ['none'] : offers.map(offerLine)),
+          ]),
       '',
       context.call === null || transcript === null
         ? 'Latest call in the last 7 days: none'
@@ -223,6 +268,7 @@ export function draftMessage(
   let message = build();
   while (message.length > DRAFT_MESSAGE_MAX) {
     if (thread.length > 0) thread = thread.slice(1);
+    else if (offers.length > 5) offers = offers.slice(0, 5);
     else if (history.length > 0) history = history.slice(0, -1);
     else if (transcript !== null && transcript.length > TRANSCRIPT_FLOOR) {
       const over = message.length - DRAFT_MESSAGE_MAX;
@@ -231,6 +277,7 @@ export function draftMessage(
     else if (contacts.length > 10) contacts = contacts.slice(0, 10);
     // Then everything else that is not the answered email, the about line, the recipients or
     // the company's name, least useful first (F-114-5b-R1-01).
+    else if (offers.length > 0) offers = [];
     else if (locations.length > 0) locations = [];
     else if (followUps.length > 0) followUps = [];
     else if (notes !== null) notes = null;

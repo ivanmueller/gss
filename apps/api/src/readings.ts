@@ -61,6 +61,8 @@ followUps: each thing GSS's caller said they would do, or was asked to do, after
 
 contacts: each person at the counterparty newly named on the call with a role, phone or email, and each new detail of a listed contact (give that contact's id). Leave out details already listed.
 
+email: wanted is true only when someone at GSS said on the call that GSS would send the counterparty an email, or the counterparty asked GSS to email them something (what GSS has, an offer, a contract, details). Otherwise false, with about empty and no lines. about: one short plain line on what that email should cover, as said; lines: the transcript lines where it was said.
+
 lines: for every quote, follow-up and contact, the numbers of the transcript lines it comes from.
 
 Commodity codes: ${COMMODITIES.map((commodity) => `${commodity.code} (${commodity.name})`).join(', ')}.

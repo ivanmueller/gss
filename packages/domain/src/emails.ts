@@ -70,6 +70,8 @@ export const sendEmailSchema = z
     replyToEmailId: z.uuid().nullable().default(null),
     /** The Draft with Claude request whose draft this email started from (F-114 step 5b). */
     claudeDraftId: z.uuid().nullable().default(null),
+    /** The automatic draft this email was opened from (F-114 step 5c). */
+    autoDraftId: z.uuid().nullable().default(null),
   })
   .transform((value) => {
     // Each address once: To first, then Cc without the To addresses.

@@ -256,6 +256,17 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     finishEmailDraft: vi.fn<Database['finishEmailDraft']>(() => Promise.resolve()),
     emailDraftContext: vi.fn<Database['emailDraftContext']>(() => Promise.resolve(null)),
+    claimEmailAutoDrafts: vi.fn<Database['claimEmailAutoDrafts']>(() => Promise.resolve([])),
+    releaseEmailAutoDraft: vi.fn<Database['releaseEmailAutoDraft']>(() => Promise.resolve()),
+    emailAutoDraftContext: vi.fn<Database['emailAutoDraftContext']>(() => Promise.resolve(null)),
+    keepEmailAutoDraft: vi.fn<Database['keepEmailAutoDraft']>(() => Promise.resolve(true)),
+    listEmailAutoDrafts: vi.fn<Database['listEmailAutoDrafts']>(() =>
+      Promise.resolve({ drafts: [], truncated: false }),
+    ),
+    countEmailAutoDrafts: vi.fn<Database['countEmailAutoDrafts']>(() => Promise.resolve(0)),
+    dismissEmailAutoDraft: vi.fn<Database['dismissEmailAutoDraft']>(() =>
+      Promise.resolve('dismissed'),
+    ),
     listEmails: vi.fn<Database['listEmails']>(() => Promise.resolve([])),
     getEmail: vi.fn<Database['getEmail']>(() => Promise.resolve(null)),
     listUnmatchedEmails: vi.fn<Database['listUnmatchedEmails']>(() =>

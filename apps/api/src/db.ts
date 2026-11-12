@@ -38,6 +38,7 @@ import { crmQueries, type CrmDatabase } from './crm-db';
 import { freightQueries, type FreightDatabase } from './freight-db';
 import { fxQueries, type FxDatabase } from './fx-db';
 import { emailQueries, type EmailsDatabase } from './emails-db';
+import { autoDraftQueries, type AutoDraftsDatabase } from './email-auto-drafts-db';
 import { mapLayerQueries, type MapLayersDatabase } from './map-layers-db';
 import type { FacilityAddress } from './geocoding';
 import { quoteQueries, type QuoteDatabase } from './quotes-db';
@@ -374,7 +375,8 @@ export interface Database
     ReadingsDatabase,
     SummariesDatabase,
     MapLayersDatabase,
-    EmailsDatabase {
+    EmailsDatabase,
+    AutoDraftsDatabase {
   memberships: (userId: string) => Promise<Membership[]>;
   canEditDirectory: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   listCounterparties: (
@@ -972,6 +974,7 @@ export function createDatabase(sql: postgres.Sql): Database {
     ...summaryQueries(asUser, sql),
     ...mapLayerQueries(asUser),
     ...emailQueries(asUser, sql),
+    ...autoDraftQueries(asUser, sql),
 
     async memberships(userId) {
       const rows = await sql.begin(async (tx) => {

@@ -32,6 +32,7 @@ let db: Database;
 
 const READING: CheckedReading = {
   voicemail: false,
+  emailAbout: null,
   summary: 'Pat bids on canola delivered.',
   drafts: [
     {
