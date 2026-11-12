@@ -100,7 +100,7 @@ function numbersIn(text: string): Found[] {
 }
 
 function wordsIn(text: string): string[] {
-  return Array.from(text.matchAll(WORD), (match) => match[0].toLowerCase());
+  return Array.from(text.matchAll(WORD), (match) => match[0]);
 }
 
 export interface EmailDraftCheck {
@@ -116,7 +116,7 @@ export function checkEmailDraft(
   source: string,
 ): EmailDraftCheck {
   const known = new Set(numbersIn(source).map((found) => found.key));
-  const sourceWords = new Set(wordsIn(source));
+  const sourceWords = new Set(wordsIn(source).map((word) => word.toLowerCase()));
   const text = `${draft.subject}\n${draft.message}`;
   const checkThis: string[] = [];
   const add = (shown: string) => {
@@ -126,8 +126,10 @@ export function checkEmailDraft(
   for (const found of numbersIn(text)) {
     if (!known.has(found.key)) add(found.shown);
   }
+  // As written in the draft ("Twelve"), so the form finds it in the text (F-114-5b-R1-02).
   for (const word of wordsIn(text)) {
-    if (NUMBER_WORDS.has(word) && !sourceWords.has(word)) add(word);
+    const lower = word.toLowerCase();
+    if (NUMBER_WORDS.has(lower) && !sourceWords.has(lower)) add(word);
   }
   const placeholders = [...new Set(Array.from(text.matchAll(PLACEHOLDER), (m) => m[0]))];
   return { checkThis, placeholders };

@@ -51,6 +51,14 @@ describe('checkEmailDraft', () => {
     expect(result.checkThis).toEqual(['twelve']);
   });
 
+  it('keeps a number word as written, capitalised (R1-02)', () => {
+    const result = checkEmailDraft(
+      { subject: 'Loads', message: 'Twelve loads available.' },
+      source,
+    );
+    expect(result.checkThis).toEqual(['Twelve']);
+  });
+
   it('finds the placeholders, each once', () => {
     const result = checkEmailDraft(
       { subject: 'Offer', message: 'We offer [price] delivered by [date]. Price: [price].' },

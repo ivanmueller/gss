@@ -187,6 +187,59 @@ describe('draftMessage', () => {
     expect(message).toContain('END-OF-ANSWER');
     expect(message).toContain('Synthetic Buyer');
   });
+
+  it('fits with every retained part at its longest and 50 long recipients (R1-01)', () => {
+    const address = (k: number) =>
+      `${'r'.repeat(220)}${String(k).padStart(2, '0')}@buyer.example.test`;
+    const full = context({
+      notes: 'n'.repeat(1500),
+      contacts: Array.from({ length: 30 }, (_, k) => ({
+        id: `k${String(k)}`,
+        name: 'c'.repeat(200),
+        role: 'r'.repeat(200),
+        email: address(k),
+        main: false,
+      })),
+      commodities: Array.from({ length: 40 }, () => ({
+        code: 'barley',
+        direction: 'buys' as const,
+      })),
+      locations: Array.from({ length: 15 }, () => ({
+        name: 'l'.repeat(200),
+        city: 'c'.repeat(200),
+        region: 'AB',
+        country: 'CA',
+      })),
+      quotes: Array.from({ length: 20 }, () => ({ ...QUOTE, basisLocation: 'b'.repeat(200) })),
+      followUps: Array.from({ length: 15 }, () => ({
+        task: 't'.repeat(300),
+        dueAt: '2026-11-20T18:00:00+00:00',
+        assignedTo: 'a'.repeat(200),
+      })),
+      history: Array.from({ length: 8 }, () => ({
+        occurredAt: '2026-11-01T18:00:00+00:00',
+        channel: 'phone',
+        contactName: 'p'.repeat(200),
+        by: 'b'.repeat(200),
+        notes: 'w'.repeat(800),
+        claudeNotes: 'w'.repeat(800),
+      })),
+      call: { ...CALL, transcript: 'x'.repeat(12_000) },
+      answer: { ...ANSWER, body: `START ${'a '.repeat(2900)}END-OF-ANSWER` },
+      thread: Array.from({ length: 7 }, (_, k) => ({
+        ...EARLIER,
+        id: `e${String(k)}`,
+        body: 'b'.repeat(12_000),
+      })),
+    });
+    const about = 'z'.repeat(300);
+    const to = Array.from({ length: 50 }, (_, k) => address(k));
+    const message = draftMessage(full, { ...FACTS, to, about }, NOW);
+    expect(message.length).toBeLessThanOrEqual(DRAFT_MESSAGE_MAX);
+    expect(message).toContain('END-OF-ANSWER');
+    expect(message).toContain(about);
+    expect(message).toContain('and 40 more');
+  });
 });
 
 let db = fakeDatabase();

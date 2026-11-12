@@ -281,7 +281,10 @@ function EmailDialog({
   const subjectLine = subject.replace(/[\r\n]+/g, ' ');
   const text = `${subjectLine}\n${message}`;
   const unfilled = draft === null ? [] : draft.placeholders.filter((p) => text.includes(p));
-  const toCheck = draft === null ? [] : draft.checkThis.filter((item) => text.includes(item));
+  // Case-insensitive, so "Twelve" edited to "twelve" is still listed (F-114-5b-R1-02).
+  const lowered = text.toLowerCase();
+  const toCheck =
+    draft === null ? [] : draft.checkThis.filter((item) => lowered.includes(item.toLowerCase()));
   const canSend =
     ready &&
     !busy &&

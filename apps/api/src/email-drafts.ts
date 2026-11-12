@@ -34,7 +34,9 @@ export const DRAFT_MESSAGE_MAX = 48_000;
 export const ANSWER_CHARS_MAX = 6000;
 /** Each other email of the thread, at most. */
 export const THREAD_EMAIL_CHARS_MAX = 2500;
-/** The call's transcript is never cut below this while trimming. */
+/** At most this many recipients are named to Claude. */
+const RECIPIENTS_NAMED = 10;
+/** The call's transcript is cut no lower than this before the other parts go. */
 const TRANSCRIPT_FLOOR = 3000;
 /** The answer: a short email needs far fewer tokens than a call's reading. */
 const DRAFT_MAX_TOKENS = 4000;
@@ -113,12 +115,20 @@ export function draftMessage(
   let transcript = context.call?.transcript ?? null;
   let quotes = [...context.quotes];
   let contacts = [...context.contacts];
+  let locations = [...context.locations];
+  let followUps = [...context.followUps];
+  let notes = context.notes;
+  // At most 10 recipients named; the rest counted (F-114-5b-R1-01).
+  const recipients =
+    facts.to.length <= RECIPIENTS_NAMED
+      ? facts.to.join(', ')
+      : `${facts.to.slice(0, RECIPIENTS_NAMED).join(', ')} and ${String(facts.to.length - RECIPIENTS_NAMED)} more`;
 
   const build = () => {
     const sections: string[] = [
       `Now: ${formatAlberta(now.toISOString())}.`,
       `From: ${facts.senderName}${facts.senderTitle === null ? '' : `, ${facts.senderTitle}`}, GSS${facts.shared ? ' (sent from the shared GSS address)' : ''}.`,
-      `To: ${facts.to.length === 0 ? 'not chosen yet' : facts.to.join(', ')}.`,
+      `To: ${facts.to.length === 0 ? 'not chosen yet' : recipients}.`,
       `What it is about: ${facts.about ?? 'not given'}.`,
       '',
       `Company: ${context.name} (${context.types.join(' and ')}, ${context.country})`,
@@ -144,8 +154,8 @@ export function draftMessage(
           .map((m) => commodityName(m.code))
           .join(', ') || 'none listed'
       }`,
-      `Locations: ${context.locations.map((l) => [l.name, l.city, l.region, l.country].filter(Boolean).join(', ')).join('; ') || 'none'}`,
-      `Notes on the company (internal): ${context.notes ?? 'none'}`,
+      `Locations: ${locations.map((l) => [l.name, l.city, l.region, l.country].filter(Boolean).join(', ')).join('; ') || 'none'}`,
+      `Notes on the company (internal): ${notes ?? 'none'}`,
       '',
       'Live bids and offers of this company:',
       ...(quotes.length === 0
@@ -168,9 +178,9 @@ export function draftMessage(
           )),
       '',
       'Open follow-ups (internal):',
-      ...(context.followUps.length === 0
+      ...(followUps.length === 0
         ? ['none']
-        : context.followUps.map(
+        : followUps.map(
             (f) => `- "${f.task}", due ${formatAlberta(f.dueAt)}, for ${f.assignedTo}`,
           )),
       '',
@@ -219,6 +229,14 @@ export function draftMessage(
       transcript = cutAt(transcript, Math.max(TRANSCRIPT_FLOOR, transcript.length - over));
     } else if (quotes.length > 10) quotes = quotes.slice(0, 10);
     else if (contacts.length > 10) contacts = contacts.slice(0, 10);
+    // Then everything else that is not the answered email, the about line, the recipients or
+    // the company's name, least useful first (F-114-5b-R1-01).
+    else if (locations.length > 0) locations = [];
+    else if (followUps.length > 0) followUps = [];
+    else if (notes !== null) notes = null;
+    else if (transcript !== null) transcript = null;
+    else if (quotes.length > 3) quotes = quotes.slice(0, 3);
+    else if (contacts.length > 3) contacts = contacts.slice(0, 3);
     else break;
     message = build();
   }
@@ -248,6 +266,17 @@ export async function draftEmail(
   now: Date,
 ): Promise<DraftOutcome> {
   const message = draftMessage(context, facts, now);
+  if (message.length > DRAFT_MESSAGE_MAX) {
+    // Cannot happen within the context's limits; never sent to Claude if it does.
+    console.error('Email draft: failed too_large');
+    await db.finishEmailDraft(ctx, requestId, {
+      drafted: false,
+      model: null,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    return { status: 'failed' };
+  }
   const finish = (drafted: boolean, model: string | null, input = 0, output = 0) =>
     db.finishEmailDraft(ctx, requestId, {
       drafted,

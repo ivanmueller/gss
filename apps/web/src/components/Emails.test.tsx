@@ -485,6 +485,34 @@ describe('Reply and Draft with Claude (F-114 step 5b)', () => {
     });
   });
 
+  it('warns about a capitalised number word Claude did not have (R1-02)', async () => {
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: { ...SETTINGS, claudeConfigured: true } }),
+      [DRAFT_PATH]: () =>
+        Response.json({
+          draft: {
+            draftId: DRAFT_ID,
+            subject: 'Barley',
+            message: 'Twelve loads available.',
+            checkThis: ['Twelve'],
+            placeholders: [],
+          },
+        }),
+    });
+    show();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Email Pat Buyer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New email' });
+    await user.click(await within(dialog).findByRole('button', { name: 'Draft with Claude' }));
+    expect(await within(dialog).findByText('Check this before sending')).toBeInTheDocument();
+    expect(within(dialog).getByText('Twelve')).toBeInTheDocument();
+    // Still listed when only its case is changed.
+    const box = within(dialog).getByLabelText('Message');
+    await user.clear(box);
+    await user.type(box, 'twelve loads available.');
+    expect(within(dialog).getByText('Twelve')).toBeInTheDocument();
+  });
+
   it('offers no Draft with Claude when Claude is not set up', async () => {
     mockApi({
       [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
