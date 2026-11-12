@@ -19,7 +19,9 @@
 //   3. Runs the Codex CLI (`codex exec`, installed by the official Codex plugin) with a read-only
 //      sandbox, no connectors (`--disable apps`), the JSON output schema beside this file, and the
 //      prompt built from prompt-template.md, the register's known findings and, for a re-review, the
-//      findings to verify.
+//      findings to verify; at the reasoning effort EFFORT gives for the mode. The prompt sets a
+//      reading budget (no handoff or feature documents, line ranges rather than whole files), and
+//      each round's token count is recorded in the state and printed.
 //   4. Keeps everything Codex wrote outside the repository, in ~/.gss-reviews/<ID>/<round>-<sha>-<n>/
 //      (the repository is public: open security findings must not be committed in detail).
 //   5. Removes only the worktree it created, and prints the findings with probable duplicates.
@@ -54,6 +56,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = join(HERE, 'review-output.schema.json');
 const TEMPLATE = join(HERE, 'prompt-template.md');
 const CODEX_TIMEOUT_MS = 45 * 60 * 1000;
+// Reasoning effort by mode (the owner's decision of 2026-11-11, to cut Codex usage): medium for the
+// plan and the final review of the whole pull request, low (the model's own default, as the reviews
+// pasted by hand used) for checkpoint reviews and re-reviews of fixes.
+const EFFORT = { design: 'medium', final: 'medium', checkpoint: 'low', rereview: 'low' };
 
 const argv = process.argv.slice(2);
 const option = (name) => {
@@ -241,17 +247,22 @@ const reopened = findingRows.filter(([, , status]) => status === 'confirmed');
 
 let scope;
 if (mode === 'design') {
-  scope = `Review this plan before it is implemented. Use file "PLAN" for findings about the plan itself.\n\n${readFileSync(resolve(option('plan')), 'utf8')}`;
+  scope =
+    'Review this plan before it is implemented. Use file "PLAN" for findings about the plan itself. ' +
+    'Open only the existing files the plan names or builds on, and only the parts it relies on.' +
+    `\n\n${readFileSync(resolve(option('plan')), 'utf8')}`;
 } else if (mode === 'checkpoint') {
-  scope = `Review every change from ${base} to ${sha}: run \`git diff ${base} ${sha}\` and read the changed files whole where needed.`;
+  scope =
+    `Review every change from ${base} to ${sha}: start with \`git diff ${base} ${sha}\`. ` +
+    'Open a changed file beyond its diff only where the diff alone cannot settle a question.';
 } else if (mode === 'final') {
   scope =
-    `FINAL review of a high-risk or governance pull request, the last before it merges automatically. Review the WHOLE pull request, every change from ${base} (on the base branch) to ${sha}: run \`git diff ${base} ${sha}\` and read every changed file whole. ` +
+    `FINAL review of a high-risk or governance pull request, the last before it merges automatically. Review the WHOLE pull request, every change from ${base} (on the base branch) to ${sha}: start with \`git diff ${base} ${sha}\`, and read a changed file whole only where its diff leaves a question open. ` +
     'Challenge the design as well as the code: security, permissions and organization isolation, money and FX, migrations and data integrity, failure modes, missing tests. Earlier rounds do not vouch for anything: approve only if you would merge this exact commit yourself.';
 } else {
   scope =
     `Targeted re-review. Review only what changed from ${base} (already reviewed) to ${sha}: run \`git diff ${base} ${sha}\`. ` +
-    'Do not re-review unchanged code except to judge a fix.';
+    'Do not re-review unchanged code except to judge a fix, and then read only the lines around it. Open no documents.';
 }
 const verify =
   toVerify.length || reopened.length
@@ -302,7 +313,7 @@ try {
     '--disable',
     'apps',
     '-c',
-    'model_reasoning_effort=high',
+    `model_reasoning_effort=${EFFORT[mode]}`,
     ...(process.platform === 'win32' ? ['-c', 'windows.sandbox=unelevated'] : []),
     '--cd',
     worktree,
@@ -327,6 +338,11 @@ try {
     },
   );
   writeFileSync(join(dir, 'log.txt'), `${run.stdout ?? ''}\n${run.stderr ?? ''}`);
+  // Codex prints "tokens used" and the count on the next line; kept per round to watch usage.
+  const tokenMatch = /tokens used\s*\r?\n\s*([\d,]+)/.exec(
+    `${run.stdout ?? ''}\n${run.stderr ?? ''}`,
+  );
+  const tokens = tokenMatch ? Number(tokenMatch[1].replaceAll(',', '')) : null;
   let review;
   try {
     review = JSON.parse(readFileSync(rawPath, 'utf8'));
@@ -381,6 +397,8 @@ try {
       issues,
       notFixed,
       escalation,
+      effort: EFFORT[mode],
+      tokens,
     });
     console.log(
       `Codex review ${id} round ${round} (${mode}) of ${sha.slice(0, 7)}${base ? ` from ${base.slice(0, 7)}` : ''}: ${review.verdict}`,
@@ -398,6 +416,9 @@ try {
     for (const v of review.verified_fixes)
       console.log(`\nVerified ${v.id}: ${v.status}. ${v.note}`);
     console.log(`\nIssues this round: ${issues} (the register's Findings column).`);
+    console.log(
+      `Codex usage: ${tokens === null ? 'not reported' : `${tokens.toLocaleString('en-US')} tokens`} at ${EFFORT[mode]} effort.`,
+    );
     console.log(`Full result (private, outside the repository): ${join(dir, 'result.json')}`);
     if (escalation) {
       console.log(

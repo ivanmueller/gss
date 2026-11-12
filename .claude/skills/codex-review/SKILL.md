@@ -17,6 +17,15 @@ The runner loads `scripts/review-register.js` from the working tree: do not star
 - Create `docs/reviews/<ID>.md` from the format in `docs/reviews/README.md` (Status: open).
 - Risk tier: `node scripts/review-gate.js --base origin/main --head HEAD` once there is a commit; high risk also includes anything that changes how money, permissions, phone numbers or real business data are handled, whatever the paths say.
 
+## Keep Codex usage low (the owner's decision, 2026-11-11)
+
+Codex's usage is limited, and every round is a fresh review that reads the code again. The runner sets the reasoning effort by mode (medium for design and final, low for checkpoint and re-review) and a reading budget in the prompt, and prints each round's token count. Most rounds so far were spent on Claude's own slips, so **before every review, Claude checks its own work**:
+
+1. **Plan (design reviews):** every edge case written down before Codex sees it: each role (viewer and analyst included), retries and lost answers, two people at once, paging ties and moved cursors, archived or removed records, missing configuration, limits and hostile input (linear time, bounded memory, Unicode cut on character boundaries for any parser). Follow the repository's existing patterns for the same thing (for example lists passed to Postgres as JSON, since the Worker's connection does not fetch types).
+2. **Code (checkpoint, re-review, final):** `pnpm check`, the database tests (`supabase test db`, `pnpm --filter @grain/api test:db`) and, for screens, `pnpm e2e` pass locally; Prettier run on every changed file; Claude has read its own whole diff against the plan's edge cases and the open findings.
+3. **One review per feature where possible:** the checkpoint review once the feature is complete, not after each piece; fixes for all of a round's findings together before the re-review.
+4. After each round, compare its token count with the earlier ones; an unusually large one is a sign the prompt or the change is too broad.
+
 ## 1. Design review (required for high risk and governance, before coding)
 
 The evidence check refuses a high-risk or governance pull request without one, and the design review must have reviewed a commit before the reviewed code. Know the tier before you start: anything touching the paths of the high-risk and governance rows in `docs/AI_WORKFLOW.md` §11.6.
