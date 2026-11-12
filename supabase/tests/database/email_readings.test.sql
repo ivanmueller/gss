@@ -105,7 +105,7 @@ select ok(not has_table_privilege('app_api', 'app.email_reading_requests', 'sele
 select ok(not has_function_privilege('app_api', 'app.email_readable(uuid)', 'execute')
           and not has_function_privilege('anon', 'app.claim_email_readings(integer)', 'execute')
           and not has_function_privilege('authenticated',
-                'app.keep_email_reading(uuid, uuid, text, text, jsonb, boolean, jsonb, integer, integer)', 'execute')
+                'app.keep_email_reading(uuid, uuid, text, text, jsonb, boolean, jsonb, integer, integer, boolean, text)', 'execute')
           and has_function_privilege('app_api', 'app.claim_email_readings(integer)', 'execute'),
           'functions are the Worker''s only');
 
@@ -150,7 +150,7 @@ create function pg_temp.keep(email uuid, token uuid, model text default 'claude-
                              drafts jsonb default '[]') returns boolean
 language sql as $fn$
   select app.keep_email_reading(email, token, model, 'Notes', '["Subject: Re: Offer", "We can take 2 loads."]',
-                                false, drafts, 10, 20)
+                                false, drafts, 10, 20, false, null)
 $fn$;
 
 select is(pg_temp.keep(pg_temp.id('good'), gen_random_uuid()), false, 'not kept under another token');

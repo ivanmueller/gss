@@ -375,6 +375,35 @@ export const EMAIL_DRAFT_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * Claude's answer for a reminder (F-114 step 5c, part 2): whether the GSS email asked for
+ * something that calls for a reminder, and the reminder's message. The subject is the Worker's,
+ * never Claude's. A wanted reminder without a message is out of shape.
+ */
+export const reminderAnswerSchema = z
+  .strictObject({
+    wanted: z.boolean(),
+    message: z
+      .string()
+      .transform((value) => value.replace(/\r\n?/g, '\n').replace(CONTROL, '').trim())
+      .pipe(z.string().max(EMAIL_DRAFT_MESSAGE_MAX)),
+  })
+  .refine((answer) => !answer.wanted || answer.message !== '', {
+    message: 'A wanted reminder needs a message.',
+  });
+export type ReminderAnswer = z.infer<typeof reminderAnswerSchema>;
+
+/** The JSON schema Claude answers a reminder in (structured outputs). */
+export const REMINDER_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    wanted: { type: 'boolean' },
+    message: { type: 'string' },
+  },
+  required: ['wanted', 'message'],
+  additionalProperties: false,
+} as const;
+
 /** What the person gets back: the draft, and what to check before sending. */
 export interface EmailDraftView {
   /** The request's id, sent back with the email (claudeDraftId). */

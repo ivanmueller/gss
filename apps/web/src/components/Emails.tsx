@@ -249,6 +249,12 @@ function EmailDialog({
     held === null ? (auto?.id ?? null) : held.autoDraftId,
   );
   const [autoGone, setAutoGone] = useState(false);
+  // The reminder's silence ended while it was open (F-114-5c2-R1-01): not sent.
+  const [autoAnswered, setAutoAnswered] = useState(false);
+  // A reminder answers GSS's own email (F-114 step 5c, part 2): only with its draft, so Draft
+  // with Claude (which answers received email only) is not offered while it is the one answered.
+  const remindedEmail = auto?.source === 'reminder' ? auto.emailId : null;
+  const answeringReminded = remindedEmail !== null && answering === remindedEmail;
   const [about, setAbout] = useState('');
   const [drafting, setDrafting] = useState<AbortController | null>(null);
   const heldDraft = held?.claudeDraftId ?? null;
@@ -388,9 +394,16 @@ function EmailDialog({
           // The email answered was deleted meanwhile: nothing was kept or sent.
           setPending(null);
           setReplyGone(true);
-        } else if ((code === 'AUTO_DRAFT_USED' || code === 'AUTO_DRAFT_NOT_FOUND') && !uncertain) {
-          // Someone else sent or dismissed Claude's draft meanwhile: nothing was kept or sent.
+        } else if (
+          (code === 'AUTO_DRAFT_USED' ||
+            code === 'AUTO_DRAFT_NOT_FOUND' ||
+            code === 'AUTO_DRAFT_ANSWERED') &&
+          !uncertain
+        ) {
+          // Someone else sent or dismissed Claude's draft meanwhile, or the company answered a
+          // reminder: nothing was kept or sent.
           setPending(null);
+          setAutoAnswered(code === 'AUTO_DRAFT_ANSWERED');
           setAutoGone(true);
         } else if (code === 'EMAIL_REFUSED') {
           // Nothing went: correct it and send again as a new attempt (the refused one is kept).
@@ -637,13 +650,17 @@ function EmailDialog({
             )}
             {autoGone && autoDraftId !== null && !sent && (
               <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
-                Claude’s draft was sent or dismissed by someone else.
+                {autoAnswered
+                  ? 'The company answered, or was emailed or contacted, after this reminder was drafted: read that first.'
+                  : 'Claude’s draft was sent or dismissed by someone else.'}
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
                   onClick={() => {
                     setAutoDraftId(null);
+                    // GSS's own email can be answered only with its reminder: sent as new.
+                    if (answeringReminded) setAnswering(null);
                     setAutoGone(false);
                     setResult(null);
                   }}
@@ -652,7 +669,7 @@ function EmailDialog({
                 </Button>
               </div>
             )}
-            {settings.claudeConfigured && !sent && pending === null && (
+            {settings.claudeConfigured && !sent && pending === null && !answeringReminded && (
               <div className="flex flex-col gap-2 rounded-control border border-l-[3px] border-claude-border border-l-claude-mark bg-claude-subtle px-3 py-2">
                 <label className="flex flex-col gap-1.5" htmlFor={`${id}-about`}>
                   <span className="flex items-center gap-1.5 font-medium">

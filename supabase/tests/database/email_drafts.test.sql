@@ -143,9 +143,9 @@ select ok(not has_function_privilege('app_api', 'app.answerable_email(uuid, uuid
           and not has_function_privilege('authenticated', 'app.start_email_draft(uuid, uuid, uuid, uuid)', 'execute')
           and not has_function_privilege('anon', 'app.email_draft_context(uuid, uuid, uuid)', 'execute')
           and not has_function_privilege('public',
-                'app.start_outgoing_email(uuid, uuid, uuid, text, text, text[], text[], text, text, text, uuid, uuid)', 'execute')
+                'app.start_outgoing_email(uuid, uuid, uuid, text, text, text[], text[], text, text, text, uuid, uuid, uuid)', 'execute')
           and has_function_privilege('app_api',
-                'app.start_outgoing_email(uuid, uuid, uuid, text, text, text[], text[], text, text, text, uuid, uuid)', 'execute'),
+                'app.start_outgoing_email(uuid, uuid, uuid, text, text, text[], text[], text, text, text, uuid, uuid, uuid)', 'execute'),
           'the functions are app_api''s only');
 
 -- Starting a draft ----------------------------------------------------------
@@ -279,7 +279,7 @@ create function pg_temp.send(uid text, reply uuid, draft uuid, key text,
                              company text default '00000000-0000-4000-8000-00000000c1aa')
 returns jsonb language sql as $fn$
   select pg_temp.api(uid, format(
-    'select app.start_outgoing_email(%L, %L, null, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
+    'select app.start_outgoing_email(%L, %L, null, %L, %L, %L, %L, %L, %L, %L, %L, %L, null)::text',
     '00000000-0000-4000-8000-0000000000aa', company, 'info', 'gss.example',
     '{pat@buyer.example}'::text[], '{}'::text[], 'Re: Offer', 'Thanks.', key, reply, draft))::jsonb
 $fn$;
@@ -303,10 +303,10 @@ select results_eq(
   format('values (%L::uuid, %L::uuid)', pg_temp.id('in1'), pg_temp.id('tomdraft')),
   'a reply keeps the email it answers and the draft it started from');
 select is(pg_temp.api('00000000-0000-4000-8000-0000000044aa', format(
-            'select app.start_outgoing_email(%L, %L, null, %L, %L, %L, %L, %L, %L, %L)::text',
+            'select app.start_outgoing_email(%L, %L, null, %L, %L, %L, %L, %L, %L, %L, null, null, null)::text',
             '00000000-0000-4000-8000-0000000000aa', '00000000-0000-4000-8000-00000000c1aa', 'info', 'gss.example',
             '{pat@buyer.example}'::text[], '{}'::text[], 'Hello', 'Text.', 'gss-k6'))::jsonb ->> 'status',
-          'started', 'the old function still sends (the deploy''s few seconds)');
+          'started', 'a new email without a reply or draft still sends');
 
 select throws_ok(
   format($q$insert into app.emails (organization_id, direction, status, counterparty_id, from_address,

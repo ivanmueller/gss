@@ -519,4 +519,34 @@ describe('POST /emails with a reply and a draft', () => {
     );
     expect(mailer.send).not.toHaveBeenCalled();
   });
+
+  it('sends no reminder answered since it was drafted (F-114-5c2-R1-01)', async () => {
+    db.startOutgoingEmail.mockResolvedValueOnce({ status: 'auto_draft_answered' });
+    const response = await app.request(
+      '/api/v1/emails',
+      {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          counterpartyId: COMPANY,
+          contactId: null,
+          from: 'own',
+          to: ['pat@buyer.example.test'],
+          cc: [],
+          subject: 'Re: Barley',
+          message: 'Hi Pat, any news?',
+          sendKey: KEY,
+          replyToEmailId: ANSWERED,
+          claudeDraftId: null,
+          autoDraftId: '00000000-0000-4000-8000-0000000a0d01',
+        }),
+      },
+      EMAIL_ENV,
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json<{ error: { code: string } }>()).error.code).toBe(
+      'AUTO_DRAFT_ANSWERED',
+    );
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
 });

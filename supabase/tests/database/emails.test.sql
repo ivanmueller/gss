@@ -84,7 +84,7 @@ create function pg_temp.start(uid text, company text, contact text, from_part te
 returns jsonb
 language sql as $fn$
   select pg_temp.api(uid, format(
-    'select app.start_outgoing_email(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L)::text',
+    'select app.start_outgoing_email(%L, %L, %L, %L, %L, %L, %L, %L, %L, %L, null, null, null)::text',
     org, company, contact, from_part, 'gss.example', to_list, '{}'::text[], 'Hello', 'Body text',
     coalesce(msg, '<' || gen_random_uuid() || '@gss.example>')))::jsonb
 $fn$;

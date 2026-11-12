@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkEmailDraft, plainNumber, replySubject } from './emailDrafts';
+import { checkEmailDraft, plainNumber, reminderSubject, replySubject } from './emailDrafts';
+import { reminderAnswerSchema } from './emails';
 
 describe('plainNumber', () => {
   it('compares numbers as written in different ways', () => {
@@ -98,5 +99,44 @@ describe('replySubject', () => {
     expect(replySubject('RE:Barley')).toBe('Re: Barley');
     expect(replySubject('Fwd: Barley')).toBe('Re: Barley');
     expect(replySubject('  ')).toBe('Re:');
+  });
+});
+
+describe('reminderSubject (F-114-5c2-D1-01)', () => {
+  it('is the reply subject when it fits', () => {
+    expect(reminderSubject('Barley for December', 200)).toBe('Re: Barley for December');
+  });
+
+  it('cuts a long subject to the limit', () => {
+    const subject = reminderSubject('x'.repeat(250), 200);
+    expect(subject).toHaveLength(200);
+    expect(subject.startsWith('Re: x')).toBe(true);
+  });
+
+  it('never cuts a character in half', () => {
+    // "Re: " is 4 units, then 195 x, then an emoji in units 200 and 201.
+    const subject = reminderSubject(`${'x'.repeat(195)}\u{1F33E}tail`, 200);
+    expect(subject).toBe(`Re: ${'x'.repeat(195)}`);
+  });
+});
+
+describe('reminderAnswerSchema', () => {
+  it('takes a wanted reminder with a message, and a reminder not wanted with none', () => {
+    expect(reminderAnswerSchema.parse({ wanted: true, message: ' Hi Pat \r\n' })).toEqual({
+      wanted: true,
+      message: 'Hi Pat',
+    });
+    expect(reminderAnswerSchema.parse({ wanted: false, message: '' })).toEqual({
+      wanted: false,
+      message: '',
+    });
+  });
+
+  it('refuses a wanted reminder without a message, and anything else', () => {
+    expect(reminderAnswerSchema.safeParse({ wanted: true, message: '  ' }).success).toBe(false);
+    expect(
+      reminderAnswerSchema.safeParse({ wanted: true, message: 'x', subject: 'y' }).success,
+    ).toBe(false);
+    expect(reminderAnswerSchema.safeParse({ wanted: 'yes', message: 'x' }).success).toBe(false);
   });
 });

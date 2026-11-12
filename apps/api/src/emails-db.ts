@@ -29,7 +29,8 @@ export type StartEmailRefusal =
   | 'reply_not_found'
   | 'draft_not_found'
   | 'auto_draft_not_found'
-  | 'auto_draft_used';
+  | 'auto_draft_used'
+  | 'auto_draft_answered';
 export type StartEmailResult =
   | { status: 'started'; id: string }
   /**
@@ -196,7 +197,10 @@ export interface EmailsDatabase {
     details: { localPart: string | null; title: string | null; phone: string | null },
   ) => Promise<SaveMemberEmailResult>;
   startOutgoingEmail: (ctx: RequestContext, email: StartEmail) => Promise<StartEmailResult>;
-  /** A received email's Message-ID and References, for a reply's headers; null if none. */
+  /**
+   * The Message-ID and References of the email answered, for a reply's headers: a received
+   * email's own, or a sent email's id from Cloudflare (a reminder); null if none.
+   */
   answeredEmailIds: (
     ctx: RequestContext,
     organizationId: string,
@@ -313,6 +317,7 @@ const START_REFUSALS: readonly StartEmailRefusal[] = [
   'draft_not_found',
   'auto_draft_not_found',
   'auto_draft_used',
+  'auto_draft_answered',
 ];
 const DRAFT_REFUSALS = [
   'forbidden',
@@ -609,12 +614,19 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
 
     answeredEmailIds(ctx, organizationId, id) {
       return asUser(ctx, async (tx) => {
-        const [row] = await tx<{ message_id: string; references: string[] }[]>`
-          select e.message_id, to_jsonb(e.reference_ids::text[]) as references
+        // A sent email (a reminder replies to it, F-114 step 5c part 2) is known to the
+        // recipient by the id Cloudflare gave it, the one received replies are matched against;
+        // without one, no thread headers.
+        const [row] = await tx<{ message_id: string | null; references: string[] }[]>`
+          select case when e.direction = 'incoming' then e.message_id
+                      else e.provider_message_id end as message_id,
+                 to_jsonb(e.reference_ids::text[]) as references
             from app.emails e
            where e.organization_id = ${organizationId} and e.id = ${id}
-             and e.direction = 'incoming'`;
-        return row === undefined ? null : { messageId: row.message_id, references: row.references };
+             and (e.direction = 'incoming' or e.status = 'sent')`;
+        return row === undefined || row.message_id === null
+          ? null
+          : { messageId: row.message_id, references: row.references };
       });
     },
 

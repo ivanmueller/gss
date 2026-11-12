@@ -113,13 +113,13 @@ select ok(
   has_function_privilege('app_api', 'app.claim_call_readings(integer)', 'execute')
     and has_function_privilege('app_api', 'app.call_reading_context(uuid, uuid)', 'execute')
     and has_function_privilege('app_api', 'app.release_call_reading(uuid, uuid)', 'execute')
-    and has_function_privilege('app_api', 'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer)', 'execute')
+    and has_function_privilege('app_api', 'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer, boolean, text)', 'execute')
     and has_function_privilege('app_api', 'app.decide_call_draft(uuid, text, uuid)', 'execute')
     and has_function_privilege('app_api', 'app.correct_call_voicemail(uuid, boolean)', 'execute'),
   'app_api runs the reading functions'
 );
 select ok(
-  not has_function_privilege('anon', 'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer)', 'execute')
+  not has_function_privilege('anon', 'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer, boolean, text)', 'execute')
     and not has_function_privilege('authenticated', 'app.decide_call_draft(uuid, text, uuid)', 'execute')
     and not has_function_privilege('service_role', 'app.claim_call_readings(integer)', 'execute')
     and not has_function_privilege('public', 'app.call_reading_context(uuid, uuid)', 'execute')
@@ -206,7 +206,7 @@ select is(
 select is(
   pg_temp.api_text(null, format($$select coalesce(app.call_reading_context('00000000-0000-4000-8000-0000000ec01a', %L)::text, 'none')
                                    || '|' || app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', %L, 'claude-opus-5-5',
-                                                                  true, null, '[]'::jsonb, 1, 1)::text$$,
+                                                                  true, null, '[]'::jsonb, 1, 1, false, null)::text$$,
                                 (select token from stale), (select token from stale))),
   'none|false',
   'nor read its context, nor keep a reading under it'
@@ -239,7 +239,7 @@ select is(
       {"kind":"contact","contactId":"00000000-0000-4000-8000-00000000d1aa","fields":{"values":{"contactRole":"Merchandiser"}},"lines":[1]},
       {"kind":"contact","contactId":"00000000-0000-4000-8000-00000000d2aa","fields":{"values":{"contactName":"Sam"}},"lines":[1]},
       {"kind":"quote","fields":{"side":"bid","commodity":"canola","values":{}},"lines":[1]}]'::jsonb,
-    1200, 300)::text$$),
+    1200, 300, false, null)::text$$),
   'true',
   'a reading is kept under its claim'
 );
@@ -271,7 +271,7 @@ select is(
 );
 select is(
   pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01a', gen_random_uuid(),
-    'claude-opus-5-5', true, null, '[{"kind":"quote","fields":{},"lines":[0]}]'::jsonb, 1, 1)::text$$),
+    'claude-opus-5-5', true, null, '[{"kind":"quote","fields":{},"lines":[0]}]'::jsonb, 1, 1, false, null)::text$$),
   'false',
   'a reading is kept once'
 );
@@ -281,16 +281,16 @@ select is(
   'and its drafts are not added to'
 );
 select throws_ok(
-  $$select pg_temp.api_text(null, 'select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', gen_random_uuid(), ''claude-opus-5-5'', true, null, ''{}''::jsonb, 1, 1)::text')$$,
+  $$select pg_temp.api_text(null, 'select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', gen_random_uuid(), ''claude-opus-5-5'', true, null, ''{}''::jsonb, 1, 1, false, null)::text')$$,
   '23514', null, 'drafts must be an array'
 );
 select throws_ok(
-  $$select pg_temp.api_text(null, format('select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', %s, ''claude-opus-5-5'', true, null, ''[{"kind":"quote","fields":{},"lines":[]}]''::jsonb, 1, 1)::text', pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01b')))$$,
+  $$select pg_temp.api_text(null, format('select app.keep_call_reading(''00000000-0000-4000-8000-0000000ec01b'', %s, ''claude-opus-5-5'', true, null, ''[{"kind":"quote","fields":{},"lines":[]}]''::jsonb, 1, 1, false, null)::text', pg_temp.claim_of('00000000-0000-4000-8000-0000000ec01b')))$$,
   '23514', null, 'a draft names at least one line of the transcript'
 );
 select is(
   pg_temp.api_text(null, $$select app.keep_call_reading('00000000-0000-4000-8000-0000000ec01d', gen_random_uuid(),
-    'claude-opus-5-5', true, null, '[]'::jsonb, 1, 1)::text$$),
+    'claude-opus-5-5', true, null, '[]'::jsonb, 1, 1, false, null)::text$$),
   'false',
   'a recording without a transcript cannot be read'
 );
