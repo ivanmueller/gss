@@ -30,3 +30,10 @@ Items moved word for word from `docs/FEATURES.md` once finished: Live with nothi
 | ID | Feature | Status | Notes |
 |---|---|---|---|
 | F-136 | **Larger map layer files** | Not needed (2026-11-10: the paid plan is enough; no code change) | Measured 2026-11-10 with the app's own check (`normalizeFeatureCollection`): 5 MB of lines in about 0.1 s of computing (30 s allowed) and about 60 MB of the 128 MB memory, so files up to the 5 MB limit now pass; the limit stays, memory being the real ceiling. Before: Moved to "Next up" (paid-plan follow-ups) on 2026-11-09. |
+
+## Email: owner checks passed
+
+| ID | What was checked | Pull requests |
+|---|---|---|
+| F-226 | **Email received** (F-114 step 4a): first the catch-all routing rule (`docs/HANDOFF.md`, 13b). Reply to the earlier test email from your personal address (a contact of a made-up test company): the reply shows on that company's **Emails** card, opened for its text. Workers Logs show `Email received: kept matched=yes dmarc=pass`. Send a message from another address to a made-up address on the domain: `kept matched=no`, on no company until step 4b shows the list. An out-of-office reply shows **Automatic**. | #222 |
+| F-227 | **Mail on no company** (F-114 step 4b): after the catch-all routing rule (F-226), send an email with a small PDF attached from your personal address to a made-up address on the domain (such as test123@ your domain). **Follow-ups** → **Email on no company**: it is listed with "to test123@…"; click it to read it and the PDF to download it (it is saved, not opened); **Link to a company** (a made-up test company; the contact is chosen for you when the company has the sender's address): it leaves the list and shows on that company's **Emails** card, the PDF still downloading from there; send another and **Delete** it (asked first): it leaves every list. Team members of any role can do all of it, except deleting mail on a company (admins only). Whether the card stays hidden while there is nothing to show. | #226 |
