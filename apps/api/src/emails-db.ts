@@ -416,7 +416,9 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
     (select count(*)::integer from app.email_attachments a
       where a.organization_id = e.organization_id and a.email_id = e.id) as attachment_count,
     (select r.subject from app.emails r
-      where r.organization_id = e.organization_id and r.id = e.reply_to_email_id) as in_reply_to_subject,
+      where r.organization_id = e.organization_id and r.id = e.reply_to_email_id
+        and not exists (select 1 from app.email_removals x where x.email_id = r.id))
+      as in_reply_to_subject,
     e.claude_draft_id is not null as drafted_by_claude,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;

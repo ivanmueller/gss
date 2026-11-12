@@ -68,6 +68,11 @@ function fenced(text: string): string {
   return text.replace(/<\/?(email|call)\b/gi, (tag) => tag.replace('<', '< '));
 }
 
+/** A value inside a fence's attribute: no quote marks or angle brackets of its own. */
+function attribute(text: string): string {
+  return text.replace(/["<>]/g, "'");
+}
+
 /** An email's own text (quoted mail left out), at most `max` characters. */
 function ownText(email: DraftContextEmail, max: number): string {
   const { lines, cut } = emailLines(email.subject, email.body);
@@ -191,7 +196,7 @@ export function draftMessage(
         ? ['none']
         : thread.map(
             (e) =>
-              `<email direction="${e.direction === 'incoming' ? 'received' : 'sent by GSS'}" from="${fenced(e.fromName ?? e.from)}" at="${formatAlberta(e.occurredAt)}">\nSubject: ${fenced(e.subject)}\n${fenced(ownText(e, THREAD_EMAIL_CHARS_MAX))}\n</email>`,
+              `<email direction="${e.direction === 'incoming' ? 'received' : 'sent by GSS'}" from="${attribute(e.fromName ?? e.from)}" at="${formatAlberta(e.occurredAt)}">\nSubject: ${fenced(e.subject)}\n${fenced(ownText(e, THREAD_EMAIL_CHARS_MAX))}\n</email>`,
           )),
     ];
     if (context.answer !== null) {
@@ -199,7 +204,7 @@ export function draftMessage(
       sections.push(
         '',
         'The email to answer:',
-        `<email ANSWER direction="received" from="${fenced(a.fromName ?? a.from)} <${a.from}>" at="${formatAlberta(a.occurredAt)}"${a.automatic ? ' automatic="yes"' : ''}>\nSubject: ${fenced(a.subject)}\n${fenced(ownText(a, ANSWER_CHARS_MAX))}\n</email>`,
+        `<email ANSWER direction="received" from="${attribute(a.fromName ?? a.from)} (${attribute(a.from)})" at="${formatAlberta(a.occurredAt)}"${a.automatic ? ' automatic="yes"' : ''}>\nSubject: ${fenced(a.subject)}\n${fenced(ownText(a, ANSWER_CHARS_MAX))}\n</email>`,
       );
     }
     return sections.join('\n');

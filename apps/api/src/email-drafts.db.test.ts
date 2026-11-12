@@ -85,6 +85,10 @@ describe('a reply drafted with Claude', () => {
     });
     const received_ = await db.getEmail(as(people.vera), org, received);
     expect(received_).toMatchObject({ inReplyToSubject: null, draftedByClaude: false });
+
+    // Once the answered email is deleted, its subject no longer shows on the reply.
+    expect(await db.removeEmail(as(people.adam), org, received)).toBe('done');
+    expect((await db.getEmail(as(people.vera), org, sending.id))?.inReplyToSubject).toBeNull();
   });
 
   it('has no context for a company of another organization', async () => {
