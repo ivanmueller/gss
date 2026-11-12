@@ -33,6 +33,8 @@ export interface MailBucket {
   ): Promise<unknown>;
   get(key: string): Promise<{
     arrayBuffer(): Promise<ArrayBuffer>;
+    /** The object's bytes as a stream (R2 gives it; a download passes it on unbuffered). */
+    body?: ReadableStream<Uint8Array>;
     customMetadata?: Record<string, string>;
   } | null>;
   head(key: string): Promise<{ customMetadata?: Record<string, string> } | null>;

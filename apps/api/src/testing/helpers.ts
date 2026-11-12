@@ -248,6 +248,12 @@ export function fakeDatabase(): Mocked<Database> {
     finishOutgoingEmail: vi.fn<Database['finishOutgoingEmail']>(() => Promise.resolve('done')),
     listEmails: vi.fn<Database['listEmails']>(() => Promise.resolve([])),
     getEmail: vi.fn<Database['getEmail']>(() => Promise.resolve(null)),
+    listUnmatchedEmails: vi.fn<Database['listUnmatchedEmails']>(() =>
+      Promise.resolve({ emails: [], more: false, total: 0 }),
+    ),
+    linkEmail: vi.fn<Database['linkEmail']>(() => Promise.resolve('done')),
+    removeEmail: vi.fn<Database['removeEmail']>(() => Promise.resolve('done')),
+    storedEmailFile: vi.fn<Database['storedEmailFile']>(() => Promise.resolve(null)),
     admitEmail: vi.fn<Database['admitEmail']>(() => Promise.resolve('admit')),
     receiveEmail: vi.fn<Database['receiveEmail']>(() =>
       Promise.resolve({ status: 'received', id: 'e1', counterpartyId: null, duplicate: false }),

@@ -62,6 +62,9 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     unverifiedSender: false,
     automatic: false,
     parseFailed: false,
+    counterpartyId: COMPANY,
+    sentTo: null,
+    attachmentCount: 0,
     ...overrides,
   };
 }

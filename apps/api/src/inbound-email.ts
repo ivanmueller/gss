@@ -353,6 +353,43 @@ function attachmentBytes(content: ArrayBuffer | Uint8Array | string): Uint8Array
   return content instanceof Uint8Array ? content : new Uint8Array(content);
 }
 
+/** How a received message is parsed, on receipt and again for a download (the same positions). */
+const PARSE_OPTIONS = {
+  attachmentEncoding: 'arraybuffer',
+  maxNestingDepth: 50,
+  maxPartCount: 1000,
+} as const;
+
+/**
+ * One listed attachment's bytes, read again from the stored original (F-114 step 4b): the
+ * attachment at its listed position when its SHA-256 is the one kept, else the first listed
+ * attachment with that hash (should a parser update move positions). 'unreadable' when the
+ * original cannot be parsed or no attachment has that hash.
+ */
+export async function attachmentFromOriginal(
+  raw: Uint8Array,
+  position: number,
+  sha256: string,
+): Promise<Uint8Array | 'unreadable'> {
+  let email: Email;
+  try {
+    email = await PostalMime.parse(raw, PARSE_OPTIONS);
+  } catch {
+    return 'unreadable';
+  }
+  const listed = email.attachments.slice(0, MAX_ATTACHMENTS);
+  const order = [position, ...[...listed.keys()].filter((i) => i !== position)].filter(
+    (i) => i >= 0 && i < listed.length,
+  );
+  for (const index of order) {
+    const content = listed[index]?.content;
+    if (content === undefined) continue;
+    const bytes = attachmentBytes(content);
+    if ((await sha256Hex(bytes)) === sha256) return bytes;
+  }
+  return 'unreadable';
+}
+
 /**
  * The sender and Message-ID from the headers alone, for admission before the message is read
  * and stored (Codex's final review, R4-01: nothing heavy runs before the raw copy is safe). The
@@ -423,11 +460,7 @@ export async function readInbound(
   const syntheticId = `<${rawSha256}@missing.invalid>`;
   let email: Email;
   try {
-    email = await PostalMime.parse(raw, {
-      attachmentEncoding: 'arraybuffer',
-      maxNestingDepth: 50,
-      maxPartCount: 1000,
-    });
+    email = await PostalMime.parse(raw, PARSE_OPTIONS);
   } catch {
     return unreadableEmail(rawSha256, envelope);
   }

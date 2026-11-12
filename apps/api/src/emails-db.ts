@@ -1,4 +1,12 @@
-import type { EmailState, EmailView, MemberEmailView } from '@grain/domain';
+import {
+  UNMATCHED_EMAIL_COUNT_CAP,
+  UNMATCHED_EMAIL_PAGE,
+  type EmailAttachmentView,
+  type EmailState,
+  type EmailView,
+  type MemberEmailView,
+  type UnmatchedEmailsView,
+} from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { RequestContext } from './db';
@@ -65,6 +73,20 @@ export interface ReceivedEmail {
   receivedAt: Date;
 }
 
+/** app.link_email's answer (F-114 step 4b). */
+export type LinkEmailResult =
+  'done' | 'not_found' | 'removed' | 'already_linked' | 'company_not_found';
+/** app.remove_email's answer. */
+export type RemoveEmailResult = 'done' | 'not_found' | 'already_removed' | 'forbidden';
+
+/** Where a received email's original is kept, and one attachment's hash, for a download. */
+export interface StoredEmailFile {
+  rawKey: string;
+  rawSize: number;
+  /** The listed attachment asked for, or null when only the original is asked for. */
+  attachment: { position: number; fileName: string | null; sha256: string } | null;
+}
+
 export type ReceiveEmailResult =
   | { status: 'received'; id: string; counterpartyId: string | null; duplicate: boolean }
   | { status: 'own_copy' }
@@ -112,8 +134,40 @@ export interface EmailsDatabase {
     counterpartyId: string,
     before: EmailCursor | null,
   ) => Promise<EmailView[] | null>;
-  /** One email with its text, or null. */
+  /** One email with its text (and, received, its attachments), or null. */
   getEmail: (ctx: RequestContext, organizationId: string, id: string) => Promise<EmailView | null>;
+  /**
+   * Received mail on no company, not removed, newest first, a page before the cursor; an unknown
+   * cursor gives an empty page (F-114 step 4b).
+   */
+  listUnmatchedEmails: (
+    ctx: RequestContext,
+    organizationId: string,
+    before: EmailCursor | null,
+  ) => Promise<UnmatchedEmailsView>;
+  linkEmail: (
+    ctx: RequestContext,
+    organizationId: string,
+    id: string,
+    counterpartyId: string,
+    contactId: string | null,
+  ) => Promise<LinkEmailResult>;
+  removeEmail: (
+    ctx: RequestContext,
+    organizationId: string,
+    id: string,
+  ) => Promise<RemoveEmailResult>;
+  /**
+   * A received email's original (and, with a position, that listed attachment), when the email
+   * is the organization's and not removed; null otherwise (also when no attachment is listed at
+   * that position).
+   */
+  storedEmailFile: (
+    ctx: RequestContext,
+    organizationId: string,
+    id: string,
+    position: number | null,
+  ) => Promise<StoredEmailFile | null>;
 }
 
 /**
@@ -153,6 +207,19 @@ const START_REFUSALS: readonly StartEmailRefusal[] = [
   'bad_recipients',
 ];
 const FINISH_RESULTS: readonly FinishEmailResult[] = ['done', 'not_found', 'already_finished'];
+const LINK_RESULTS: readonly LinkEmailResult[] = [
+  'done',
+  'not_found',
+  'removed',
+  'already_linked',
+  'company_not_found',
+];
+const REMOVE_RESULTS: readonly RemoveEmailResult[] = [
+  'done',
+  'not_found',
+  'already_removed',
+  'forbidden',
+];
 const STATES: readonly EmailState[] = ['sending', 'unconfirmed', 'sent', 'failed', 'received'];
 
 interface EmailRow {
@@ -171,6 +238,9 @@ interface EmailRow {
   auth_passed: boolean | null;
   automatic: boolean;
   parse_failed: boolean;
+  counterparty_id: string | null;
+  envelope_to: string | null;
+  attachment_count: number;
   body_text?: string;
   body_truncated?: boolean;
 }
@@ -194,6 +264,9 @@ function emailView(row: EmailRow): EmailView {
     unverifiedSender: row.direction === 'incoming' && row.auth_passed !== true,
     automatic: row.automatic,
     parseFailed: row.parse_failed,
+    counterpartyId: row.counterparty_id,
+    sentTo: row.direction === 'incoming' ? row.envelope_to : null,
+    attachmentCount: row.attachment_count,
     ...(row.body_text === undefined
       ? {}
       : { body: row.body_text, bodyTruncated: row.body_truncated ?? false }),
@@ -231,7 +304,9 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
   const columns = (tx: postgres.TransactionSql) => tx`
     e.id, e.direction, e.from_address, e.from_name, to_jsonb(e.to_addresses::text[]) as to_addresses,
     to_jsonb(e.cc_addresses::text[]) as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
-    e.occurred_at, e.auth_passed, e.automatic, e.parse_failed,
+    e.occurred_at, e.auth_passed, e.automatic, e.parse_failed, e.counterparty_id, e.envelope_to,
+    (select count(*)::integer from app.email_attachments a
+      where a.organization_id = e.organization_id and a.email_id = e.id) as attachment_count,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
@@ -448,7 +523,118 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
             from app.emails e
            where e.organization_id = ${organizationId} and e.id = ${id}
              and not exists (select 1 from app.email_removals x where x.email_id = e.id)`;
-        return row ? emailView(row) : null;
+        if (row === undefined) return null;
+        const view = emailView(row);
+        if (row.direction !== 'incoming') return view;
+        const attachments = await tx<
+          {
+            position: number;
+            file_name: string | null;
+            content_type: string;
+            size_bytes: number;
+            disposition: 'attachment' | 'inline';
+          }[]
+        >`
+          select a.position, a.file_name, a.content_type, a.size_bytes, a.disposition
+            from app.email_attachments a
+           where a.organization_id = ${organizationId} and a.email_id = ${id}
+           order by a.position`;
+        return {
+          ...view,
+          attachments: attachments.map((a): EmailAttachmentView => ({
+            position: a.position,
+            fileName: a.file_name,
+            contentType: a.content_type,
+            sizeBytes: a.size_bytes,
+            disposition: a.disposition,
+          })),
+        };
+      });
+    },
+
+    listUnmatchedEmails(ctx, organizationId, before) {
+      return asUser(ctx, async (tx) => {
+        const unmatched = () => tx`
+          e.organization_id = ${organizationId} and e.direction = 'incoming'
+          and e.counterparty_id is null
+          and not exists (select 1 from app.email_removals x where x.email_id = e.id)`;
+        // The cursor's place is read from the email itself, whatever became of it since (linked
+        // or deleted between two pages), so the next page still starts after it; an id that is
+        // no received email of this organization gives an empty page.
+        const rows = await tx<EmailRow[]>`
+          select ${columns(tx)}
+            from app.emails e
+           where ${unmatched()}
+             ${
+               before === null
+                 ? tx``
+                 : tx`and (e.occurred_at, e.id) < (
+                       select o.occurred_at, o.id from app.emails o
+                        where o.organization_id = ${organizationId} and o.direction = 'incoming'
+                          and o.id = ${before.id})`
+             }
+           order by e.occurred_at desc, e.id desc
+           limit ${UNMATCHED_EMAIL_PAGE + 1}`;
+        const [count] = await tx<{ total: number }[]>`
+          select count(*)::integer as total
+            from (select 1 from app.emails e where ${unmatched()}
+                   limit ${UNMATCHED_EMAIL_COUNT_CAP}) as listed`;
+        return {
+          emails: rows.slice(0, UNMATCHED_EMAIL_PAGE).map(emailView),
+          more: rows.length > UNMATCHED_EMAIL_PAGE,
+          total: count?.total ?? 0,
+        };
+      });
+    },
+
+    linkEmail(ctx, organizationId, id, counterpartyId, contactId) {
+      return asUser(ctx, async (tx) => {
+        // Only an email of the organization the request names (the function itself checks the
+        // caller's membership of the email's own organization).
+        const [mine] = await tx<{ id: string }[]>`
+          select e.id from app.emails e where e.organization_id = ${organizationId} and e.id = ${id}`;
+        if (mine === undefined) return 'not_found';
+        const [row] = await tx<{ result: string }[]>`
+          select app.link_email(${id}, ${counterpartyId}, ${contactId}) as result`;
+        const result = LINK_RESULTS.find((value) => value === row?.result);
+        if (result === undefined) throw new Error('Unexpected answer from app.link_email');
+        return result;
+      });
+    },
+
+    removeEmail(ctx, organizationId, id) {
+      return asUser(ctx, async (tx) => {
+        const [mine] = await tx<{ id: string }[]>`
+          select e.id from app.emails e where e.organization_id = ${organizationId} and e.id = ${id}`;
+        if (mine === undefined) return 'not_found';
+        const [row] = await tx<{ result: string }[]>`
+          select app.remove_email(${id}) as result`;
+        const result = REMOVE_RESULTS.find((value) => value === row?.result);
+        if (result === undefined) throw new Error('Unexpected answer from app.remove_email');
+        return result;
+      });
+    },
+
+    storedEmailFile(ctx, organizationId, id, position) {
+      return asUser(ctx, async (tx) => {
+        const [email] = await tx<{ raw_key: string | null; raw_size: number | null }[]>`
+          select e.raw_key, e.raw_size from app.emails e
+           where e.organization_id = ${organizationId} and e.id = ${id} and e.direction = 'incoming'
+             and not exists (select 1 from app.email_removals x where x.email_id = e.id)`;
+        if (email?.raw_key == null || email.raw_size == null) return null;
+        if (position === null) {
+          return { rawKey: email.raw_key, rawSize: email.raw_size, attachment: null };
+        }
+        const [attachment] = await tx<{ file_name: string | null; sha256: string }[]>`
+          select a.file_name, a.sha256 from app.email_attachments a
+           where a.organization_id = ${organizationId} and a.email_id = ${id}
+             and a.position = ${position}`;
+        if (attachment === undefined) return null;
+        return {
+          rawKey: email.raw_key,
+          rawSize: email.raw_size,
+          attachment: { position, fileName: attachment.file_name, sha256: attachment.sha256 },
+        };
       });
     },
   };

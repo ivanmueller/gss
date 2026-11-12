@@ -1,4 +1,5 @@
 import {
+  attachmentFileName,
   composeEmailBody,
   EMAIL_MAX_RECIPIENTS,
   EMAIL_MESSAGE_MAX,
@@ -10,10 +11,11 @@ import {
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
-import { Mail, Send } from 'lucide-react';
+import { Download, Mail, Paperclip, Send } from 'lucide-react';
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 
 import { apiJson, ApiError, sendJson, type Contact } from '../lib/api';
+import { saveDownload } from '../lib/download';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { Badge, type BadgeVariant } from './ui/badge';
 import { Button } from './ui/button';
@@ -622,16 +624,106 @@ export function EmailsCard({
 /** The API's page size (EMAIL_LIST_LIMIT). */
 const PAGE = 200;
 
-function EmailItem({
+/** A received email's attachments, each saved as a download (F-114 step 4b). */
+function EmailFiles({ email, session }: { email: EmailView; session: DirectorySession }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const attachments = email.attachments ?? [];
+  const org = session.organization.id;
+
+  function save(key: string, path: string, name: string) {
+    setBusy(key);
+    setError(null);
+    saveDownload(`${path}?organization_id=${org}`, session.token, name)
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : 'The file could not be downloaded.');
+      })
+      .finally(() => {
+        setBusy(null);
+      });
+  }
+
+  if (email.direction !== 'incoming') return null;
+  if (attachments.length === 0 && !email.parseFailed) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {attachments.length > 0 && (
+        <>
+          <p className="text-xs font-medium">Attachments</p>
+          <ul className="flex flex-col gap-1">
+            {attachments.map((file) => {
+              const name = attachmentFileName(file.fileName, file.position);
+              const key = `a${String(file.position)}`;
+              return (
+                <li key={file.position} className="flex flex-wrap items-center gap-2 text-xs">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      save(key, `/emails/${email.id}/attachments/${String(file.position)}`, name);
+                    }}
+                  >
+                    <Download aria-hidden="true" className="size-3" />
+                    {busy === key ? 'Downloading…' : name}
+                  </Button>
+                  <span className="text-muted-foreground">
+                    {formatFileSize(file.sizeBytes)}
+                    {file.disposition === 'inline' ? ' · in the message' : ''}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {email.parseFailed && (
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => {
+              save('original', `/emails/${email.id}/original`, `email-${email.id}.eml`);
+            }}
+          >
+            <Download aria-hidden="true" className="size-3" />
+            {busy === 'original' ? 'Downloading…' : 'Download the original'}
+          </Button>
+        </div>
+      )}
+      {error !== null && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A size in bytes as people read it. */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${String(bytes)} bytes`;
+  if (bytes < 1024 * 1024) return `${String(Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * One email, opened for its text on a click: on a company's Emails card and in the list of
+ * received mail on no company (F-114 step 4b), whose actions come as children.
+ */
+export function EmailItem({
   email,
   session,
   open,
   onToggle,
+  children,
 }: {
   email: EmailView;
   session: DirectorySession;
   open: boolean;
   onToggle: () => void;
+  children?: ReactNode;
 }) {
   const [body, setBody] = useState<EmailView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -658,7 +750,9 @@ function EmailItem({
   const who =
     email.direction === 'outgoing'
       ? `${email.sentByName ?? email.fromName ?? ''} to ${email.to.join(', ')}`
-      : email.fromAddress;
+      : `${email.fromName ? `${email.fromName} <${email.fromAddress}>` : email.fromAddress}${
+          email.counterpartyId === null && email.sentTo !== null ? ` to ${email.sentTo}` : ''
+        }`;
   return (
     <li className="py-2">
       <button
@@ -682,6 +776,14 @@ function EmailItem({
         </span>
         <span className="text-xs text-muted-foreground">
           {formatAlberta(email.occurredAt)} · {who}
+          {email.attachmentCount > 0 && (
+            <span className="ml-1 inline-flex items-center gap-0.5">
+              · <Paperclip aria-hidden="true" className="size-3" />
+              {email.attachmentCount === 1
+                ? '1 attachment'
+                : `${String(email.attachmentCount)} attachments`}
+            </span>
+          )}
         </span>
       </button>
       {email.unverifiedSender && (
@@ -719,10 +821,12 @@ function EmailItem({
                   The rest of this email was too long to keep.
                 </p>
               )}
+              <EmailFiles email={body} session={session} />
             </>
           )}
         </div>
       )}
+      {children}
     </li>
   );
 }
