@@ -1,3 +1,4 @@
+import { emailLines } from '@grain/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -132,6 +133,14 @@ describe('htmlToText', () => {
     ).toBe(
       'Thanks, I will check.\n> We offer canola CAD $725 per tonne delivered.\n> > Older\n> Back\nAfter',
     );
+  });
+
+  it('marks a quoted table line whose first cell is empty (F-114-5a round 3)', () => {
+    const body = htmlToText(
+      '<p>Thanks.</p><blockquote><table><tr><td></td><td>We offer canola CAD $725 per tonne delivered.</td></tr><tr><td>A</td><td>B</td></tr></table></blockquote>',
+    );
+    expect(body).toBe('Thanks.\n> \tWe offer canola CAD $725 per tonne delivered.\n> A\tB');
+    expect(emailLines('Re: Canola', body).lines).toEqual(['Subject: Re: Canola', 'Thanks.']);
   });
 
   it('leaves an invalid character reference as written', () => {

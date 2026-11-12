@@ -189,6 +189,7 @@ export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
     current += value;
     length += value.length;
     last = value.charAt(value.length - 1);
+    if (last === '\n') lineMarked = false;
     if (current.length >= CHUNK) {
       chunks.push(current);
       current = '';
@@ -197,15 +198,24 @@ export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
   // Inside a <blockquote> (an earlier email quoted), each line starts with "> ", as in plain
   // text mail, so the quotation stays marked once the HTML is gone (Codex's final review of
   // F-114-5a, finding R2-01: Claude must not read GSS's quoted price as a new one).
+  // Whether the current line has its marker, kept apart from what was written on it (a table
+  // cell's tab first, for one: Codex's final review of F-114-5a, round 3).
   let quoteDepth = 0;
+  let lineMarked = false;
+  const mark = () => {
+    if (quoteDepth > 0 && !lineMarked) {
+      emit('> '.repeat(Math.min(quoteDepth, 5)));
+      lineMarked = true;
+    }
+  };
   const text = (value: string) => {
     if (length >= limit) return;
     let decoded = decodeEntities(value.slice(0, (limit - length) * 10 + 16));
     if (quoteDepth > 0) {
       decoded = decoded.replace(/[\r\n]+/g, ' ');
       if (decoded.trim() === '') return;
-      if (length === 0 || last === '\n') {
-        emit('> '.repeat(Math.min(quoteDepth, 5)));
+      if (!lineMarked) {
+        mark();
         decoded = decoded.trimStart();
       }
     }
@@ -252,7 +262,10 @@ export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
       quoteDepth = ending ? Math.max(quoteDepth - 1, 0) : quoteDepth + 1;
     } else if (CELL_TAGS.has(name)) {
       if (!ending) {
-        if (cellInRow) emit('\t');
+        if (cellInRow) {
+          mark();
+          emit('\t');
+        }
         cellInRow = true;
       }
     } else if (name === 'br' || LINE_TAGS.has(name)) {
