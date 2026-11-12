@@ -216,6 +216,11 @@ export interface EmailView {
   sentTo: string | null;
   /** Received mail: how many attachments were listed. */
   attachmentCount: number;
+  /**
+   * Received email: the Reply-To address it named, where a reply goes (F-114-5b-R2-02); null
+   * when it named none, and for sent email.
+   */
+  replyToAddress: string | null;
   /** Sent email: the subject of the received email it answers (Reply). */
   inReplyToSubject: string | null;
   /** Sent email: it started from a draft by Claude. */

@@ -66,6 +66,7 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     counterpartyId: COMPANY,
     sentTo: null,
     attachmentCount: 0,
+    replyToAddress: null,
     inReplyToSubject: null,
     draftedByClaude: false,
     ...overrides,
@@ -511,6 +512,23 @@ describe('Reply and Draft with Claude (F-114 step 5b)', () => {
     await user.clear(box);
     await user.type(box, 'twelve loads available.');
     expect(within(dialog).getByText('Twelve')).toBeInTheDocument();
+  });
+
+  it('replies to the Reply-To address when the email named one (R2-02)', async () => {
+    const named = {
+      ...RECEIVED,
+      fromAddress: 'notifications@buyer.example.test',
+      replyToAddress: 'pat@buyer.example.test',
+    };
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [named] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...named, body: 'Hello' } }),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await openReply(user);
+    expect(await within(dialog).findByLabelText('To')).toHaveValue('pat@buyer.example.test');
   });
 
   it('offers no Draft with Claude when Claude is not set up', async () => {

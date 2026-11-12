@@ -35,6 +35,7 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     counterpartyId: null,
     sentTo: 'nobody@gss.example.test',
     attachmentCount: 0,
+    replyToAddress: null,
     inReplyToSubject: null,
     draftedByClaude: false,
     ...overrides,

@@ -380,14 +380,21 @@ begin
      or coalesce(cardinality(to_list), 0) + coalesce(cardinality(cc_list), 0) > 50 then
     return jsonb_build_object('status', 'bad_recipients');
   end if;
-  if answering is not null and not app.answerable_email(org, company, answering) then
-    return jsonb_build_object('status', 'reply_not_found');
-  end if;
-  if draft is not null and not exists (
-       select 1 from app.email_draft_requests d
-        where d.organization_id = org and d.id = draft and d.user_id = uid
-          and d.counterparty_id = company and d.status = 'drafted') then
-    return jsonb_build_object('status', 'draft_not_found');
+  -- The links are checked for a new email only: a retry of a send key already used reaches the
+  -- insert, whose unique key answers with the earlier email, even if the answered email was
+  -- deleted meanwhile (Codex's final review, F-114-5b-R2-01).
+  if not exists (select 1 from app.emails e
+                  where e.organization_id = org and e.direction = 'outgoing'
+                    and e.message_id = msg_id) then
+    if answering is not null and not app.answerable_email(org, company, answering) then
+      return jsonb_build_object('status', 'reply_not_found');
+    end if;
+    if draft is not null and not exists (
+         select 1 from app.email_draft_requests d
+          where d.organization_id = org and d.id = draft and d.user_id = uid
+            and d.counterparty_id = company and d.status = 'drafted') then
+      return jsonb_build_object('status', 'draft_not_found');
+    end if;
   end if;
   insert into app.emails (organization_id, direction, status, counterparty_id, contact_id,
                           sent_by, sent_by_name, from_address, from_name, to_addresses,

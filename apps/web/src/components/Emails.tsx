@@ -827,9 +827,11 @@ export function EmailsCard({
                           size="sm"
                           variant="outline"
                           onClick={() => {
+                            // Where the sender asked replies to go, else to the sender
+                            // (Codex's final review, F-114-5b-R2-02).
                             composer.compose(undefined, {
                               id: email.id,
-                              fromAddress: email.fromAddress,
+                              fromAddress: email.replyToAddress ?? email.fromAddress,
                               subject: email.subject,
                             });
                           }}

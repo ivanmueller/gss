@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(45);
+select plan(47);
 
 -- Fixtures ------------------------------------------------------------------
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -320,6 +320,15 @@ select throws_ok(
 select throws_ok(
   format('update app.emails set reply_to_email_id = null where id = %L', pg_temp.id('reply')),
   '42501', null, 'a sent email''s links are never edited');
+
+-- A lost answer, then the answered email deleted: the retry of the same key reaches the unique
+-- key (the API then answers with the earlier email), never reply_not_found (R2-01).
+select is(pg_temp.api('00000000-0000-4000-8000-0000000055aa',
+            format('select app.remove_email(%L)', pg_temp.id('in1'))), 'done', 'the answered email is deleted');
+select throws_ok(
+  format('select pg_temp.send(%L, %L, %L, %L)', '00000000-0000-4000-8000-0000000044aa',
+         pg_temp.id('in1'), pg_temp.id('tomdraft'), 'gss-k5'),
+  '23505', null, 'a retry of a sent reply finds the earlier email after its answered email was deleted (R2-01)');
 
 select * from finish();
 rollback;

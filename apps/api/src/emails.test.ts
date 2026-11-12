@@ -67,6 +67,7 @@ function emailRow(overrides: Partial<EmailView> = {}): EmailView {
     counterpartyId: COMPANY,
     sentTo: null,
     attachmentCount: 0,
+    replyToAddress: null,
     inReplyToSubject: null,
     draftedByClaude: false,
     ...overrides,

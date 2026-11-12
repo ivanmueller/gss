@@ -345,6 +345,7 @@ interface EmailRow {
   counterparty_id: string | null;
   envelope_to: string | null;
   attachment_count: number;
+  reply_to: string | null;
   in_reply_to_subject: string | null;
   drafted_by_claude: boolean;
   body_text?: string;
@@ -373,6 +374,7 @@ function emailView(row: EmailRow): EmailView {
     counterpartyId: row.counterparty_id,
     sentTo: row.direction === 'incoming' ? row.envelope_to : null,
     attachmentCount: row.attachment_count,
+    replyToAddress: row.direction === 'incoming' ? row.reply_to : null,
     inReplyToSubject: row.in_reply_to_subject,
     draftedByClaude: row.drafted_by_claude,
     ...(row.body_text === undefined
@@ -413,6 +415,7 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
     e.id, e.direction, e.from_address, e.from_name, to_jsonb(e.to_addresses::text[]) as to_addresses,
     to_jsonb(e.cc_addresses::text[]) as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
     e.occurred_at, e.auth_passed, e.automatic, e.parse_failed, e.counterparty_id, e.envelope_to,
+    e.reply_to,
     (select count(*)::integer from app.email_attachments a
       where a.organization_id = e.organization_id and a.email_id = e.id) as attachment_count,
     (select r.subject from app.emails r

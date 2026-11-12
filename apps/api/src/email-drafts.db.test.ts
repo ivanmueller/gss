@@ -36,10 +36,11 @@ beforeAll(async () => {
     values (${company}, ${org}, ${`Synthetic Buyer ${company}`}, '{buyer}', 'CA', 'manual', ${people.adam})`;
   await admin`insert into app.emails
       (id, organization_id, direction, status, counterparty_id, from_address, to_addresses, subject,
-       body_text, message_id, raw_key, raw_size, envelope_to, auth_passed)
+       body_text, message_id, raw_key, raw_size, envelope_to, auth_passed, reply_to)
     values (${received}, ${org}, 'incoming', 'received', ${company}, 'pat@buyer.example.test',
             '{info@gss.example.test}', 'Barley for December', 'Can you do 2 loads?',
-            ${`m-${received}`}, ${`raw/${org}/${'0'.repeat(64)}.eml`}, 10, 'info@gss.example.test', true)`;
+            ${`m-${received}`}, ${`raw/${org}/${'0'.repeat(64)}.eml`}, 10, 'info@gss.example.test', true,
+            'pat.reply@buyer.example.test')`;
   expect(await db.saveEmailSettings(as(people.adam), org, 'info', '{name}')).toBe('saved');
 });
 
@@ -63,7 +64,7 @@ describe('a reply drafted with Claude', () => {
       outputTokens: 10,
     });
 
-    const sending = await db.startOutgoingEmail(as(people.vera), {
+    const reply = {
       organizationId: org,
       counterpartyId: company,
       contactId: null,
@@ -76,7 +77,8 @@ describe('a reply drafted with Claude', () => {
       messageId: `gss-${id()}`,
       replyToEmailId: received,
       claudeDraftId: started.id,
-    });
+    };
+    const sending = await db.startOutgoingEmail(as(people.vera), reply);
     if (sending.status !== 'started') throw new Error(sending.status);
     const email = await db.getEmail(as(people.vera), org, sending.id);
     expect(email).toMatchObject({
@@ -84,11 +86,21 @@ describe('a reply drafted with Claude', () => {
       draftedByClaude: true,
     });
     const received_ = await db.getEmail(as(people.vera), org, received);
-    expect(received_).toMatchObject({ inReplyToSubject: null, draftedByClaude: false });
+    expect(received_).toMatchObject({
+      inReplyToSubject: null,
+      draftedByClaude: false,
+      replyToAddress: 'pat.reply@buyer.example.test',
+    });
+    expect(email?.replyToAddress).toBeNull();
 
     // Once the answered email is deleted, its subject no longer shows on the reply.
     expect(await db.removeEmail(as(people.adam), org, received)).toBe('done');
     expect((await db.getEmail(as(people.vera), org, sending.id))?.inReplyToSubject).toBeNull();
+
+    // A retry of the same send (its answer lost) still finds it, the answered email deleted
+    // meanwhile (Codex's final review, F-114-5b-R2-01).
+    const retry = await db.startOutgoingEmail(as(people.vera), reply);
+    expect(retry.status).toBe('already_started');
   });
 
   it('has no context for a company of another organization', async () => {
