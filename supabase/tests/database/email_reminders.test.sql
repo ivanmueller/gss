@@ -185,6 +185,10 @@ select is(app.add_business_days('2026-11-28 05:00+00', 3), '2026-12-03 05:00+00'
           'Friday 23:00 → Wednesday 23:00, across a month');
 
 -- The start date: nothing sent before the feature is reminded --------------
+-- The start is set relative to this test's clock, so the case holds whatever today's date
+-- (Codex's final review, F-114-5c2-R2-01): the email is due and quiet, but sent before the start.
+create or replace function app.email_reminders_since() returns timestamptz
+language sql stable set search_path = '' as $$ select now() - interval '7 days' $$;
 insert into ids values
   ('due', pg_temp.sent(pg_temp.co('due'), interval '8 days', 'Barley for December'));
 select app.add_email_reminders();
