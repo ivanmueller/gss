@@ -168,16 +168,27 @@ describe('readNewEmails', () => {
     });
   });
 
-  it('keeps an email with only quoted text as read without asking Claude', async () => {
-    db.emailReadingContext.mockResolvedValue({ ...CONTEXT, body: '> Our offer is 690 a tonne.' });
+  it('keeps an email with only quoted text and a bare "Re:" as read without asking Claude', async () => {
+    db.emailReadingContext.mockResolvedValue({
+      ...CONTEXT,
+      subject: 'Re:',
+      body: '> Our offer is 690 a tonne.',
+    });
     await readNewEmails(CLAUDE_ENV, openDatabase, () => claude);
     expect(claude.readCall).not.toHaveBeenCalled();
-    expect(db.keepEmailReading).toHaveBeenCalledWith(
-      claimOf(EMAIL),
-      ['Subject: Re: Canola'],
-      false,
-      null,
-    );
+    expect(db.keepEmailReading).toHaveBeenCalledWith(claimOf(EMAIL), ['Subject: Re:'], false, null);
+  });
+
+  it('asks Claude about a bid in the subject above a quoted-only body (R1-01)', async () => {
+    db.emailReadingContext.mockResolvedValue({
+      ...CONTEXT,
+      subject: 'Re: now 730 a tonne',
+      body: '> Our offer is 690 a tonne.',
+    });
+    await readNewEmails(CLAUDE_ENV, openDatabase, () => claude);
+    expect(claude.readCall).toHaveBeenCalledTimes(1);
+    expect(claude.readCall.mock.calls[0]?.[0].user).toContain('[0] Subject: Re: now 730 a tonne');
+    expect(claude.readCall.mock.calls[0]?.[0].user).not.toContain('690');
   });
 
   it('does nothing without the API key', async () => {

@@ -23,7 +23,8 @@ export interface EmailLines {
   lines: string[];
   /** Whether the text was cut at EMAIL_READ_LINES_MAX or EMAIL_READ_CHARS_MAX. */
   cut: boolean;
-  /** Whether nothing of the email's own text is left (empty, or only quoted mail). */
+  /** Whether nothing is left to read: no own text (empty, or only quoted mail) and no subject
+   * beyond "Re:" or "Fwd:". */
   empty: boolean;
 }
 
@@ -106,7 +107,11 @@ export function emailLines(subject: string | null, body: string | null): EmailLi
     }
   }
   if (cut) lines.push(EMAIL_CUT_NOTE);
-  return { lines, cut, empty: own === 0 };
+  // A subject can carry the news itself (a bid in the subject, an empty or quoted-only body):
+  // only an email with neither its own text nor a subject beyond "Re:" or "Fwd:" is empty
+  // (Codex's final review of F-114-5a, finding R1-01).
+  const topic = squash(subject ?? '').replace(/^((re|fw|fwd|aw|wg|tr)\s*:\s*)+/i, '');
+  return { lines, cut, empty: own === 0 && topic === '' };
 }
 
 /** The lines as Claude reads them: `[n] text`, one per line. */

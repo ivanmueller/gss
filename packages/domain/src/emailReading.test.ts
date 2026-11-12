@@ -59,8 +59,18 @@ describe('emailLines', () => {
   });
 
   it('says when only quoted mail is left', () => {
-    expect(emailLines('Re', '> all quoted\n\n').empty).toBe(true);
+    expect(emailLines('Re:', '> all quoted\n\n').empty).toBe(true);
+    expect(emailLines('RE: Fwd:  ', '> all quoted').empty).toBe(true);
     expect(emailLines(null, null)).toEqual({ lines: ['Subject: '], cut: false, empty: true });
+  });
+
+  it('reads a subject that says something, with an empty or quoted-only body (R1-01)', () => {
+    expect(emailLines('Bid canola CAD $725 per tonne delivered', '')).toEqual({
+      lines: ['Subject: Bid canola CAD $725 per tonne delivered'],
+      cut: false,
+      empty: false,
+    });
+    expect(emailLines('Re: now 730 a tonne', '> Our offer is 690 a tonne.').empty).toBe(false);
   });
 
   it('splits long lines and cuts at the line limit', () => {
