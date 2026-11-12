@@ -49,12 +49,13 @@ The owner moved Cloudflare to the Workers paid plan on 2026-11-09. In this order
 4. **Replies received:** the Worker's email handler takes the domain's mail, matches it to the email it answers or else to a contact by address, logs it on the company's page, refuses auto-replies and loops; mail matching nothing goes to a short list (like **Calls to GSS's number**) to link to a company.
 5. **Claude:** **Draft with Claude** on the form (a draft in Claude's colours, edited, then sent by the person), and drafts from each received reply, as from transcripts.
 6. **Owner checks on staging**, then the handoff record.
+7. **Sending attachments** (planned 2026-11-12; register `docs/reviews/F-114-7.md`): files from the computer on the email form (new email, Reply, Claude's drafts once opened), at most 10 files and 10 MB in all, PDFs and JPEG or PNG photos (decided by the file's first bytes); kept in the private bucket with the email, shown with download buttons on sent email as on received; never given to Claude. Codex design review first (high risk).
 
 **Owner's answers (2026-11-10):**
 1. **Sending address:** both. A person sends from their own address (name@ the domain) or picks the shared address, **info@** the domain. No mailboxes exist yet (the owner, 2026-11-10: nothing is set up for email at IONOS or elsewhere).
 2. **Replies:** first answered as a subdomain kept for the platform (`reply.` + the domain), provided Outlook or another provider stays easy to link later. With no mailboxes, the owner chose on 2026-11-10 **option A: the platform is the mailbox** (all the domain's mail received by the platform; read in the platform only, also on a phone's browser), and **option B later**, once mailboxes are set up (each person's inbox; the platform then sends and reads through it). Sending stays in one module so B replaces it.
 3. **Who may send:** everyone on the team.
-4. **Attachments:** text only at first; PDFs and photos once sending and replies are checked on staging.
+4. **Attachments:** text only at first; PDFs and photos once sending and replies are checked on staging. The owner, 2026-11-12: files **from the computer only** (not from files kept on a company's page); the size left to the agents: **10 MB in total per email** (Cloudflare allows 25 MiB and 32 files; attachments grow by about a third when sent, and large emails bounce more often).
 5. **Signature:** one standard GSS signature for the whole team, edited by **admins only**, with each person's **name, title, phone and email**. Saved templates: not asked for.
 6. **How long emails are kept:** forever, as call transcripts.
 7. **Claude on replies:** yes, Claude reads every received reply and drafts bids, offers, follow-ups and contact details, verified by a person as from calls.
