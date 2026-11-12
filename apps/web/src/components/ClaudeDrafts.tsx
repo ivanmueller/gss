@@ -128,6 +128,16 @@ function lineText(draft: OpenDraftView, n: number): string | null {
   return draft.sourceLines.find((line) => line.line === n)?.text ?? null;
 }
 
+/** "From the call" or "From the email" (F-114 step 5a). */
+function fromThe(draft: OpenDraftView): string {
+  return draft.source === 'email' ? 'From the email' : 'From the call';
+}
+
+/** What a draft lacks is "not heard on the call" or "not in the email". */
+function notIn(draft: OpenDraftView): string {
+  return draft.source === 'email' ? 'Not in the email' : 'Not heard on the call';
+}
+
 /** Where a filled-in value was said, and the reason to look twice at it. */
 function Evidence({
   label,
@@ -142,7 +152,7 @@ function Evidence({
   return (
     <div className="flex flex-col gap-1 text-xs">
       <p className="text-muted-foreground">
-        <span className="font-medium text-foreground">{label}</span> from the call:{' '}
+        <span className="font-medium text-foreground">{label}</span> {fromThe(draft).toLowerCase()}:{' '}
         {line === null ? (
           <q className="italic">{check.said}</q>
         ) : (
@@ -173,7 +183,7 @@ function SourceLines({ draft }: { draft: OpenDraftView }) {
   if (lines.length === 0) return null;
   return (
     <p className="text-xs text-muted-foreground">
-      From the call:{' '}
+      {fromThe(draft)}:{' '}
       {lines.map((text, index) => (
         <span key={index}>
           {index > 0 && ' … '}
@@ -383,7 +393,7 @@ export function ClaudeDraftCard({
                 )}
                 {readiness?.status === 'incomplete' && (
                   <span className="text-foreground">
-                    Not heard on the call: {readiness.missing.join(', ')}
+                    {notIn(draft)}: {readiness.missing.join(', ')}
                   </span>
                 )}
                 {contactGone && (
@@ -451,8 +461,18 @@ export function ClaudeDraftCard({
       {open && (
         <div className="flex flex-col gap-2 border-t border-claude-border pt-2">
           <p className="text-xs text-muted-foreground">
-            From {draft.callerName}’s call with {draft.contactName},{' '}
-            {formatAlberta(draft.calledAt, { weekday: false })}
+            {draft.source === 'email' ? (
+              <>
+                From an email from {draft.callerName},{' '}
+                {formatAlberta(draft.calledAt, { weekday: false })}
+                {draft.emailSubject ? ` — ${draft.emailSubject}` : ''}
+              </>
+            ) : (
+              <>
+                From {draft.callerName}’s call with {draft.contactName},{' '}
+                {formatAlberta(draft.calledAt, { weekday: false })}
+              </>
+            )}
           </p>
           {evidence.length > 0 ? (
             evidence.map(([label, check]) => (
@@ -463,8 +483,8 @@ export function ClaudeDraftCard({
           )}
           {readiness?.status === 'incomplete' && (
             <p className="text-xs text-foreground">
-              <strong>Not heard on the call:</strong> {readiness.missing.join(', ')}. Finish it in
-              the form to save it.
+              <strong>{notIn(draft)}:</strong> {readiness.missing.join(', ')}. Finish it in the form
+              to save it.
             </p>
           )}
           {contactGone && (

@@ -24,6 +24,7 @@ import { mapLayerRoutes } from './map-layers';
 import { memberRoutes } from './members';
 import { commodityRoutes, quoteRoutes } from './quotes';
 import { callReadingRoutes, readNewTranscripts } from './readings';
+import { readNewEmails } from './email-readings';
 import { counterpartySummaryRoutes, writeDueSummaries } from './summaries';
 import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 import { telnyxClient, type TelnyxFactory } from './telnyx';
@@ -155,12 +156,14 @@ export default {
   fetch: app.fetch,
   // wrangler.jsonc, triggers: the Bank of Canada's USD/CAD rate twice a day, and every 2 minutes
   // (RECORDINGS_CRON) new recordings transcribed by side, call audio 24 hours old deleted, and
-  // new transcripts read by Claude, the company summaries that are due written by Claude, and
+  // new transcripts and received emails read by Claude (F-114 step 5a), the company summaries
+  // that are due written by Claude, and
   // received mail kept while the database could not be reached (src/receive-mail.ts).
   scheduled(controller, env, ctx) {
     if (controller.cron === RECORDINGS_CRON) {
       ctx.waitUntil(runRecordingsJob(env, postgresDatabase));
       ctx.waitUntil(readNewTranscripts(env, postgresDatabase));
+      ctx.waitUntil(readNewEmails(env, postgresDatabase));
       ctx.waitUntil(writeDueSummaries(env, postgresDatabase));
       ctx.waitUntil(replayPendingMail(env, postgresDatabase));
       return;

@@ -51,6 +51,32 @@ export interface ReadingClaim {
   token: string;
 }
 
+/** A received email claimed for reading, and the claim's token (F-114 step 5a). */
+export interface EmailReadingClaim {
+  emailId: string;
+  token: string;
+}
+
+/** What Claude is given to read a claimed email (app.email_reading_context). */
+export interface EmailReadingContextRow {
+  emailId: string;
+  counterpartyId: string;
+  counterpartyName: string;
+  counterpartyTypes: string[];
+  fromName: string | null;
+  fromAddress: string;
+  /** The listed contact who sent it, when matched. */
+  contactId: string | null;
+  subject: string;
+  body: string | null;
+  /** UTC instant. */
+  receivedAt: string;
+  /** The GSS person a follow-up goes to: who sent the email it answers, else whose address it
+   * was sent to, while an active member; else null. */
+  assigneeId: string | null;
+  contacts: ReadingContextRow['contacts'];
+}
+
 export type DecideDraftResult =
   'decided' | 'not_found' | 'forbidden' | 'already_decided' | 'result_not_found';
 
@@ -102,6 +128,28 @@ export interface ReadingsDatabase {
     reading: CheckedReading,
     inputTokens: number,
     outputTokens: number,
+  ) => Promise<boolean>;
+  /** Claims up to `most` received emails for Claude to read now, each with a reserved request. */
+  claimEmailReadings: (most: number) => Promise<EmailReadingClaim[]>;
+  /** Gives a claim back and refunds its request (Anthropic did not take it). */
+  releaseEmailReading: (claim: EmailReadingClaim) => Promise<void>;
+  /** The email a claim is of, for Claude to read; null unless the claim is current. */
+  emailReadingContext: (claim: EmailReadingClaim) => Promise<EmailReadingContextRow | null>;
+  /**
+   * Keeps an email's reading (the lines Claude saw) and its drafts, once; false when read
+   * already, the claim is not current, or the email may no longer be read. `reading` is null
+   * when the email had no text of its own and nothing was sent to Claude.
+   */
+  keepEmailReading: (
+    claim: EmailReadingClaim,
+    lines: readonly string[],
+    cut: boolean,
+    answer: {
+      model: string;
+      reading: CheckedReading;
+      inputTokens: number;
+      outputTokens: number;
+    } | null,
   ) => Promise<boolean>;
   /** A person accepts a draft (naming what they saved from it) or dismisses it. */
   decideCallDraft: (
@@ -221,6 +269,42 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
       return row?.kept === true;
     },
 
+    async claimEmailReadings(most) {
+      const rows = await sql<{ email_id: string; claim_token: string }[]>`
+        select email_id, claim_token from app.claim_email_readings(${most})`;
+      return rows.map((row) => ({ emailId: row.email_id, token: row.claim_token }));
+    },
+
+    async releaseEmailReading(claim) {
+      await sql`select app.release_email_reading(${claim.emailId}, ${claim.token})`;
+    },
+
+    async emailReadingContext(claim) {
+      const [row] = await sql<{ context: EmailReadingContextRow | null }[]>`
+        select app.email_reading_context(${claim.emailId}, ${claim.token}) as context`;
+      const context = row?.context ?? null;
+      if (context === null) return null;
+      return { ...context, receivedAt: new Date(context.receivedAt).toISOString() };
+    },
+
+    async keepEmailReading(claim, lines, cut, answer) {
+      const drafts = (answer?.reading.drafts ?? []).map((draft) => ({
+        kind: draft.kind,
+        contactId: draft.kind === 'contact' ? draft.contactId : null,
+        fields: draft.fields,
+        lines: draft.lines,
+      }));
+      // As plain JSON: fields left out (undefined) are not kept.
+      const json = JSON.parse(JSON.stringify(drafts)) as postgres.JSONValue;
+      const [row] = await sql<{ kept: boolean }[]>`
+        select app.keep_email_reading(${claim.emailId}, ${claim.token}, ${answer?.model ?? null},
+                                      ${answer?.reading.summary ?? null},
+                                      ${sql.json([...lines])}::jsonb, ${cut},
+                                      ${sql.json(json)}::jsonb, ${answer?.inputTokens ?? null},
+                                      ${answer?.outputTokens ?? null}) as kept`;
+      return row?.kept === true;
+    },
+
     decideCallDraft(ctx, draftId, decision, resultId) {
       return asUser(ctx, async (tx) => {
         const [row] = await tx<{ result: string }[]>`
@@ -242,24 +326,31 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
             contact_id: string | null;
             counterparty_id: string;
             counterparty_name: string;
-            call_id: string;
+            call_id: string | null;
+            email_id: string | null;
+            email_subject: string | null;
             called_at: Date;
-            placed_by: string;
+            placed_by: string | null;
             placed_by_name: string;
             contact_name: string;
             source_lines: { line: number; text: string | null }[];
           }[]
         >`
           select d.id, d.kind, d.fields, d.lines, d.contact_id, d.counterparty_id,
-                 p.legal_name as counterparty_name, c.id as call_id,
-                 coalesce(c.connected_at, c.created_at) as called_at,
-                 c.placed_by, c.placed_by_name, c.contact_name,
+                 p.legal_name as counterparty_name, c.id as call_id, m.id as email_id,
+                 m.subject as email_subject,
+                 coalesce(c.connected_at, c.created_at, m.occurred_at) as called_at,
+                 c.placed_by,
+                 coalesce(c.placed_by_name, m.from_name, m.from_address) as placed_by_name,
+                 coalesce(c.contact_name, k.name, '') as contact_name,
                  -- The lines the draft and its checks point to: from the transcript by side, or
-                 -- for one kept before it was split, its non-blank lines (as Claude read them).
+                 -- for one kept before it was split, its non-blank lines (as Claude read them);
+                 -- for an email, the lines Claude saw.
                  (select coalesce(jsonb_agg(jsonb_build_object(
                            'line', n.line,
                            'text', coalesce(r.transcript_lines -> n.line ->> 'text',
-                                            plain.lines[n.line + 1]))
+                                            plain.lines[n.line + 1],
+                                            er.text_read ->> n.line))
                            order by n.line), '[]'::jsonb)
                     from (select distinct v::int as line
                             from (select jsonb_array_elements_text(d.lines) as v
@@ -271,11 +362,15 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
                            where v ~ '^[0-9]{1,4}$') n
                  ) as source_lines
           from app.call_drafts d
-          join app.calls c on c.id = d.call_id and c.organization_id = d.organization_id
-          join app.call_recordings r
+          left join app.calls c on c.id = d.call_id and c.organization_id = d.organization_id
+          left join app.call_recordings r
             on r.id = d.recording_id and r.organization_id = d.organization_id
+          left join app.emails m on m.id = d.email_id and m.organization_id = d.organization_id
+          left join app.email_readings er on er.email_id = d.email_id
+          left join app.counterparty_contacts k
+            on k.id = m.contact_id and k.organization_id = m.organization_id
           cross join lateral (
-            select case when r.transcript_lines is null then array(
+            select case when r.id is not null and r.transcript_lines is null then array(
                      select btrim(t) from unnest(string_to_array(coalesce(r.transcript, ''), E'\n'))
                        with ordinality u(t, o)
                       where btrim(t) <> '' order by o) end as lines
@@ -284,9 +379,12 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
             on p.id = d.counterparty_id and p.organization_id = d.organization_id
           where d.organization_id = ${filter.organizationId} and d.status = 'open'
             and p.archived_at is null
+            -- A draft from an email removed since is no longer shown.
+            and not exists (select 1 from app.email_removals x where x.email_id = d.email_id)
             and ${filter.counterpartyId === null ? tx`true` : tx`d.counterparty_id = ${filter.counterpartyId}`}
             and ${filter.kind === null ? tx`true` : tx`d.kind = ${filter.kind}`}
-          order by coalesce(c.connected_at, c.created_at) desc, d.recording_id, d.position
+          order by coalesce(c.connected_at, c.created_at, m.occurred_at) desc,
+                   coalesce(d.recording_id, d.email_id), d.position
           limit ${OPEN_DRAFTS_LIMIT}`;
         return rows.map((row) => ({
           id: row.id,
@@ -296,7 +394,10 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
           contactId: row.contact_id,
           counterpartyId: row.counterparty_id,
           counterpartyName: row.counterparty_name,
+          source: row.email_id === null ? ('call' as const) : ('email' as const),
           callId: row.call_id,
+          emailId: row.email_id,
+          emailSubject: row.email_subject,
           calledAt: row.called_at.toISOString(),
           callerId: row.placed_by,
           callerName: row.placed_by_name,

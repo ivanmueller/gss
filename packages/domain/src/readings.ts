@@ -211,10 +211,15 @@ export interface ReadingContext {
     email: string | null;
     phone: string | null;
   }[];
-  /** Who placed the call: the follow-ups are theirs. */
-  callerId: string;
-  /** When the call connected (UTC instant): the bids and offers are quoted then. */
+  /**
+   * Who placed the call (for an email, the GSS person it answers): the follow-ups are theirs.
+   * Null when there is nobody: the follow-up then waits for its person to be chosen.
+   */
+  callerId: string | null;
+  /** When the call connected or the email was received (UTC instant): quotes are made then. */
   calledAt: string;
+  /** What was read: a call's transcript (the default) or a received email (F-114 step 5a). */
+  source?: 'call' | 'email';
 }
 
 export type ContactFormValues = Partial<Record<ContactFieldId, string>>;
@@ -717,7 +722,10 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
   };
   const drafts: DraftInput[] = [];
   const quotedAt = new Date(context.calledAt).toISOString();
-  const reference = label(`Call of ${formatAlberta(quotedAt)}, drafted by Claude`);
+  const fromEmail = context.source === 'email';
+  const reference = label(
+    `${fromEmail ? 'Email' : 'Call'} of ${formatAlberta(quotedAt)}, drafted by Claude`,
+  );
 
   for (const quote of reading.quotes.slice(0, DRAFTS_PER_KIND_MAX)) {
     const { lines, cited } = evidence(quote.lines);
@@ -725,7 +733,10 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     if (!SIDE_COUNTERPARTY_TYPES[quote.side].some((t) => context.counterpartyTypes.includes(t))) {
       continue;
     }
-    const values: QuoteFormValues = { quotedAt, sourceType: 'phone' };
+    const values: QuoteFormValues = {
+      quotedAt,
+      sourceType: fromEmail ? 'email' : 'phone',
+    };
     put(values, 'sourceReference', reference);
     put(values, 'firmness', quote.firmness);
     // The price, its currency and its unit from one price said whole (saidPrice); each amount
@@ -773,7 +784,8 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     const { lines } = evidence(followUp.lines);
     const task = label(followUp.task);
     if (lines.length === 0 || task === null) continue;
-    const values: FollowUpFormValues = { task, assignedTo: context.callerId };
+    const values: FollowUpFormValues = { task };
+    put(values, 'assignedTo', context.callerId);
     put(values, 'dueAt', albertaInstant(followUp.dueAt));
     drafts.push({ kind: 'follow_up', fields: { values }, lines });
   }

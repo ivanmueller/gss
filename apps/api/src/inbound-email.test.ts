@@ -1,3 +1,4 @@
+import { emailLines } from '@grain/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -122,6 +123,24 @@ describe('htmlToText', () => {
         '<html><head><style>p{}</style></head><body><p>Hello&nbsp;<b>there</b></p><script>x()</script>Line&#33;<br>Two &amp; &#x41;</body></html>',
       ),
     ).toBe('Hello there\nLine!\nTwo & A');
+  });
+
+  it('marks quoted earlier mail with "> " per level, as plain text mail (F-114-5a R2-01)', () => {
+    expect(
+      htmlToText(
+        '<p>Thanks, I will check.</p><blockquote type="cite"><p>We offer canola\nCAD $725 per tonne delivered.</p><blockquote><div>Older</div></blockquote><p>Back</p></blockquote><p>After</p>',
+      ),
+    ).toBe(
+      'Thanks, I will check.\n> We offer canola CAD $725 per tonne delivered.\n> > Older\n> Back\nAfter',
+    );
+  });
+
+  it('marks a quoted table line whose first cell is empty (F-114-5a round 3)', () => {
+    const body = htmlToText(
+      '<p>Thanks.</p><blockquote><table><tr><td></td><td>We offer canola CAD $725 per tonne delivered.</td></tr><tr><td>A</td><td>B</td></tr></table></blockquote>',
+    );
+    expect(body).toBe('Thanks.\n> \tWe offer canola CAD $725 per tonne delivered.\n> A\tB');
+    expect(emailLines('Re: Canola', body).lines).toEqual(['Subject: Re: Canola', 'Thanks.']);
   });
 
   it('leaves an invalid character reference as written', () => {

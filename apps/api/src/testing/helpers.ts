@@ -195,6 +195,10 @@ export function fakeDatabase(): Mocked<Database> {
     releaseCallReading: vi.fn<Database['releaseCallReading']>(() => Promise.resolve()),
     callReadingContext: vi.fn<Database['callReadingContext']>(() => Promise.resolve(null)),
     keepCallReading: vi.fn<Database['keepCallReading']>(() => Promise.resolve(true)),
+    claimEmailReadings: vi.fn<Database['claimEmailReadings']>(() => Promise.resolve([])),
+    releaseEmailReading: vi.fn<Database['releaseEmailReading']>(() => Promise.resolve()),
+    emailReadingContext: vi.fn<Database['emailReadingContext']>(() => Promise.resolve(null)),
+    keepEmailReading: vi.fn<Database['keepEmailReading']>(() => Promise.resolve(true)),
     decideCallDraft: vi.fn<Database['decideCallDraft']>(() => Promise.resolve('decided')),
     listOpenDrafts: vi.fn<Database['listOpenDrafts']>(() => Promise.resolve([])),
     verifyCallDraft: vi.fn<Database['verifyCallDraft']>(() =>
