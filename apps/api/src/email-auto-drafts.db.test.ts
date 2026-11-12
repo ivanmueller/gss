@@ -87,7 +87,9 @@ describe('a reply Claude drafts by itself', () => {
       shared: true,
       sender: { name: 'vera', title: null },
     });
-    expect(context?.answer?.id).toBe(received);
+    expect(context !== null && context.source !== 'reminder' ? context.answer?.id : null).toBe(
+      received,
+    );
 
     expect(
       await db.keepEmailAutoDraft(claim, {
@@ -161,5 +163,116 @@ describe('a reply Claude drafts by itself', () => {
     expect(sent?.draftedByClaude).toBe(true);
     expect(await db.countEmailAutoDrafts(as(people.vera), org)).toBe(0);
     expect(await db.dismissEmailAutoDraft(as(people.vera), org, draftId ?? '')).toBe('taken');
+  });
+});
+
+describe('a reminder (F-114 step 5c, part 2)', () => {
+  /** A company with a GSS email sent 8 days ago and a pending reminder of it. */
+  async function quietEmail(subject: string) {
+    const quiet = id();
+    const sent = id();
+    const reminder = id();
+    await admin`insert into app.counterparties
+        (id, organization_id, legal_name, types, primary_country, source, created_by)
+      values (${quiet}, ${org}, ${`Synthetic Quiet ${quiet}`}, '{buyer}', 'CA', 'manual', ${people.adam})`;
+    await admin`insert into app.emails
+        (id, organization_id, direction, status, counterparty_id, sent_by, sent_by_name, from_address,
+         to_addresses, subject, body_text, message_id)
+      values (${sent}, ${org}, 'outgoing', 'sending', ${quiet}, ${people.adam}, 'adam',
+              'info@gss.example.test', '{pat@buyer.example.test}', ${subject},
+              'Could you confirm the 2 loads?', ${`gss-${sent}`})`;
+    await admin`update app.emails set status = 'sent', provider_message_id = ${`<cf-${sent}@gss.example.test>`},
+                       occurred_at = now() - interval '8 days'
+                 where id = ${sent}`;
+    await admin`insert into app.email_auto_drafts
+        (id, organization_id, counterparty_id, source, email_id, about, assigned_to, from_choice)
+      values (${reminder}, ${org}, ${quiet}, 'reminder', ${sent}, ${`No answer to "${subject}"`},
+              ${people.adam}, 'shared')`;
+    return { quiet, sent, reminder };
+  }
+
+  it('is described, kept, listed and sent as a reply in the same thread', async () => {
+    const { quiet, sent, reminder } = await quietEmail('Barley for December');
+    const claim = (await db.claimEmailAutoDrafts(10)).find((item) => item.draftId === reminder);
+    if (claim === undefined) throw new Error('the reminder was not claimed');
+
+    const context = await db.emailAutoDraftContext(claim);
+    expect(context).toMatchObject({
+      source: 'reminder',
+      about: 'No answer to "Barley for December"',
+      types: ['buyer'],
+      sender: { name: 'adam', title: null },
+      shared: true,
+      reminded: {
+        subject: 'Barley for December',
+        body: 'Could you confirm the 2 loads?',
+        to: ['pat@buyer.example.test'],
+        contactName: null,
+        sentByName: 'adam',
+      },
+    });
+    expect(context?.happenedAt).toMatch(/Z$/);
+    expect(context).not.toHaveProperty('quotes');
+
+    expect(
+      await db.keepEmailAutoDraft(claim, {
+        model: 'claude-test',
+        subject: 'Re: Barley for December',
+        message: 'Hi Pat, could you confirm the 2 loads?',
+        checkThis: [],
+        placeholders: [],
+        inputTokens: 100,
+        outputTokens: 20,
+      }),
+    ).toBe(true);
+    const list = await db.listEmailAutoDrafts(as(people.adam), org, {
+      counterpartyId: quiet,
+      mine: true,
+    });
+    expect(list?.drafts[0]).toMatchObject({
+      id: reminder,
+      source: 'reminder',
+      emailId: sent,
+      emailSubject: 'Barley for December',
+      to: ['pat@buyer.example.test'],
+      answeredSince: null,
+    });
+
+    const started = await db.startOutgoingEmail(as(people.adam), {
+      organizationId: org,
+      counterpartyId: quiet,
+      contactId: null,
+      fromLocalPart: 'info',
+      domain: 'gss.example.test',
+      to: ['pat@buyer.example.test'],
+      cc: [],
+      subject: 'Re: Barley for December',
+      body: 'Hi Pat',
+      messageId: `gss-${id()}`,
+      replyToEmailId: sent,
+      claudeDraftId: null,
+      autoDraftId: reminder,
+    });
+    if (started.status !== 'started') throw new Error(started.status);
+    // The reply's headers name the id the recipient knows GSS's email by.
+    expect(await db.answeredEmailIds(as(people.adam), org, sent)).toEqual({
+      messageId: `<cf-${sent}@gss.example.test>`,
+      references: [],
+    });
+    // An email still being sent has no id yet: no headers.
+    expect(await db.answeredEmailIds(as(people.adam), org, started.id)).toBeNull();
+    expect(await db.answeredEmailIds(as(id()), org, sent)).toBeNull();
+  });
+
+  it('is put away when Claude finds it not needed, once, under its claim', async () => {
+    const { reminder } = await quietEmail('Thanks for the call');
+    const claim = (await db.claimEmailAutoDrafts(10)).find((item) => item.draftId === reminder);
+    if (claim === undefined) throw new Error('the reminder was not claimed');
+    expect(await db.skipEmailAutoDraft({ ...claim, token: id() })).toBe(false);
+    expect(await db.skipEmailAutoDraft(claim)).toBe(true);
+    expect(await db.skipEmailAutoDraft(claim)).toBe(false);
+    const [row] = await admin<{ state: string }[]>`
+      select state from app.email_auto_drafts where id = ${reminder}`;
+    expect(row?.state).toBe('skipped');
   });
 });

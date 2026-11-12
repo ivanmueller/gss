@@ -75,6 +75,21 @@ export interface EmailReadingContextRow {
    * was sent to, while an active member; else null. */
   assigneeId: string | null;
   contacts: ReadingContextRow['contacts'];
+  /**
+   * Up to 4 earlier emails with the company, oldest first, as context only (F-114 step 5c part 2,
+   * the owner's answer 26): never numbered, so no draft can cite them.
+   */
+  thread: EarlierEmail[];
+}
+
+export interface EarlierEmail {
+  direction: 'incoming' | 'outgoing';
+  fromName: string | null;
+  from: string;
+  /** UTC instant. */
+  at: string;
+  subject: string;
+  body: string | null;
 }
 
 export type DecideDraftResult =
@@ -286,7 +301,14 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
         select app.email_reading_context(${claim.emailId}, ${claim.token}) as context`;
       const context = row?.context ?? null;
       if (context === null) return null;
-      return { ...context, receivedAt: new Date(context.receivedAt).toISOString() };
+      return {
+        ...context,
+        receivedAt: new Date(context.receivedAt).toISOString(),
+        thread: context.thread.map((email) => ({
+          ...email,
+          at: new Date(email.at).toISOString(),
+        })),
+      };
     },
 
     async keepEmailReading(claim, lines, cut, answer) {

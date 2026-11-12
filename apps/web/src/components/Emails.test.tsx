@@ -725,6 +725,59 @@ describe('Claude’s email drafts on the Emails card (F-114 step 5c)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('opens a reminder as a reply to GSS’s email, without Draft with Claude (F-114 step 5c part 2)', async () => {
+    const SENT = '00000000-0000-4000-8000-0000000e1ab0';
+    const REMINDER: EmailAutoDraftView = {
+      ...DRAFT,
+      source: 'reminder',
+      about: 'No answer to "Barley for December"',
+      emailId: SENT,
+      emailFrom: 'Tom Trader',
+      emailSubject: 'Barley for December',
+      emailAt: '2026-11-13T17:00:00.000Z',
+      to: ['pat@buyer.example.test'],
+      subject: 'Re: Barley for December',
+      message: 'Hi Pat, could you confirm the 2 loads?',
+      placeholders: [],
+    };
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: { ...SETTINGS, claudeConfigured: true } }),
+      [DRAFTS_PATH]: () => Response.json({ drafts: [REMINDER], truncated: false }),
+      [`POST /emails?organization_id=${ORG.id}`]: (call) =>
+        (call.body as { autoDraftId: string | null }).autoDraftId === null
+          ? Response.json({ email: email() }, { status: 201 })
+          : Response.json(
+              { error: { code: 'AUTO_DRAFT_USED', message: 'Claude’s draft was already sent.' } },
+              { status: 409 },
+            ),
+    });
+    show();
+    const user = userEvent.setup();
+    const title = 'Reminder: no answer to “Barley for December”, sent Fri 13 Nov 2026, 11:00 am MT';
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: `Open Claude’s draft: ${title}` }));
+    const dialog = await screen.findByRole('dialog', { name: 'Claude’s draft' });
+    await within(dialog).findByLabelText('Subject');
+    expect(within(dialog).getByLabelText('To')).toHaveValue('pat@buyer.example.test');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Barley for December');
+    expect(within(dialog).queryByText('Draft with Claude')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    // Gone meanwhile: sent as a new email, no longer a reply to GSS's own email.
+    await user.click(await within(dialog).findByRole('button', { name: 'Send as a new email' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const posts = calls.filter((call) => call.method === 'POST' && call.path.startsWith('/emails'));
+    expect(
+      posts.map((call) => {
+        const body = call.body as { autoDraftId: string | null; replyToEmailId: string | null };
+        return [body.autoDraftId, body.replyToEmailId];
+      }),
+    ).toEqual([
+      [REMINDER.id, SENT],
+      [null, null],
+    ]);
+  });
+
   it('dismisses a draft after asking', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const calls = mockApi({

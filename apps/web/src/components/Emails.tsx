@@ -249,6 +249,10 @@ function EmailDialog({
     held === null ? (auto?.id ?? null) : held.autoDraftId,
   );
   const [autoGone, setAutoGone] = useState(false);
+  // A reminder answers GSS's own email (F-114 step 5c, part 2): only with its draft, so Draft
+  // with Claude (which answers received email only) is not offered while it is the one answered.
+  const remindedEmail = auto?.source === 'reminder' ? auto.emailId : null;
+  const answeringReminded = remindedEmail !== null && answering === remindedEmail;
   const [about, setAbout] = useState('');
   const [drafting, setDrafting] = useState<AbortController | null>(null);
   const heldDraft = held?.claudeDraftId ?? null;
@@ -644,6 +648,8 @@ function EmailDialog({
                   variant="outline"
                   onClick={() => {
                     setAutoDraftId(null);
+                    // GSS's own email can be answered only with its reminder: sent as new.
+                    if (answeringReminded) setAnswering(null);
                     setAutoGone(false);
                     setResult(null);
                   }}
@@ -652,7 +658,7 @@ function EmailDialog({
                 </Button>
               </div>
             )}
-            {settings.claudeConfigured && !sent && pending === null && (
+            {settings.claudeConfigured && !sent && pending === null && !answeringReminded && (
               <div className="flex flex-col gap-2 rounded-control border border-l-[3px] border-claude-border border-l-claude-mark bg-claude-subtle px-3 py-2">
                 <label className="flex flex-col gap-1.5" htmlFor={`${id}-about`}>
                   <span className="flex items-center gap-1.5 font-medium">

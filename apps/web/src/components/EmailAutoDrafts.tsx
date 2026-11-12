@@ -10,8 +10,14 @@ import { Button } from './ui/button';
 // company's Emails card and on Follow-ups. Open fills the usual email form; Dismiss puts a draft
 // away for good. Nothing is sent until a person clicks Send in the form.
 
-/** What a draft is: a reply to a received email, or an email after a call. */
+/** What a draft is: a reply to a received email, an email after a call, or a reminder. */
 export function autoDraftTitle(draft: EmailAutoDraftView): string {
+  if (draft.source === 'reminder') {
+    const subject =
+      draft.emailSubject === null || draft.emailSubject === '' ? '' : ` “${draft.emailSubject}”`;
+    const when = draft.emailAt === null ? '' : `, sent ${formatAlberta(draft.emailAt)}`;
+    return `Reminder: no answer to${subject === '' ? ' your email' : subject}${when}`;
+  }
   if (draft.source === 'email') {
     const subject =
       draft.emailSubject === null || draft.emailSubject === '' ? '' : ` “${draft.emailSubject}”`;

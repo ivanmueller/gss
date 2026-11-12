@@ -196,10 +196,12 @@ select ok(app.keep_email_reading(pg_temp.id('in3'), pg_temp.id('in3'), 'claude-t
 select is((select count(*)::int from app.email_auto_drafts where email_id = pg_temp.id('in3')), 0,
           'but no draft without an about line');
 
--- The old keep signatures still work and want nothing.
-select ok(has_function_privilege('app_api',
-            'app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer)', 'execute'),
-          'the old call keep is still there for the deploy');
+-- The deploy window's old signatures are gone (step 5c part 2).
+select ok(to_regprocedure('app.keep_call_reading(uuid, uuid, text, boolean, text, jsonb, integer, integer)') is null
+          and to_regprocedure('app.keep_email_reading(uuid, uuid, text, text, jsonb, boolean, jsonb, integer, integer)') is null
+          and to_regprocedure('app.start_outgoing_email(uuid, uuid, uuid, text, text, text[], text[], text, text, text)') is null
+          and to_regprocedure('app.start_outgoing_email(uuid, uuid, uuid, text, text, text[], text[], text, text, text, uuid, uuid)') is null,
+          'the old keep and send functions are dropped');
 
 -- The job ------------------------------------------------------------------
 select is(pg_temp.api('00000000-0000-4000-8000-0000000044aa',

@@ -37,6 +37,31 @@ export interface AutoDraftContext extends EmailDraftContext {
   }[];
 }
 
+/**
+ * What Claude is given to write a reminder (F-114 step 5c, part 2): the company's name and types,
+ * the sender and the GSS email reminded. Nothing else of the company's records.
+ */
+export interface ReminderContext {
+  source: 'reminder';
+  /** Fixed text built from the reminded email's subject, never Claude's words. */
+  about: string;
+  /** When the reminded email was sent. */
+  happenedAt: string;
+  name: string;
+  types: string[];
+  sender: { name: string; title: string | null } | null;
+  shared: boolean;
+  reminded: {
+    subject: string;
+    body: string | null;
+    to: string[];
+    contactName: string | null;
+    sentByName: string | null;
+  };
+}
+
+export type AutoDraftJobContext = AutoDraftContext | ReminderContext;
+
 export interface KeptAutoDraft {
   model: string | null;
   subject: string;
@@ -58,7 +83,9 @@ const DISMISS_RESULTS: readonly DismissAutoDraftResult[] = [
 export interface AutoDraftsDatabase {
   claimEmailAutoDrafts: (most: number) => Promise<AutoDraftClaim[]>;
   releaseEmailAutoDraft: (claim: AutoDraftClaim) => Promise<void>;
-  emailAutoDraftContext: (claim: AutoDraftClaim) => Promise<AutoDraftContext | null>;
+  emailAutoDraftContext: (claim: AutoDraftClaim) => Promise<AutoDraftJobContext | null>;
+  /** Puts a reminder away under its claim: Claude found the email asked for nothing. */
+  skipEmailAutoDraft: (claim: AutoDraftClaim) => Promise<boolean>;
   keepEmailAutoDraft: (claim: AutoDraftClaim, draft: KeptAutoDraft) => Promise<boolean>;
   /** Null for anyone not an active member of the organization. */
   listEmailAutoDrafts: (
@@ -97,11 +124,17 @@ export function autoDraftQueries(asUser: AsUser, sql: postgres.Sql): AutoDraftsD
     },
 
     async emailAutoDraftContext(claim) {
-      const [row] = await sql<{ context: AutoDraftContext | null }[]>`
+      const [row] = await sql<{ context: AutoDraftJobContext | null }[]>`
         select app.email_auto_draft_context(${claim.draftId}, ${claim.token}) as context`;
       const context = row?.context ?? null;
       if (context === null) return null;
       return { ...context, happenedAt: new Date(context.happenedAt).toISOString() };
+    },
+
+    async skipEmailAutoDraft(claim) {
+      const [row] = await sql<{ skipped: boolean }[]>`
+        select app.skip_email_auto_draft(${claim.draftId}, ${claim.token}) as skipped`;
+      return row?.skipped === true;
     },
 
     async keepEmailAutoDraft(claim, draft) {

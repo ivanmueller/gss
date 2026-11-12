@@ -143,3 +143,17 @@ export function replySubject(subject: string): string {
     .replace(/^(?:re|aw|fwd?|fw)\s*:\s*/i, '');
   return bare === '' ? 'Re:' : `Re: ${bare}`;
 }
+
+/**
+ * A reminder's subject: the reply subject of the email reminded, at most `max` UTF-16 units, never
+ * cutting a surrogate pair in half (a sent subject may be up to 998 characters; a draft's is at
+ * most 200, F-114-5c2-D1-01).
+ */
+export function reminderSubject(subject: string, max: number): string {
+  const full = replySubject(subject);
+  if (full.length <= max) return full;
+  let end = max;
+  const last = full.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return full.slice(0, end).trimEnd();
+}
