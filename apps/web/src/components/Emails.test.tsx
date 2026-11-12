@@ -33,6 +33,7 @@ const ME = {
 };
 const SETTINGS: EmailSettingsView = {
   configured: true,
+  claudeConfigured: false,
   domain: 'gss.example.test',
   sharedLocalPart: 'info',
   signature: '{name}\n{title}\nPhone: {phone}\n{email}',
@@ -65,6 +66,9 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     counterpartyId: COMPANY,
     sentTo: null,
     attachmentCount: 0,
+    replyToAddress: null,
+    inReplyToSubject: null,
+    draftedByClaude: false,
     ...overrides,
   };
 }
@@ -398,5 +402,197 @@ describe('the Emails card', () => {
     expect(await screen.findByText('Re: Feed oats')).toBeInTheDocument();
     expect(screen.getAllByText(/Sender not verified/)).toHaveLength(1);
     expect(screen.getAllByText('Automatic')).toHaveLength(1);
+  });
+});
+
+describe('Reply and Draft with Claude (F-114 step 5b)', () => {
+  const RECEIVED = email({
+    id: '00000000-0000-4000-8000-0000000e1bb1',
+    direction: 'incoming',
+    state: 'received',
+    fromAddress: 'pat@buyer.example.test',
+    fromName: 'Pat Buyer',
+    to: ['tom@gss.example.test'],
+    subject: 'RE: Barley',
+    sentByName: null,
+  });
+  const DRAFT_PATH = `POST /emails/draft?organization_id=${ORG.id}`;
+  const SEND_PATH = `POST /emails?organization_id=${ORG.id}`;
+  const OPEN_PATH = `GET /emails/${RECEIVED.id}?organization_id=${ORG.id}`;
+  const DRAFT_ID = '00000000-0000-4000-8000-00000000d0d0';
+
+  async function openReply(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole('button', { name: /^RE: Barley/ }));
+    await user.click(await screen.findByRole('button', { name: 'Reply' }));
+    return screen.findByRole('dialog', { name: 'Reply' });
+  }
+
+  it('replies to the sender with a draft, blocks Send until the placeholder is filled, and sends both links', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: { ...SETTINGS, claudeConfigured: true } }),
+      [LIST_PATH]: () => Response.json({ emails: [RECEIVED] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...RECEIVED, body: 'Can you do 2 loads?' } }),
+      [DRAFT_PATH]: () =>
+        Response.json({
+          draft: {
+            draftId: DRAFT_ID,
+            subject: 'Re: Barley',
+            message: 'Hi Pat,\n\nYes, 2 loads at $310 for [delivery date].',
+            checkThis: ['310'],
+            placeholders: ['[delivery date]'],
+          },
+        }),
+      [SEND_PATH]: () => Response.json({ email: email() }, { status: 201 }),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await openReply(user);
+    await within(dialog).findByLabelText('Subject');
+    expect(within(dialog).getByLabelText('To')).toHaveValue('pat@buyer.example.test');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Barley');
+
+    await user.type(within(dialog).getByLabelText(/Draft with Claude/), 'the loads');
+    await user.click(within(dialog).getByRole('button', { name: 'Draft with Claude' }));
+    await waitFor(() => {
+      expect(within(dialog).getByLabelText('Message')).toHaveValue(
+        'Hi Pat,\n\nYes, 2 loads at $310 for [delivery date].',
+      );
+    });
+    const draftCall = calls.find((call) => call.path.startsWith('/emails/draft'));
+    expect(draftCall?.body).toMatchObject({
+      counterpartyId: COMPANY,
+      replyToEmailId: RECEIVED.id,
+      about: 'the loads',
+      to: ['pat@buyer.example.test'],
+    });
+    expect(within(dialog).getByText('Check this before sending')).toBeInTheDocument();
+    expect(within(dialog).getByText('310')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Fill in \[delivery date\]/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    const box = within(dialog).getByLabelText('Message');
+    await user.clear(box);
+    await user.type(box, 'Hi Pat, yes, 2 loads in December.');
+    expect(within(dialog).queryByText('Check this before sending')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const sendCall = calls.find(
+      (call) => call.method === 'POST' && call.path.startsWith('/emails?'),
+    );
+    expect(sendCall?.body).toMatchObject({
+      replyToEmailId: RECEIVED.id,
+      claudeDraftId: DRAFT_ID,
+      subject: 'Re: Barley',
+    });
+  });
+
+  it('warns about a capitalised number word Claude did not have (R1-02)', async () => {
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: { ...SETTINGS, claudeConfigured: true } }),
+      [DRAFT_PATH]: () =>
+        Response.json({
+          draft: {
+            draftId: DRAFT_ID,
+            subject: 'Barley',
+            message: 'Twelve loads available.',
+            checkThis: ['Twelve'],
+            placeholders: [],
+          },
+        }),
+    });
+    show();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Email Pat Buyer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New email' });
+    await user.click(await within(dialog).findByRole('button', { name: 'Draft with Claude' }));
+    expect(await within(dialog).findByText('Check this before sending')).toBeInTheDocument();
+    expect(within(dialog).getByText('Twelve')).toBeInTheDocument();
+    // Still listed when only its case is changed.
+    const box = within(dialog).getByLabelText('Message');
+    await user.clear(box);
+    await user.type(box, 'twelve loads available.');
+    expect(within(dialog).getByText('Twelve')).toBeInTheDocument();
+  });
+
+  it('replies to the Reply-To address when the email named one (R2-02)', async () => {
+    const named = {
+      ...RECEIVED,
+      fromAddress: 'notifications@buyer.example.test',
+      replyToAddress: 'pat@buyer.example.test',
+    };
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [named] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...named, body: 'Hello' } }),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await openReply(user);
+    expect(await within(dialog).findByLabelText('To')).toHaveValue('pat@buyer.example.test');
+  });
+
+  it('offers no Draft with Claude when Claude is not set up', async () => {
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [RECEIVED] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...RECEIVED, body: 'Hello' } }),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await openReply(user);
+    await within(dialog).findByLabelText('Subject');
+    expect(within(dialog).queryByRole('button', { name: 'Draft with Claude' })).toBeNull();
+  });
+
+  it('keeps what was written when the person declines the replacement', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: { ...SETTINGS, claudeConfigured: true } }),
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    show();
+    const user = userEvent.setup();
+    const dialog = await write(user);
+    await user.click(within(dialog).getByRole('button', { name: 'Draft with Claude' }));
+    expect(within(dialog).getByLabelText('Message')).toHaveValue('Hello Pat');
+    expect(calls.some((call) => call.path.startsWith('/emails/draft'))).toBe(false);
+  });
+
+  it('offers to send as a new email when the answered email was deleted', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [RECEIVED] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...RECEIVED, body: 'Hello' } }),
+      [SEND_PATH]: (call) =>
+        (call.body as { replyToEmailId: string | null }).replyToEmailId === null
+          ? Response.json({ email: email() }, { status: 201 })
+          : Response.json(
+              { error: { code: 'REPLY_NOT_FOUND', message: 'The email was deleted.' } },
+              { status: 409 },
+            ),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await openReply(user);
+    await user.type(await within(dialog).findByLabelText('Message'), 'Thanks');
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Send as a new email' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const sends = calls.filter(
+      (call) => call.method === 'POST' && call.path.startsWith('/emails?'),
+    );
+    expect(sends).toHaveLength(2);
+  });
+
+  it('shows how a sent email started', async () => {
+    mockApi({
+      [LIST_PATH]: () =>
+        Response.json({
+          emails: [email({ inReplyToSubject: 'RE: Barley', draftedByClaude: true })],
+        }),
+    });
+    show();
+    expect(await screen.findByText('In reply to “RE: Barley”')).toBeInTheDocument();
+    expect(screen.getByText('Drafted with Claude')).toBeInTheDocument();
   });
 });

@@ -1,6 +1,7 @@
 import { choosePasswordSchema, MIN_PASSWORD_LENGTH } from '@grain/domain';
 import { Hono } from 'hono';
 
+import { claudeClient, type ClaudeFactory } from './anthropic';
 import { requireUser } from './auth';
 import {
   callRoutes,
@@ -33,10 +34,11 @@ export type { ApiEnv, DatabaseFactory } from './respond';
 
 export function createApp(
   openDatabase: DatabaseFactory,
-  options: { telnyx?: TelnyxFactory; mailer?: MailerFactory } = {},
+  options: { telnyx?: TelnyxFactory; mailer?: MailerFactory; claude?: ClaudeFactory } = {},
 ) {
   const telnyx = options.telnyx ?? telnyxClient;
   const mailer = options.mailer ?? cloudflareMailer;
+  const claude = options.claude ?? claudeClient;
   const app = new Hono<ApiEnv>().basePath('/api/v1');
 
   // Every response carries a request id; writes record it in the audit trail.
@@ -145,7 +147,7 @@ export function createApp(
   app.route('/calls', callRoutes(openDatabase, telnyx));
   app.route('/callbacks', callbackRoutes(openDatabase, telnyx));
   app.route('/map-layers', mapLayerRoutes(openDatabase));
-  app.route('/emails', emailRoutes(openDatabase, mailer));
+  app.route('/emails', emailRoutes(openDatabase, mailer, claude));
 
   return app;
 }

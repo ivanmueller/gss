@@ -66,6 +66,10 @@ export const sendEmailSchema = z
       .refine((value) => value.trim() !== '', 'Write a message'),
     /** Made once when the form opens: sending it twice never sends twice. */
     sendKey: z.uuid(),
+    /** The received email this one answers (Reply, F-114 step 5b). */
+    replyToEmailId: z.uuid().nullable().default(null),
+    /** The Draft with Claude request whose draft this email started from (F-114 step 5b). */
+    claudeDraftId: z.uuid().nullable().default(null),
   })
   .transform((value) => {
     // Each address once: To first, then Cc without the To addresses.
@@ -212,6 +216,15 @@ export interface EmailView {
   sentTo: string | null;
   /** Received mail: how many attachments were listed. */
   attachmentCount: number;
+  /**
+   * Received email: the Reply-To address it named, where a reply goes (F-114-5b-R2-02); null
+   * when it named none, and for sent email.
+   */
+  replyToAddress: string | null;
+  /** Sent email: the subject of the received email it answers (Reply). */
+  inReplyToSubject: string | null;
+  /** Sent email: it started from a draft by Claude. */
+  draftedByClaude: boolean;
   /** Only in the single-email answer. */
   body?: string;
   bodyTruncated?: boolean;
@@ -280,6 +293,8 @@ export interface MemberEmailView {
 export interface EmailSettingsView {
   /** The Worker can send (its binding and domain are set). */
   configured: boolean;
+  /** Claude can draft emails (the Worker's Anthropic key is set). */
+  claudeConfigured: boolean;
   /** The domain from the Worker's configuration; null when not configured. */
   domain: string | null;
   /** Null until an admin saves the email settings. */
@@ -293,4 +308,79 @@ export interface EmailSettingsView {
   updatedByName: string | null;
   /** UTC instant. */
   updatedAt: string | null;
+}
+
+// Draft with Claude (F-114 step 5b). Claude writes a subject and a message from the company's
+// records; the browser fills the form with them and the person edits and sends. Nothing is kept
+// of the draft but what the request cost.
+
+/** The optional line the person types: what the email is about. */
+export const EMAIL_DRAFT_ABOUT_MAX = 300;
+/** The longest subject and message kept from Claude's answer. */
+export const EMAIL_DRAFT_SUBJECT_MAX = 200;
+export const EMAIL_DRAFT_MESSAGE_MAX = 6000;
+
+/** POST /api/v1/emails/draft. */
+export const draftEmailSchema = z.strictObject({
+  counterpartyId: z.uuid(),
+  contactId: z.uuid().nullable(),
+  /** The received email being answered. */
+  replyToEmailId: z.uuid().nullable(),
+  from: z.enum(['own', 'shared']),
+  to: z.array(addressSchema).max(EMAIL_MAX_RECIPIENTS),
+  about: z
+    .string()
+    .max(EMAIL_DRAFT_ABOUT_MAX)
+    .refine((value) => !/[\r\n]/.test(value), 'One line')
+    .transform((value) => (value.trim() === '' ? null : value.trim()))
+    .nullable()
+    .default(null),
+  /** Made for each click: the same key twice is never paid twice. */
+  draftKey: z.uuid(),
+});
+export type DraftEmailRequest = z.infer<typeof draftEmailSchema>;
+
+// Control characters other than a newline or a tab.
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+
+/** Claude's answer, as the Worker accepts it. */
+export const emailDraftAnswerSchema = z.strictObject({
+  subject: z
+    .string()
+    .transform((value) =>
+      value
+        .replace(/[\r\n\t]+/g, ' ')
+        .replace(CONTROL, '')
+        .trim(),
+    )
+    .pipe(z.string().min(1).max(EMAIL_DRAFT_SUBJECT_MAX)),
+  message: z
+    .string()
+    .transform((value) => value.replace(/\r\n?/g, '\n').replace(CONTROL, '').trim())
+    .pipe(z.string().min(1).max(EMAIL_DRAFT_MESSAGE_MAX)),
+});
+export type EmailDraftAnswer = z.infer<typeof emailDraftAnswerSchema>;
+
+/** The JSON schema Claude answers in (structured outputs). */
+export const EMAIL_DRAFT_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    subject: { type: 'string' },
+    message: { type: 'string' },
+  },
+  required: ['subject', 'message'],
+  additionalProperties: false,
+} as const;
+
+/** What the person gets back: the draft, and what to check before sending. */
+export interface EmailDraftView {
+  /** The request's id, sent back with the email (claudeDraftId). */
+  draftId: string;
+  subject: string;
+  message: string;
+  /** Numbers in the draft not found in what Claude was given. */
+  checkThis: string[];
+  /** Placeholders ("[price]") to fill in before Send. */
+  placeholders: string[];
 }

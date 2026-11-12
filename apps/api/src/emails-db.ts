@@ -25,7 +25,9 @@ export type StartEmailRefusal =
   | 'company_not_found'
   | 'archived'
   | 'contact_not_found'
-  | 'bad_recipients';
+  | 'bad_recipients'
+  | 'reply_not_found'
+  | 'draft_not_found';
 export type StartEmailResult =
   | { status: 'started'; id: string }
   /**
@@ -57,6 +59,77 @@ export interface StartEmail {
   body: string;
   /** GSS's own id for the email, from the form's send key. */
   messageId: string;
+  /** The received email it answers (Reply). */
+  replyToEmailId: string | null;
+  /** The Draft with Claude request it started from. */
+  claudeDraftId: string | null;
+}
+
+/** app.start_email_draft's answer (F-114 step 5b). */
+export type StartDraftResult =
+  | { status: 'started'; id: string }
+  | {
+      status:
+        'forbidden' | 'not_found' | 'archived' | 'reply_not_found' | 'already' | 'in_progress';
+    };
+
+/** An email as Claude sees it in a draft's context. */
+export interface DraftContextEmail {
+  id: string;
+  direction: 'incoming' | 'outgoing';
+  occurredAt: string;
+  from: string;
+  fromName: string | null;
+  subject: string;
+  body: string;
+}
+
+/** What Claude is given to draft an email (app.email_draft_context), each part limited. */
+export interface EmailDraftContext {
+  name: string;
+  types: string[];
+  country: string;
+  notes: string | null;
+  contacts: {
+    id: string;
+    name: string;
+    role: string | null;
+    email: string | null;
+    main: boolean;
+  }[];
+  commodities: { code: string; direction: 'buys' | 'sells' }[];
+  locations: { name: string | null; city: string | null; region: string | null; country: string }[];
+  quotes: {
+    side: 'bid' | 'offer';
+    commodity: string;
+    firmness: string;
+    price: string;
+    currency: string;
+    priceUnit: string;
+    grade: string | null;
+    deliveryBasis: string;
+    basisLocation: string | null;
+    quantityMinMt: string | null;
+    quantityMaxMt: string;
+    deliveryStart: string | null;
+    deliveryEnd: string | null;
+    validUntil: string;
+  }[];
+  followUps: { task: string; dueAt: string; assignedTo: string }[];
+  history: {
+    occurredAt: string;
+    channel: string;
+    contactName: string;
+    by: string;
+    notes: string | null;
+    claudeNotes: string | null;
+  }[];
+  /** The latest call with a transcript in the last 7 days. */
+  call: { at: string; by: string; contactName: string; transcript: string } | null;
+  /** The email being answered, whatever its age or kind. */
+  answer: (DraftContextEmail & { to: string[]; automatic: boolean }) | null;
+  /** Other emails of the thread, oldest first, as context. */
+  thread: DraftContextEmail[];
 }
 
 /** app.admit_email's answer: whether a delivery may be stored and kept. */
@@ -119,6 +192,33 @@ export interface EmailsDatabase {
     details: { localPart: string | null; title: string | null; phone: string | null },
   ) => Promise<SaveMemberEmailResult>;
   startOutgoingEmail: (ctx: RequestContext, email: StartEmail) => Promise<StartEmailResult>;
+  /** A received email's Message-ID and References, for a reply's headers; null if none. */
+  answeredEmailIds: (
+    ctx: RequestContext,
+    organizationId: string,
+    id: string,
+  ) => Promise<{ messageId: string; references: string[] } | null>;
+  /** Records a Draft with Claude request before it is sent to Anthropic (F-114 step 5b). */
+  startEmailDraft: (
+    ctx: RequestContext,
+    organizationId: string,
+    counterpartyId: string,
+    replyToEmailId: string | null,
+    draftKey: string,
+  ) => Promise<StartDraftResult>;
+  /** Records what came of it: drafted or failed, the model and tokens. */
+  finishEmailDraft: (
+    ctx: RequestContext,
+    id: string,
+    outcome: { drafted: boolean; model: string | null; inputTokens: number; outputTokens: number },
+  ) => Promise<void>;
+  /** What Claude is given; null when the company or the answered email is not draftable. */
+  emailDraftContext: (
+    ctx: RequestContext,
+    organizationId: string,
+    counterpartyId: string,
+    replyToEmailId: string | null,
+  ) => Promise<EmailDraftContext | null>;
   finishOutgoingEmail: (
     ctx: RequestContext,
     id: string,
@@ -205,7 +305,17 @@ const START_REFUSALS: readonly StartEmailRefusal[] = [
   'archived',
   'contact_not_found',
   'bad_recipients',
+  'reply_not_found',
+  'draft_not_found',
 ];
+const DRAFT_REFUSALS = [
+  'forbidden',
+  'not_found',
+  'archived',
+  'reply_not_found',
+  'already',
+  'in_progress',
+] as const;
 const FINISH_RESULTS: readonly FinishEmailResult[] = ['done', 'not_found', 'already_finished'];
 const LINK_RESULTS: readonly LinkEmailResult[] = [
   'done',
@@ -241,6 +351,9 @@ interface EmailRow {
   counterparty_id: string | null;
   envelope_to: string | null;
   attachment_count: number;
+  reply_to: string | null;
+  in_reply_to_subject: string | null;
+  drafted_by_claude: boolean;
   body_text?: string;
   body_truncated?: boolean;
 }
@@ -267,6 +380,9 @@ function emailView(row: EmailRow): EmailView {
     counterpartyId: row.counterparty_id,
     sentTo: row.direction === 'incoming' ? row.envelope_to : null,
     attachmentCount: row.attachment_count,
+    replyToAddress: row.direction === 'incoming' ? row.reply_to : null,
+    inReplyToSubject: row.in_reply_to_subject,
+    draftedByClaude: row.drafted_by_claude,
     ...(row.body_text === undefined
       ? {}
       : { body: row.body_text, bodyTruncated: row.body_truncated ?? false }),
@@ -305,8 +421,14 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
     e.id, e.direction, e.from_address, e.from_name, to_jsonb(e.to_addresses::text[]) as to_addresses,
     to_jsonb(e.cc_addresses::text[]) as cc_addresses, e.subject, e.sent_by_name, e.contact_name, e.failure,
     e.occurred_at, e.auth_passed, e.automatic, e.parse_failed, e.counterparty_id, e.envelope_to,
+    e.reply_to,
     (select count(*)::integer from app.email_attachments a
       where a.organization_id = e.organization_id and a.email_id = e.id) as attachment_count,
+    (select r.subject from app.emails r
+      where r.organization_id = e.organization_id and r.id = e.reply_to_email_id
+        and not exists (select 1 from app.email_removals x where x.email_id = r.id))
+      as in_reply_to_subject,
+    e.claude_draft_id is not null as drafted_by_claude,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
@@ -452,7 +574,7 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
               array(select t.x from jsonb_array_elements_text(${tx.json(email.cc)}::jsonb)
                       with ordinality t(x, n) order by t.n),
               ${email.subject}, ${email.body},
-              ${email.messageId}) as result`;
+              ${email.messageId}, ${email.replyToEmailId}::uuid, ${email.claudeDraftId}::uuid) as result`;
           const status = row?.result.status;
           if (status === 'started' && typeof row?.result.id === 'string') {
             return { status: 'started' as const, id: row.result.id };
@@ -476,6 +598,50 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
         if (existing === undefined) throw error;
         return { status: 'already_started', email: emailView(existing) };
       }
+    },
+
+    answeredEmailIds(ctx, organizationId, id) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ message_id: string; references: string[] }[]>`
+          select e.message_id, to_jsonb(e.reference_ids::text[]) as references
+            from app.emails e
+           where e.organization_id = ${organizationId} and e.id = ${id}
+             and e.direction = 'incoming'`;
+        return row === undefined ? null : { messageId: row.message_id, references: row.references };
+      });
+    },
+
+    startEmailDraft(ctx, organizationId, counterpartyId, replyToEmailId, draftKey) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ result: { status?: unknown; id?: unknown } }[]>`
+          select app.start_email_draft(${organizationId}, ${counterpartyId},
+                                       ${replyToEmailId}::uuid, ${draftKey}) as result`;
+        const status = row?.result.status;
+        if (status === 'started' && typeof row?.result.id === 'string') {
+          return { status: 'started' as const, id: row.result.id };
+        }
+        const refusal = DRAFT_REFUSALS.find((value) => value === status);
+        if (refusal === undefined) throw new Error('Unexpected answer from app.start_email_draft');
+        return { status: refusal };
+      });
+    },
+
+    async finishEmailDraft(ctx, id, outcome) {
+      await asUser(
+        ctx,
+        (tx) => tx`
+          select app.finish_email_draft(${id}, ${outcome.drafted}, ${outcome.model},
+                                        ${outcome.inputTokens}, ${outcome.outputTokens})`,
+      );
+    },
+
+    emailDraftContext(ctx, organizationId, counterpartyId, replyToEmailId) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ context: EmailDraftContext | null }[]>`
+          select app.email_draft_context(${organizationId}, ${counterpartyId},
+                                         ${replyToEmailId}::uuid) as context`;
+        return row?.context ?? null;
+      });
     },
 
     finishOutgoingEmail(ctx, id, outcome) {

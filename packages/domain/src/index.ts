@@ -22,4 +22,5 @@ export * from './mapLayers';
 export * from './mapOverview';
 export * from './arcgisMaps';
 export * from './emails';
+export * from './emailDrafts';
 export * from './emailReading';

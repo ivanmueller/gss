@@ -42,6 +42,10 @@ export interface ReadingRequest {
   user: string;
   /** The JSON schema of the answer. */
   schema: Record<string, unknown>;
+  /** The longest answer, in tokens; READING_MAX_TOKENS when not given. */
+  maxTokens?: number;
+  /** How long the whole request may take; the client's deadline when not given. */
+  deadlineMs?: number;
 }
 
 export type ReadingAnswer =
@@ -102,11 +106,11 @@ export const claudeClient = (
   });
   return {
     async readCall(request) {
-      const response = await withDeadline(deadlineMs, (signal) =>
+      const response = await withDeadline(request.deadlineMs ?? deadlineMs, (signal) =>
         client.beta.messages.create(
           {
             model: READING_MODEL,
-            max_tokens: READING_MAX_TOKENS,
+            max_tokens: request.maxTokens ?? READING_MAX_TOKENS,
             // A declined request is tried again on the model Anthropic recommends for it.
             betas: ['server-side-fallback-2026-07-01'],
             fallbacks: 'default',

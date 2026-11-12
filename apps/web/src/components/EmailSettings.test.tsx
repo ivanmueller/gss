@@ -17,6 +17,7 @@ const TOM = {
 };
 const SETTINGS: EmailSettingsView = {
   configured: true,
+  claudeConfigured: false,
   domain: 'gss.example.test',
   sharedLocalPart: 'info',
   signature: '{name}\n{title}\n{email}',

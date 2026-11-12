@@ -1,6 +1,7 @@
 import {
   attachmentFileName,
   composeEmailBody,
+  EMAIL_DRAFT_ABOUT_MAX,
   EMAIL_MAX_RECIPIENTS,
   EMAIL_MESSAGE_MAX,
   EMAIL_STATE_LABELS,
@@ -8,15 +9,18 @@ import {
   fillSignature,
   formatAlberta,
   normalizeEmailAddress,
+  replySubject,
+  type EmailDraftView,
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
-import { Download, Mail, Paperclip, Send } from 'lucide-react';
+import { Download, Mail, Paperclip, Reply, Send } from 'lucide-react';
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 
 import { apiJson, ApiError, sendJson, type Contact } from '../lib/api';
 import { saveDownload } from '../lib/download';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { ClaudeMark } from './ClaudeMark';
 import { Badge, type BadgeVariant } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -27,10 +31,21 @@ import { Input, Textarea } from './ui/input';
 // and **New email** in the page's ⋯ menu open one form; the person writes, checks the signature
 // and clicks Send. The Worker sends it through Cloudflare and keeps it; the Emails card lists the
 // company's emails. Nothing is sent by itself and nothing is retried by itself.
+// F-114 step 5b: **Reply** on a received email opens the same form to its sender, and
+// **Draft with Claude** fills Subject and Message with Claude's draft for the person to read,
+// change and send; numbers Claude did not have are listed under Check this, and a placeholder
+// such as [price] must be filled in before Send. Claude never sends (AGENTS.md rule 8).
+
+/** The received email a reply answers. */
+export interface ReplyTo {
+  id: string;
+  fromAddress: string;
+  subject: string;
+}
 
 interface Composer {
-  /** Opens the form, addressed to a contact when given. */
-  compose: (contact?: Contact) => void;
+  /** Opens the form, addressed to a contact when given, or as a reply to a received email. */
+  compose: (contact?: Contact, reply?: ReplyTo) => void;
 }
 
 const ComposerContext = createContext<Composer | null>(null);
@@ -60,14 +75,18 @@ export function EmailProvider({
   enabled: boolean;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState<{ contact: Contact | null; key: number } | null>(null);
+  const [open, setOpen] = useState<{
+    contact: Contact | null;
+    reply: ReplyTo | null;
+    key: number;
+  } | null>(null);
   const [sentCount, setSentCount] = useState(0);
   // An email whose outcome is not known, kept while the form is closed (R4-01).
   const [held, setHeld] = useState<SendPayload | null>(null);
   const composer: Composer | null = enabled
     ? {
-        compose: (contact) => {
-          setOpen({ contact: contact ?? null, key: Date.now() });
+        compose: (contact, reply) => {
+          setOpen({ contact: contact ?? null, reply: reply ?? null, key: Date.now() });
         },
       }
     : null;
@@ -82,6 +101,7 @@ export function EmailProvider({
             counterpartyId={counterpartyId}
             contacts={contacts}
             contact={open.contact}
+            reply={open.reply}
             held={held}
             onHold={setHeld}
             onClose={() => {
@@ -133,6 +153,15 @@ interface SendPayload {
   subject: string;
   message: string;
   sendKey: string;
+  replyToEmailId: string | null;
+  claudeDraftId: string | null;
+}
+
+/** Claude's draft as it filled the form, to check what is still in the text. */
+interface DraftShown {
+  draftId: string;
+  checkThis: string[];
+  placeholders: string[];
 }
 
 function splitAddresses(text: string): string[] {
@@ -147,6 +176,7 @@ function EmailDialog({
   counterpartyId,
   contacts,
   contact,
+  reply: replyTo,
   held,
   onHold,
   onClose,
@@ -156,6 +186,8 @@ function EmailDialog({
   counterpartyId: string;
   contacts: Contact[];
   contact: Contact | null;
+  /** The received email this answers (Reply). */
+  reply: ReplyTo | null;
   /** An email submitted earlier whose outcome is not known: reopened as it was, locked. */
   held: SendPayload | null;
   onHold: (payload: SendPayload | null) => void;
@@ -167,9 +199,25 @@ function EmailDialog({
   const [settings, setSettings] = useState<EmailSettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [from, setFrom] = useState<'own' | 'shared' | null>(held?.from ?? null);
-  const [to, setTo] = useState(held ? held.to.join(', ') : (contact?.email ?? ''));
+  const [to, setTo] = useState(
+    held ? held.to.join(', ') : (replyTo?.fromAddress ?? contact?.email ?? ''),
+  );
   const [cc, setCc] = useState(held ? held.cc.join(', ') : '');
-  const [subject, setSubject] = useState(held?.subject ?? '');
+  const [subject, setSubject] = useState(
+    held?.subject ?? (replyTo === null ? '' : replySubject(replyTo.subject)),
+  );
+  // The received email answered; cleared when it was deleted and the person sends it as new.
+  const [answering, setAnswering] = useState<string | null>(
+    held === null ? (replyTo?.id ?? null) : held.replyToEmailId,
+  );
+  const [about, setAbout] = useState('');
+  const [drafting, setDrafting] = useState<AbortController | null>(null);
+  const heldDraft = held?.claudeDraftId ?? null;
+  const [draft, setDraft] = useState<DraftShown | null>(
+    heldDraft === null ? null : { draftId: heldDraft, checkThis: [], placeholders: [] },
+  );
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [replyGone, setReplyGone] = useState(false);
   const [message, setMessage] = useState(held?.message ?? '');
   // One key per attempt: a second click or a retry after a lost answer never sends twice; a
   // new key only after Cloudflare refused it (Codex's design review of F-114-3, D1-02).
@@ -188,7 +236,7 @@ function EmailDialog({
   const [pending, setPending] = useState<SendPayload | null>(held);
   // An attempt under the current key had no clear answer: it may have been sent.
   const [uncertain, setUncertain] = useState(held !== null);
-  const locked = sent || busy || pending !== null;
+  const locked = sent || busy || pending !== null || drafting !== null;
 
   useEffect(() => {
     let cancelled = false;
@@ -231,10 +279,18 @@ function EmailDialog({
   const tooMany =
     new Set([...toList, ...ccList].map((a) => a.toLowerCase())).size > EMAIL_MAX_RECIPIENTS;
   const subjectLine = subject.replace(/[\r\n]+/g, ' ');
+  const text = `${subjectLine}\n${message}`;
+  const unfilled = draft === null ? [] : draft.placeholders.filter((p) => text.includes(p));
+  // Case-insensitive, so "Twelve" edited to "twelve" is still listed (F-114-5b-R1-02).
+  const lowered = text.toLowerCase();
+  const toCheck =
+    draft === null ? [] : draft.checkThis.filter((item) => lowered.includes(item.toLowerCase()));
   const canSend =
     ready &&
     !busy &&
     !sent &&
+    drafting === null &&
+    unfilled.length === 0 &&
     toList.length > 0 &&
     bad.length === 0 &&
     !tooMany &&
@@ -259,6 +315,8 @@ function EmailDialog({
       subject: subjectLine.trim(),
       message,
       sendKey,
+      replyToEmailId: answering,
+      claudeDraftId: draft?.draftId ?? null,
     };
     setPending(payload);
     setBusy(true);
@@ -278,7 +336,11 @@ function EmailDialog({
       .catch((reason: unknown) => {
         const code = reason instanceof ApiError ? reason.code : '';
         const status = reason instanceof ApiError ? reason.status : 0;
-        if (code === 'EMAIL_REFUSED') {
+        if (code === 'REPLY_NOT_FOUND' && !uncertain) {
+          // The email answered was deleted meanwhile: nothing was kept or sent.
+          setPending(null);
+          setReplyGone(true);
+        } else if (code === 'EMAIL_REFUSED') {
           // Nothing went: correct it and send again as a new attempt (the refused one is kept).
           setSendKey(crypto.randomUUID());
           setPending(null);
@@ -314,10 +376,56 @@ function EmailDialog({
       });
   }
 
+  function askClaude() {
+    if (
+      (message.trim() !== '' || (subject.trim() !== '' && replyTo === null)) &&
+      !window.confirm('Replace what you wrote with Claude’s draft?')
+    )
+      return;
+    const controller = new AbortController();
+    setDrafting(controller);
+    setDraftError(null);
+    apiJson<{ draft: EmailDraftView }>(`/emails/draft?organization_id=${organization.id}`, token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        counterpartyId,
+        contactId: matchedContact?.id ?? null,
+        replyToEmailId: answering,
+        from: chosenFrom,
+        to: toList.filter((address) => normalizeEmailAddress(address) !== null),
+        about: about.trim(),
+        draftKey: crypto.randomUUID(),
+      }),
+      signal: controller.signal,
+    })
+      .then(({ draft: answer }) => {
+        if (controller.signal.aborted) return;
+        setSubject(answer.subject);
+        setMessage(answer.message);
+        setDraft({
+          draftId: answer.draftId,
+          checkThis: answer.checkThis,
+          placeholders: answer.placeholders,
+        });
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        if (reason instanceof ApiError && reason.code === 'REPLY_NOT_FOUND') setReplyGone(true);
+        setDraftError(
+          reason instanceof Error ? reason.message : 'Claude could not draft this email.',
+        );
+      })
+      .finally(() => {
+        setDrafting((current) => (current === controller ? null : current));
+      });
+  }
+
   const written = message.trim() !== '' || subject.trim() !== '';
   function close() {
     // While sending, closing could not stop it: the form stays (Codex's final review, R4-01).
     if (busy) return;
+    drafting?.abort();
     if (!sent && pending !== null && uncertain) {
       if (
         !window.confirm(
@@ -343,7 +451,10 @@ function EmailDialog({
         if (!next) close();
       }}
     >
-      <DialogContent title={sent && result?.ok ? 'Email sent' : 'New email'} className="max-w-2xl">
+      <DialogContent
+        title={sent && result?.ok ? 'Email sent' : replyTo !== null ? 'Reply' : 'New email'}
+        className="max-w-2xl"
+      >
         {loadError !== null && (
           <p role="alert" className="text-sm text-danger">
             {loadError}
@@ -446,6 +557,88 @@ function EmailDialog({
                 At most {EMAIL_MAX_RECIPIENTS} recipients in To and Cc together.
               </p>
             )}
+            {replyGone && answering !== null && !sent && (
+              <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
+                The email you are answering was deleted.
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setAnswering(null);
+                    setReplyGone(false);
+                    setResult(null);
+                    setDraftError(null);
+                  }}
+                >
+                  Send as a new email
+                </Button>
+              </div>
+            )}
+            {settings.claudeConfigured && !sent && pending === null && (
+              <div className="flex flex-col gap-2 rounded-control border border-l-[3px] border-claude-border border-l-claude-mark bg-claude-subtle px-3 py-2">
+                <label className="flex flex-col gap-1.5" htmlFor={`${id}-about`}>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <ClaudeMark />
+                    Draft with Claude
+                  </span>
+                  <Input
+                    id={`${id}-about`}
+                    value={about}
+                    maxLength={EMAIL_DRAFT_ABOUT_MAX}
+                    placeholder="What’s it about? (optional)"
+                    disabled={drafting !== null || busy}
+                    onChange={(event) => {
+                      setAbout(event.target.value.replace(/[\r\n]+/g, ' '));
+                    }}
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={drafting !== null || busy}
+                    onClick={askClaude}
+                  >
+                    {drafting !== null
+                      ? 'Claude is drafting…'
+                      : draft === null
+                        ? 'Draft with Claude'
+                        : 'Draft again'}
+                  </Button>
+                  {drafting !== null && (
+                    <>
+                      <span className="text-xs text-muted-foreground" role="status">
+                        This can take up to a minute.
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          drafting.abort();
+                          setDrafting(null);
+                        }}
+                      >
+                        Stop waiting
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {draftError !== null && (
+                  <p role="alert" className="text-danger">
+                    {draftError}
+                  </p>
+                )}
+                {draft !== null && drafting === null && (
+                  <p className="text-xs">
+                    Drafted by Claude: read it before sending. Change anything you like; nothing is
+                    sent until you click Send.
+                  </p>
+                )}
+              </div>
+            )}
             <label className="flex flex-col gap-1.5" htmlFor={`${id}-subject`}>
               <span className="font-medium">Subject</span>
               <Input
@@ -471,6 +664,26 @@ function EmailDialog({
                 }}
               />
             </label>
+            {toCheck.length > 0 && (
+              <div className="rounded-control border border-warning p-2 text-xs">
+                <p className="font-medium">Check this before sending</p>
+                <p className="text-muted-foreground">
+                  Not found in the company’s records, the call or the emails Claude was given:
+                </p>
+                <ul className="mt-1 flex flex-wrap gap-1">
+                  {toCheck.map((item) => (
+                    <li key={item}>
+                      <Badge variant="warning">{item}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {unfilled.length > 0 && (
+              <p role="alert" className="text-danger">
+                Fill in {unfilled.join(', ')} before sending.
+              </p>
+            )}
             {signature !== null && (
               <div>
                 <p className="text-xs text-muted-foreground">Added under your message:</p>
@@ -604,7 +817,31 @@ export function EmailsCard({
                   onToggle={() => {
                     setOpenId((current) => (current === email.id ? null : email.id));
                   }}
-                />
+                >
+                  {composer !== null &&
+                    openId === email.id &&
+                    email.direction === 'incoming' &&
+                    email.counterpartyId !== null && (
+                      <div className="mt-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            // Where the sender asked replies to go, else to the sender
+                            // (Codex's final review, F-114-5b-R2-02).
+                            composer.compose(undefined, {
+                              id: email.id,
+                              fromAddress: email.replyToAddress ?? email.fromAddress,
+                              subject: email.subject,
+                            });
+                          }}
+                        >
+                          <Reply aria-hidden="true" />
+                          Reply
+                        </Button>
+                      </div>
+                    )}
+                </EmailItem>
               ))}
             </ul>
           )}
@@ -801,6 +1038,19 @@ export function EmailItem({
       )}
       {email.state === 'unconfirmed' && (
         <p className="mt-1 text-xs text-muted-foreground">{EMAIL_STATE_LABELS.unconfirmed}.</p>
+      )}
+      {(email.inReplyToSubject !== null || email.draftedByClaude) && (
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          {email.inReplyToSubject !== null && (
+            <span>In reply to “{email.inReplyToSubject || '(no subject)'}”</span>
+          )}
+          {email.draftedByClaude && (
+            <span className="inline-flex items-center gap-1">
+              <ClaudeMark className="size-3" />
+              Drafted with Claude
+            </span>
+          )}
+        </p>
       )}
       {open && (
         <div className="mt-2 rounded-control border border-border bg-muted p-3">
