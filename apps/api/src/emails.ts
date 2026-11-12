@@ -15,7 +15,13 @@ import { Hono } from 'hono';
 import { claudeClient, type ClaudeFactory } from './anthropic';
 import type { Database, RequestContext } from './db';
 import { draftEmail } from './email-drafts';
-import { emailConfig, gssAddress, type EmailConfig, type MailerFactory } from './email';
+import {
+  emailConfig,
+  gssAddress,
+  threadHeaders,
+  type EmailConfig,
+  type MailerFactory,
+} from './email';
 import type { EmailCursor } from './emails-db';
 import { attachmentFromOriginal, MAX_RAW_BYTES } from './inbound-email';
 import {
@@ -555,6 +561,11 @@ export function emailRoutes(
           );
       }
 
+      // A reply carries In-Reply-To and References, so mail programs thread it (R3-01).
+      const answered =
+        request.replyToEmailId === null
+          ? null
+          : await db.answeredEmailIds(ctx, org, request.replyToEmailId);
       const outcome = await sender.send({
         fromAddress,
         fromName: me.name,
@@ -562,6 +573,9 @@ export function emailRoutes(
         cc: request.cc,
         subject: request.subject,
         text,
+        ...(answered === null
+          ? {}
+          : { headers: threadHeaders(answered.messageId, answered.references) }),
       });
       if (outcome.kind === 'unknown') {
         // Left sending: whether it went is not known, so nobody is told it failed (or sent).

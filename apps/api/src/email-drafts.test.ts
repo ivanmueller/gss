@@ -5,7 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { READING_MODEL, ReadingDeadlineError, type ClaudeClient } from './anthropic';
 import type { Database } from './db';
 import { DRAFT_MESSAGE_MAX, draftMessage, DRAFT_DEADLINE_MS } from './email-drafts';
-import { emailConfig, type Mailer, type SendEmailBinding } from './email';
+import { emailConfig, threadHeaders, type Mailer, type SendEmailBinding } from './email';
 import type { DraftContextEmail, EmailDraftContext, EmailSettingsRecord } from './emails-db';
 import { createApp } from './index';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
@@ -425,7 +425,67 @@ describe('POST /emails/draft', () => {
   });
 });
 
+describe('threadHeaders (R3-01)', () => {
+  it('answers the email and keeps its chain, each id in brackets once', () => {
+    expect(
+      threadHeaders('m2@buyer.example.test', ['<m1@gss.example.test>', '<m2@buyer.example.test>']),
+    ).toEqual({
+      'In-Reply-To': '<m2@buyer.example.test>',
+      References: '<m1@gss.example.test> <m2@buyer.example.test>',
+    });
+  });
+
+  it('keeps at most 10 ids and 900 characters, the oldest dropped, the answered one kept', () => {
+    const many = Array.from(
+      { length: 30 },
+      (_, k) => `<${'x'.repeat(100)}${String(k)}@example.test>`,
+    );
+    const headers = threadHeaders('<last@example.test>', many);
+    const ids = headers.References?.split(' ') ?? [];
+    expect(ids.length).toBeLessThanOrEqual(10);
+    expect(headers.References?.length).toBeLessThanOrEqual(900);
+    expect(ids.at(-1)).toBe('<last@example.test>');
+  });
+});
+
 describe('POST /emails with a reply and a draft', () => {
+  it('sends a reply with In-Reply-To and References (R3-01)', async () => {
+    mailer.send.mockResolvedValue({ kind: 'sent', messageId: 'cf-1' });
+    db.answeredEmailIds.mockResolvedValue({
+      messageId: '<m2@buyer.example.test>',
+      references: ['<m1@gss.example.test>'],
+    });
+    const response = await app.request(
+      '/api/v1/emails',
+      {
+        method: 'POST',
+        headers: AUTH,
+        body: JSON.stringify({
+          counterpartyId: COMPANY,
+          contactId: null,
+          from: 'own',
+          to: ['pat@buyer.example.test'],
+          cc: [],
+          subject: 'Re: Barley',
+          message: 'Hi Pat',
+          sendKey: KEY,
+          replyToEmailId: ANSWERED,
+        }),
+      },
+      EMAIL_ENV,
+    );
+    expect(response.status).toBe(201);
+    expect(db.answeredEmailIds).toHaveBeenCalledWith(expect.anything(), ORG, ANSWERED);
+    expect(mailer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          'In-Reply-To': '<m2@buyer.example.test>',
+          References: '<m1@gss.example.test> <m2@buyer.example.test>',
+        },
+      }),
+    );
+  });
+
   it('passes both links on, and explains a deleted answered email', async () => {
     mailer.send.mockResolvedValue({ kind: 'sent', messageId: 'cf-1' });
     db.startOutgoingEmail.mockResolvedValueOnce({ status: 'reply_not_found' });

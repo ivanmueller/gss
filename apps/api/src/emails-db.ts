@@ -192,6 +192,12 @@ export interface EmailsDatabase {
     details: { localPart: string | null; title: string | null; phone: string | null },
   ) => Promise<SaveMemberEmailResult>;
   startOutgoingEmail: (ctx: RequestContext, email: StartEmail) => Promise<StartEmailResult>;
+  /** A received email's Message-ID and References, for a reply's headers; null if none. */
+  answeredEmailIds: (
+    ctx: RequestContext,
+    organizationId: string,
+    id: string,
+  ) => Promise<{ messageId: string; references: string[] } | null>;
   /** Records a Draft with Claude request before it is sent to Anthropic (F-114 step 5b). */
   startEmailDraft: (
     ctx: RequestContext,
@@ -592,6 +598,17 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
         if (existing === undefined) throw error;
         return { status: 'already_started', email: emailView(existing) };
       }
+    },
+
+    answeredEmailIds(ctx, organizationId, id) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<{ message_id: string; references: string[] }[]>`
+          select e.message_id, to_jsonb(e.reference_ids::text[]) as references
+            from app.emails e
+           where e.organization_id = ${organizationId} and e.id = ${id}
+             and e.direction = 'incoming'`;
+        return row === undefined ? null : { messageId: row.message_id, references: row.references };
+      });
     },
 
     startEmailDraft(ctx, organizationId, counterpartyId, replyToEmailId, draftKey) {

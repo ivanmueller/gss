@@ -53,6 +53,10 @@ describe('a reply drafted with Claude', () => {
     const started = await db.startEmailDraft(as(people.vera), org, company, received, id());
     if (started.status !== 'started') throw new Error(started.status);
 
+    expect(await db.answeredEmailIds(as(people.vera), org, received)).toEqual({
+      messageId: `m-${received}`,
+      references: [],
+    });
     const context = await db.emailDraftContext(as(people.vera), org, company, received);
     expect(context?.answer).toMatchObject({ id: received, subject: 'Barley for December' });
     expect(context?.name).toBe(`Synthetic Buyer ${company}`);

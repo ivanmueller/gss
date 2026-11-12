@@ -6,6 +6,7 @@ import {
   cloudflareMailer,
   emailConfig,
   sendFailure,
+  threadHeaders,
   type Mailer,
   type SendEmailBinding,
 } from './email';
@@ -298,6 +299,30 @@ describe('the Cloudflare mailer', () => {
       subject: 'Feed oats',
       text: 'Hello',
     });
+  });
+
+  it('passes the headers of a reply to Cloudflare (F-114-5b-R3-01)', async () => {
+    const binding = {
+      send: vi.fn<SendEmailBinding['send']>(() => Promise.resolve({ messageId: 'id-2' })),
+    };
+    const sender = cloudflareMailer({ ...EMAIL_ENV, EMAIL: binding });
+    await sender?.send({
+      fromAddress: 'tom@gss.example.test',
+      fromName: 'Tom Trader',
+      to: ['pat@buyer.example.test'],
+      cc: [],
+      subject: 'Re: Feed oats',
+      text: 'Hello',
+      headers: threadHeaders('<m2@buyer.example.test>', ['<m1@gss.example.test>']),
+    });
+    expect(binding.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: {
+          'In-Reply-To': '<m2@buyer.example.test>',
+          References: '<m1@gss.example.test> <m2@buyer.example.test>',
+        },
+      }),
+    );
   });
 
   it('is absent without the configuration', () => {

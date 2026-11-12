@@ -16,6 +16,8 @@ export interface SendEmailBinding {
     cc?: string[];
     subject: string;
     text: string;
+    /** Custom headers; Cloudflare allows In-Reply-To and References (docs/DECISIONS.md). */
+    headers?: Record<string, string>;
   }): Promise<{ messageId: string }>;
 }
 
@@ -61,6 +63,34 @@ export interface OutgoingEmail {
   cc: string[];
   subject: string;
   text: string;
+  /** A reply's In-Reply-To and References (threadHeaders), so mail programs thread it. */
+  headers?: Record<string, string>;
+}
+
+/** At most this many ids in a reply's References, the oldest dropped first. */
+const REFERENCES_MOST = 10;
+/** At most this many characters in the References header. */
+const REFERENCES_CHARS = 900;
+
+/** A Message-ID as a header writes it: in angle brackets. */
+function bracketed(id: string): string {
+  const bare = id.replace(/^<+|>+$/g, '');
+  return `<${bare}>`;
+}
+
+/**
+ * The headers of a reply to a received email (F-114 step 5b; Codex's final review,
+ * F-114-5b-R3-01): In-Reply-To its Message-ID, References its own references then its
+ * Message-ID, the oldest dropped to stay within REFERENCES_MOST ids and REFERENCES_CHARS. The ids
+ * are kept as header tokens (no spaces or control characters), so nothing can add a header.
+ */
+export function threadHeaders(messageId: string, references: string[]): Record<string, string> {
+  const answered = bracketed(messageId);
+  const chain = [...references.map(bracketed).filter((id) => id !== answered), answered].slice(
+    -REFERENCES_MOST,
+  );
+  while (chain.length > 1 && chain.join(' ').length > REFERENCES_CHARS) chain.shift();
+  return { 'In-Reply-To': answered, References: chain.join(' ') };
 }
 
 export type SendOutcome =
@@ -140,6 +170,7 @@ export const cloudflareMailer: MailerFactory = (env) => {
             ...(email.cc.length > 0 ? { cc: email.cc } : {}),
             subject: email.subject,
             text: email.text,
+            ...(email.headers === undefined ? {} : { headers: email.headers }),
           }),
           timeout,
         ]);
