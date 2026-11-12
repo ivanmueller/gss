@@ -778,6 +778,34 @@ describe('Claude’s email drafts on the Emails card (F-114 step 5c)', () => {
     ]);
   });
 
+  it('says so when the company answered a reminder while it was open (R1-01)', async () => {
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [DRAFTS_PATH]: () =>
+        Response.json({
+          drafts: [{ ...DRAFT, source: 'reminder', placeholders: [], emailSubject: 'Oats' }],
+          truncated: false,
+        }),
+      [`POST /emails?organization_id=${ORG.id}`]: () =>
+        Response.json(
+          { error: { code: 'AUTO_DRAFT_ANSWERED', message: 'The company answered.' } },
+          { status: 409 },
+        ),
+    });
+    show();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Open Claude’s draft: Reminder/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Claude’s draft' });
+    await within(dialog).findByLabelText('Subject');
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(
+      await within(dialog).findByText(
+        'The company answered, or was emailed or contacted, after this reminder was drafted: read that first.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole('status')).toBeNull();
+  });
+
   it('dismisses a draft after asking', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const calls = mockApi({

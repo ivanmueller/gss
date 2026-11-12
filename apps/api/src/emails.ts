@@ -574,6 +574,13 @@ export function emailRoutes(
             'AUTO_DRAFT_USED',
             'Claude’s draft was already sent or dismissed by someone. Send this as a new email instead.',
           );
+        case 'auto_draft_answered':
+          return apiError(
+            c,
+            409,
+            'AUTO_DRAFT_ANSWERED',
+            'The company answered, or was emailed or contacted, after this reminder was drafted. Read that first; send this as a new email only if it is still needed.',
+          );
       }
 
       // A reply carries In-Reply-To and References, so mail programs thread it (R3-01).

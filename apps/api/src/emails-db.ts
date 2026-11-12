@@ -29,7 +29,8 @@ export type StartEmailRefusal =
   | 'reply_not_found'
   | 'draft_not_found'
   | 'auto_draft_not_found'
-  | 'auto_draft_used';
+  | 'auto_draft_used'
+  | 'auto_draft_answered';
 export type StartEmailResult =
   | { status: 'started'; id: string }
   /**
@@ -316,6 +317,7 @@ const START_REFUSALS: readonly StartEmailRefusal[] = [
   'draft_not_found',
   'auto_draft_not_found',
   'auto_draft_used',
+  'auto_draft_answered',
 ];
 const DRAFT_REFUSALS = [
   'forbidden',

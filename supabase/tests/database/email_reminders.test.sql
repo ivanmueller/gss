@@ -8,7 +8,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(47);
+select plan(50);
 
 -- Fixtures ------------------------------------------------------------------
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -384,6 +384,19 @@ select is((select row(reply_to_email_id, auto_draft_id)::text from app.emails wh
 select is(pg_temp.send('00000000-0000-4000-8000-0000000044aa', pg_temp.co('due'), pg_temp.id('due'),
                        pg_temp.reminder_of(pg_temp.id('due')), 'gss-r6') ->> 'status',
           'auto_draft_used', 'once only');
+-- A retry of its send key skips the checks and reaches the insert, whose unique key the Worker
+-- answers with the earlier email (5b's R2-01), though the reminder is now answered.
+select throws_ok(
+  format('select pg_temp.send(%L, %L, %L, %L, %L)', '00000000-0000-4000-8000-0000000044aa',
+         pg_temp.co('due'), pg_temp.id('due'), pg_temp.reminder_of(pg_temp.id('due')), 'gss-r5'),
+  '23505', null, 'a retry of its send key still reaches the earlier email');
+
+-- A reminder open in the form when the company answers is not sent (R1-01).
+select pg_temp.received(pg_temp.co('left'), interval '1 minute', 'Re: the email');
+select is(pg_temp.send('00000000-0000-4000-8000-0000000044aa', pg_temp.co('left'), pg_temp.id('left'),
+                       pg_temp.reminder_of(pg_temp.id('left')), 'gss-r7', from_part => 'info') ->> 'status',
+          'auto_draft_answered', 'a reminder answered since it was drafted is refused');
+select is((select count(*)::int from app.emails where message_id = 'gss-r7'), 0, 'and nothing is kept');
 
 -- Never a reminder of a reminder: the sent reminder goes quiet in turn, and gets none.
 update app.emails set status = 'sent', provider_message_id = '<cf-r5@gss.example>',

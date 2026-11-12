@@ -628,6 +628,13 @@ begin
          or app.auto_draft_taken(auto_draft) then
         return jsonb_build_object('status', 'auto_draft_used');
       end if;
+      -- A reminder whose silence ended while it was open is not sent: the company answered,
+      -- another email went, or a contact was logged (Codex's final review, F-114-5c2-R1-01).
+      if exists (select 1 from app.email_auto_drafts a
+                  where a.id = auto_draft and a.source = 'reminder')
+         and app.auto_draft_answered(auto_draft) then
+        return jsonb_build_object('status', 'auto_draft_answered');
+      end if;
     end if;
   end if;
   insert into app.emails (organization_id, direction, status, counterparty_id, contact_id,
