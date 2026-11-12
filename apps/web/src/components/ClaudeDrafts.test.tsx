@@ -22,7 +22,10 @@ const QUOTE_ID = '00000000-0000-4000-8000-0000000e0e01';
 const CALL = {
   counterpartyId: COMPANY,
   counterpartyName: 'Synthetic Prairie Mills',
+  source: 'call' as const,
   callId: '00000000-0000-4000-8000-0000000ca111',
+  emailId: null,
+  emailSubject: null,
   calledAt: '2026-11-05T15:00:00.000Z',
   callerId: ME,
   callerName: 'Tess Trader',
@@ -159,6 +162,28 @@ describe("Claude's drafts in their sections", () => {
     expect(within(bid).getByRole('note')).toHaveTextContent(
       'Check this: The line also says “minus freight”.',
     );
+  });
+
+  it('says a draft came from an email, with its subject and lines (F-114 step 5a)', async () => {
+    mockApi({});
+    show([
+      {
+        ...COMPLETE_BID,
+        source: 'email',
+        callId: null,
+        emailId: '00000000-0000-4000-8000-0000000e3a11',
+        emailSubject: 'Re: Flax',
+        callerId: null,
+        callerName: 'Pat Buyer',
+      },
+    ]);
+    const bid = card(/Bid · Flaxseed/);
+    await userEvent.click(within(bid).getByRole('button', { name: 'Show details' }));
+    expect(bid).toHaveTextContent(
+      'From an email from Pat Buyer, 5 Nov 2026, 9:00 am MT — Re: Flax',
+    );
+    expect(bid).toHaveTextContent('Price from the email: I can pay 725 a tonne.');
+    expect(bid).not.toHaveTextContent('call');
   });
 
   it('verifies a complete draft in one click, saving it as it is on the server', async () => {

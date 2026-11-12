@@ -25,13 +25,21 @@ export interface OpenDraftView {
   contactId: string | null;
   counterpartyId: string;
   counterpartyName: string;
-  callId: string;
-  /** UTC instant: when the call connected (or was placed). */
+  /** What Claude read: a call's transcript, or a received email (F-114 step 5a). */
+  source: 'call' | 'email';
+  /** The call, for a draft from a call; else null. */
+  callId: string | null;
+  /** The email, for a draft from an email; else null. */
+  emailId: string | null;
+  /** The email's subject, for a draft from an email; else null. */
+  emailSubject: string | null;
+  /** UTC instant: when the call connected (or was placed), or the email was received. */
   calledAt: string;
-  /** Who placed the call. */
-  callerId: string;
+  /** Who placed the call; null for an email. */
+  callerId: string | null;
+  /** Who placed the call, or who sent the email (their name, else their address). */
   callerName: string;
-  /** The contact called. */
+  /** The contact called; for an email, the listed contact who sent it, else "". */
   contactName: string;
   /**
    * The transcript lines the draft and its checks point to, by number (from 0), for the card to

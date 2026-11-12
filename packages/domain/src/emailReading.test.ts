@@ -81,9 +81,9 @@ describe('emailLines', () => {
 
   it('cuts at the character limit without splitting a pair, in linear time', () => {
     const body = '😀'.repeat(300_000);
-    const started = performance.now();
+    const started = Date.now();
     const result = emailLines('S', body);
-    expect(performance.now() - started).toBeLessThan(2000);
+    expect(Date.now() - started).toBeLessThan(2000);
     expect(result.cut).toBe(true);
     const text = result.lines.slice(1, -1).join('');
     expect(text.length).toBeLessThanOrEqual(EMAIL_READ_CHARS_MAX);
