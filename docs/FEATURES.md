@@ -101,6 +101,12 @@ The owner also confirmed answer 9's reading (deleting hides the email and keeps 
 29. **Where ready email drafts wait:** on the company's Emails card and on the Follow-ups page, assigned to the person who made the call or whose email it answers; opened, edited and sent, or dismissed.
 30. **Unhandled email drafts:** stay until sent or dismissed, showing their age.
 
+**Owner's answers for step 5c (2026-11-12):**
+31. **From address of an automatic draft:** the assigned person's own address (from their Team profile); the person can switch it to the shared address before sending. With no one assigned, or no address of their own, the shared address.
+32. **A reply draft no one is assigned to** (for example a contact writing to the shared address out of the blue): anyone on the team may open, send or dismiss it.
+33. **Reminder after no answer:** left to the agent's judgment of business habit. Chosen (an agent, 2026-11-12): one reminder draft, 3 business days (Monday to Friday, Alberta time; holidays not counted) after a GSS email that asked for something got no answer, no other email to the company and no logged contact with it since. Never a reminder of a reminder.
+34. **How people learn a draft is waiting:** left to the agents (Claude and Codex). Chosen: drafts for the signed-in person (and drafts for anyone) counted in the number beside **Follow-ups** in the menu, listed on the Follow-ups page and on the company's Emails card. No push notification or email.
+
 **Step 5 plan, revised (an agent, 2026-11-11, before the 5b design review):**
 - **5b, Draft with Claude and Reply** (as planned above), with the whole thread given to Claude as context and the newest email the one answered; no per-person limit (answer 23).
 - **5c, email drafts made by themselves:** after a call is read, one email draft when the call asked for an email (answer 25); after a received email is read, one reply draft when it needs an answer, and a follow-up draft when the thread calls for one (answer 28). Shown as answer 29 says, kept as answer 30 says; nothing is sent until a person clicks **Send** (`AGENTS.md` rule 8). Automatic drafts stay under the organization's daily ceiling of Claude requests (200 a day, a guard against a mail loop or flood); the button is not counted against it.
