@@ -124,6 +124,16 @@ describe('htmlToText', () => {
     ).toBe('Hello there\nLine!\nTwo & A');
   });
 
+  it('marks quoted earlier mail with "> " per level, as plain text mail (F-114-5a R2-01)', () => {
+    expect(
+      htmlToText(
+        '<p>Thanks, I will check.</p><blockquote type="cite"><p>We offer canola\nCAD $725 per tonne delivered.</p><blockquote><div>Older</div></blockquote><p>Back</p></blockquote><p>After</p>',
+      ),
+    ).toBe(
+      'Thanks, I will check.\n> We offer canola CAD $725 per tonne delivered.\n> > Older\n> Back\nAfter',
+    );
+  });
+
   it('leaves an invalid character reference as written', () => {
     expect(htmlToText('&#xD800; &#0; &bogus;')).toBe('&#xD800; &#0; &bogus;');
   });

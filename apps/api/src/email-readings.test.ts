@@ -7,6 +7,7 @@ import { READING_MODEL, type ClaudeClient } from './anthropic';
 import type { Database } from './db';
 import { EMAIL_READING_INSTRUCTIONS, emailReadingMessage, readNewEmails } from './email-readings';
 import type { EmailReadingContextRow } from './readings-db';
+import { htmlToText } from './inbound-email';
 import { ENV, fakeDatabase } from './testing/helpers';
 
 // Synthetic values only: made-up names, ids, addresses and 555 numbers.
@@ -177,6 +178,31 @@ describe('readNewEmails', () => {
     await readNewEmails(CLAUDE_ENV, openDatabase, () => claude);
     expect(claude.readCall).not.toHaveBeenCalled();
     expect(db.keepEmailReading).toHaveBeenCalledWith(claimOf(EMAIL), ['Subject: Re:'], false, null);
+  });
+
+  it('never drafts a price quoted in an HTML-only email (R2-01)', async () => {
+    // As kept at receipt: the HTML turned into text, its blockquote marked.
+    const body = htmlToText(
+      '<p>Thanks, I will check.</p><blockquote type="cite"><p>We offer canola CAD $725 per tonne delivered.</p></blockquote>',
+    );
+    db.emailReadingContext.mockResolvedValue({ ...CONTEXT, body });
+    // Claude cites the quoted line anyway (line 2, were it given).
+    claude.readCall.mockResolvedValue({
+      status: 'read',
+      json: {
+        ...ANSWER,
+        quotes: ANSWER.quotes
+          .slice(0, 1)
+          .map((quote) => ({ ...quote, priceSaid: 'CAD $725 per tonne', lines: [2] })),
+      },
+      model: READING_MODEL,
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    await readNewEmails(CLAUDE_ENV, openDatabase, () => claude);
+    expect(claude.readCall.mock.calls[0]?.[0].user).not.toContain('725');
+    const drafts = db.keepEmailReading.mock.calls[0]?.[3]?.reading.drafts ?? [];
+    expect(drafts.filter((d) => d.kind === 'quote')).toEqual([]);
   });
 
   it('asks Claude about a bid in the subject above a quoted-only body (R1-01)', async () => {

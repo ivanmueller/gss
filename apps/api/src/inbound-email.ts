@@ -194,8 +194,22 @@ export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
       current = '';
     }
   };
+  // Inside a <blockquote> (an earlier email quoted), each line starts with "> ", as in plain
+  // text mail, so the quotation stays marked once the HTML is gone (Codex's final review of
+  // F-114-5a, finding R2-01: Claude must not read GSS's quoted price as a new one).
+  let quoteDepth = 0;
   const text = (value: string) => {
-    if (length < limit) emit(decodeEntities(value.slice(0, (limit - length) * 10 + 16)));
+    if (length >= limit) return;
+    let decoded = decodeEntities(value.slice(0, (limit - length) * 10 + 16));
+    if (quoteDepth > 0) {
+      decoded = decoded.replace(/[\r\n]+/g, ' ');
+      if (decoded.trim() === '') return;
+      if (length === 0 || last === '\n') {
+        emit('> '.repeat(Math.min(quoteDepth, 5)));
+        decoded = decoded.trimStart();
+      }
+    }
+    emit(decoded);
   };
   const newLine = () => {
     cellInRow = false;
@@ -233,7 +247,10 @@ export function htmlToText(html: string, limit = MAX_BODY_CHARS + 1): string {
       at = endClose + 1;
       continue;
     }
-    if (CELL_TAGS.has(name)) {
+    if (name === 'blockquote') {
+      newLine();
+      quoteDepth = ending ? Math.max(quoteDepth - 1, 0) : quoteDepth + 1;
+    } else if (CELL_TAGS.has(name)) {
       if (!ending) {
         if (cellInRow) emit('\t');
         cellInRow = true;
