@@ -2,6 +2,7 @@ import type { FollowUp } from '@grain/domain';
 import { useState } from 'react';
 
 import { CallbackReturns } from '../components/CallbackReturns';
+import { UnmatchedEmails } from '../components/UnmatchedEmails';
 import { useTeam, type FollowUpListResponse } from '../components/CounterpartyCrm';
 import { ClaudeDraftList, draftsOf, useOpenDrafts } from '../components/ClaudeDrafts';
 import { FollowUpItem } from '../components/FollowUpItem';
@@ -87,6 +88,7 @@ export function FollowUpsPage({ session }: { session: DirectorySession }) {
       </div>
 
       <CallbackReturns session={session} />
+      <UnmatchedEmails session={session} />
 
       {notice !== null && (
         <p role="status" className="text-sm text-success">

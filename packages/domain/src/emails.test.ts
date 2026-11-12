@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  attachmentFileName,
   composeEmailBody,
   fillSignature,
+  linkEmailSchema,
   normalizeEmailAddress,
   saveMemberEmailSchema,
   sendEmailSchema,
@@ -171,5 +173,37 @@ describe('composeEmailBody', () => {
 
   it('is the message alone without a signature', () => {
     expect(composeEmailBody('Hello', null)).toBe('Hello');
+  });
+});
+
+describe('attachmentFileName (F-114 step 4b)', () => {
+  it('keeps a plain name and its accents', () => {
+    expect(attachmentFileName('Contrat été.pdf', 0)).toBe('Contrat été.pdf');
+  });
+
+  it('removes what could break a header or a path, and dots and spaces at the ends', () => {
+    expect(attachmentFileName('..\\../etc/"pass\r\nwd".txt ', 0)).toBe('etcpasswd.txt');
+    expect(attachmentFileName(' . ', 2)).toBe('attachment-3');
+    expect(attachmentFileName(null, 0)).toBe('attachment-1');
+  });
+
+  it('cuts a long name on a character boundary', () => {
+    const name = attachmentFileName('😀'.repeat(300), 0);
+    // 200 whole characters: no half of one left at the end.
+    expect(name).toBe('😀'.repeat(200));
+  });
+});
+
+describe('linkEmailSchema', () => {
+  it('takes a company and a contact or none, nothing else', () => {
+    const company = '00000000-0000-4000-8000-00000000c1aa';
+    expect(linkEmailSchema.safeParse({ counterpartyId: company, contactId: null }).success).toBe(
+      true,
+    );
+    expect(linkEmailSchema.safeParse({ counterpartyId: company }).success).toBe(false);
+    expect(linkEmailSchema.safeParse({ counterpartyId: 'x', contactId: null }).success).toBe(false);
+    expect(
+      linkEmailSchema.safeParse({ counterpartyId: company, contactId: null, more: 1 }).success,
+    ).toBe(false);
   });
 });

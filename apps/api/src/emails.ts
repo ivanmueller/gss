@@ -1,6 +1,8 @@
 import {
+  attachmentFileName,
   composeEmailBody,
   fillSignature,
+  linkEmailSchema,
   saveEmailSettingsSchema,
   saveMemberEmailSchema,
   sendEmailSchema,
@@ -12,6 +14,7 @@ import { Hono } from 'hono';
 import type { Database, RequestContext } from './db';
 import { emailConfig, gssAddress, type EmailConfig, type MailerFactory } from './email';
 import type { EmailCursor } from './emails-db';
+import { attachmentFromOriginal, MAX_RAW_BYTES } from './inbound-email';
 import {
   apiError,
   isUuid,
@@ -33,6 +36,8 @@ const MAX_SETTINGS_BYTES = 16 * 1024;
 const NOT_MEMBER = 'You are not a member of this organization.';
 const NOT_CONFIGURED = 'Email is not set up yet. An admin adds the email settings in Cloudflare.';
 const NOT_THIS_ORGANIZATION = 'Email is not set up for this organization.';
+const NOT_RECEIVING = 'Received email is not set up yet.';
+const NO_LONGER_LISTED = 'This email is no longer listed.';
 
 /** The person's organization: the one they belong to, or the one named when they have several. */
 async function organizationOf(c: ApiContext, db: Database): Promise<string | null> {
@@ -184,6 +189,119 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
     });
   });
 
+  // Received mail on no company (F-114 step 4b): everyone on the team reads it, links it to a
+  // company or deletes it (the owner's answers 8 to 10). Before '/:id'.
+  routes.get('/unmatched', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const before = cursorOf(c);
+    if (before === 'invalid')
+      return apiError(c, 422, 'VALIDATION_FAILED', 'The page cursor is malformed.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      return c.json(await db.listUnmatchedEmails(ctx, org, before));
+    });
+  });
+
+  routes.post('/:id/link', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+    const body = await readJson(c, MAX_SETTINGS_BYTES);
+    if (!body.ok) return body.response;
+    const parsed = linkEmailSchema.safeParse(body.value);
+    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'Choose a company.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      const result = await db.linkEmail(
+        ctx,
+        org,
+        id,
+        parsed.data.counterpartyId,
+        parsed.data.contactId,
+      );
+      switch (result) {
+        case 'done':
+          return c.json({ email: await db.getEmail(ctx, org, id) });
+        case 'not_found':
+        case 'removed':
+          return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+        case 'already_linked':
+          return apiError(c, 409, 'ALREADY_LINKED', 'Someone linked this email already.');
+        case 'company_not_found':
+          return apiError(
+            c,
+            409,
+            'COMPANY_UNAVAILABLE',
+            'That company is archived or no longer listed, or the contact is not one of its. Choose again.',
+          );
+      }
+    });
+  });
+
+  routes.post('/:id/remove', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      const result = await db.removeEmail(ctx, org, id);
+      switch (result) {
+        case 'done':
+        case 'already_removed':
+          // A retry after a lost answer is not an error.
+          return c.json({ removed: true });
+        case 'forbidden':
+          return apiError(c, 403, 'FORBIDDEN', 'Only admins delete email on a company.');
+        case 'not_found':
+          return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+      }
+    });
+  });
+
+  // A received email's original, as kept in the private bucket (shown for mail that could not be
+  // read), and one listed attachment read again from it. Always downloads, never shown in a page.
+  routes.get('/:id/original', (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+    const bucket = c.env.EMAIL_FILES;
+    if (bucket === undefined) return apiError(c, 503, 'EMAIL_NOT_CONFIGURED', NOT_RECEIVING);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      const stored = await db.storedEmailFile(ctx, org, id, null);
+      if (stored === null) return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+      const object = await bucket.get(stored.rawKey);
+      if (object === null) return originalMissing(c, id);
+      return download(object.body ?? (await object.arrayBuffer()), `email-${id}.eml`);
+    });
+  });
+
+  routes.get('/:id/attachments/:position', (c) => {
+    const id = c.req.param('id');
+    const position = Number(c.req.param('position'));
+    if (!isUuid(id) || !/^(0|[1-9][0-9]?)$/.test(c.req.param('position')))
+      return apiError(c, 404, 'NOT_FOUND', 'No such attachment.');
+    const bucket = c.env.EMAIL_FILES;
+    if (bucket === undefined) return apiError(c, 503, 'EMAIL_NOT_CONFIGURED', NOT_RECEIVING);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const org = await organizationOf(c, db);
+      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      const stored = await db.storedEmailFile(ctx, org, id, position);
+      if (stored?.attachment == null) return apiError(c, 404, 'NOT_FOUND', 'No such attachment.');
+      if (stored.rawSize > MAX_RAW_BYTES) return attachmentUnreadable(c, id);
+      const object = await bucket.get(stored.rawKey);
+      if (object === null) return originalMissing(c, id);
+      const raw = new Uint8Array(await object.arrayBuffer());
+      if (raw.byteLength > MAX_RAW_BYTES) return attachmentUnreadable(c, id);
+      const bytes = await attachmentFromOriginal(raw, position, stored.attachment.sha256);
+      if (bytes === 'unreadable') return attachmentUnreadable(c, id);
+      return download(bytes, attachmentFileName(stored.attachment.fileName, position));
+    });
+  });
+
   routes.get('/:id', (c) => {
     c.header('Cache-Control', 'no-store');
     const id = c.req.param('id');
@@ -331,6 +449,51 @@ export function emailRoutes(openDatabase: DatabaseFactory, mailer: MailerFactory
   });
 
   return routes;
+}
+
+/**
+ * A file the sender chose, as a download: plain bytes whatever the sender declared, never shown
+ * in a page or sniffed, never run (F-114 step 4b).
+ */
+export function download(
+  body: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array,
+  name: string,
+) {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': contentDisposition(name),
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'Cache-Control': 'private, no-store',
+    },
+  });
+}
+
+/** `attachment` with an ASCII name and the exact one in UTF-8 (RFC 6266, RFC 8187). */
+export function contentDisposition(name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  const exact = encodeURIComponent(name).replace(
+    /['()*!]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${exact}`;
+}
+
+function originalMissing(c: ApiContext, id: string) {
+  console.error(`Email file: original missing id=${id} request=${c.get('requestId')}`);
+  return apiError(c, 404, 'NOT_FOUND', 'The original of this email is not available.');
+}
+
+function attachmentUnreadable(c: ApiContext, id: string) {
+  console.error(`Email file: attachment unreadable id=${id} request=${c.get('requestId')}`);
+  return apiError(
+    c,
+    502,
+    'ATTACHMENT_UNREADABLE',
+    'The attachment could not be read from the original.',
+  );
 }
 
 /** A send key used before: the earlier email as it stands, never sent again. */

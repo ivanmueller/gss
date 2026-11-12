@@ -242,3 +242,170 @@ describe('the Worker keeping a received message (F-114 step 4a)', () => {
     await production.end();
   });
 });
+
+describe('received email on no company (F-114 step 4b)', () => {
+  // As the Worker's API runs it: the real driver without fetch_types, as app_api, as a viewer
+  // (everyone on the team links and deletes it, the owner's answer 10).
+  const viewer = id();
+  const analyst = id();
+  const outsider = id();
+  const outsiderOrg = id();
+  // Its own company: the one above is archived by the first test.
+  const company = id();
+  const ctx = (userId: string) => ({ userId, requestId: id() });
+
+  beforeAll(async () => {
+    await admin`insert into app.counterparties
+        (id, organization_id, legal_name, types, primary_country, source, created_by)
+      values (${company}, ${org}, ${`Synthetic Buyer ${company}`}, '{buyer}', 'US', 'manual', ${user})`;
+    await admin`insert into auth.users (id, email) values (${viewer}, ${`viewer-${viewer}@example.test`})`;
+    await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at)
+      values (${org}, ${viewer}, 'viewer', 'active', now())`;
+    await admin`insert into auth.users (id, email) values (${analyst}, ${`analyst-${analyst}@example.test`})`;
+    await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at)
+      values (${org}, ${analyst}, 'analyst', 'active', now())`;
+    await admin`insert into auth.users (id, email) values (${outsider}, ${`out-${outsider}@example.test`})`;
+    await admin`insert into app.organizations (id, display_name) values (${outsiderOrg}, ${`Other Org ${outsiderOrg}`})`;
+    await admin`insert into app.organization_members (organization_id, user_id, role, status, joined_at)
+      values (${outsiderOrg}, ${outsider}, 'org_admin', 'active', now())`;
+  });
+
+  /** Mail to an address of nobody (on no company), kept at the given time, with one attachment. */
+  async function unmatched(at: Date): Promise<string> {
+    const [row] = await worker<{ result: { id: string; counterparty_id: string | null } }[]>`
+      select app.receive_email(${org}, 'nobody@gss.example', 'stranger@synthetic.example', null,
+        ${['nobody@gss.example']}::text[], ${[]}::text[], null, 'Synthetic offer',
+        'Synthetic body.', false, ${`<${id()}@synthetic.example>`}, null, ${[]}::text[], false,
+        false, false, ${`raw/${org}/${'d'.repeat(64)}.eml`}, 400,
+        ${worker.json([
+          {
+            position: 0,
+            file_name: 'offer.pdf',
+            content_type: 'application/pdf',
+            size_bytes: 12,
+            sha256: 'e'.repeat(64),
+            disposition: 'attachment',
+            content_id: null,
+          },
+        ])}::jsonb, ${at.toISOString()}::timestamptz) as result`;
+    expect(row?.result.counterparty_id).toBeNull();
+    return row?.result.id ?? '';
+  }
+
+  it('lists it newest first, a page at a time, past a cursor email linked meanwhile', async () => {
+    const production = postgres(API_URL, connectionOptions(API_URL));
+    const db = createDatabase(production);
+    try {
+      // Three at the same moment (ties ordered by id) and one later.
+      const same = new Date(Date.now() - 60_000);
+      const tied = [await unmatched(same), await unmatched(same), await unmatched(same)].sort();
+      const latest = await unmatched(new Date(Date.now() - 1_000));
+
+      const first = await db.listUnmatchedEmails(ctx(viewer), org, null);
+      const ids = first.emails.map((e) => e.id);
+      const expected = [latest, ...[...tied].reverse()];
+      expect(ids.filter((value) => expected.includes(value))).toEqual(expected);
+      const mine = first.emails.find((e) => e.id === latest);
+      expect(mine).toMatchObject({
+        counterpartyId: null,
+        sentTo: 'nobody@gss.example',
+        attachmentCount: 1,
+        unverifiedSender: true,
+      });
+      expect(first.total).toBeGreaterThanOrEqual(4);
+
+      // The cursor email is linked before the next page is asked for: the page still starts
+      // after it (D3 plan: the cursor is read whatever became of it).
+      const cursor = tied[2] ?? '';
+      expect(await db.linkEmail(ctx(viewer), org, cursor, company, null)).toBe('done');
+      const next = await db.listUnmatchedEmails(ctx(viewer), org, { id: cursor });
+      expect(next.emails.map((e) => e.id).slice(0, 2)).toEqual([tied[1], tied[0]]);
+
+      // An unknown cursor, or another organization's email, gives an empty page.
+      expect(await db.listUnmatchedEmails(ctx(viewer), org, { id: id() })).toMatchObject({
+        emails: [],
+        more: false,
+      });
+      // Another organization's member sees none of it.
+      const outside = await db.listUnmatchedEmails(ctx(outsider), outsiderOrg, null);
+      expect(outside.emails.some((e) => tied.includes(e.id))).toBe(false);
+    } finally {
+      await production.end();
+    }
+  });
+
+  it('is linked by a viewer once, refused for an archived company or another organization', async () => {
+    const production = postgres(API_URL, connectionOptions(API_URL));
+    const db = createDatabase(production);
+    try {
+      const email = await unmatched(new Date());
+      // Another organization's member: not found, nothing changed.
+      expect(await db.linkEmail(ctx(outsider), outsiderOrg, email, company, null)).toBe(
+        'not_found',
+      );
+      expect(await db.linkEmail(ctx(outsider), org, email, company, null)).toBe('not_found');
+      // A contact of another company.
+      expect(await db.linkEmail(ctx(viewer), org, email, company, id())).toBe('company_not_found');
+      expect(await db.linkEmail(ctx(viewer), org, email, company, null)).toBe('done');
+      expect(await db.linkEmail(ctx(viewer), org, email, company, null)).toBe('already_linked');
+      const linked = await db.getEmail(ctx(viewer), org, email);
+      expect(linked?.counterpartyId).toBe(company);
+
+      // A viewer cannot delete mail on a company (admins only).
+      expect(await db.removeEmail(ctx(viewer), org, email)).toBe('forbidden');
+
+      // An archived company is refused.
+      const archived = id();
+      await admin`insert into app.counterparties
+          (id, organization_id, legal_name, types, primary_country, source, created_by, archived_at)
+        values (${archived}, ${org}, ${`Archived Farm ${archived}`}, '{seller}', 'CA', 'manual',
+                ${user}, now())`;
+      const other = await unmatched(new Date());
+      expect(await db.linkEmail(ctx(viewer), org, other, archived, null)).toBe('company_not_found');
+    } finally {
+      await production.end();
+    }
+  });
+
+  it('is deleted by an analyst, then gone from the list, the email, its files and linking', async () => {
+    const production = postgres(API_URL, connectionOptions(API_URL));
+    const db = createDatabase(production);
+    try {
+      const email = await unmatched(new Date());
+      const viewed = await db.getEmail(ctx(viewer), org, email);
+      expect(viewed?.attachments).toEqual([
+        {
+          position: 0,
+          fileName: 'offer.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 12,
+          disposition: 'attachment',
+        },
+      ]);
+      expect(await db.storedEmailFile(ctx(viewer), org, email, 0)).toEqual({
+        rawKey: `raw/${org}/${'d'.repeat(64)}.eml`,
+        rawSize: 400,
+        attachment: { position: 0, fileName: 'offer.pdf', sha256: 'e'.repeat(64) },
+      });
+      expect(await db.storedEmailFile(ctx(viewer), org, email, 1)).toBeNull();
+      expect(await db.storedEmailFile(ctx(outsider), outsiderOrg, email, null)).toBeNull();
+
+      expect(await db.removeEmail(ctx(outsider), outsiderOrg, email)).toBe('not_found');
+      expect(await db.removeEmail(ctx(analyst), org, email)).toBe('done');
+      expect(await db.removeEmail(ctx(analyst), org, email)).toBe('already_removed');
+
+      const listed = await db.listUnmatchedEmails(ctx(viewer), org, null);
+      expect(listed.emails.some((e) => e.id === email)).toBe(false);
+      expect(await db.getEmail(ctx(viewer), org, email)).toBeNull();
+      expect(await db.storedEmailFile(ctx(viewer), org, email, 0)).toBeNull();
+      expect(await db.storedEmailFile(ctx(viewer), org, email, null)).toBeNull();
+      expect(await db.linkEmail(ctx(viewer), org, email, company, null)).toBe('removed');
+      // The row itself is kept.
+      const [kept] = await admin<{ n: number }[]>`
+        select count(*)::int as n from app.emails where id = ${email}`;
+      expect(kept?.n).toBe(1);
+    } finally {
+      await production.end();
+    }
+  });
+});

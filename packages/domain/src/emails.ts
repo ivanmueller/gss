@@ -206,9 +206,65 @@ export interface EmailView {
   automatic: boolean;
   /** Received mail that could not be read; its original is kept. */
   parseFailed: boolean;
+  /** The company it is on; null for received mail on no company (F-114 step 4b). */
+  counterpartyId: string | null;
+  /** Received mail: the GSS address it was delivered to (perhaps an address of nobody). */
+  sentTo: string | null;
+  /** Received mail: how many attachments were listed. */
+  attachmentCount: number;
   /** Only in the single-email answer. */
   body?: string;
   bodyTruncated?: boolean;
+  /** Only in the single-email answer: received mail's attachments, read from its original. */
+  attachments?: EmailAttachmentView[];
+}
+
+/** An attachment of a received email (F-114 step 4b), downloaded from the stored original. */
+export interface EmailAttachmentView {
+  /** Its place in the message (0 first); the download names it. */
+  position: number;
+  fileName: string | null;
+  /** As the sender declared it; the download is always served as plain bytes. */
+  contentType: string;
+  sizeBytes: number;
+  disposition: 'attachment' | 'inline';
+}
+
+/** GET /api/v1/emails/unmatched: received mail on no company, a page at a time. */
+export interface UnmatchedEmailsView {
+  emails: EmailView[];
+  /** Whether older mail follows (ask with before_id = the last email's id). */
+  more: boolean;
+  /** How many there are in all, up to UNMATCHED_EMAIL_COUNT_CAP (then shown as "1,000+"). */
+  total: number;
+}
+
+/** The unmatched list's page size. */
+export const UNMATCHED_EMAIL_PAGE = 50;
+/** The unmatched count stops here. */
+export const UNMATCHED_EMAIL_COUNT_CAP = 1000;
+
+/** POST /api/v1/emails/:id/link: received mail on no company put on a company. */
+export const linkEmailSchema = z.strictObject({
+  counterpartyId: z.uuid(),
+  contactId: z.uuid().nullable(),
+});
+export type LinkEmailRequest = z.infer<typeof linkEmailSchema>;
+
+/**
+ * The name an attachment is saved under: the sender's name without control characters, quotes,
+ * slashes or backslashes (nor dots or spaces at either end), at most 200 characters; otherwise
+ * "attachment-<n>".
+ */
+export function attachmentFileName(name: string | null, position: number): string {
+  const cleaned = Array.from(
+    // eslint-disable-next-line no-control-regex
+    (name ?? '').replace(/[\u0000-\u001f\u007f-\u009f"\\/]/g, '').replace(/^[\s.]+|[\s.]+$/g, ''),
+  )
+    .slice(0, 200)
+    .join('')
+    .replace(/[\s.]+$/, '');
+  return cleaned === '' ? `attachment-${String(position + 1)}` : cleaned;
 }
 
 /** A team member's address and signature details, for the Team page and the form. */

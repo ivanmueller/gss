@@ -9,6 +9,7 @@ import {
   type Mailer,
   type SendEmailBinding,
 } from './email';
+import { contentDisposition } from './emails';
 import type { EmailSettingsRecord } from './emails-db';
 import { createApp } from './index';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
@@ -63,6 +64,9 @@ function emailRow(overrides: Partial<EmailView> = {}): EmailView {
     unverifiedSender: false,
     automatic: false,
     parseFailed: false,
+    counterpartyId: COMPANY,
+    sentTo: null,
+    attachmentCount: 0,
     ...overrides,
   };
 }
@@ -436,5 +440,232 @@ describe('GET /emails', () => {
   it('reads emails without the sending configuration', async () => {
     const response = await app.request(`/api/v1/emails/${EMAIL_ID}`, { headers: AUTH }, ENV);
     expect(response.status).toBe(200);
+  });
+});
+
+// Received email on no company (F-114 step 4b). Synthetic values only.
+const RAW_KEY = `raw/${ORG}/${'a'.repeat(64)}.eml`;
+const HTML_ATTACHMENT = '<script>alert(1)</script>';
+
+/** A received message with one HTML attachment (a hostile file a sender might choose). */
+function rawMessage(): Uint8Array {
+  return new TextEncoder().encode(
+    [
+      'From: Sam <sam@sender.example.test>',
+      'To: nobody@gss.example.test',
+      'Subject: Prices',
+      'Message-ID: <m1@sender.example.test>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="b"',
+      '',
+      '--b',
+      'Content-Type: text/plain',
+      '',
+      'See attached.',
+      '--b',
+      'Content-Type: text/html; name="page.html"',
+      'Content-Disposition: attachment; filename="page.html"',
+      '',
+      HTML_ATTACHMENT,
+      '--b--',
+      '',
+    ].join('\r\n'),
+  );
+}
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function bucketWith(objects: Record<string, Uint8Array>) {
+  return {
+    get: vi.fn((key: string) => {
+      const data = objects[key];
+      return Promise.resolve(
+        data === undefined ? null : { arrayBuffer: () => Promise.resolve(data.slice().buffer) },
+      );
+    }),
+    put: vi.fn(),
+    head: vi.fn(),
+    delete: vi.fn(),
+    list: vi.fn(),
+  };
+}
+
+describe('received email on no company', () => {
+  it('lists it a page at a time, for any member, before a cursor', async () => {
+    db.listUnmatchedEmails.mockResolvedValue({
+      emails: [emailRow({ direction: 'incoming', state: 'received', counterpartyId: null })],
+      more: true,
+      total: 51,
+    });
+    const first = await app.request('/api/v1/emails/unmatched', { headers: AUTH }, ENV);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ more: true, total: 51 });
+    expect(db.listUnmatchedEmails).toHaveBeenLastCalledWith(expect.anything(), ORG, null);
+    await app.request(`/api/v1/emails/unmatched?before_id=${EMAIL_ID}`, { headers: AUTH }, ENV);
+    expect(db.listUnmatchedEmails).toHaveBeenLastCalledWith(expect.anything(), ORG, {
+      id: EMAIL_ID,
+    });
+    const bad = await app.request('/api/v1/emails/unmatched?before_id=x', { headers: AUTH }, ENV);
+    expect(bad.status).toBe(422);
+  });
+
+  it('refuses someone of no organization', async () => {
+    db.memberships.mockResolvedValue([]);
+    const response = await app.request('/api/v1/emails/unmatched', { headers: AUTH }, ENV);
+    expect(response.status).toBe(403);
+    expect(db.listUnmatchedEmails).not.toHaveBeenCalled();
+  });
+
+  it('links it to a company and answers every refusal plainly', async () => {
+    db.getEmail.mockResolvedValue(emailRow({ direction: 'incoming', state: 'received' }));
+    const link = (body: unknown) =>
+      app.request(
+        `/api/v1/emails/${EMAIL_ID}/link`,
+        { method: 'POST', headers: AUTH, body: JSON.stringify(body) },
+        ENV,
+      );
+    const done = await link({ counterpartyId: COMPANY, contactId: CONTACT });
+    expect(done.status).toBe(200);
+    expect(db.linkEmail).toHaveBeenLastCalledWith(
+      expect.anything(),
+      ORG,
+      EMAIL_ID,
+      COMPANY,
+      CONTACT,
+    );
+
+    expect((await link({ counterpartyId: COMPANY })).status).toBe(422);
+    expect((await link({ counterpartyId: COMPANY, contactId: null, extra: 1 })).status).toBe(422);
+
+    const answers: [Awaited<ReturnType<Database['linkEmail']>>, number, string][] = [
+      ['not_found', 404, 'NOT_FOUND'],
+      ['removed', 404, 'NOT_FOUND'],
+      ['already_linked', 409, 'ALREADY_LINKED'],
+      ['company_not_found', 409, 'COMPANY_UNAVAILABLE'],
+    ];
+    for (const [answer, status, code] of answers) {
+      db.linkEmail.mockResolvedValueOnce(answer);
+      const response = await link({ counterpartyId: COMPANY, contactId: null });
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { code } });
+    }
+  });
+
+  it('deletes it; a retry after a lost answer is no error; mail on a company is for admins', async () => {
+    const remove = () =>
+      app.request(`/api/v1/emails/${EMAIL_ID}/remove`, { method: 'POST', headers: AUTH }, ENV);
+    expect((await remove()).status).toBe(200);
+    db.removeEmail.mockResolvedValueOnce('already_removed');
+    expect((await remove()).status).toBe(200);
+    db.removeEmail.mockResolvedValueOnce('forbidden');
+    expect((await remove()).status).toBe(403);
+    db.removeEmail.mockResolvedValueOnce('not_found');
+    expect((await remove()).status).toBe(404);
+    expect(db.removeEmail).toHaveBeenLastCalledWith(expect.anything(), ORG, EMAIL_ID);
+  });
+});
+
+describe('a received email’s files', () => {
+  it('gives an attachment from the original as a plain download, never as a page', async () => {
+    db.storedEmailFile.mockResolvedValue({
+      rawKey: RAW_KEY,
+      rawSize: 400,
+      attachment: { position: 0, fileName: 'page.html', sha256: await sha256(HTML_ATTACHMENT) },
+    });
+    const response = await app.request(
+      `/api/v1/emails/${EMAIL_ID}/attachments/0`,
+      { headers: AUTH },
+      { ...ENV, EMAIL_FILES: bucketWith({ [RAW_KEY]: rawMessage() }) },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(HTML_ATTACHMENT);
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(response.headers.get('Content-Disposition')).toBe(
+      `attachment; filename="page.html"; filename*=UTF-8''page.html`,
+    );
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(response.headers.get('Content-Security-Policy')).toBe("default-src 'none'; sandbox");
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(db.storedEmailFile).toHaveBeenLastCalledWith(expect.anything(), ORG, EMAIL_ID, 0);
+  });
+
+  it('finds an attachment by its hash when its position moved', async () => {
+    db.storedEmailFile.mockResolvedValue({
+      rawKey: RAW_KEY,
+      rawSize: 400,
+      attachment: { position: 3, fileName: null, sha256: await sha256(HTML_ATTACHMENT) },
+    });
+    const response = await app.request(
+      `/api/v1/emails/${EMAIL_ID}/attachments/3`,
+      { headers: AUTH },
+      { ...ENV, EMAIL_FILES: bucketWith({ [RAW_KEY]: rawMessage() }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Disposition')).toContain('filename="attachment-4"');
+  });
+
+  it('answers plainly when the file cannot be given, with no address in the log', async () => {
+    const env = { ...ENV, EMAIL_FILES: bucketWith({ [RAW_KEY]: rawMessage() }) };
+    const get = (path: string, withEnv: object = env) =>
+      app.request(`/api/v1/emails/${EMAIL_ID}/${path}`, { headers: AUTH }, withEnv);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    // Not set up: no bucket.
+    expect((await get('attachments/0', ENV)).status).toBe(503);
+    expect((await get('original', ENV)).status).toBe(503);
+    // Not listed, removed, another organization's or sent email: the database finds nothing.
+    db.storedEmailFile.mockResolvedValue(null);
+    expect((await get('attachments/0')).status).toBe(404);
+    expect((await get('original')).status).toBe(404);
+    // A malformed position, before the database.
+    db.storedEmailFile.mockClear();
+    for (const position of ['100', '01', '-1', 'x']) {
+      expect((await get(`attachments/${position}`)).status).toBe(404);
+    }
+    expect(db.storedEmailFile).not.toHaveBeenCalled();
+    // The hash found nowhere in the original.
+    db.storedEmailFile.mockResolvedValue({
+      rawKey: RAW_KEY,
+      rawSize: 400,
+      attachment: { position: 0, fileName: 'page.html', sha256: 'b'.repeat(64) },
+    });
+    expect((await get('attachments/0')).status).toBe(502);
+    // The original missing from the bucket.
+    db.storedEmailFile.mockResolvedValue({
+      rawKey: `raw/${ORG}/${'c'.repeat(64)}.eml`,
+      rawSize: 400,
+      attachment: { position: 0, fileName: 'page.html', sha256: 'b'.repeat(64) },
+    });
+    expect((await get('attachments/0')).status).toBe(404);
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('@');
+    errors.mockRestore();
+  });
+
+  it('gives the original of an email as a download', async () => {
+    db.storedEmailFile.mockResolvedValue({ rawKey: RAW_KEY, rawSize: 400, attachment: null });
+    const response = await app.request(
+      `/api/v1/emails/${EMAIL_ID}/original`,
+      { headers: AUTH },
+      { ...ENV, EMAIL_FILES: bucketWith({ [RAW_KEY]: rawMessage() }) },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(response.headers.get('Content-Disposition')).toContain(`email-${EMAIL_ID}.eml`);
+    expect(await response.text()).toContain('Subject: Prices');
+    expect(db.storedEmailFile).toHaveBeenLastCalledWith(expect.anything(), ORG, EMAIL_ID, null);
+  });
+});
+
+describe('contentDisposition', () => {
+  it('keeps the header safe whatever the name', () => {
+    expect(contentDisposition('prix été.pdf')).toBe(
+      `attachment; filename="prix _t_.pdf"; filename*=UTF-8''prix%20%C3%A9t%C3%A9.pdf`,
+    );
+    expect(contentDisposition("it's (1).pdf")).toBe(
+      `attachment; filename="it's (1).pdf"; filename*=UTF-8''it%27s%20%281%29.pdf`,
+    );
   });
 });
