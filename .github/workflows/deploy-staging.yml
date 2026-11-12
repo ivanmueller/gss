@@ -66,7 +66,7 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_4gRcidcCPr7dsdATHL57nQ_QNY0SNAc
           VITE_MAPBOX_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
       # Migrations go first so the Worker never runs against an older schema.
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         if: needs.preflight.outputs.database == 'true'
         with:
           version: 2.122.0
