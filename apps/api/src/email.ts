@@ -1,5 +1,7 @@
 import { EMAIL_LOCAL_PART } from '@grain/domain';
 
+import { base64Of } from './email-files';
+
 // Sending email through Cloudflare Email Service, from the Worker only (F-114; the owner's
 // decisions of 2026-11-10, docs/DECISIONS.md). Kept in this one module so that sending through
 // each person's mailbox (option B, such as Microsoft 365) can replace it later. The shapes follow
@@ -18,6 +20,13 @@ export interface SendEmailBinding {
     text: string;
     /** Custom headers; Cloudflare allows In-Reply-To and References (docs/DECISIONS.md). */
     headers?: Record<string, string>;
+    /** Files, as Cloudflare's Workers API page shows them: base64 content (F-114 step 7). */
+    attachments?: {
+      content: string;
+      filename: string;
+      type: string;
+      disposition: 'attachment';
+    }[];
   }): Promise<{ messageId: string }>;
 }
 
@@ -65,6 +74,8 @@ export interface OutgoingEmail {
   text: string;
   /** A reply's In-Reply-To and References (threadHeaders), so mail programs thread it. */
   headers?: Record<string, string>;
+  /** Files chosen from the computer (F-114 step 7), already checked and kept. */
+  attachments?: { filename: string; type: string; bytes: Uint8Array }[];
 }
 
 /** At most this many ids in a reply's References, the oldest dropped first. */
@@ -121,6 +132,7 @@ const REFUSALS: Record<string, string> = {
     'A recipient is on Cloudflare’s suppression list (an earlier email to them bounced or was marked as spam).',
   E_ACCOUNT_SUSPENDED: 'Sending is paused on the Cloudflare account.',
   E_CONTENT_TOO_LARGE: 'The email is too large to send.',
+  E_TOO_MANY_ATTACHMENTS: 'Too many files on one email.',
   E_RATE_LIMIT_EXCEEDED: 'Too many emails at once. Wait a minute and send again.',
   E_DAILY_LIMIT_EXCEEDED:
     'Today’s sending limit on the Cloudflare account is reached. Send again tomorrow.',
@@ -171,6 +183,16 @@ export const cloudflareMailer: MailerFactory = (env) => {
             subject: email.subject,
             text: email.text,
             ...(email.headers === undefined ? {} : { headers: email.headers }),
+            ...(email.attachments === undefined || email.attachments.length === 0
+              ? {}
+              : {
+                  attachments: email.attachments.map((file) => ({
+                    content: base64Of(file.bytes),
+                    filename: file.filename,
+                    type: file.type,
+                    disposition: 'attachment' as const,
+                  })),
+                }),
           }),
           timeout,
         ]);

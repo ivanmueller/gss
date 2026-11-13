@@ -25,3 +25,4 @@ export * from './emails';
 export * from './emailAutoDrafts';
 export * from './emailDrafts';
 export * from './emailReading';
+export * from './emailAttachments';

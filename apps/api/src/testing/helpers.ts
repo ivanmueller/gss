@@ -247,7 +247,7 @@ export function fakeDatabase(): Mocked<Database> {
     saveEmailSettings: vi.fn<Database['saveEmailSettings']>(() => Promise.resolve('saved')),
     saveMemberEmail: vi.fn<Database['saveMemberEmail']>(() => Promise.resolve('saved')),
     startOutgoingEmail: vi.fn<Database['startOutgoingEmail']>(() =>
-      Promise.resolve({ status: 'started', id: 'email-1' } as const),
+      Promise.resolve({ status: 'started', id: 'email-1', fileKeys: [] as string[] } as const),
     ),
     finishOutgoingEmail: vi.fn<Database['finishOutgoingEmail']>(() => Promise.resolve('done')),
     answeredEmailIds: vi.fn<Database['answeredEmailIds']>(() => Promise.resolve(null)),

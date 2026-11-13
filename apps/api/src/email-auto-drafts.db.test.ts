@@ -139,6 +139,7 @@ describe('a reply Claude drafts by itself', () => {
       replyToEmailId: received,
       claudeDraftId: null,
       autoDraftId: draftId ?? null,
+      attachments: [],
     };
     const first = await db.startOutgoingEmail(as(people.vera), email);
     if (first.status !== 'started') throw new Error(first.status);
@@ -252,6 +253,7 @@ describe('a reminder (F-114 step 5c, part 2)', () => {
       replyToEmailId: sent,
       claudeDraftId: null,
       autoDraftId: reminder,
+      attachments: [],
     });
     if (started.status !== 'started') throw new Error(started.status);
     // The reply's headers name the id the recipient knows GSS's email by.

@@ -32,7 +32,8 @@ export type StartEmailRefusal =
   | 'auto_draft_used'
   | 'auto_draft_answered';
 export type StartEmailResult =
-  | { status: 'started'; id: string }
+  /** Started: the email's id and, by position, where each of its files is to be kept. */
+  | { status: 'started'; id: string; fileKeys: string[] }
   /**
    * The same send key was started before (a second click or a retry): never sent twice; the
    * earlier email as it stands (Codex's design review of F-114-3, finding D1-02).
@@ -68,6 +69,17 @@ export interface StartEmail {
   claudeDraftId: string | null;
   /** The automatic draft it was opened from (F-114 step 5c). */
   autoDraftId: string | null;
+  /** Its files (F-114 step 7), positions 0 to n-1; none for a text-only email. */
+  attachments: SentAttachmentRecord[];
+}
+
+/** A sent email's file as app.start_outgoing_email lists it. */
+export interface SentAttachmentRecord {
+  position: number;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
 }
 
 /** app.start_email_draft's answer (F-114 step 5b). */
@@ -158,12 +170,19 @@ export type LinkEmailResult =
 export type RemoveEmailResult = 'done' | 'not_found' | 'already_removed' | 'forbidden';
 
 /** Where a received email's original is kept, and one attachment's hash, for a download. */
-export interface StoredEmailFile {
+export interface ReceivedEmailFile {
   rawKey: string;
   rawSize: number;
   /** The listed attachment asked for, or null when only the original is asked for. */
   attachment: { position: number; fileName: string | null; sha256: string } | null;
 }
+
+/** A sent email's file (F-114 step 7): kept on its own in the bucket at `fileKey`. */
+export interface SentEmailFile {
+  sentFile: { position: number; fileName: string; fileKey: string };
+}
+
+export type StoredEmailFile = ReceivedEmailFile | SentEmailFile;
 
 export type ReceiveEmailResult =
   | { status: 'received'; id: string; counterpartyId: string | null; duplicate: boolean }
@@ -266,9 +285,9 @@ export interface EmailsDatabase {
     id: string,
   ) => Promise<RemoveEmailResult>;
   /**
-   * A received email's original (and, with a position, that listed attachment), when the email
-   * is the organization's and not removed; null otherwise (also when no attachment is listed at
-   * that position).
+   * A received email's original (and, with a position, that listed attachment), or a sent
+   * email's file at that position, when the email is the organization's and not removed; null
+   * otherwise (also when no attachment is listed at that position; a sent email has no original).
    */
   storedEmailFile: (
     ctx: RequestContext,
@@ -575,7 +594,9 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
     async startOutgoingEmail(ctx, email) {
       try {
         return await asUser(ctx, async (tx) => {
-          const [row] = await tx<{ result: { status?: unknown; id?: unknown } }[]>`
+          const [row] = await tx<
+            { result: { status?: unknown; id?: unknown; file_keys?: unknown } }[]
+          >`
             select app.start_outgoing_email(
               ${email.organizationId}, ${email.counterpartyId}, ${email.contactId}, ${email.fromLocalPart},
               ${email.domain},
@@ -586,10 +607,24 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
                       with ordinality t(x, n) order by t.n),
               ${email.subject}, ${email.body},
               ${email.messageId}, ${email.replyToEmailId}::uuid, ${email.claudeDraftId}::uuid,
-              ${email.autoDraftId}::uuid) as result`;
+              ${email.autoDraftId}::uuid,
+              ${tx.json(
+                email.attachments.map((a) => ({
+                  position: a.position,
+                  file_name: a.fileName,
+                  content_type: a.contentType,
+                  size_bytes: a.sizeBytes,
+                  sha256: a.sha256,
+                })),
+              )}::jsonb) as result`;
           const status = row?.result.status;
+          const keys = row?.result.file_keys;
           if (status === 'started' && typeof row?.result.id === 'string') {
-            return { status: 'started' as const, id: row.result.id };
+            const fileKeys =
+              Array.isArray(keys) && keys.every((key) => typeof key === 'string') ? keys : null;
+            if (fileKeys?.length !== email.attachments.length)
+              throw new Error('Unexpected file keys from app.start_outgoing_email');
+            return { status: 'started' as const, id: row.result.id, fileKeys };
           }
           const refusal = START_REFUSALS.find((value) => value === status);
           if (refusal === undefined)
@@ -710,7 +745,7 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
              and not exists (select 1 from app.email_removals x where x.email_id = e.id)`;
         if (row === undefined) return null;
         const view = emailView(row);
-        if (row.direction !== 'incoming') return view;
+        // Received and sent email alike (F-114 step 7).
         const attachments = await tx<
           {
             position: number;
@@ -802,11 +837,24 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
 
     storedEmailFile(ctx, organizationId, id, position) {
       return asUser(ctx, async (tx) => {
-        const [email] = await tx<{ raw_key: string | null; raw_size: number | null }[]>`
-          select e.raw_key, e.raw_size from app.emails e
-           where e.organization_id = ${organizationId} and e.id = ${id} and e.direction = 'incoming'
+        const [email] = await tx<
+          { direction: string; raw_key: string | null; raw_size: number | null }[]
+        >`
+          select e.direction, e.raw_key, e.raw_size from app.emails e
+           where e.organization_id = ${organizationId} and e.id = ${id}
              and not exists (select 1 from app.email_removals x where x.email_id = e.id)`;
-        if (email?.raw_key == null || email.raw_size == null) return null;
+        if (email === undefined) return null;
+        if (email.direction === 'outgoing') {
+          // A sent email has no original; each of its files is kept on its own (F-114 step 7).
+          if (position === null) return null;
+          const [file] = await tx<{ file_name: string | null; file_key: string | null }[]>`
+            select a.file_name, a.file_key from app.email_attachments a
+             where a.organization_id = ${organizationId} and a.email_id = ${id}
+               and a.position = ${position}`;
+          if (file?.file_key == null || file.file_name === null) return null;
+          return { sentFile: { position, fileName: file.file_name, fileKey: file.file_key } };
+        }
+        if (email.raw_key == null || email.raw_size == null) return null;
         if (position === null) {
           return { rawKey: email.raw_key, rawSize: email.raw_size, attachment: null };
         }
