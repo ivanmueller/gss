@@ -80,6 +80,30 @@ export interface EmailReadingContextRow {
    * the owner's answer 26): never numbered, so no draft can cite them.
    */
   thread: EarlierEmail[];
+  /** A forward from a member's confirmed address (F-233), offsets in code points of `body`. */
+  forward: {
+    byName: string;
+    /** The forwarding member's personal address (never drafted as a contact). */
+    byAddress: string;
+    fromAddress: string;
+    fromName: string | null;
+    subject: string;
+    dateText: string | null;
+    offset: number;
+    textOffset: number;
+    depth: number;
+  } | null;
+}
+
+/** How a forward in an email's context is shown (app.email_as_shown, F-233). */
+export interface ShownForward {
+  /** The forwarded block's quote depth; `body` starts at its text, still quoted that deep. */
+  depth: number;
+  byName: string;
+  byAddress: string;
+  /** The forwarding person's note above the block (context only). */
+  note: string;
+  dateText: string | null;
 }
 
 export interface EarlierEmail {
@@ -90,6 +114,8 @@ export interface EarlierEmail {
   at: string;
   subject: string;
   body: string | null;
+  /** Present for a forward: `from`, `subject` and `body` are then the original's. */
+  forward?: ShownForward;
 }
 
 export type DecideDraftResult =

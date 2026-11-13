@@ -118,6 +118,25 @@ Step 2 merged (ivanmueller/gss#218, 2026-11-10). Step 3 merged (ivanmueller/gss#
 
 **Read from Cloudflare's documentation on 2026-11-10** (developers.cloudflare.com, Email Service pages; to be recorded in `docs/DECISIONS.md` in step 1): sending to any address needs a sending domain onboarded on Cloudflare DNS and Workers Paid; From any address on that domain, with a display name; a **Reply-To can be set** (`replyTo`); text and HTML; at most 50 recipients and 25 MiB per email, 32 attachments; 3,000 emails a month included on Workers Paid, then USD 0.35 per 1,000, new accounts on a daily quota that grows (no number published); still called a beta; sending's own DNS records go on a separate `cf-bounce` name, leaving the domain's SPF and IONOS mail untouched. Receiving (Email Routing) forwards only to verified addresses (each person's inbox verified once) and takes messages up to 25 MiB. Email Routing puts its records on the main domain and refuses to start while other mail records exist there. **The domain's DNS on Cloudflare (seen by the owner, 2026-11-10):** IONOS's default mail records, with no mailboxes behind them (two MX, an SPF TXT, two DKIM and a DMARC CNAME, and autodiscover); for option A they are removed in step 1, then Cloudflare adds its own; a DMARC record is also recommended by Cloudflare. Nothing is to be changed before step 1's exact steps.
 
+#### 1a. F-233 — Forwarded email: mail a person received in their own mailbox, brought into the platform
+
+**Status:** Planned (asked 2026-11-13; Codex design review next, high risk: email receiving, database, Claude). **Asked:** the owner received a logistics company's answer in their personal mailbox and wants to forward it into the platform.
+
+**Today (found 2026-11-13):** forwarding such an email to an address on the business's domain keeps it, but the platform sees it as mail from the person's own address: it lands on **Follow-ups → Email on no company** (it can be linked by hand); Claude reads only the person's note above the forwarded part, because the forwarded block (`From: … Date:` or `From: … Sent:`) is cut as quoted mail (`packages/domain/src/emailReading.ts`); **Reply** would answer the person, not the original sender.
+
+**Owner's answers (2026-11-13):**
+1. **Who may forward mail in:** anyone on the team.
+2. **Which personal addresses:** each person adds their own.
+3. **Claude reads forwarded email** and drafts bids, offers, follow-ups, contact details and replies from it, as from mail received directly.
+
+**Plan (an agent, 2026-11-13, before the Codex design review):**
+- **Forwarding addresses (Team):** each person adds their own personal addresses under their name; each is confirmed by a code the platform emails to it, typed back by the person, before it counts (so nobody can name a company's or another person's address as theirs). Removed by the person; a removal is marked, not deleted. Addresses on the business's own domain refused.
+- **Recognizing a forward:** received mail to a GSS address (the shared address or a person's own) from a confirmed forwarding address whose sender checks passed (DMARC). The forwarded message is read from the body (the usual "Forwarded message" block of Gmail, Outlook and Apple Mail: its From, date, subject and text) or from an attached original message (forward as attachment). The email keeps who forwarded it and the original sender's address and name, date and subject; the forwarding person stays its sender of record.
+- **Matching:** on the original sender's address, a contact of exactly one company (as for direct mail); otherwise **Email on no company**, shown as "Forwarded by …, from …", linked by hand as now.
+- **Claude:** reads the forwarded message's own text (its earlier quoted mail still left out, so GSS's quoted prices are never taken for the other side's); the person's note above it given as context only. Prices, quantities and phone numbers kept only when copied from the forwarded message's lines, as now.
+- **Reply** (and Claude's reply drafts) go to the original sender, "Re: " + the original subject, not threaded (the original's Message-ID is not known for an inline forward).
+- Not done: a forward from an address not confirmed stays ordinary mail from that person (as today); nothing is sent or answered by itself (`AGENTS.md` rule 8).
+
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
 Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).

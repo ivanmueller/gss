@@ -113,8 +113,10 @@ select ok(not has_function_privilege('app_api', 'app.is_own_email_copy(uuid, tex
           and not has_function_privilege('app_api', 'app.email_id_core(text)', 'execute')
           and not has_function_privilege('app_api', 'app.check_email_attachment()', 'execute'),
   'app_api cannot call the helpers');
-select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-            where n.nspname = 'app' and p.proname = 'receive_email'), 1,
+-- Step 2's 14-argument version is gone (F-233 keeps step 4a's beside its own for the deploy
+-- window, so the count is no longer 1).
+select is(to_regprocedure('app.receive_email(uuid, text, text, text, text[], text[], text, text, '
+                          'text, boolean, text, text, text[], boolean)')::text, null,
   'step 2''s receive_email is gone');
 
 -- Admission -------------------------------------------------------------------

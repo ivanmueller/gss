@@ -161,6 +161,29 @@ export function fakeDatabase(): Mocked<Database> {
     ),
     getMemberPhone: vi.fn<Database['getMemberPhone']>(() => Promise.resolve(null)),
     saveMemberPhone: vi.fn<Database['saveMemberPhone']>(() => Promise.resolve('saved')),
+    myForwardingAddresses: vi.fn<Database['myForwardingAddresses']>(() => Promise.resolve([])),
+    addForwardingAddress: vi.fn<Database['addForwardingAddress']>(() =>
+      Promise.resolve({
+        status: 'added',
+        id: '00000000-0000-4000-8000-0000000f0a11',
+        confirmed: false,
+      }),
+    ),
+    reserveForwardingCode: vi.fn<Database['reserveForwardingCode']>(() =>
+      Promise.resolve({
+        status: 'reserved',
+        sendId: '00000000-0000-4000-8000-0000000f05e1',
+        address: 'tom.personal@mail.example',
+      }),
+    ),
+    finishForwardingCode: vi.fn<Database['finishForwardingCode']>(() => Promise.resolve('done')),
+    failForwardingCode: vi.fn<Database['failForwardingCode']>(() => Promise.resolve('done')),
+    confirmForwardingAddress: vi.fn<Database['confirmForwardingAddress']>(() =>
+      Promise.resolve('confirmed'),
+    ),
+    removeForwardingAddress: vi.fn<Database['removeForwardingAddress']>(() =>
+      Promise.resolve('done'),
+    ),
     placeCall: vi.fn<Database['placeCall']>(() =>
       Promise.resolve({
         status: 'created',

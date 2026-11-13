@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 
-import type { CheckedReading } from '@grain/domain';
+import { findForward, type CheckedReading } from '@grain/domain';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { postgresDatabase, type Database, type RequestContext } from './db';
+import { readingLines } from './email-readings';
 
 // Integration test of Claude's readings of received email (F-114 step 5a): the real driver, as
 // `app_api`, against the real migrations, row level security and functions. Claude itself is not
@@ -182,5 +183,108 @@ describe("Claude's reading of a received email", () => {
     expect(await db.verifyCallDraft(as(users.tess), draft.id, 'Tess', new Date())).toEqual({
       status: 'not_found',
     });
+  });
+});
+
+describe('a forwarded email (F-233)', () => {
+  it('is confirmed by code, received on the original sender’s company, and read as the original', async () => {
+    const tess = as(users.tess);
+    const personal = `tess-${id()}@mail.example`;
+    const added = await db.addForwardingAddress(tess, orgs.a, personal, 'gss.example');
+    if (added.status !== 'added') throw new Error(`Not added: ${added.status}`);
+    expect(await db.addForwardingAddress(as(users.ann), orgs.a, personal, 'gss.example')).toEqual({
+      status: 'taken',
+    });
+    const reserved = await db.reserveForwardingCode(tess, orgs.a, added.id);
+    if (reserved.status !== 'reserved') throw new Error(`Not reserved: ${reserved.status}`);
+    expect(await db.reserveForwardingCode(tess, orgs.a, added.id)).toEqual({ status: 'too_soon' });
+    const hash = createHash('sha256').update(`123456:${added.id}`).digest('hex');
+    expect(await db.finishForwardingCode(tess, orgs.a, reserved.sendId, hash)).toBe('done');
+    expect(await db.confirmForwardingAddress(as(users.bob), orgs.a, added.id, hash)).toBe(
+      'forbidden',
+    );
+    expect(await db.confirmForwardingAddress(tess, orgs.a, added.id, hash)).toBe('confirmed');
+    expect(await db.myForwardingAddresses(tess, orgs.a)).toEqual([
+      expect.objectContaining({ id: added.id, address: personal, codeExpiresAt: null }),
+    ]);
+    expect(await db.myForwardingAddresses(as(users.ann), orgs.a)).toEqual([]);
+
+    const note = 'From my phone 🌾🌾';
+    const body = [
+      note,
+      '',
+      '---------- Forwarded message ---------',
+      `From: Pat Buyer <pat-${pat}@buyer.example>`,
+      'Date: Thu, Nov 12, 2026 at 3:14 PM',
+      'Subject: Canola',
+      '',
+      'We bid 725 a tonne.',
+    ].join('\n');
+    const message = `<fwd-${id()}@mail.example>`;
+    const kept = await db.receiveEmail({
+      organizationId: orgs.a,
+      rawKey: `raw/${orgs.a}/${createHash('sha256').update(message).digest('hex')}.eml`,
+      rawSize: 100,
+      receivedAt: new Date(),
+      email: {
+        envelopeTo: 'info@gss.example',
+        fromAddress: personal,
+        fromName: 'Tess at home',
+        to: ['info@gss.example'],
+        cc: [],
+        replyTo: null,
+        subject: 'Fwd: Canola',
+        body,
+        bodyTruncated: false,
+        messageId: message,
+        inReplyTo: null,
+        references: [],
+        dmarc: 'pass',
+        automatic: false,
+        parseFailed: false,
+        attachments: [],
+        attachmentsNotListed: 0,
+        forward: findForward(body),
+      },
+    });
+    expect(kept).toMatchObject({ status: 'received', counterpartyId: buyer, duplicate: false });
+    if (kept.status !== 'received') throw new Error('Not received.');
+
+    const shown = await db.getEmail(tess, orgs.a, kept.id);
+    expect(shown?.forward).toEqual({
+      byName: 'Tess',
+      fromAddress: `pat-${pat}@buyer.example`,
+      fromName: 'Pat Buyer',
+      subject: 'Canola',
+      dateText: 'Thu, Nov 12, 2026 at 3:14 PM',
+    });
+    expect(shown?.fromAddress).toBe(personal);
+
+    const claim = await readEmail(kept.id);
+    const context = await db.emailReadingContext(claim);
+    expect(context?.assigneeId).toBe(users.tess);
+    expect(context?.forward).toMatchObject({
+      byName: 'Tess',
+      byAddress: personal,
+      fromAddress: `pat-${pat}@buyer.example`,
+      depth: 0,
+    });
+    if (context === null) throw new Error('No context.');
+    expect(readingLines(context).lines).toEqual(['Subject: Canola', 'We bid 725 a tonne.']);
+
+    // The reply draft the reading asks for is the forwarding member's too, though the forward
+    // came to the shared address (Codex's final review, R3-01).
+    expect(
+      await db.keepEmailReading(claim, ['Subject: Canola', 'We bid 725 a tonne.'], false, {
+        model: 'claude-opus-5-5',
+        reading: { ...reading(users.tess), emailAbout: 'Answer the canola bid' },
+        inputTokens: 900,
+        outputTokens: 200,
+      }),
+    ).toBe(true);
+    const [draft] = await admin<{ assigned_to: string | null }[]>`
+      select assigned_to from app.email_auto_drafts where email_id = ${kept.id}`;
+    expect(draft?.assigned_to).toBe(users.tess);
+    expect(await db.answeredEmailIds(tess, orgs.a, kept.id)).toBeNull();
   });
 });

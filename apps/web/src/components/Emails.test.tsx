@@ -69,6 +69,7 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     replyToAddress: null,
     inReplyToSubject: null,
     draftedByClaude: false,
+    forward: null,
     ...overrides,
   };
 }
@@ -626,6 +627,37 @@ describe('Reply and Draft with Claude (F-114 step 5b)', () => {
     const user = userEvent.setup();
     const dialog = await openReply(user);
     expect(await within(dialog).findByLabelText('To')).toHaveValue('pat@buyer.example.test');
+  });
+
+  it('shows a forward from its original sender and replies to them (F-233)', async () => {
+    const forwarded = {
+      ...RECEIVED,
+      fromAddress: 'tom.home@mail.example',
+      fromName: 'Tom at home',
+      forward: {
+        byName: 'Tom Trader',
+        fromAddress: 'pat@buyer.example.test',
+        fromName: 'Pat Buyer',
+        subject: 'Lane rate',
+        dateText: 'Thu, Nov 12, 2026 at 3:14 PM',
+      },
+    };
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [forwarded] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...forwarded, body: 'Hello' } }),
+    });
+    show();
+    expect(await screen.findByText(/Pat Buyer <pat@buyer\.example\.test>/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Forwarded by Tom Trader from their own mailbox · originally sent Thu, Nov 12, 2026 at 3:14 PM',
+      ),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    const dialog = await openReply(user);
+    expect(await within(dialog).findByLabelText('To')).toHaveValue('pat@buyer.example.test');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Lane rate');
   });
 
   it('offers no Draft with Claude when Claude is not set up', async () => {

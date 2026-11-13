@@ -16,6 +16,7 @@ import { contactLogRoutes, followUpRoutes } from './crm';
 import { postgresDatabase } from './db';
 import { cloudflareMailer, type MailerFactory } from './email';
 import { emailRoutes } from './emails';
+import { forwardingRoutes } from './forwarding';
 import { handleEmail, replayPendingMail } from './receive-mail';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
@@ -143,6 +144,7 @@ export function createApp(
   app.route('/contact-log', contactLogRoutes(openDatabase));
   app.route('/follow-ups', followUpRoutes(openDatabase));
   app.route('/me/phone', memberPhoneRoutes(openDatabase));
+  app.route('/me/forwarding-addresses', forwardingRoutes(openDatabase, mailer));
   // Claude's drafts first: GET /calls/drafts would otherwise be taken for a call's id.
   app.route('/calls', callReadingRoutes(openDatabase));
   app.route('/calls', callRoutes(openDatabase, telnyx));

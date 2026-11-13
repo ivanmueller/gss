@@ -227,11 +227,28 @@ export interface EmailView {
   inReplyToSubject: string | null;
   /** Sent email: it started from a draft by Claude. */
   draftedByClaude: boolean;
+  /**
+   * Received email forwarded by a team member from their confirmed personal address (F-233):
+   * who forwarded it, and the original sender, subject and date as the forward wrote them.
+   * A reply goes to the original sender. Null otherwise.
+   */
+  forward: EmailForwardView | null;
   /** Only in the single-email answer. */
   body?: string;
   bodyTruncated?: boolean;
   /** Only in the single-email answer: received mail's attachments, read from its original. */
   attachments?: EmailAttachmentView[];
+}
+
+/** A forwarded email's origin (F-233). */
+export interface EmailForwardView {
+  /** The team member who forwarded it. */
+  byName: string;
+  fromAddress: string;
+  fromName: string | null;
+  subject: string;
+  /** The original's date as the forward wrote it, never parsed. */
+  dateText: string | null;
 }
 
 /** An attachment of a received email (F-114 step 4b), downloaded from the stored original. */
