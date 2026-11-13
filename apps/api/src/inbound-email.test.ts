@@ -1,4 +1,4 @@
-import { emailLines } from '@grain/domain';
+import { emailLines, forwardedText } from '@grain/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -15,6 +15,7 @@ import {
   MAX_BODY_CHARS,
   readInbound,
   sha256Hex,
+  unreadableEmail,
 } from './inbound-email';
 
 const CONFIG = { domain: 'example.com', organizationId: '11111111-1111-4111-8111-111111111111' };
@@ -411,5 +412,82 @@ describe('Codex final review, round 5', () => {
       expect(text.length).toBeGreaterThan(0);
       expect(performance.now() - started).toBeLessThan(1500);
     }
+  });
+});
+
+describe('forwarded email (F-233)', () => {
+  const html = (body: string) => [
+    'Authentication-Results: mx.cloudflare.net; dmarc=pass',
+    'From: Tom <tom.home@mail.example>',
+    'To: info@example.com',
+    'Subject: Fwd: Lane rate',
+    'Message-ID: <fwd-1@mail.example>',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    body,
+  ];
+
+  it('reads an Apple Mail HTML forward, its header block inside a blockquote (D1-02)', async () => {
+    const email = await read(
+      html(
+        '<div>See below</div><div><br><blockquote type="cite"><div>Begin forwarded message:</div>' +
+          '<div><b>From: </b>Pat Carrier &lt;pat@carrier.example&gt;</div>' +
+          '<div><b>Subject: </b>Lane rate</div>' +
+          '<div><b>Date: </b>November 12, 2026 at 3:14 PM MST</div>' +
+          '<div><b>To: </b>Tom &lt;tom.home@mail.example&gt;</div><br>' +
+          '<div>We can do 2 loads at 4,200.</div>' +
+          '<blockquote><div>Can you do 3,900?</div></blockquote></blockquote></div>',
+      ),
+    );
+    const forward = email.forward;
+    expect(forward).toMatchObject({
+      fromAddress: 'pat@carrier.example',
+      fromName: 'Pat Carrier',
+      subject: 'Lane rate',
+      depth: 1,
+    });
+    if (forward === null) throw new Error('no forward');
+    const text = forwardedText(email.body, forward.textStart, forward.depth);
+    expect(emailLines(forward.subject, text).lines).toEqual([
+      'Subject: Lane rate',
+      'We can do 2 loads at 4,200.',
+    ]);
+  });
+
+  it('reads a Gmail HTML forward', async () => {
+    const email = await read(
+      html(
+        '<div dir="ltr">FYI<br><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">' +
+          '---------- Forwarded message ---------<br>From: <strong class="gmail_sendername">Pat Carrier</strong> ' +
+          '<span dir="auto">&lt;<a href="mailto:pat@carrier.example">pat@carrier.example</a>&gt;</span><br>' +
+          'Date: Thu, Nov 12, 2026 at 3:14 PM<br>Subject: Lane rate<br>To: &lt;tom.home@mail.example&gt;<br></div>' +
+          '<br><br><div>We can do 2 loads at 4,200.</div></div></div>',
+      ),
+    );
+    expect(email.forward).toMatchObject({ fromAddress: 'pat@carrier.example', depth: 0 });
+    const forward = email.forward;
+    if (forward === null) throw new Error('no forward');
+    expect(forwardedText(email.body, forward.textStart, 0).trim()).toBe(
+      'We can do 2 loads at 4,200.',
+    );
+  });
+
+  it('reads an Outlook HTML forward', async () => {
+    const email = await read(
+      html(
+        '<div>FYI</div><hr><div><b>From:</b> Pat Carrier &lt;pat@carrier.example&gt;<br>' +
+          '<b>Sent:</b> Thursday, November 12, 2026 3:14 PM<br><b>To:</b> Tom<br>' +
+          '<b>Subject:</b> Lane rate</div><div>&nbsp;</div><p>We can do 2 loads at 4,200.</p>',
+      ),
+    );
+    expect(email.forward).toMatchObject({
+      fromAddress: 'pat@carrier.example',
+      dateText: 'Thursday, November 12, 2026 3:14 PM',
+    });
+  });
+
+  it('finds no forward in a plain reply, and none in unreadable mail', async () => {
+    expect((await read(PLAIN)).forward).toBeNull();
+    expect(unreadableEmail('a'.repeat(64), ENVELOPE).forward).toBeNull();
   });
 });

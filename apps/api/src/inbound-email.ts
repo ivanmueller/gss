@@ -1,3 +1,4 @@
+import { findForward, type ForwardedPart } from '@grain/domain';
 import PostalMime, { addressParser, type Address, type Email, type Header } from 'postal-mime';
 
 // Email received by the Worker (F-114 step 4a; the owner's answers 13 to 15 of 2026-11-11 in
@@ -370,6 +371,11 @@ export interface InboundEmail {
   attachments: InboundAttachment[];
   /** Attachments beyond MAX_ATTACHMENTS (kept in the raw message, not listed). */
   attachmentsNotListed: number;
+  /**
+   * The forwarded message found in the kept body (F-233), offsets in code points of `body`; the
+   * database honours it only from a member's confirmed forwarding address.
+   */
+  forward: ForwardedPart | null;
 }
 
 export async function sha256Hex(data: ArrayBuffer | Uint8Array | string): Promise<string> {
@@ -471,6 +477,7 @@ export function unreadableEmail(
     parseFailed: true,
     attachments: [],
     attachmentsNotListed: 0,
+    forward: null,
   };
 }
 
@@ -534,5 +541,7 @@ export async function readInbound(
     parseFailed: false,
     attachments,
     attachmentsNotListed: email.attachments.length - listed.length,
+    // Found on the body as kept (after its cut), so the offsets fit what the database holds.
+    forward: findForward(body.text),
   };
 }

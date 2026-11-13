@@ -142,6 +142,71 @@ describe('TeamPage', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Only admins of Synthetic Org A manage the team. You are Trader',
     );
-    expect(calls).toHaveLength(0);
+    // Only their own forwarding addresses are asked for (F-233), never the team.
+    expect(calls.map((call) => call.path)).toEqual([
+      `/me/forwarding-addresses?organization_id=${ORG.id}`,
+    ]);
+  });
+});
+
+describe('ForwardingAddresses (F-233)', () => {
+  const ADDRESSES = `GET /me/forwarding-addresses?organization_id=${ORG.id}`;
+  const PENDING = {
+    id: '00000000-0000-4000-8000-0000000f0a11',
+    address: 'tom.home@mail.example',
+    confirmedAt: null,
+    codeExpiresAt: '2026-11-13T20:30:00.000Z',
+    createdAt: '2026-11-13T20:00:00.000Z',
+  };
+
+  it('lets every role add a personal address, then confirm it with the emailed code', async () => {
+    const calls = mockApi({
+      [ADDRESSES]: () =>
+        Response.json({ addresses: [PENDING], available: true, domain: 'gss.example.test' }),
+      [`POST /me/forwarding-addresses?organization_id=${ORG.id}`]: () =>
+        Response.json({ id: PENDING.id, addresses: [PENDING] }, { status: 201 }),
+      [`POST /me/forwarding-addresses/${PENDING.id}/confirm?organization_id=${ORG.id}`]: () =>
+        Response.json({ addresses: [] }),
+    });
+    render(<TeamPage session={{ ...SESSION, organization: { ...ORG, role: 'viewer' } }} />);
+    const card = await screen.findByRole('region', { name: 'Your forwarding addresses' });
+    expect(card).toHaveTextContent('to info@gss.example.test');
+    expect(card).toHaveTextContent('tom.home@mail.example');
+    expect(card).toHaveTextContent('Waiting for its code');
+    await userEvent.type(within(card).getByLabelText('Add a personal address'), 'Me@Mail.example');
+    await userEvent.click(within(card).getByRole('button', { name: 'Add and send a code' }));
+    await waitFor(() => {
+      expect(within(card).getByRole('status')).toHaveTextContent(
+        'We emailed a code to me@mail.example.',
+      );
+    });
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
+      address: 'Me@Mail.example',
+    });
+    await userEvent.type(within(card).getByLabelText('Code from the email'), '012345');
+    await userEvent.click(within(card).getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => {
+      expect(within(card).getByRole('status')).toHaveTextContent('is confirmed');
+    });
+    expect(calls.filter((call) => call.method === 'POST').at(-1)?.body).toEqual({
+      code: '012345',
+    });
+  });
+
+  it('shows a refused code plainly', async () => {
+    mockApi({
+      [ADDRESSES]: () =>
+        Response.json({ addresses: [PENDING], available: true, domain: 'gss.example.test' }),
+      [`POST /me/forwarding-addresses/${PENDING.id}/confirm?organization_id=${ORG.id}`]: () =>
+        Response.json(
+          { error: { code: 'WRONG_CODE', message: 'That code is not right.' } },
+          { status: 422 },
+        ),
+    });
+    render(<TeamPage session={SESSION} />);
+    const card = await screen.findByRole('region', { name: 'Your forwarding addresses' });
+    await userEvent.type(within(card).getByLabelText('Code from the email'), '000000');
+    await userEvent.click(within(card).getByRole('button', { name: 'Confirm' }));
+    expect(await within(card).findByRole('alert')).toHaveTextContent('That code is not right.');
   });
 });

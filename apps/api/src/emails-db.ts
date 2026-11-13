@@ -2,6 +2,7 @@ import {
   UNMATCHED_EMAIL_COUNT_CAP,
   UNMATCHED_EMAIL_PAGE,
   type EmailAttachmentView,
+  type EmailForwardView,
   type EmailState,
   type EmailView,
   type MemberEmailView,
@@ -11,6 +12,7 @@ import type postgres from 'postgres';
 
 import type { RequestContext } from './db';
 import type { InboundEmail } from './inbound-email';
+import type { ShownForward } from './readings-db';
 
 // Emails in Postgres (20261111010000_emails.sql, 20261111020000_email_signatures.sql; F-114).
 // Every write goes through the database's own functions, as the signed-in person; app_api only
@@ -99,6 +101,8 @@ export interface DraftContextEmail {
   fromName: string | null;
   subject: string;
   body: string;
+  /** Present for a forward (F-233): `from`, `subject` and `body` are then the original's. */
+  forward?: ShownForward;
 }
 
 /** What Claude is given to draft an email (app.email_draft_context), each part limited. */
@@ -384,6 +388,7 @@ interface EmailRow {
   reply_to: string | null;
   in_reply_to_subject: string | null;
   drafted_by_claude: boolean;
+  forward: EmailForwardView | null;
   body_text?: string;
   body_truncated?: boolean;
 }
@@ -413,6 +418,7 @@ function emailView(row: EmailRow): EmailView {
     replyToAddress: row.direction === 'incoming' ? row.reply_to : null,
     inReplyToSubject: row.in_reply_to_subject,
     draftedByClaude: row.drafted_by_claude,
+    forward: row.forward,
     ...(row.body_text === undefined
       ? {}
       : { body: row.body_text, bodyTruncated: row.body_truncated ?? false }),
@@ -459,6 +465,10 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
         and not exists (select 1 from app.email_removals x where x.email_id = r.id))
       as in_reply_to_subject,
     (e.claude_draft_id is not null or e.auto_draft_id is not null) as drafted_by_claude,
+    case when e.forwarded_by is not null then jsonb_build_object(
+      'byName', coalesce(app.member_name(e.organization_id, e.forwarded_by), 'A former team member'),
+      'fromAddress', e.original_from_address, 'fromName', e.original_from_name,
+      'subject', e.original_subject, 'dateText', e.original_date_text) end as forward,
     case when e.status = 'sending' and e.occurred_at < now() - interval '10 minutes' then 'unconfirmed'
          else e.status::text end as state`;
 
@@ -482,6 +492,7 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
         disposition: a.disposition,
         content_id: a.contentId,
       }));
+      const fwd = email.forward;
       const [row] = await sql<{ result: Record<string, unknown> }[]>`
         select app.receive_email(
           ${organizationId}, ${email.envelopeTo}, ${email.fromAddress}, ${email.fromName},
@@ -493,7 +504,11 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
           ${email.messageId}, ${email.inReplyTo},
           array(select t.x from jsonb_array_elements_text(${sql.json(email.references)}::jsonb) as t(x)),
           ${email.dmarc === 'pass'}, ${email.automatic}, ${email.parseFailed}, ${rawKey},
-          ${rawSize}, ${sql.json(attachments)}::jsonb, ${receivedAt.toISOString()}::timestamptz) as result`;
+          ${rawSize}, ${sql.json(attachments)}::jsonb, ${receivedAt.toISOString()}::timestamptz,
+          ${fwd?.fromAddress ?? null}::text, ${fwd?.fromName ?? null}::text,
+          ${fwd?.subject ?? null}::text, ${fwd?.dateText ?? null}::text,
+          ${fwd?.start ?? null}::integer, ${fwd?.textStart ?? null}::integer,
+          ${fwd?.depth ?? null}::integer) as result`;
       const result = row?.result ?? {};
       if (result.status === 'own_copy' || result.status === 'unknown_organization') {
         return { status: result.status };
@@ -651,14 +666,15 @@ export function emailQueries(asUser: AsUser, sql: postgres.Sql): EmailsDatabase 
       return asUser(ctx, async (tx) => {
         // A sent email (a reminder replies to it, F-114 step 5c part 2) is known to the
         // recipient by the id Cloudflare gave it, the one received replies are matched against;
-        // without one, no thread headers.
+        // without one, no thread headers. A forward (F-233) has none either: its Message-ID is
+        // the forwarding person's, never seen by the original sender the reply goes to.
         const [row] = await tx<{ message_id: string | null; references: string[] }[]>`
           select case when e.direction = 'incoming' then e.message_id
                       else e.provider_message_id end as message_id,
                  to_jsonb(e.reference_ids::text[]) as references
             from app.emails e
            where e.organization_id = ${organizationId} and e.id = ${id}
-             and (e.direction = 'incoming' or e.status = 'sent')`;
+             and ((e.direction = 'incoming' and e.forwarded_by is null) or e.status = 'sent')`;
         return row === undefined || row.message_id === null
           ? null
           : { messageId: row.message_id, references: row.references };

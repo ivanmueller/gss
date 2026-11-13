@@ -20,7 +20,7 @@ import {
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
-import { Download, Mail, Paperclip, Reply, Send, X } from 'lucide-react';
+import { Download, Forward, Mail, Paperclip, Reply, Send, X } from 'lucide-react';
 import {
   createContext,
   useContext,
@@ -1090,12 +1090,16 @@ export function EmailsCard({
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            // Where the sender asked replies to go, else to the sender
-                            // (Codex's final review, F-114-5b-R2-02).
+                            // A forward: to its original sender, about the original's subject
+                            // (F-233). Otherwise where the sender asked replies to go, else to
+                            // the sender (Codex's final review, F-114-5b-R2-02).
                             composer.compose(undefined, {
                               id: email.id,
-                              fromAddress: email.replyToAddress ?? email.fromAddress,
-                              subject: email.subject,
+                              fromAddress:
+                                email.forward?.fromAddress ??
+                                email.replyToAddress ??
+                                email.fromAddress,
+                              subject: email.forward?.subject ?? email.subject,
                             });
                           }}
                         >
@@ -1246,10 +1250,13 @@ export function EmailItem({
     };
   }, [open, body, email.id, session.organization.id, session.token]);
 
+  // A forward (F-233) is shown from its original sender; the forwarding person is named below.
+  const fromName = email.forward === null ? email.fromName : email.forward.fromName;
+  const fromAddress = email.forward === null ? email.fromAddress : email.forward.fromAddress;
   const who =
     email.direction === 'outgoing'
       ? `${email.sentByName ?? email.fromName ?? ''} to ${email.to.join(', ')}`
-      : `${email.fromName ? `${email.fromName} <${email.fromAddress}>` : email.fromAddress}${
+      : `${fromName ? `${fromName} <${fromAddress}>` : fromAddress}${
           email.counterpartyId === null && email.sentTo !== null ? ` to ${email.sentTo}` : ''
         }`;
   return (
@@ -1285,6 +1292,13 @@ export function EmailItem({
           )}
         </span>
       </button>
+      {email.forward !== null && (
+        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+          <Forward aria-hidden="true" className="size-3" />
+          Forwarded by {email.forward.byName} from their own mailbox
+          {email.forward.dateText !== null && ` · originally sent ${email.forward.dateText}`}
+        </p>
+      )}
       {email.unverifiedSender && (
         <p className="mt-1 text-xs text-warning">
           Sender not verified: this email may not be from who it says.

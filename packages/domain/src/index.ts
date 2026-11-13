@@ -25,4 +25,6 @@ export * from './emails';
 export * from './emailAutoDrafts';
 export * from './emailDrafts';
 export * from './emailReading';
+export * from './emailForward';
+export * from './forwarding';
 export * from './emailAttachments';

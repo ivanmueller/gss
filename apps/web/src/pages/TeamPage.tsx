@@ -10,6 +10,7 @@ import { useId, useState, type SyntheticEvent } from 'react';
 
 import { CallbackSettings } from '../components/CallbackSettings';
 import { EmailSettings } from '../components/EmailSettings';
+import { ForwardingAddresses } from '../components/ForwardingAddresses';
 import { MapLayerSettings } from '../components/MapLayerSettings';
 import { PageHeader } from '../components/PageHeader';
 import { Badge } from '../components/ui/badge';
@@ -399,6 +400,8 @@ export function TeamPage({ session }: { session: DirectorySession }) {
           ; ask an admin to change your role.
         </p>
       )}
+
+      <ForwardingAddresses session={session} />
 
       {isAdmin && (
         <>

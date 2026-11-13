@@ -11,7 +11,9 @@ import {
   earlierEmails,
   EMAIL_READING_INSTRUCTIONS,
   emailReadingMessage,
+  readingLines,
   readNewEmails,
+  withoutForwarder,
 } from './email-readings';
 import type { EmailReadingContextRow } from './readings-db';
 import { htmlToText } from './inbound-email';
@@ -45,6 +47,7 @@ const CONTEXT: EmailReadingContextRow = {
   assigneeId: TOM,
   contacts: [{ id: PAT, name: 'Pat Buyer', role: null, email: 'pat@buyer.example', phone: null }],
   thread: [],
+  forward: null,
 };
 
 const ANSWER: CallReading = {
@@ -408,5 +411,115 @@ describe('earlierEmails', () => {
     const started = Date.now();
     earlierEmails([{ ...long(1), body: '<earlier'.repeat(200_000) }]);
     expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('forwarded email (F-233)', () => {
+  const body = [
+    'Pat answered me at home. Our price was 3,900.',
+    '',
+    '---------- Forwarded message ---------',
+    'From: Pat Carrier <pat@carrier.example>',
+    'Date: Thu, Nov 12, 2026 at 3:14 PM',
+    'Subject: Lane rate',
+    '',
+    'We can do 2 loads at 4,200 a load.',
+    'Pat Carrier, 403 555 0177, pat@carrier.example',
+  ].join('\n');
+  const FORWARD: EmailReadingContextRow = {
+    ...CONTEXT,
+    fromName: 'Tom at home',
+    fromAddress: 'tom.home@mail.example',
+    subject: 'Fwd: Lane rate',
+    body,
+    forward: {
+      byName: 'Tom Trader',
+      byAddress: 'tom.home@mail.example',
+      fromAddress: 'pat@carrier.example',
+      fromName: 'Pat Carrier',
+      subject: 'Lane rate',
+      dateText: 'Thu, Nov 12, 2026 at 3:14 PM',
+      offset: body.indexOf('----------'),
+      textOffset: body.indexOf('We can do'),
+      depth: 0,
+    },
+  };
+
+  it('reads the forwarded message, not the note above it', () => {
+    expect(readingLines(FORWARD).lines).toEqual([
+      'Subject: Lane rate',
+      'We can do 2 loads at 4,200 a load.',
+      'Pat Carrier, 403 555 0177, pat@carrier.example',
+    ]);
+  });
+
+  it('names the original sender and gives the note fenced, unnumbered', () => {
+    const message = emailReadingMessage(FORWARD, readingLines(FORWARD).lines);
+    expect(message).toContain(
+      'Email from Pat Carrier <pat@carrier.example> at Synthetic Prairie Mills',
+    );
+    expect(message).toContain(
+      'Tom Trader of GSS received it in their own mailbox and forwarded it',
+    );
+    expect(message).toContain('"Thu, Nov 12, 2026 at 3:14 PM"');
+    expect(message).toContain('<note>\nPat answered me at home. Our price was 3,900.\n</note>');
+    expect(message).not.toMatch(/\[\d+\] Pat answered me/);
+    expect(message).toContain('[1] We can do 2 loads at 4,200 a load.');
+  });
+
+  it('never drafts the forwarding member as a contact', () => {
+    const checked = withoutForwarder(
+      {
+        voicemail: false,
+        summary: null,
+        emailAbout: null,
+        drafts: [
+          {
+            kind: 'contact',
+            contactId: null,
+            fields: {
+              values: { contactName: 'Tom', contactEmail: 'Tom.Home@mail.example' },
+              checks: {},
+            },
+            lines: [0],
+          },
+          {
+            kind: 'contact',
+            contactId: null,
+            fields: {
+              values: { contactName: 'Pat', contactEmail: 'pat@carrier.example' },
+              checks: {},
+            },
+            lines: [2],
+          },
+        ],
+      },
+      FORWARD,
+    );
+    expect(checked.drafts).toHaveLength(1);
+    expect(checked.drafts[0]).toMatchObject({ fields: { values: { contactName: 'Pat' } } });
+  });
+
+  it('shows an earlier forward from its original sender, its quote depth removed', () => {
+    const text = earlierEmails([
+      {
+        direction: 'incoming',
+        fromName: 'Pat Carrier',
+        from: 'pat@carrier.example',
+        at: '2026-11-10T16:00:00.000Z',
+        subject: 'Lane rate',
+        body: '> We can do 4,100.\n> > Our 3,800?',
+        forward: {
+          depth: 1,
+          byName: 'Tom Trader',
+          byAddress: 'tom.home@mail.example',
+          note: '',
+          dateText: null,
+        },
+      },
+    ]);
+    expect(text).toContain('from="Pat Carrier, forwarded by Tom Trader of GSS"');
+    expect(text).toContain('We can do 4,100.');
+    expect(text).not.toContain('3,800');
   });
 });

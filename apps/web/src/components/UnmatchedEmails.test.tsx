@@ -38,6 +38,7 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
     replyToAddress: null,
     inReplyToSubject: null,
     draftedByClaude: false,
+    forward: null,
     ...overrides,
   };
 }

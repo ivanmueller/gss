@@ -6,6 +6,7 @@ import {
   EMAIL_DRAFT_JSON_SCHEMA,
   emailDraftAnswerSchema,
   emailLines,
+  forwardedText,
   formatAlberta,
   type EmailDraftView,
 } from '@grain/domain';
@@ -77,10 +78,21 @@ export function attribute(text: string): string {
 
 /** An email's own text (quoted mail left out), at most `max` characters. */
 function ownText(email: DraftContextEmail, max: number): string {
-  const { lines, cut } = emailLines(email.subject, email.body);
+  // A forward's text is the forwarded message's, its block's quote depth removed (F-233).
+  const { lines, cut } = emailLines(
+    email.subject,
+    email.forward === undefined ? email.body : forwardedText(email.body, 0, email.forward.depth),
+  );
   const body = lines.slice(1).join('\n');
   const kept = cutAt(body, max);
   return kept.length < body.length || cut ? `${kept}\n[the rest of the email was cut]` : kept;
+}
+
+/** A forward's attribute (F-233): who at GSS forwarded it from their own mailbox. */
+function forwardedBy(email: DraftContextEmail): string {
+  return email.forward === undefined
+    ? ''
+    : ` forwarded_by="${attribute(email.forward.byName)} of GSS, from their own mailbox"`;
 }
 
 function label(labels: Record<string, string>, value: string): string {
@@ -251,7 +263,7 @@ export function draftMessage(
         ? ['none']
         : thread.map(
             (e) =>
-              `<email direction="${e.direction === 'incoming' ? 'received' : 'sent by GSS'}" from="${attribute(e.fromName ?? e.from)}" at="${formatAlberta(e.occurredAt)}">\nSubject: ${fenced(e.subject)}\n${fenced(ownText(e, THREAD_EMAIL_CHARS_MAX))}\n</email>`,
+              `<email direction="${e.direction === 'incoming' ? 'received' : 'sent by GSS'}" from="${attribute(e.fromName ?? e.from)}"${forwardedBy(e)} at="${formatAlberta(e.occurredAt)}">\nSubject: ${fenced(e.subject)}\n${fenced(ownText(e, THREAD_EMAIL_CHARS_MAX))}\n</email>`,
           )),
     ];
     if (context.answer !== null) {
@@ -259,7 +271,7 @@ export function draftMessage(
       sections.push(
         '',
         'The email to answer:',
-        `<email ANSWER direction="received" from="${attribute(a.fromName ?? a.from)} (${attribute(a.from)})" at="${formatAlberta(a.occurredAt)}"${a.automatic ? ' automatic="yes"' : ''}>\nSubject: ${fenced(a.subject)}\n${fenced(ownText(a, ANSWER_CHARS_MAX))}\n</email>`,
+        `<email ANSWER direction="received" from="${attribute(a.fromName ?? a.from)} (${attribute(a.from)})"${forwardedBy(a)} at="${formatAlberta(a.occurredAt)}"${a.automatic ? ' automatic="yes"' : ''}>\nSubject: ${fenced(a.subject)}\n${fenced(ownText(a, ANSWER_CHARS_MAX))}\n</email>`,
       );
     }
     return sections.join('\n');
