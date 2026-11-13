@@ -74,16 +74,16 @@ function email(overrides: Partial<EmailView> = {}): EmailView {
   };
 }
 
-function show(enabled = true) {
+function show(enabled = true, session = SESSION) {
   render(
     <EmailProvider
-      session={SESSION}
+      session={session}
       counterpartyId={COMPANY}
       contacts={[PAT, DANA]}
       enabled={enabled}
     >
       <ContactEmail contact={PAT} />
-      <EmailsCard session={SESSION} counterpartyId={COMPANY} />
+      <EmailsCard session={session} counterpartyId={COMPANY} />
     </EmailProvider>,
   );
 }
@@ -658,6 +658,50 @@ describe('Reply and Draft with Claude (F-114 step 5b)', () => {
     const dialog = await openReply(user);
     expect(await within(dialog).findByLabelText('To')).toHaveValue('pat@buyer.example.test');
     expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Lane rate');
+  });
+
+  it('lets an admin remove an email from the company, after confirming (F-234)', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [RECEIVED] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...RECEIVED, body: 'Hello' } }),
+      [`POST /emails/${RECEIVED.id}/remove?organization_id=${ORG.id}`]: () =>
+        Response.json({ removed: true }),
+    });
+    show();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^RE: Barley/ }));
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    const confirm = screen.getByRole('group', { name: /^Remove: RE: Barley/ });
+    expect(confirm).toHaveTextContent('It is kept in the records');
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('group', { name: /^Remove:/ })).toBeNull();
+    expect(calls.some((call) => call.path.endsWith('/remove?organization_id=' + ORG.id))).toBe(
+      false,
+    );
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    await user.click(
+      within(screen.getByRole('group', { name: /^Remove:/ })).getByRole('button', {
+        name: 'Remove',
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^RE: Barley/ })).toBeNull();
+    });
+    expect(screen.getByText('No emails yet.')).toBeInTheDocument();
+  });
+
+  it('offers Remove to admins only (F-234)', async () => {
+    mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [LIST_PATH]: () => Response.json({ emails: [RECEIVED] }),
+      [OPEN_PATH]: () => Response.json({ email: { ...RECEIVED, body: 'Hello' } }),
+    });
+    show(true, { ...SESSION, organization: { ...ORG, role: 'trader' } });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^RE: Barley/ }));
+    await screen.findByRole('button', { name: 'Reply' });
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
   it('offers no Draft with Claude when Claude is not set up', async () => {
