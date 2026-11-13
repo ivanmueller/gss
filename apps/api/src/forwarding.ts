@@ -154,10 +154,18 @@ export function forwardingRoutes(openDatabase: DatabaseFactory, mailer: MailerFa
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       const addresses = await db.myForwardingAddresses(ctx, org);
       if (addresses === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      // Where to forward: the shared address as configured and the person's own, the only GSS
+      // addresses a forward is honoured at (Codex's review of F-233, R1-01).
+      const sending = sendingFor(emailConfig(c.env), org);
+      const settings = sending === null ? null : await db.getEmailSettings(ctx, org);
+      const me = settings?.members.find((m) => m.userId === ctx.userId);
+      const at = (localPart: string | null | undefined) =>
+        sending === null || localPart == null ? null : gssAddress(localPart, sending);
       return c.json({
         addresses,
-        available: sendingFor(emailConfig(c.env), org) !== null,
-        domain: sendingFor(emailConfig(c.env), org)?.domain ?? null,
+        available: sending !== null,
+        sharedAddress: at(settings?.sharedLocalPart),
+        ownAddress: at(me?.localPart),
       });
     });
   });

@@ -17,7 +17,15 @@ import { Input } from './ui/input';
 interface Listing {
   addresses: ForwardingAddressView[];
   available: boolean;
-  domain: string | null;
+  /** The shared address as an admin set it, and the person's own: where to forward (R1-01). */
+  sharedAddress: string | null;
+  ownAddress: string | null;
+}
+
+/** Where to forward, in words: only GSS's shared address or the person's own count. */
+function forwardTo(shared: string | null, own: string | null): string {
+  if (shared === null) return 'the business’s shared address';
+  return own === null ? shared : `${shared} or ${own}`;
 }
 
 export function ForwardingAddresses({ session }: { session: DirectorySession }) {
@@ -38,7 +46,7 @@ export function ForwardingAddresses({ session }: { session: DirectorySession }) 
       </p>
     ) : null;
   }
-  const { addresses, available, domain } = listing.data;
+  const { addresses, available, sharedAddress, ownAddress } = listing.data;
 
   function run(key: string, action: () => Promise<unknown>, done: string) {
     setBusy(key);
@@ -85,10 +93,9 @@ export function ForwardingAddresses({ session }: { session: DirectorySession }) 
         <CardContent className="flex flex-col gap-3 text-sm">
           <p className="text-muted-foreground">
             When a company answers you at a personal address, forward its email from that address to{' '}
-            {domain === null ? 'the business’s shared address' : `info@${domain}`} (or your own
-            address there). The platform files it under the company that wrote it, Claude reads it,
-            and Reply answers the company. Add each personal address you forward from; we email it a
-            code to confirm it is yours.
+            {forwardTo(sharedAddress, ownAddress)}. The platform files it under the company that
+            wrote it, Claude reads it, and Reply answers the company. Add each personal address you
+            forward from; we email it a code to confirm it is yours.
           </p>
           {!available && (
             <p className="text-muted-foreground">

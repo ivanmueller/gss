@@ -178,10 +178,24 @@ describe('the other routes', () => {
     expect(await res.json()).toEqual({
       addresses: [],
       available: true,
-      domain: 'gss.example.test',
+      sharedAddress: 'info@gss.example.test',
+      ownAddress: 'tom@gss.example.test',
     });
     expect(await (await call('', 'GET', undefined, ENV)).json()).toMatchObject({
       available: false,
+      sharedAddress: null,
+    });
+    // The shared address as an admin set it, not always info@ (R1-01).
+    const [me] = SETTINGS.members;
+    if (me === undefined) throw new Error('No member.');
+    db.getEmailSettings.mockResolvedValue({
+      ...SETTINGS,
+      sharedLocalPart: 'trading',
+      members: [{ ...me, localPart: null }],
+    });
+    expect(await (await call('', 'GET')).json()).toMatchObject({
+      sharedAddress: 'trading@gss.example.test',
+      ownAddress: null,
     });
   });
 

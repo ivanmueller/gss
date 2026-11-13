@@ -162,7 +162,12 @@ describe('ForwardingAddresses (F-233)', () => {
   it('lets every role add a personal address, then confirm it with the emailed code', async () => {
     const calls = mockApi({
       [ADDRESSES]: () =>
-        Response.json({ addresses: [PENDING], available: true, domain: 'gss.example.test' }),
+        Response.json({
+          addresses: [PENDING],
+          available: true,
+          sharedAddress: 'trading@gss.example.test',
+          ownAddress: null,
+        }),
       [`POST /me/forwarding-addresses?organization_id=${ORG.id}`]: () =>
         Response.json({ id: PENDING.id, addresses: [PENDING] }, { status: 201 }),
       [`POST /me/forwarding-addresses/${PENDING.id}/confirm?organization_id=${ORG.id}`]: () =>
@@ -170,7 +175,7 @@ describe('ForwardingAddresses (F-233)', () => {
     });
     render(<TeamPage session={{ ...SESSION, organization: { ...ORG, role: 'viewer' } }} />);
     const card = await screen.findByRole('region', { name: 'Your forwarding addresses' });
-    expect(card).toHaveTextContent('to info@gss.example.test');
+    expect(card).toHaveTextContent('to trading@gss.example.test.');
     expect(card).toHaveTextContent('tom.home@mail.example');
     expect(card).toHaveTextContent('Waiting for its code');
     await userEvent.type(within(card).getByLabelText('Add a personal address'), 'Me@Mail.example');
@@ -196,7 +201,12 @@ describe('ForwardingAddresses (F-233)', () => {
   it('shows a refused code plainly', async () => {
     mockApi({
       [ADDRESSES]: () =>
-        Response.json({ addresses: [PENDING], available: true, domain: 'gss.example.test' }),
+        Response.json({
+          addresses: [PENDING],
+          available: true,
+          sharedAddress: 'trading@gss.example.test',
+          ownAddress: null,
+        }),
       [`POST /me/forwarding-addresses/${PENDING.id}/confirm?organization_id=${ORG.id}`]: () =>
         Response.json(
           { error: { code: 'WRONG_CODE', message: 'That code is not right.' } },

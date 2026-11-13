@@ -31,7 +31,12 @@ export function mockApi(handlers: Record<string, Handler>): Call[] {
       }
       // The Team page lists the person's forwarding addresses (F-233): none, unless a test says.
       if (method === 'GET' && path.startsWith('/me/forwarding-addresses?')) {
-        return Response.json({ addresses: [], available: false, domain: null });
+        return Response.json({
+          addresses: [],
+          available: false,
+          sharedAddress: null,
+          ownAddress: null,
+        });
       }
       return Response.json(
         { error: { code: 'NOT_FOUND', message: 'Not found.' } },
