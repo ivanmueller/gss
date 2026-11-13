@@ -120,7 +120,7 @@ Step 2 merged (ivanmueller/gss#218, 2026-11-10). Step 3 merged (ivanmueller/gss#
 
 #### 1a. F-233 — Forwarded email: mail a person received in their own mailbox, brought into the platform
 
-**Status:** Planned (asked 2026-11-13; Codex design review next, high risk: email receiving, database, Claude). **Asked:** the owner received a logistics company's answer in their personal mailbox and wants to forward it into the platform.
+**Status:** Live, check pending (merged as ivanmueller/gss#241 on 2026-11-13; register `docs/reviews/F-233.md`). Asked 2026-11-13. **Asked:** the owner received a logistics company's answer in their personal mailbox and wants to forward it into the platform.
 
 **Today (found 2026-11-13):** forwarding such an email to an address on the business's domain keeps it, but the platform sees it as mail from the person's own address: it lands on **Follow-ups → Email on no company** (it can be linked by hand); Claude reads only the person's note above the forwarded part, because the forwarded block (`From: … Date:` or `From: … Sent:`) is cut as quoted mail (`packages/domain/src/emailReading.ts`); **Reply** would answer the person, not the original sender.
 
@@ -189,6 +189,7 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 |---|---|---|
 | F-231 | **Reminder after an unanswered email** (F-114 step 5c part 2; its thread context was checked 2026-11-12): from a made-up test company's page, email your personal address a question and do not answer; from 2026-11-18 at the earliest (three business days later; reminders only for mail sent from 2026-11-13), "Reminder: no answer to …" on its **Emails** card and **Follow-ups → Emails to send**, for you; **Open** (To your address, "Re: …"), **Send**: the same thread in your mail program; a thanks-only email, or one answered in time, gets no reminder. | #236 |
 | F-232 | **Sending attachments by email** (F-114 step 7): from a made-up test company's page, open **New email** to your personal address, click **Attach files**, attach a PDF and a photo from a phone or computer, and send; both arrive in your inbox and open; on the company's **Emails** card the email shows "2 attachments" and each file downloads when you open the email; then try attaching a Word file: it is refused with a message naming it and Send stays off. | #239 |
+| F-233 | **Forwarded email**: **Team → Your forwarding addresses**, add your personal address, **Add and send a code**, type the 6 digits from the email, **Confirm** (shows Confirmed); from that mailbox forward a made-up test company contact's email to the address the card names; on the company's **Emails** card it shows from the contact with "Forwarded by … from their own mailbox"; **Reply**: To is the contact, subject "Re: " and the original subject; Claude's drafts from it appear as for direct mail, the reply draft assigned to you. | #241 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
@@ -250,7 +251,7 @@ Test file names are short: `*.spec.ts` are browser tests in `tests/e2e/specs/`; 
 
 | ID | Pull request | Status |
 |---|---|---|
-| D-01 | Dependabot #191 (was #112): 15 minor and patch updates | Reopened 2026-11-09. Still fails lint (one `no-unnecessary-condition` error at line 400 of a changed file, as before at `FacilityMap.tsx`); redo on our own branch with the lint fixed and a review register. |
+| D-01 | Dependabot #224 (was #191, before it #112): 16 minor and patch updates | Reopened 2026-11-09. Still fails lint (one `no-unnecessary-condition` error at line 400 of a changed file, as before at `FacilityMap.tsx`); redo on our own branch with the lint fixed and a review register. |
 | D-02 | Dependabot #192 (was #113): postgres (the Worker's database library) 3 → 4.1.0, a major version | Its CI failed one browser test ("adds a carrier, enters its rate per load…", `counterparties.spec.ts:635`; unit and database tests passed). To test on its own branch with all database tests, finding whether postgres 4 or a flaky test is the cause; Codex review. |
 | D-03 | Dependabot #114: `@types/node` 22 → 26 | Not wanted: CI and deploys run Node 22. Close, and tell Dependabot to skip major `@types/node` updates. |
 | D-04 | Dependabot #190: `supabase/setup-cli` action 1 → 3 | Changes `ci.yml` and `deploy-staging.yml`: governance, so it needs a review register and the owner's approval of the exact commit. Merge policy held it (2026-11-10), as designed. |
