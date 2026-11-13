@@ -340,6 +340,103 @@ describe('the email form', () => {
   });
 });
 
+// Files from the computer (F-114 step 7). Synthetic bytes only.
+const PDF_FILE = () =>
+  new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a])], 'ticket.pdf', {
+    type: 'application/pdf',
+  });
+const PNG_FILE = () =>
+  new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0])], 'load.png', {
+    type: 'image/png',
+  });
+const HTML_FILE = () => new File(['<html>hi</html>'], 'page.pdf', { type: 'application/pdf' });
+
+function fileInputOf(dialog: HTMLElement): HTMLInputElement {
+  const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+  if (input === null) throw new Error('No file input');
+  return input;
+}
+
+describe('attaching files (F-114 step 7)', () => {
+  it('attaches, removes and sends the files with the email as a form, under a new key', async () => {
+    const calls = mockApi({
+      [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }),
+      [`POST /emails?organization_id=${ORG.id}`]: () =>
+        Response.json({ email: email({ attachmentCount: 1 }) }, { status: 201 }),
+    });
+    show();
+    const user = userEvent.setup();
+    const dialog = await write(user);
+    expect(within(dialog).getByText(/Up to 10 files, 10 MB in all/)).toBeInTheDocument();
+    await user.upload(fileInputOf(dialog), [PDF_FILE(), PNG_FILE()]);
+    const list = within(dialog).getByRole('list', { name: 'Attached files' });
+    expect(within(list).getByText('ticket.pdf')).toBeInTheDocument();
+    expect(within(list).getByText('load.png')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove load.png' }));
+    expect(within(list).queryByText('load.png')).toBeNull();
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Send' })).toBeEnabled();
+    });
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }));
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('Sent.');
+    const post = calls.find((call) => call.method === 'POST');
+    expect(post?.body).toBeInstanceOf(FormData);
+    const form = post?.body as FormData;
+    const sent = JSON.parse(form.get('email') as string) as Record<string, unknown>;
+    expect(sent).toMatchObject({ subject: 'Feed oats', message: 'Hello Pat' });
+    expect(sent).not.toHaveProperty('files');
+    const files = form.getAll('file') as File[];
+    expect(files.map((file) => file.name)).toEqual(['ticket.pdf']);
+    // The browser writes the multipart type with its boundary itself.
+    expect(post?.headers.get('Content-Type')).toBeNull();
+  });
+
+  it('refuses a file that is not a PDF or photo, whatever its name, until it is removed', async () => {
+    mockApi({ [SETTINGS_PATH]: () => Response.json({ settings: SETTINGS }) });
+    show();
+    const user = userEvent.setup();
+    const dialog = await write(user);
+    await user.upload(fileInputOf(dialog), [HTML_FILE()]);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      '“page.pdf” cannot be attached. Only PDFs and JPEG or PNG photos can be attached.',
+    );
+    expect(within(dialog).getByRole('button', { name: 'Send' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove page.pdf' }));
+    expect(within(dialog).queryByRole('alert')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('shows a sent email’s files with download buttons', async () => {
+    const sent = email({ attachmentCount: 1 });
+    mockApi({
+      [LIST_PATH]: () => Response.json({ emails: [sent] }),
+      [`GET /emails/${sent.id}?organization_id=${ORG.id}`]: () =>
+        Response.json({
+          email: {
+            ...sent,
+            body: 'Ticket attached.',
+            bodyTruncated: false,
+            attachments: [
+              {
+                position: 0,
+                fileName: 'ticket.pdf',
+                contentType: 'application/pdf',
+                sizeBytes: 2048,
+                disposition: 'attachment',
+              },
+            ],
+          },
+        }),
+    });
+    show();
+    const user = userEvent.setup();
+    expect(await screen.findByText(/1 attachment$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Feed oatsSent/ }));
+    expect(await screen.findByRole('button', { name: 'ticket.pdf' })).toBeInTheDocument();
+    expect(screen.getByText('2 KB')).toBeInTheDocument();
+  });
+});
+
 describe('the Emails card', () => {
   it('lists emails with their state, opens one, and loads older ones (D1-03)', async () => {
     const page = Array.from({ length: 200 }, (_, i) =>

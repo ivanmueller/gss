@@ -155,6 +155,7 @@ describe('POST /emails', () => {
       replyToEmailId: null,
       claudeDraftId: null,
       autoDraftId: null,
+      attachments: [],
     });
     expect(mailer.send).toHaveBeenCalledWith({
       fromAddress: 'tom@gss.example.test',
@@ -279,6 +280,207 @@ describe('POST /emails', () => {
   });
 });
 
+// Files sent with an email (F-114 step 7). Synthetic bytes only.
+const PDF_BYTES = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x25]);
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
+
+function storeBucket(failAt?: number) {
+  let puts = 0;
+  return {
+    get: vi.fn(),
+    put: vi.fn(() => {
+      puts += 1;
+      return puts === failAt ? Promise.reject(new Error('R2 down')) : Promise.resolve({});
+    }),
+    head: vi.fn(),
+    delete: vi.fn(),
+    list: vi.fn(),
+  };
+}
+
+async function sendWithFiles(
+  files: [Uint8Array, string][],
+  env: Record<string, unknown>,
+  body: Record<string, unknown> = {},
+) {
+  const form = new FormData();
+  form.append(
+    'email',
+    JSON.stringify({
+      counterpartyId: COMPANY,
+      contactId: CONTACT,
+      from: 'own',
+      to: ['pat@buyer.example.test'],
+      cc: [],
+      subject: 'Feed oats',
+      message: 'Tickets attached.',
+      sendKey: KEY,
+      ...body,
+    }),
+  );
+  for (const [bytes, name] of files) form.append('file', new Blob([bytes]), name);
+  const encoded = new Response(form);
+  const raw = new Uint8Array(await encoded.arrayBuffer());
+  return app.request(
+    '/api/v1/emails',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${VALID_TOKEN}`,
+        'Content-Type': encoded.headers.get('content-type') ?? '',
+        'Content-Length': String(raw.byteLength),
+      },
+      body: raw,
+    },
+    env,
+  );
+}
+
+const SHA = /^[0-9a-f]{64}$/;
+const fileKey = (position: number) => `sent/${EMAIL_ID}/${String(position)}-${'a'.repeat(64)}`;
+
+describe('POST /emails with files (F-114 step 7)', () => {
+  it('keeps each file at the key the database wrote, then sends them', async () => {
+    const bucket = storeBucket();
+    db.startOutgoingEmail.mockResolvedValue({
+      status: 'started',
+      id: 'email-1',
+      fileKeys: [fileKey(0), fileKey(1)],
+    });
+    const response = await sendWithFiles(
+      [
+        [PDF_BYTES, 'C:\\fakepath\\ticket.pdf'],
+        [PNG_BYTES, 'photo.heic'],
+      ],
+      { ...EMAIL_ENV, EMAIL_FILES: bucket },
+    );
+    expect(response.status).toBe(201);
+    expect(db.startOutgoingEmail).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        subject: 'Feed oats',
+        attachments: [
+          {
+            position: 0,
+            fileName: 'ticket.pdf',
+            contentType: 'application/pdf',
+            sizeBytes: 10,
+            sha256: expect.stringMatching(SHA) as unknown,
+          },
+          {
+            position: 1,
+            fileName: 'photo.png',
+            contentType: 'image/png',
+            sizeBytes: 12,
+            sha256: expect.stringMatching(SHA) as unknown,
+          },
+        ],
+      }),
+    );
+    expect(bucket.put).toHaveBeenNthCalledWith(1, fileKey(0), PDF_BYTES, {
+      httpMetadata: { contentType: 'application/pdf' },
+    });
+    expect(bucket.put).toHaveBeenNthCalledWith(2, fileKey(1), PNG_BYTES, {
+      httpMetadata: { contentType: 'image/png' },
+    });
+    expect(mailer.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          { filename: 'ticket.pdf', type: 'application/pdf', bytes: PDF_BYTES },
+          { filename: 'photo.png', type: 'image/png', bytes: PNG_BYTES },
+        ],
+      }),
+    );
+  });
+
+  it('refuses a file that is not a PDF or photo before anything is kept or sent', async () => {
+    const bucket = storeBucket();
+    const response = await sendWithFiles(
+      [
+        [PDF_BYTES, 'a.pdf'],
+        [new TextEncoder().encode('<html>hi</html>'), 'page.pdf'],
+      ],
+      { ...EMAIL_ENV, EMAIL_FILES: bucket },
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json<{ error: { code: string; message: string } }>();
+    expect(body.error.code).toBe('ATTACHMENT_REFUSED');
+    expect(body.error.message).toContain('“page.pdf”');
+    expect(db.startOutgoingEmail).not.toHaveBeenCalled();
+    expect(bucket.put).not.toHaveBeenCalled();
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses files without the bucket; a text-only email still goes', async () => {
+    const response = await sendWithFiles([[PDF_BYTES, 'a.pdf']], EMAIL_ENV);
+    expect(response.status).toBe(503);
+    expect((await response.json<{ error: { message: string } }>()).error.message).toBe(
+      'Attachments cannot be sent until file storage is set up.',
+    );
+    expect(db.startOutgoingEmail).not.toHaveBeenCalled();
+    expect((await send()).status).toBe(201);
+  });
+
+  it('sends nothing when a file cannot be kept, and records the email as failed', async () => {
+    const bucket = storeBucket(2);
+    db.startOutgoingEmail.mockResolvedValue({
+      status: 'started',
+      id: 'email-1',
+      fileKeys: [fileKey(0), fileKey(1)],
+    });
+    db.getEmail.mockResolvedValue(emailRow({ state: 'failed' }));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const response = await sendWithFiles(
+      [
+        [PDF_BYTES, 'a.pdf'],
+        [PNG_BYTES, 'b.png'],
+      ],
+      { ...EMAIL_ENV, EMAIL_FILES: bucket },
+    );
+    expect(response.status).toBe(502);
+    expect((await response.json<{ error: { code: string } }>()).error.code).toBe('EMAIL_REFUSED');
+    expect(db.finishOutgoingEmail).toHaveBeenCalledWith(expect.anything(), 'email-1', {
+      ok: false,
+      failure: 'E_FILE_STORE: The attachments could not be stored. Nothing was sent.',
+    });
+    expect(mailer.send).not.toHaveBeenCalled();
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('@');
+  });
+
+  it('never keeps or sends the files again for a key used before', async () => {
+    const bucket = storeBucket();
+    db.startOutgoingEmail.mockResolvedValue({
+      status: 'already_started',
+      email: emailRow({ state: 'sent', attachmentCount: 1 }),
+    });
+    const response = await sendWithFiles([[PDF_BYTES, 'a.pdf']], {
+      ...EMAIL_ENV,
+      EMAIL_FILES: bucket,
+    });
+    expect(response.status).toBe(200);
+    expect(bucket.put).not.toHaveBeenCalled();
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses a body over the cap before the database', async () => {
+    const response = await app.request(
+      '/api/v1/emails',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${VALID_TOKEN}`,
+          'Content-Type': 'multipart/form-data; boundary=x',
+          'Content-Length': String(12 * 1024 * 1024),
+        },
+        body: 'x',
+      },
+      EMAIL_ENV,
+    );
+    expect(response.status).toBe(413);
+    expect(db.startOutgoingEmail).not.toHaveBeenCalled();
+  });
+});
+
 describe('the Cloudflare mailer', () => {
   it('sends text from the address with the name, without Cc when there is none', async () => {
     const binding = {
@@ -299,6 +501,38 @@ describe('the Cloudflare mailer', () => {
       to: ['pat@buyer.example.test'],
       subject: 'Feed oats',
       text: 'Hello',
+    });
+  });
+
+  it('passes files to Cloudflare as base64 attachments (F-114 step 7)', async () => {
+    const binding = {
+      send: vi.fn<SendEmailBinding['send']>(() => Promise.resolve({ messageId: 'id-1' })),
+    };
+    await cloudflareMailer({ ...EMAIL_ENV, EMAIL: binding })?.send({
+      fromAddress: 'tom@gss.example.test',
+      fromName: 'Tom Trader',
+      to: ['pat@buyer.example.test'],
+      cc: [],
+      subject: 'Tickets',
+      text: 'Attached.',
+      attachments: [{ filename: 'ticket.pdf', type: 'application/pdf', bytes: PDF_BYTES }],
+    });
+    expect(binding.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          {
+            content: btoa(String.fromCharCode(...PDF_BYTES)),
+            filename: 'ticket.pdf',
+            type: 'application/pdf',
+            disposition: 'attachment',
+          },
+        ],
+      }),
+    );
+    expect(sendFailure(Object.assign(new Error('x'), { code: 'E_TOO_MANY_ATTACHMENTS' }))).toEqual({
+      kind: 'refused',
+      code: 'E_TOO_MANY_ATTACHMENTS',
+      failure: 'Too many files on one email.',
     });
   });
 
@@ -672,6 +906,31 @@ describe('a received email’s files', () => {
     });
     expect((await get('attachments/0')).status).toBe(404);
     expect(errors.mock.calls.flat().join(' ')).not.toContain('@');
+    errors.mockRestore();
+  });
+
+  it('gives a sent email’s file from its own key; a sent email has no original', async () => {
+    const key = fileKey(1);
+    db.storedEmailFile.mockResolvedValue({
+      sentFile: { position: 1, fileName: 'ticket.pdf', fileKey: key },
+    });
+    const env = { ...ENV, EMAIL_FILES: bucketWith({ [key]: PDF_BYTES }) };
+    const get = (path: string) =>
+      app.request(`/api/v1/emails/${EMAIL_ID}/${path}`, { headers: AUTH }, env);
+    const response = await get('attachments/1');
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(PDF_BYTES);
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(response.headers.get('Content-Disposition')).toContain('filename="ticket.pdf"');
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(db.storedEmailFile).toHaveBeenLastCalledWith(expect.anything(), ORG, EMAIL_ID, 1);
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    db.storedEmailFile.mockResolvedValue({
+      sentFile: { position: 1, fileName: 'ticket.pdf', fileKey: fileKey(2) },
+    });
+    expect((await get('attachments/1')).status).toBe(404);
+    expect((await get('original')).status).toBe(404);
     errors.mockRestore();
   });
 

@@ -82,6 +82,7 @@ describe('a reply drafted with Claude', () => {
       replyToEmailId: received,
       claudeDraftId: started.id,
       autoDraftId: null,
+      attachments: [],
     };
     const sending = await db.startOutgoingEmail(as(people.vera), reply);
     if (sending.status !== 'started') throw new Error(sending.status);

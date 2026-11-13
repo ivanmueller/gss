@@ -16,6 +16,13 @@ import { claudeClient, type ClaudeFactory } from './anthropic';
 import type { Database, RequestContext } from './db';
 import { draftEmail } from './email-drafts';
 import {
+  MAX_SEND_BYTES,
+  prepareFiles,
+  readSendForm,
+  type ChosenFile,
+  type SentFile,
+} from './email-files';
+import {
   emailConfig,
   gssAddress,
   threadHeaders,
@@ -39,8 +46,6 @@ import {
 // The domain and the one organization that sends from it come from the Worker's configuration,
 // never from the request (Codex's design review of F-114-3, finding D1-01).
 
-/** A message of 100,000 characters, which JSON may write as up to six bytes each, and the rest. */
-const MAX_SEND_BYTES = 640 * 1024;
 const MAX_SETTINGS_BYTES = 16 * 1024;
 const MAX_DRAFT_BYTES = 16 * 1024;
 const NOT_MEMBER = 'You are not a member of this organization.';
@@ -48,6 +53,8 @@ const NOT_CONFIGURED = 'Email is not set up yet. An admin adds the email setting
 const NOT_THIS_ORGANIZATION = 'Email is not set up for this organization.';
 const NOT_RECEIVING = 'Received email is not set up yet.';
 const NO_LONGER_LISTED = 'This email is no longer listed.';
+const NO_FILE_STORAGE = 'Attachments cannot be sent until file storage is set up.';
+const FILES_NOT_STORED = 'The attachments could not be stored. Nothing was sent.';
 
 /** The person's organization: the one they belong to, or the one named when they have several. */
 async function organizationOf(c: ApiContext, db: Database): Promise<string | null> {
@@ -288,7 +295,8 @@ export function emailRoutes(
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       const stored = await db.storedEmailFile(ctx, org, id, null);
-      if (stored === null) return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
+      if (stored === null || 'sentFile' in stored)
+        return apiError(c, 404, 'NOT_FOUND', NO_LONGER_LISTED);
       const object = await bucket.get(stored.rawKey);
       if (object === null) return originalMissing(c, id);
       return download(object.body ?? (await object.arrayBuffer()), `email-${id}.eml`);
@@ -306,6 +314,15 @@ export function emailRoutes(
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       const stored = await db.storedEmailFile(ctx, org, id, position);
+      if (stored !== null && 'sentFile' in stored) {
+        // A sent email's file, kept on its own (F-114 step 7).
+        const object = await bucket.get(stored.sentFile.fileKey);
+        if (object === null) return fileMissing(c, id);
+        return download(
+          object.body ?? (await object.arrayBuffer()),
+          attachmentFileName(stored.sentFile.fileName, position),
+        );
+      }
       if (stored?.attachment == null) return apiError(c, 404, 'NOT_FOUND', 'No such attachment.');
       if (stored.rawSize > MAX_RAW_BYTES) return attachmentUnreadable(c, id);
       const object = await bucket.get(stored.rawKey);
@@ -451,9 +468,24 @@ export function emailRoutes(
 
   routes.post('/', async (c) => {
     c.header('Cache-Control', 'no-store');
-    const body = await readJson(c, MAX_SEND_BYTES);
-    if (!body.ok) return body.response;
-    const parsed = sendEmailSchema.safeParse(body.value);
+    // With files (F-114 step 7) the form sends multipart/form-data: the same JSON in its `email`
+    // part and the files; without, the JSON alone as before.
+    const multipart = (c.req.header('content-type') ?? '')
+      .toLowerCase()
+      .startsWith('multipart/form-data');
+    let json: unknown;
+    let chosen: ChosenFile[] = [];
+    if (multipart) {
+      const form = await readSendForm(c.req.raw);
+      if (!form.ok) return apiError(c, form.status, form.code, form.message);
+      json = form.json;
+      chosen = form.files;
+    } else {
+      const body = await readJson(c, MAX_SEND_BYTES);
+      if (!body.ok) return body.response;
+      json = body.value;
+    }
+    const parsed = sendEmailSchema.safeParse(json);
     if (!parsed.success) {
       return apiError(
         c,
@@ -463,10 +495,20 @@ export function emailRoutes(
       );
     }
     const request = parsed.data;
+    // Every file checked before anything is kept or sent; none is ever given to Claude.
+    let files: SentFile[] = [];
+    if (chosen.length > 0) {
+      const prepared = await prepareFiles(chosen);
+      if (!prepared.ok) return apiError(c, 422, 'ATTACHMENT_REFUSED', prepared.message);
+      files = prepared.files;
+    }
     const config = emailConfig(c.env);
     const sender = mailer(c.env);
     if (config === null || sender === null)
       return apiError(c, 503, 'EMAIL_NOT_CONFIGURED', NOT_CONFIGURED);
+    const store = files.length === 0 ? null : (c.env.EMAIL_FILES ?? null);
+    if (files.length > 0 && store === null)
+      return apiError(c, 503, 'EMAIL_NOT_CONFIGURED', NO_FILE_STORAGE);
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
@@ -511,6 +553,13 @@ export function emailRoutes(
         replyToEmailId: request.replyToEmailId,
         claudeDraftId: request.claudeDraftId,
         autoDraftId: request.autoDraftId,
+        attachments: files.map((file) => ({
+          position: file.position,
+          fileName: file.fileName,
+          contentType: file.contentType,
+          sizeBytes: file.sizeBytes,
+          sha256: file.sha256,
+        })),
       });
       switch (started.status) {
         case 'started':
@@ -583,6 +632,27 @@ export function emailRoutes(
           );
       }
 
+      // The files are kept first, at the keys the database wrote; if one cannot be, nothing is
+      // sent. Files already kept stay: they belong to the failed email's record.
+      if (store !== null) {
+        try {
+          for (const file of files) {
+            const key = started.fileKeys[file.position];
+            if (key === undefined) throw new Error('No key for a file');
+            await store.put(key, file.bytes, { httpMetadata: { contentType: file.contentType } });
+          }
+        } catch {
+          console.error(`Email ${started.id} files not stored in request ${c.get('requestId')}`);
+          await db.finishOutgoingEmail(ctx, started.id, {
+            ok: false,
+            failure: `E_FILE_STORE: ${FILES_NOT_STORED}`,
+          });
+          return apiError(c, 502, 'EMAIL_REFUSED', `Not sent. ${FILES_NOT_STORED}`, {
+            email: await db.getEmail(ctx, org, started.id),
+          });
+        }
+      }
+
       // A reply carries In-Reply-To and References, so mail programs thread it (R3-01).
       const answered =
         request.replyToEmailId === null
@@ -598,6 +668,15 @@ export function emailRoutes(
         ...(answered === null
           ? {}
           : { headers: threadHeaders(answered.messageId, answered.references) }),
+        ...(files.length === 0
+          ? {}
+          : {
+              attachments: files.map((file) => ({
+                filename: file.fileName,
+                type: file.contentType,
+                bytes: file.bytes,
+              })),
+            }),
       });
       if (outcome.kind === 'unknown') {
         // Left sending: whether it went is not known, so nobody is told it failed (or sent).
@@ -665,6 +744,11 @@ export function contentDisposition(name: string): string {
 function originalMissing(c: ApiContext, id: string) {
   console.error(`Email file: original missing id=${id} request=${c.get('requestId')}`);
   return apiError(c, 404, 'NOT_FOUND', 'The original of this email is not available.');
+}
+
+function fileMissing(c: ApiContext, id: string) {
+  console.error(`Email file: sent file missing id=${id} request=${c.get('requestId')}`);
+  return apiError(c, 404, 'NOT_FOUND', 'This file is not available.');
 }
 
 function attachmentUnreadable(c: ApiContext, id: string) {

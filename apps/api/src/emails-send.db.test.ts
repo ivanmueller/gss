@@ -139,6 +139,7 @@ describe('sending', () => {
       replyToEmailId: null,
       claudeDraftId: null,
       autoDraftId: null,
+      attachments: [],
     });
 
   it('starts once per send key and answers the earlier email after (F-114-3-D1-02)', async () => {
@@ -219,6 +220,7 @@ describe('sending', () => {
         replyToEmailId: null,
         claudeDraftId: null,
         autoDraftId: null,
+        attachments: [],
       });
       if (started.status !== 'started') throw new Error(`not started: ${started.status}`);
       expect(
@@ -272,5 +274,125 @@ describe('sending', () => {
       values (${otherOrg}, ${outsider}, 'org_admin', 'active', now())`;
     expect(await db.listEmails(as(outsider), org, company, null)).toBeNull();
     expect(await db.getEmailSettings(as(outsider), org)).toBeNull();
+  });
+});
+
+// F-114 step 7: files sent with an email, listed with it, each at a key the database writes.
+describe('sending files', () => {
+  const sha = (n: number) => n.toString(16).padStart(64, '0');
+  const ticket = {
+    position: 0,
+    fileName: 'ticket.pdf',
+    contentType: 'application/pdf',
+    sizeBytes: 1200,
+    sha256: sha(1),
+  };
+  const files = [
+    ticket,
+    {
+      position: 1,
+      fileName: 'load.jpg',
+      contentType: 'image/jpeg',
+      sizeBytes: 5000,
+      sha256: sha(2),
+    },
+  ];
+  const start = (key: string, attachments = files) =>
+    db.startOutgoingEmail(as(people.tom), {
+      organizationId: org,
+      counterpartyId: company,
+      contactId: null,
+      fromLocalPart: 'tom',
+      domain: 'gss.example.test',
+      to: ['pat@buyer.example.test'],
+      cc: [],
+      subject: 'Synthetic tickets',
+      body: 'Synthetic body.',
+      messageId: `gss-${key}`,
+      replyToEmailId: null,
+      claudeDraftId: null,
+      autoDraftId: null,
+      attachments,
+    });
+
+  it('lists the files with the email and answers their keys; members read and download them', async () => {
+    const started = await start(id());
+    expect(started.status).toBe('started');
+    if (started.status !== 'started') return;
+    expect(started.fileKeys).toEqual([
+      `sent/${started.id}/0-${sha(1)}`,
+      `sent/${started.id}/1-${sha(2)}`,
+    ]);
+    const viewed = await db.getEmail(as(people.vera), org, started.id);
+    expect(viewed?.attachmentCount).toBe(2);
+    expect(viewed?.attachments).toEqual([
+      {
+        position: 0,
+        fileName: 'ticket.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 1200,
+        disposition: 'attachment',
+      },
+      {
+        position: 1,
+        fileName: 'load.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 5000,
+        disposition: 'attachment',
+      },
+    ]);
+    expect(await db.storedEmailFile(as(people.vera), org, started.id, 1)).toEqual({
+      sentFile: { position: 1, fileName: 'load.jpg', fileKey: `sent/${started.id}/1-${sha(2)}` },
+    });
+    // A sent email has no original, and no file at a position not listed.
+    expect(await db.storedEmailFile(as(people.vera), org, started.id, null)).toBeNull();
+    expect(await db.storedEmailFile(as(people.vera), org, started.id, 2)).toBeNull();
+  });
+
+  it('keeps nothing when a file is refused by the database', async () => {
+    const key = id();
+    await expect(start(key, [{ ...ticket, contentType: 'text/html' }])).rejects.toMatchObject({
+      code: '23514',
+    });
+    await expect(start(key, [{ ...ticket, position: 1 }])).rejects.toMatchObject({
+      code: '23514',
+    });
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from app.emails where message_id = ${`gss-${key}`}`;
+    expect(row?.n).toBe(0);
+  });
+
+  it('a retry of the same key answers the earlier email, its files not listed twice', async () => {
+    const key = id();
+    const first = await start(key);
+    const second = await start(key);
+    expect(second.status).toBe('already_started');
+    if (first.status !== 'started') return;
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from app.email_attachments where email_id = ${first.id}`;
+    expect(row?.n).toBe(2);
+  });
+
+  // D1-02: the Worker deployed before the migration calls the 13-argument function exactly as
+  // it did; with both versions present the call is not ambiguous.
+  it('still answers the 13-argument call of the Worker before this step', async () => {
+    const api = postgres(API_URL, { max: 1, onnotice: () => undefined, fetch_types: false });
+    try {
+      const [row] = await api.begin(async (tx) => {
+        await tx`select set_config('app.user_id', ${people.tom}, true)`;
+        return tx<{ result: { status: string; id?: string } }[]>`
+          select app.start_outgoing_email(
+            ${org}, ${company}, ${null}, ${'tom'}, ${'gss.example.test'},
+            array(select t.x from jsonb_array_elements_text(${tx.json(['pat@buyer.example.test'])}::jsonb)
+                    with ordinality t(x, n) order by t.n),
+            array(select t.x from jsonb_array_elements_text(${tx.json([])}::jsonb)
+                    with ordinality t(x, n) order by t.n),
+            ${'Synthetic subject'}, ${'Synthetic body.'},
+            ${`gss-${id()}`}, ${null}::uuid, ${null}::uuid, ${null}::uuid) as result`;
+      });
+      expect(row?.result.status).toBe('started');
+    } finally {
+      await api.end();
+    }
   });
 });

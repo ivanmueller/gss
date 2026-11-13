@@ -1,5 +1,9 @@
 import {
+  ATTACHMENT_ACCEPT,
+  ATTACHMENT_HEAD_BYTES,
+  ATTACHMENT_RULE,
   attachmentFileName,
+  checkAttachments,
   composeEmailBody,
   EMAIL_DRAFT_ABOUT_MAX,
   EMAIL_MAX_RECIPIENTS,
@@ -16,7 +20,7 @@ import {
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
-import { Download, Mail, Paperclip, Reply, Send } from 'lucide-react';
+import { Download, Mail, Paperclip, Reply, Send, X } from 'lucide-react';
 import {
   createContext,
   useContext,
@@ -180,6 +184,8 @@ interface SendPayload {
   replyToEmailId: string | null;
   claudeDraftId: string | null;
   autoDraftId: string | null;
+  /** Files from the computer (F-114 step 7): sent as multipart, never given to Claude. */
+  files: File[];
 }
 
 /** Claude's draft as it filled the form, to check what is still in the text. */
@@ -271,6 +277,15 @@ function EmailDialog({
   // One key per attempt: a second click or a retry after a lost answer never sends twice; a
   // new key only after Cloudflare refused it (Codex's design review of F-114-3, D1-02).
   const [sendKey, setSendKey] = useState(() => held?.sendKey ?? crypto.randomUUID());
+  // Files from the computer (F-114 step 7), checked here for a quick message; the Worker checks
+  // them again. Any change to them is a new attempt: a new key, so an edited email is never
+  // matched to an earlier one.
+  const [files, setFiles] = useState<File[]>(held?.files ?? []);
+  const [checkingFiles, setCheckingFiles] = useState(false);
+  const [fileProblem, setFileProblem] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  /** The latest choice of files: an earlier check finishing late is ignored. */
+  const fileChoice = useRef(0);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(
     held === null
@@ -348,7 +363,9 @@ function EmailDialog({
     bad.length === 0 &&
     !tooMany &&
     subjectLine.trim() !== '' &&
-    message.trim() !== '';
+    message.trim() !== '' &&
+    !checkingFiles &&
+    fileProblem === null;
   const firstTo = normalizeEmailAddress(toList[0] ?? '');
   const matchedContact =
     contacts.find((c) => c.email && normalizeEmailAddress(c.email) === firstTo) ?? null;
@@ -371,16 +388,24 @@ function EmailDialog({
       replyToEmailId: answering,
       claudeDraftId: draft?.draftId ?? null,
       autoDraftId,
+      files,
     };
     setPending(payload);
     setBusy(true);
     setResult(null);
-    sendJson<{ email: EmailView }>(
-      `/emails?organization_id=${organization.id}`,
-      token,
-      'POST',
-      payload,
-    )
+    const { files: chosen, ...email } = payload;
+    const path = `/emails?organization_id=${organization.id}`;
+    let request: Promise<{ email: EmailView }>;
+    if (chosen.length === 0) {
+      request = sendJson<{ email: EmailView }>(path, token, 'POST', email);
+    } else {
+      // The browser sets the multipart Content-Type and the body's length.
+      const form = new FormData();
+      form.append('email', JSON.stringify(email));
+      for (const file of chosen) form.append('file', file, file.name);
+      request = apiJson<{ email: EmailView }>(path, token, { method: 'POST', body: form });
+    }
+    request
       .then(() => {
         setSent(true);
         onHold(null);
@@ -438,6 +463,33 @@ function EmailDialog({
       })
       .finally(() => {
         setBusy(false);
+      });
+  }
+
+  function chooseFiles(next: File[]) {
+    const choice = ++fileChoice.current;
+    setFiles(next);
+    setSendKey(crypto.randomUUID());
+    setFileProblem(null);
+    setCheckingFiles(next.length > 0);
+    if (next.length === 0) return;
+    void Promise.all(
+      next.map(async (file) => ({
+        name: file.name,
+        size: file.size,
+        head: new Uint8Array(await file.slice(0, ATTACHMENT_HEAD_BYTES).arrayBuffer()),
+      })),
+    )
+      .then((candidates) => {
+        const check = checkAttachments(candidates);
+        if (choice !== fileChoice.current) return;
+        setFileProblem(check.ok ? null : check.message);
+        setCheckingFiles(false);
+      })
+      .catch(() => {
+        if (choice !== fileChoice.current) return;
+        setFileProblem('A file could not be read. Remove it and choose it again.');
+        setCheckingFiles(false);
       });
   }
 
@@ -758,6 +810,69 @@ function EmailDialog({
                 }}
               />
             </label>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={fileInput}
+                  id={`${id}-files`}
+                  type="file"
+                  multiple
+                  accept={ATTACHMENT_ACCEPT}
+                  className="sr-only"
+                  tabIndex={-1}
+                  disabled={locked}
+                  onChange={(event) => {
+                    const added = Array.from(event.target.files ?? []);
+                    event.target.value = '';
+                    if (added.length > 0) chooseFiles([...files, ...added]);
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={locked}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <Paperclip aria-hidden="true" />
+                  Attach files
+                </Button>
+                <span className="text-xs text-muted-foreground">{ATTACHMENT_RULE}</span>
+              </div>
+              {files.length > 0 && (
+                <ul aria-label="Attached files" className="flex flex-col gap-1">
+                  {files.map((file, index) => (
+                    <li
+                      key={`${String(index)}-${file.name}`}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <Paperclip aria-hidden="true" className="size-3 shrink-0" />
+                      <span className="min-w-0 truncate">{file.name}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {formatFileSize(file.size)}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        aria-label={`Remove ${file.name}`}
+                        disabled={locked}
+                        onClick={() => {
+                          chooseFiles(files.filter((_, i) => i !== index));
+                        }}
+                      >
+                        <X aria-hidden="true" className="size-3" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {fileProblem !== null && (
+                <p role="alert" className="text-xs text-danger">
+                  {fileProblem}
+                </p>
+              )}
+            </div>
             {toCheck.length > 0 && (
               <div className="rounded-control border border-warning p-2 text-xs">
                 <p className="font-medium">Check this before sending</p>
@@ -1009,7 +1124,7 @@ export function EmailsCard({
 /** The API's page size (EMAIL_LIST_LIMIT). */
 const PAGE = 200;
 
-/** A received email's attachments, each saved as a download (F-114 step 4b). */
+/** An email's attachments, received (F-114 step 4b) or sent (step 7), each saved as a download. */
 function EmailFiles({ email, session }: { email: EmailView; session: DirectorySession }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1028,7 +1143,6 @@ function EmailFiles({ email, session }: { email: EmailView; session: DirectorySe
       });
   }
 
-  if (email.direction !== 'incoming') return null;
   if (attachments.length === 0 && !email.parseFailed) return null;
   return (
     <div className="mt-2 flex flex-col gap-1">
