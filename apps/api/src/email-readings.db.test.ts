@@ -271,6 +271,20 @@ describe('a forwarded email (F-233)', () => {
     });
     if (context === null) throw new Error('No context.');
     expect(readingLines(context).lines).toEqual(['Subject: Canola', 'We bid 725 a tonne.']);
+
+    // The reply draft the reading asks for is the forwarding member's too, though the forward
+    // came to the shared address (Codex's final review, R3-01).
+    expect(
+      await db.keepEmailReading(claim, ['Subject: Canola', 'We bid 725 a tonne.'], false, {
+        model: 'claude-opus-5-5',
+        reading: { ...reading(users.tess), emailAbout: 'Answer the canola bid' },
+        inputTokens: 900,
+        outputTokens: 200,
+      }),
+    ).toBe(true);
+    const [draft] = await admin<{ assigned_to: string | null }[]>`
+      select assigned_to from app.email_auto_drafts where email_id = ${kept.id}`;
+    expect(draft?.assigned_to).toBe(users.tess);
     expect(await db.answeredEmailIds(tess, orgs.a, kept.id)).toBeNull();
   });
 });

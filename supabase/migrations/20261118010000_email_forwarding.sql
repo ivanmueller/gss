@@ -786,8 +786,39 @@ begin
 end
 $$;
 
+-- As in 20261115010000_email_auto_drafts.sql, with a forward assigned to the member who forwarded
+-- it, before the person whose address it was sent to (F-233). The one resolver for the reading's
+-- follow-ups and for the automatic reply draft (Codex's final review of F-233, R3-01).
+create or replace function app.email_assignee(email uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select u.user_id
+    from app.emails m
+    cross join lateral (
+      select o.sent_by as user_id, 0 as rank
+        from app.emails o
+       where o.organization_id = m.organization_id and o.direction = 'outgoing'
+         and app.email_id_core(m.in_reply_to) is not null
+         and (app.email_id_core(o.message_id) = app.email_id_core(m.in_reply_to)
+              or app.email_id_core(o.provider_message_id) = app.email_id_core(m.in_reply_to))
+      union all
+      select m.forwarded_by, 1
+      union all
+      select m.gss_member, 2) u
+    join app.organization_members om
+      on om.organization_id = m.organization_id and om.user_id = u.user_id and om.status = 'active'
+   where m.id = email
+   order by u.rank
+   limit 1
+$$;
+
 -- As in 20261116010000_email_reminders.sql, with the email as shown (a forward from its original
--- sender, its forwarding person and note as context) and the thread as shown.
+-- sender, its forwarding person and note as context), the thread as shown, and the assignee from
+-- app.email_assignee.
 create or replace function app.email_reading_context(email uuid, claim uuid)
 returns jsonb
 language sql
@@ -806,7 +837,7 @@ as $$
     'subject', m.subject,
     'body', m.body_text,
     'receivedAt', m.occurred_at,
-    'assigneeId', a.user_id,
+    'assigneeId', app.email_assignee(m.id),
     'forward', case when m.forwarded_by is null then null else jsonb_build_object(
       'byName', app.forwarder_name(m.forwarded_by),
       'byAddress', m.from_address,
@@ -845,24 +876,6 @@ as $$
   from app.email_readings r
   join app.emails m on m.id = r.email_id
   join app.counterparties cp on cp.organization_id = m.organization_id and cp.id = m.counterparty_id
-  left join lateral (
-    select u.user_id
-      from (select o.sent_by as user_id, 0 as rank
-              from app.emails o
-             where o.organization_id = m.organization_id and o.direction = 'outgoing'
-               and app.email_id_core(m.in_reply_to) is not null
-               and (app.email_id_core(o.message_id) = app.email_id_core(m.in_reply_to)
-                    or app.email_id_core(o.provider_message_id) = app.email_id_core(m.in_reply_to))
-            union all
-            -- A forward is assigned to the person who forwarded it (F-233).
-            select m.forwarded_by, 1
-            union all
-            select m.gss_member, 2) u
-      join app.organization_members om
-        on om.organization_id = m.organization_id and om.user_id = u.user_id and om.status = 'active'
-     order by u.rank
-     limit 1
-  ) a on true
   where r.email_id = email and r.state = 'pending' and r.claim_token = claim
     and app.email_readable(r.email_id)
 $$;
