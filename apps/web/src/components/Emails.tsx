@@ -20,7 +20,7 @@ import {
   type EmailSettingsView,
   type EmailView,
 } from '@grain/domain';
-import { Download, Forward, Mail, Paperclip, Reply, Send, X } from 'lucide-react';
+import { Download, Forward, Mail, Paperclip, Reply, Send, Trash2, X } from 'lucide-react';
 import {
   createContext,
   useContext,
@@ -944,6 +944,8 @@ export function EmailsCard({
   const reload = useContext(ReloadContext);
   const composer = useEmailComposer();
   const { token, organization } = session;
+  // Admins remove an email from a company (F-234); the database checks it again.
+  const isAdmin = organization.role === 'org_admin';
   const [emails, setEmails] = useState<EmailView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -1081,6 +1083,20 @@ export function EmailsCard({
                     setOpenId((current) => (current === email.id ? null : email.id));
                   }}
                 >
+                  {openId === email.id && isAdmin && (
+                    <RemoveEmail
+                      email={email}
+                      session={session}
+                      onRemoved={() => {
+                        // Gone from the list; its open drafts by Claude stop showing (F-234).
+                        setEmails((current) =>
+                          (current ?? []).filter((item) => item.id !== email.id),
+                        );
+                        setOpenId(null);
+                        setAutoReload((count) => count + 1);
+                      }}
+                    />
+                  )}
                   {composer !== null &&
                     openId === email.id &&
                     email.direction === 'incoming' &&
@@ -1205,6 +1221,91 @@ function EmailFiles({ email, session }: { email: EmailView; session: DirectorySe
 }
 
 /** A size in bytes as people read it. */
+/**
+ * Remove, for admins, on an open email of a company (F-234), as contact history entries are
+ * removed: the email is kept in the records (app.email_removals), but nobody sees it here again.
+ */
+function RemoveEmail({
+  email,
+  session,
+  onRemoved,
+}: {
+  email: EmailView;
+  session: DirectorySession;
+  onRemoved: () => void;
+}) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const title = email.subject || '(no subject)';
+
+  function remove() {
+    setBusy(true);
+    setProblem(null);
+    sendJson(
+      `/emails/${email.id}/remove?organization_id=${session.organization.id}`,
+      session.token,
+      'POST',
+    )
+      .then(onRemoved)
+      .catch((reason: unknown) => {
+        setProblem(reason instanceof Error ? reason.message : 'The email could not be removed.');
+        setBusy(false);
+      });
+  }
+
+  if (!asking) {
+    return (
+      <div className="mt-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-danger"
+          onClick={() => {
+            setAsking(true);
+          }}
+        >
+          <Trash2 aria-hidden="true" />
+          Remove
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div
+      role="group"
+      aria-label={`Remove: ${title}`}
+      className="mt-2 flex flex-col gap-2 rounded-control border bg-muted/40 p-3 text-sm"
+    >
+      <p>
+        Remove <strong>{title}</strong> from this company’s emails? It is kept in the records, but
+        nobody sees it here again, and Claude’s open drafts from it go away.
+      </p>
+      {problem !== null && (
+        <p role="alert" className="text-danger">
+          {problem}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="danger" disabled={busy} onClick={remove}>
+          {busy ? 'Removing…' : 'Remove'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            setAsking(false);
+            setProblem(null);
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${String(bytes)} bytes`;
   if (bytes < 1024 * 1024) return `${String(Math.round(bytes / 1024))} KB`;
