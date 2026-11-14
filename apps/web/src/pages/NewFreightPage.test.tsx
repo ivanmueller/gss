@@ -294,6 +294,44 @@ describe('NewFreightPage', () => {
     // Many steps: more time when the whole suite runs at once.
   }, 15_000);
 
+  // Codex F-235-1-R1-01: an answer that comes back after the town changed never replaces it.
+  it('leaves out a map answer for a town changed while it was looked up', async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const calls = mockApi({
+      [`GET /counterparties?organization_id=${ORG.id}`]: () =>
+        Response.json({ counterparties: [CARRIER, BUYER], truncated: false }),
+      'POST /freight-quotes/places': () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+      'POST /freight-quotes': () => Response.json(FREIGHT, { status: 201 }),
+    });
+    render(<NewFreightPage session={SESSION} />);
+    await choose(screen.getByLabelText(/^Company quoting the rate/), 'Synthetic Carrier');
+    const town = screen.getByLabelText(/^From: town or area/);
+    await userEvent.type(town, 'Synthetic Town A, MB');
+    await userEvent.click(firstFindButton());
+    await waitFor(() => {
+      expect(calls.some((call) => call.path === '/freight-quotes/places')).toBe(true);
+    });
+    await userEvent.clear(town);
+    await userEvent.type(town, 'Synthetic Town C, SK');
+    answer(
+      Response.json({
+        status: 'found',
+        sure: true,
+        formattedAddress: 'Synthetic Town A, MB, Canada',
+        match: MATCH,
+      }),
+    );
+    await waitFor(() => {
+      expect(firstFindButton()).toHaveTextContent('Find on the map');
+    });
+    expect(town).toHaveValue('Synthetic Town C, SK');
+    expect(screen.getByLabelText(/^From: province or state/)).toHaveTextContent('Saskatchewan');
+    expect(screen.queryByRole('checkbox', { name: /That’s the place/ })).toBeNull();
+  });
+
   it('saves a doubtful town only once the person ticks it', async () => {
     const calls = mockApi({
       [`GET /counterparties?organization_id=${ORG.id}`]: () =>

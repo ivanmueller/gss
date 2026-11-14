@@ -30,7 +30,6 @@ export function CounterpartyFreight({
   const { token, organization } = session;
   const [everything, setEverything] = useState(false);
   const [open, setOpen] = useState(!folded);
-  const carrier = counterparty.types.includes('carrier');
   const [list] = useApiResource<FreightListResponse>(
     open
       ? `/freight-quotes?counterparty_id=${counterparty.id}${everything ? '&status=all' : ''}`
@@ -128,7 +127,9 @@ export function CounterpartyFreight({
                 <FreightList
                   freight={list.data.freight}
                   caption="Freight rates it quoted, and to and from its locations"
-                  showCarrier={!carrier}
+                  // Always: the list holds other companies' rates to its locations too
+                  // (Codex F-235-1-R1-02).
+                  showCarrier
                 />
               ))}
           </>

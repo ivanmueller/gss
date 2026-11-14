@@ -178,7 +178,15 @@ describe('CounterpartyPage', () => {
       [`GET /counterparties/${ID}`]: () => Response.json(carrier),
       [`GET /freight-quotes?counterparty_id=${ID}`]: () =>
         Response.json({
-          freight: [{ ...FREIGHT, carrier: { ...FREIGHT.carrier, id: ID } }],
+          freight: [
+            { ...FREIGHT, carrier: { ...FREIGHT.carrier, id: ID } },
+            // Another company's rate to one of its locations (Codex F-235-1-R1-02).
+            {
+              ...FREIGHT,
+              id: '00000000-0000-4000-8000-00000000e0b2',
+              carrier: { ...FREIGHT.carrier, legalName: 'Synthetic Other Hauler' },
+            },
+          ],
           truncated: false,
         }),
     });
@@ -188,13 +196,14 @@ describe('CounterpartyPage', () => {
         id={ID}
       />,
     );
-    const freight = await screen.findByRole('region', { name: 'Freight rates (1)' });
+    const freight = await screen.findByRole('region', { name: 'Freight rates (2)' });
     const table = within(freight).getByRole('table', {
       name: 'Freight rates it quoted, and to and from its locations',
     });
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('CAD 105.00/MT');
-    // The carrier is the page itself, so the table leaves it out.
-    expect(within(table).queryByRole('columnheader', { name: 'Carrier' })).toBeNull();
+    // Who quoted each rate: the list holds other companies' rates to its locations too.
+    expect(within(table).getByRole('columnheader', { name: 'Quoted by' })).toBeInTheDocument();
+    expect(within(table).getAllByRole('row')[2]).toHaveTextContent('Synthetic Other Hauler');
     // New freight rate is in the menu at the top of a carrier's page, not again in its rates.
     expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'More actions' }));

@@ -6,7 +6,7 @@ import {
   type FreightPlaceAnswer,
 } from '@grain/domain';
 import { MapPin } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { ApiError, sendJson, type CounterpartyDetail, type CounterpartySummary } from '../lib/api';
 import { counterpartyOptions } from '../lib/directory';
@@ -160,25 +160,47 @@ function Area({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const found = value.found;
+  // The end as it now is, and whether it is still shown: an answer that comes back after the
+  // town or province changed, or after Saved location was chosen, is left out (Codex
+  // F-235-1-R1-01), so it never replaces what the person typed since.
+  const latest = useRef(value);
+  useEffect(() => {
+    latest.current = value;
+  }, [value]);
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
 
   async function find() {
+    const asked = { text: value.text, region: value.region };
+    const stillAsked = () =>
+      shown.current && latest.current.text === asked.text && latest.current.region === asked.region;
     setBusy(true);
     setError(null);
     try {
       const answer = await sendJson<FreightPlaceAnswer>('/freight-quotes/places', token, 'POST', {
         organizationId,
-        text: value.text,
-        region: value.region,
+        ...asked,
       });
-      onChange({ ...value, found: answer, accepted: answer.status === 'found' && answer.sure });
+      if (!stillAsked()) return;
+      onChange({
+        ...latest.current,
+        found: answer,
+        accepted: answer.status === 'found' && answer.sure,
+      });
     } catch (caught) {
+      if (!stillAsked()) return;
       setError(
         caught instanceof ApiError
           ? caught.message
           : 'The map lookup failed. The rate can still be saved with its province or state.',
       );
     } finally {
-      setBusy(false);
+      if (shown.current) setBusy(false);
     }
   }
 
