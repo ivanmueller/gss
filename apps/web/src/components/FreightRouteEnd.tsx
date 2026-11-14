@@ -33,6 +33,11 @@ export type RouteEndValue =
       found: FreightPlaceAnswer | null;
       /** The person accepted the place found (ticked, or sure). */
       accepted: boolean;
+      /**
+       * The person picked the province or state: the text no longer changes it ("Fort
+       * Saskatchewan" in Alberta; Codex F-235-1-R4-01).
+       */
+      regionChosen: boolean;
     };
 
 export const EMPTY_AREA: RouteEndValue = {
@@ -41,6 +46,7 @@ export const EMPTY_AREA: RouteEndValue = {
   region: '',
   found: null,
   accepted: false,
+  regionChosen: false,
 };
 
 export const EMPTY_FACILITY: RouteEndValue = {
@@ -221,9 +227,9 @@ function Area({
             onChange={(event) => {
               const text = event.target.value;
               // The province or state is read from the text's end until the person picks one.
-              const read = regionFromAreaText(text);
+              const read = value.regionChosen ? null : regionFromAreaText(text);
               onChange({
-                kind: 'area',
+                ...value,
                 text,
                 region: read ?? value.region,
                 found: null,
@@ -242,7 +248,7 @@ function Area({
             id={`${baseId}-region`}
             value={value.region}
             onValueChange={(region) => {
-              onChange({ ...value, region, found: null, accepted: false });
+              onChange({ ...value, region, found: null, accepted: false, regionChosen: true });
             }}
             options={REGION_OPTIONS}
           />

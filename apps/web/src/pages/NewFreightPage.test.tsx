@@ -332,6 +332,27 @@ describe('NewFreightPage', () => {
     expect(screen.queryByRole('checkbox', { name: /That’s the place/ })).toBeNull();
   });
 
+  // Codex F-235-1-R4-01: a province picked by the person is never replaced by the text.
+  it('keeps the province picked when the town’s name ends like another', async () => {
+    const calls = api();
+    render(<NewFreightPage session={SESSION} />);
+    await choose(screen.getByLabelText(/^Company quoting the rate/), 'Synthetic Carrier');
+    await choose(screen.getByLabelText(/^From: province or state/), 'Alberta (AB)');
+    await userEvent.type(screen.getByLabelText(/^From: town or area/), 'Fort Saskatchewan');
+    expect(screen.getByLabelText(/^From: province or state/)).toHaveTextContent('Alberta (AB)');
+    await userEvent.type(screen.getByLabelText(/^To: town or area/), 'Synthetic Town B, WI');
+    await userEvent.type(screen.getByLabelText(/^Rate/), '182');
+    await choose(screen.getByLabelText(/^Currency/), 'CAD');
+    await choose(screen.getByLabelText(/^Source \(required\)/), 'Email');
+    await userEvent.click(screen.getByRole('button', { name: 'Save freight rate' }));
+    await waitFor(() => {
+      expect(window.location.pathname).toBe(`/freight/${FREIGHT.id}`);
+    });
+    expect(
+      calls.find((call) => call.method === 'POST' && call.path === '/freight-quotes')?.body,
+    ).toMatchObject({ origin: { area: { text: 'Fort Saskatchewan', region: 'CA-AB' } } });
+  }, 15_000);
+
   it('saves a doubtful town only once the person ticks it', async () => {
     const calls = mockApi({
       [`GET /counterparties?organization_id=${ORG.id}`]: () =>
