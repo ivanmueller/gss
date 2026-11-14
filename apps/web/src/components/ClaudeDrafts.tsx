@@ -9,9 +9,14 @@ import {
   QUOTE_SIDE_LABELS,
   utcToAlberta,
   type ContactChecks,
+  type DraftArea,
   type DraftInput,
   type DraftKind,
   type FollowUpFormValues,
+  type FreightChecks,
+  type FreightEndInput,
+  type FreightFormValues,
+  type FreightMode,
   type OpenDraftList,
   type OpenDraftView,
   type QuoteChecks,
@@ -23,9 +28,10 @@ import {
 import { ChevronDown, CircleAlert } from 'lucide-react';
 import { useState, type SyntheticEvent } from 'react';
 
-import { ApiError, fieldIssues, sendJson, type Contact } from '../lib/api';
+import { ApiError, fieldIssues, sendJson, type Contact, type CounterpartyList } from '../lib/api';
 import { canLogContacts, defaultDueInput, noteFollowUpsChanged } from '../lib/crm';
 import { canEditDirectory } from '../lib/directory';
+import { canEnterFreight, freightPayload, freightRate } from '../lib/freight';
 import { canEnterQuotes } from '../lib/quotes';
 import { Link } from '../lib/router';
 import { cn } from '../lib/utils';
@@ -34,8 +40,17 @@ import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ClaudeMark } from './ClaudeMark';
 import { FollowUpForm } from './CrmForms';
 import { ContactFields, FormIssues, type FormValues } from './DirectoryFields';
+import { FreightForm } from './FreightForm';
+import {
+  EMPTY_AREA,
+  FreightRouteEnd,
+  routeEndProblem,
+  routeEndRequest,
+  type RouteEndValue,
+} from './FreightRouteEnd';
 import { QuoteForm } from './QuoteForm';
 import { Button } from './ui/button';
+import { SegmentedControl } from './ui/segmented-control';
 import { Select } from './ui/select';
 
 // Claude's drafts from calls, shown where they belong (the owner's request and answers of
@@ -51,6 +66,7 @@ import { Select } from './ui/select';
 type QuoteFields = Extract<DraftInput, { kind: 'quote' }>['fields'];
 type FollowUpFields = Extract<DraftInput, { kind: 'follow_up' }>['fields'];
 type ContactFieldsValues = Extract<DraftInput, { kind: 'contact' }>['fields'];
+type FreightDraftFields = Extract<DraftInput, { kind: 'freight' }>['fields'];
 
 /** Where drafts are shown, and what they need there. */
 export interface DraftPlace {
@@ -83,6 +99,7 @@ export function draftsOf(drafts: Resource<OpenDraftList>, kind: DraftKind): Open
 export function maySaveDraft(kind: DraftKind, role: string): boolean {
   if (kind === 'quote') return canEnterQuotes(role);
   if (kind === 'follow_up') return canLogContacts(role);
+  if (kind === 'freight') return canEnterFreight(role);
   return canEditDirectory(role);
 }
 
@@ -90,6 +107,7 @@ const WHO_SAVES: Record<DraftKind, string> = {
   quote: 'Traders and admins verify bids and offers.',
   follow_up: 'Traders, operations and admins verify follow-ups.',
   contact: 'Operations and admins verify contacts.',
+  freight: 'Traders, operations and admins verify freight rates.',
 };
 
 /** What a draft saved as, in the message after Verify. */
@@ -97,12 +115,14 @@ const SAVED_AS: Record<DraftKind, string> = {
   quote: 'Verified: saved as a bid or offer.',
   follow_up: 'Verified: follow-up planned.',
   contact: 'Verified: contact saved.',
+  freight: 'Verified: freight rate saved.',
 };
 
 /** After a draft was saved: the lists that may show it forget what they kept. */
 function savedKind(kind: DraftKind) {
   forgetApiAnswers('/calls/drafts');
   if (kind === 'quote') forgetApiAnswers('/quotes');
+  if (kind === 'freight') forgetApiAnswers('/freight-quotes');
   if (kind === 'follow_up') {
     forgetApiAnswers('/follow-ups');
     noteFollowUpsChanged();
@@ -207,12 +227,21 @@ export function draftTitle(
   if (draft.kind === 'follow_up') {
     return `Follow-up: ${(draft.fields as FollowUpFields).values.task ?? ''}`;
   }
+  if (draft.kind === 'freight') {
+    const fields = draft.fields as FreightDraftFields;
+    return `Freight · ${draftEnd(fields.origin)} → ${draftEnd(fields.destination)}`;
+  }
   const values = (draft.fields as ContactFieldsValues).values;
   const listed = contacts.find((contact) => contact.id === draft.contactId);
   if (listed) return `New details for ${listed.name}`;
   return draft.contactId === null
     ? `New contact: ${values.contactName ?? ''}`
     : 'New details for a listed contact';
+}
+
+/** A drafted route end as written, or that it was not said. */
+function draftEnd(area: DraftArea): string {
+  return area.text ?? 'place not said';
 }
 
 /** A short line of what a draft says. */
@@ -238,6 +267,32 @@ export function draftSummary(draft: Pick<OpenDraftView, 'kind' | 'fields'>): str
   if (draft.kind === 'follow_up') {
     const due = (draft.fields as FollowUpFields).values.dueAt;
     return due === undefined ? 'No day or time said' : `Due ${formatAlberta(due)}`;
+  }
+  if (draft.kind === 'freight') {
+    const { mode, values } = draft.fields as FreightDraftFields;
+    const rate =
+      values.rate === undefined || values.currency === undefined || values.rateUnit === undefined
+        ? 'rate not said'
+        : // Checked by the Worker when drafted; shown as written here.
+          freightRate({
+            rate: values.rate,
+            currency: values.currency,
+            rateUnit: values.rateUnit,
+          } as Parameters<typeof freightRate>[0]);
+    const payload =
+      values.payload === undefined || values.payloadUnit === undefined
+        ? null
+        : freightPayload({
+            payload: values.payload,
+            payloadUnit: values.payloadUnit,
+          } as Parameters<typeof freightPayload>[0]);
+    const valid =
+      values.validUntil === undefined
+        ? 'no end date'
+        : `valid until ${formatAlberta(values.validUntil)}`;
+    return [rate, payload, mode === null ? null : mode === 'rail' ? 'Rail' : 'Truck', valid]
+      .filter(Boolean)
+      .join(' · ');
   }
   const values = (draft.fields as ContactFieldsValues).values;
   return [values.contactRole, values.contactEmail, values.contactPhone].filter(Boolean).join(' · ');
@@ -295,7 +350,8 @@ export function ClaudeDraftCard({
   const readiness = contactGone ? null : draftReadiness(draft, new Date(), listed);
 
   // Read defensively: a draft kept before checks existed has none.
-  const said = (draft.fields as { checks?: QuoteChecks & ContactChecks }).checks ?? {};
+  const said =
+    (draft.fields as { checks?: QuoteChecks & ContactChecks & FreightChecks }).checks ?? {};
   const checks: [string, SaidCheck | undefined][] =
     draft.kind === 'quote'
       ? [
@@ -305,7 +361,12 @@ export function ClaudeDraftCard({
         ]
       : draft.kind === 'contact'
         ? [['Phone', said.contactPhone]]
-        : [];
+        : draft.kind === 'freight'
+          ? [
+              ['Rate', said.rate],
+              ['Load size', said.payload],
+            ]
+          : [];
   const evidence = checks.filter((pair): pair is [string, SaidCheck] => pair[1] !== undefined);
 
   async function run(action: () => Promise<unknown>, message: string) {
@@ -344,7 +405,7 @@ export function ClaudeDraftCard({
    * What the person confirmed in the usual form, verified like the draft itself: saved and the
    * draft marked in one transaction. A refusal is thrown to the form, which shows it by field.
    */
-  async function verifyEdited(edited: { commodity?: string; values: Record<string, string> }) {
+  async function verifyEdited(edited: EditedDraft) {
     await sendJson<VerifiedDraft>(`/calls/drafts/${draft.id}/verify`, session.token, 'POST', {
       ...contactVersion,
       edited,
@@ -481,6 +542,12 @@ export function ClaudeDraftCard({
           ) : (
             <SourceLines draft={draft} />
           )}
+          {draft.kind === 'freight' && allowed && (
+            <p className="text-xs text-muted-foreground">
+              Verify places each town on the map only when the lookup is sure; use Edit to check
+              them yourself.
+            </p>
+          )}
           {readiness?.status === 'incomplete' && (
             <p className="text-xs text-foreground">
               <strong>{notIn(draft)}:</strong> {readiness.missing.join(', ')}. Finish it in the form
@@ -521,6 +588,16 @@ export function ClaudeDraftCard({
           onSave={verifyEdited}
         />
       )}
+      {editing && draft.kind === 'freight' && (
+        <FreightReview
+          session={session}
+          fields={draft.fields as FreightDraftFields}
+          onCancel={() => {
+            setEditing(false);
+          }}
+          onSave={verifyEdited}
+        />
+      )}
       {editing && draft.kind === 'contact' && (
         <ContactReview
           listed={listed}
@@ -535,8 +612,16 @@ export function ClaudeDraftCard({
   );
 }
 
-/** What a form hands back to be verified: the person's values (and a bid's commodity). */
-type SaveEdited = (edited: { commodity?: string; values: Record<string, string> }) => Promise<void>;
+/**
+ * What a form hands back to be verified: the person's values, and a bid's commodity or a freight
+ * rate's mode and route.
+ */
+interface EditedDraft {
+  commodity?: string;
+  values: Record<string, string>;
+  freight?: { mode: FreightMode; origin: FreightEndInput; destination: FreightEndInput };
+}
+type SaveEdited = (edited: EditedDraft) => Promise<void>;
 
 /** The form's values without unset fields, as the API reads them. */
 function present(values: Partial<Record<string, string>>): Record<string, string> {
@@ -706,5 +791,135 @@ function ContactReview({
         </Button>
       </div>
     </form>
+  );
+}
+
+/** A drafted end in the form: its town or area as written, its province or state if read. */
+function draftedEnd(area: DraftArea): RouteEndValue {
+  return { ...EMPTY_AREA, text: area.text ?? '', region: area.region ?? '' } as RouteEndValue;
+}
+
+/** The same town at both ends, case aside, in the same province or state; or one location. */
+function sameRouteEnds(origin: RouteEndValue, destination: RouteEndValue): boolean {
+  if (origin.kind === 'facility' || destination.kind === 'facility') {
+    return (
+      origin.kind === 'facility' &&
+      destination.kind === 'facility' &&
+      origin.facilityId === destination.facilityId
+    );
+  }
+  return (
+    origin.region === destination.region &&
+    origin.text.trim().toLowerCase() === destination.text.trim().toLowerCase()
+  );
+}
+
+/**
+ * The usual freight rate form (F-235), filled in from the draft over the form's defaults
+ * (indicative, per tonne): each end as written, to find on the map or change to a saved
+ * location; times shown in Alberta time. A point is sent only for a place the person accepted.
+ */
+function FreightReview({
+  session,
+  fields,
+  onCancel,
+  onSave,
+}: {
+  session: DirectorySession;
+  fields: FreightDraftFields;
+  onCancel: () => void;
+  onSave: SaveEdited;
+}) {
+  const { token, organization } = session;
+  const [mode, setMode] = useState<FreightMode>(fields.mode ?? 'truck');
+  const [origin, setOrigin] = useState<RouteEndValue>(() => draftedEnd(fields.origin));
+  const [destination, setDestination] = useState<RouteEndValue>(() =>
+    draftedEnd(fields.destination),
+  );
+  const [list] = useApiResource<CounterpartyList>(
+    `/counterparties?organization_id=${organization.id}`,
+    token,
+  );
+  const located =
+    list.status === 'ok'
+      ? list.data.counterparties.filter(
+          (item) => item.archivedAt === null && item.facilityCount > 0,
+        )
+      : [];
+  const initial: FreightFormValues = { firmness: 'indicative', rateUnit: 'MT', ...fields.values };
+  if (fields.values.quotedAt !== undefined) initial.quotedAt = utcToAlberta(fields.values.quotedAt);
+  if (fields.values.validUntil !== undefined) {
+    initial.validUntil = utcToAlberta(fields.values.validUntil);
+  }
+  return (
+    <div className="border-t border-claude-border pt-3">
+      <FreightForm
+        initial={initial}
+        submitLabel="Save freight rate"
+        busyLabel="Saving…"
+        checkBefore={() =>
+          routeEndProblem(origin, 'leaves from') ??
+          routeEndProblem(destination, 'goes to') ??
+          (sameRouteEnds(origin, destination)
+            ? 'A route goes from one place to another; choose two different places.'
+            : null)
+        }
+        onSubmit={(values) =>
+          onSave({
+            values: present(values),
+            freight: {
+              mode,
+              origin: routeEndRequest(origin),
+              destination: routeEndRequest(destination),
+            },
+          })
+        }
+        onCancel={
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        }
+        before={
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-1.5">
+              <span aria-hidden="true" className="text-sm font-medium">
+                Truck or rail
+              </span>
+              <SegmentedControl
+                label="Truck or rail"
+                options={[
+                  { value: 'truck', label: 'Truck' },
+                  { value: 'rail', label: 'Rail' },
+                ]}
+                value={mode}
+                onChange={setMode}
+              />
+            </div>
+            <FreightRouteEnd
+              label="From"
+              verb="leaves from"
+              hint="Where the grain is picked up, e.g. the seller’s elevator."
+              token={token}
+              organizationId={organization.id}
+              choices={located}
+              loading={list.status === 'loading'}
+              value={origin}
+              onChange={setOrigin}
+            />
+            <FreightRouteEnd
+              label="To"
+              verb="goes to"
+              hint="Where it is delivered, e.g. the buyer’s plant."
+              token={token}
+              organizationId={organization.id}
+              choices={located}
+              loading={list.status === 'loading'}
+              value={destination}
+              onChange={setDestination}
+            />
+          </div>
+        }
+      />
+    </div>
   );
 }

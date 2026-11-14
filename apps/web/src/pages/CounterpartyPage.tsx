@@ -1294,6 +1294,8 @@ function CounterpartyView({
       folded={!carrier}
       // Its header already has New freight rate.
       hideNew={canFreight}
+      drafts={draftsOf(crm.drafts, 'freight')}
+      place={crmDraftPlace(crm)}
     />
   );
   const callLogged = () => {

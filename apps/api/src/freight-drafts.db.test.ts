@@ -183,7 +183,7 @@ describe('Verify a freight draft', () => {
       origin_area_latitude: '49.354000',
       destination_area_text: 'Synthetic Town B IN',
       destination_area_latitude: null,
-      rate: '335.0000',
+      rate: '335',
       currency: 'CAD',
       rate_unit: 'MT',
       valid_until: null,
