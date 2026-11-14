@@ -5,6 +5,7 @@ import {
   COMMODITIES,
   correctVoicemailSchema,
   decideDraftSchema,
+  draftReadiness,
   listDraftsQuerySchema,
   verifyDraftSchema,
   numberedTranscript,
@@ -21,8 +22,11 @@ import {
   type ReadingAnswer,
 } from './anthropic';
 import { RECORDINGS_JOB_BUDGET_MS } from './calls';
+import { geocoderFailure } from './facilities';
+import { checkEnd, lookedUpEnd } from './freight';
+import { GeocoderError } from './geocoding';
 import { recorderName } from './quotes';
-import type { ReadingContextRow } from './readings-db';
+import type { ReadingContextRow, VerifiedRoute } from './readings-db';
 import {
   apiError,
   failureSummary,
@@ -238,8 +242,76 @@ export function callReadingRoutes(openDatabase: DatabaseFactory) {
     const parsed = verifyDraftSchema.safeParse(body.value);
     if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
     const name = recorderName(c.get('user'));
+    const now = new Date();
     return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.verifyCallDraft(ctx, id, name, new Date(), parsed.data);
+      // A freight draft's towns are placed before the transaction (F-235 part 2), and only for
+      // a person who may save it: nothing is looked up for anyone else (Codex, F-235-2-D1-01).
+      const draft = await db.draftToVerify(ctx, id);
+      if (draft === null) return apiError(c, 404, 'NOT_FOUND', 'No such draft.');
+      let route: VerifiedRoute | undefined;
+      if (draft.kind === 'freight') {
+        if (!draft.allowed) {
+          return apiError(c, 403, 'FORBIDDEN', 'Your role cannot save this kind of draft.');
+        }
+        if (!draft.open) {
+          return apiError(
+            c,
+            409,
+            'ALREADY_DECIDED',
+            'Someone already saved or dismissed this draft.',
+          );
+        }
+        const ready = draftReadiness(
+          { kind: 'freight', fields: draft.fields },
+          now,
+          null,
+          parsed.data.edited,
+        );
+        if (ready.status === 'incomplete') {
+          return apiError(
+            c,
+            422,
+            'DRAFT_INCOMPLETE',
+            `This cannot be saved yet. Missing or to fix: ${ready.missing.join(', ')}.`,
+            { missing: ready.missing, issues: ready.issues },
+          );
+        }
+        if (ready.save.kind !== 'freight') throw new Error('a freight draft saves a freight rate');
+        const apiKey = c.env.GEOCODIO_API_KEY?.trim();
+        const { origin, destination } = ready.save;
+        if (parsed.data.edited === undefined) {
+          // Verified in one click: each town looked up, placed only when the match is sure.
+          try {
+            route = {
+              origin: await lookedUpEnd(origin, draft.organizationId, apiKey, now),
+              destination: await lookedUpEnd(destination, draft.organizationId, apiKey, now),
+            };
+          } catch (error) {
+            if (error instanceof GeocoderError) return geocoderFailure(c, error);
+            throw error;
+          }
+        } else {
+          // Saved in the form: a point only from a match this Worker signed.
+          const from = await checkEnd(origin, 'origin', draft.organizationId, apiKey, now);
+          const to = await checkEnd(destination, 'destination', draft.organizationId, apiKey, now);
+          for (const end of [from, to]) {
+            if (end.status === 'bad_match') {
+              return apiError(
+                c,
+                422,
+                'BAD_PLACE_MATCH',
+                'The place found on the map is no longer valid. Click Find again, then save.',
+              );
+            }
+            if (end.status === 'invalid') {
+              return apiError(c, 422, 'VALIDATION_FAILED', end.message);
+            }
+          }
+          if (from.status !== 'ok' || to.status !== 'ok') throw new Error('unchecked route end');
+          route = { origin: from.end, destination: to.end };
+        }
+      }
+      const result = await db.verifyCallDraft(ctx, id, name, now, parsed.data, route);
       switch (result.status) {
         case 'verified':
           return c.json({ verified: true, kind: result.kind, resultId: result.resultId });

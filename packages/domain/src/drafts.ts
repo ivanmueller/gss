@@ -149,7 +149,7 @@ const MISSING_LABELS: Record<string, string> = {
 };
 
 /** What a draft is missing or has wrong, once each, in plain words. */
-function missingOf(issues: readonly { field: string | null; message: string }[]): string[] {
+export function missingOf(issues: readonly { field: string | null; message: string }[]): string[] {
   const words = issues.map((issue) =>
     issue.field === null ? issue.message : (MISSING_LABELS[issue.field] ?? issue.field),
   );

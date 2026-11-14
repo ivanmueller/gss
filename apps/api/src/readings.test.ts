@@ -52,6 +52,7 @@ const CONTEXT: ReadingContextRow = {
 const ANSWER: CallReading = {
   voicemail: false,
   email: { wanted: false, about: null, lines: [] },
+  freightRates: [],
   summary: 'Pat bids on canola delivered.',
   quotes: [
     {
@@ -537,7 +538,7 @@ describe('GET /calls/drafts', () => {
   it('refuses a malformed query before the database', async () => {
     expect((await list('')).status).toBe(422);
     expect((await list('organization_id=nope')).status).toBe(422);
-    expect((await list(`organization_id=${ORG}&kind=freight`)).status).toBe(422);
+    expect((await list(`organization_id=${ORG}&kind=rate`)).status).toBe(422);
     expect(db.listOpenDrafts).not.toHaveBeenCalled();
   });
 });
@@ -567,6 +568,7 @@ describe('POST /calls/drafts/{id}/verify', () => {
       expect.any(String),
       expect.any(Date),
       {},
+      undefined,
     );
   });
 
@@ -582,6 +584,7 @@ describe('POST /calls/drafts/{id}/verify', () => {
       expect.any(String),
       expect.any(Date),
       request,
+      undefined,
     );
   });
 

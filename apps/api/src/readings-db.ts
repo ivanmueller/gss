@@ -1,5 +1,6 @@
 import {
   draftReadiness,
+  missingOf,
   type CheckedReading,
   type DraftInput,
   type DraftKind,
@@ -11,6 +12,7 @@ import type postgres from 'postgres';
 
 import { insertPlannedFollowUp } from './crm-db';
 import { addContactIn, updateContactIn, type RequestContext } from './db';
+import { insertFreight, type NewFreightEnd } from './freight-db';
 import { insertQuote } from './quotes-db';
 
 // Claude's readings of call transcripts and their drafts, in Postgres
@@ -152,6 +154,25 @@ export type VerifyDraftResult =
   /** The listed contact it updates was removed or changed meanwhile. */
   | { status: 'contact_changed' };
 
+/**
+ * A draft as the person about to verify it may see it, read before anything else is done for
+ * it (a freight draft's towns are looked up first: F-235 part 2): its kind, organization and
+ * fields, whether it is still open, and whether this person's role may save its kind.
+ */
+export interface DraftToVerify {
+  kind: DraftKind;
+  organizationId: string;
+  open: boolean;
+  allowed: boolean;
+  fields: DraftInput['fields'];
+}
+
+/** A freight draft's route ends as they are saved: points only as the Worker found or signed them. */
+export interface VerifiedRoute {
+  origin: NewFreightEnd;
+  destination: NewFreightEnd;
+}
+
 export interface ReadingsDatabase {
   /**
    * Claims up to `most` recordings for Claude to read now, newest first, each with its claim's
@@ -212,7 +233,11 @@ export interface ReadingsDatabase {
     recordedByName: string,
     now: Date,
     request?: VerifyDraftRequest,
+    /** A freight draft's ends, resolved by the route (required for a freight draft). */
+    route?: VerifiedRoute,
   ) => Promise<VerifyDraftResult>;
+  /** The draft a person is about to verify, as they may see it; null when not found. */
+  draftToVerify: (ctx: RequestContext, draftId: string) => Promise<DraftToVerify | null>;
   /** A person's answer to whether a read call reached a voicemail. */
   correctCallVoicemail: (
     ctx: RequestContext,
@@ -257,6 +282,12 @@ class RolledBack extends Error {
   constructor(readonly result: VerifyDraftResult) {
     super('rolled back');
   }
+}
+
+/** A freight draft the database refused as it stands, as the form shows it. */
+function incompleteFreight(field: string, message: string): VerifyDraftResult {
+  const issues = [{ field, message }];
+  return { status: 'incomplete', missing: missingOf(issues), issues };
 }
 
 /** What app.decide_call_draft answered, as a verification's result. */
@@ -461,7 +492,37 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
       });
     },
 
-    verifyCallDraft(ctx, draftId, recordedByName, now, request = {}) {
+    draftToVerify(ctx, draftId) {
+      return asUser(ctx, async (tx) => {
+        const [row] = await tx<
+          {
+            kind: DraftKind;
+            organization_id: string;
+            open: boolean;
+            allowed: boolean;
+            fields: DraftInput['fields'];
+          }[]
+        >`
+          select kind, organization_id, status = 'open' as open, fields,
+                 coalesce(case kind
+                   when 'quote' then app.can_enter_quotes(organization_id)
+                   when 'follow_up' then app.can_log_contacts(organization_id)
+                   when 'freight' then app.can_enter_freight(organization_id)
+                   else app.can_edit_directory(organization_id)
+                 end, false) as allowed
+          from app.call_drafts where id = ${draftId}`;
+        if (!row) return null;
+        return {
+          kind: row.kind,
+          organizationId: row.organization_id,
+          open: row.open,
+          allowed: row.allowed,
+          fields: row.fields,
+        };
+      });
+    },
+
+    verifyCallDraft(ctx, draftId, recordedByName, now, request = {}, route) {
       return asUser(ctx, async (tx): Promise<VerifyDraftResult> => {
         const [draft] = await tx<
           {
@@ -534,6 +595,40 @@ export function readingQueries(asUser: AsUser, sql: postgres.Sql): ReadingsDatab
             );
             if (created.status !== 'created') throw new RolledBack({ status: created.status });
             resultId = created.id;
+            break;
+          }
+          case 'freight': {
+            // The route resolved the ends (looked up or signed) before this transaction.
+            if (route === undefined) throw new Error('a freight draft needs its resolved route');
+            const created = await insertFreight(tx, {
+              organizationId: draft.organization_id,
+              carrierId: draft.counterparty_id,
+              origin: route.origin,
+              destination: route.destination,
+              mode: save.mode,
+              terms: save.terms,
+              recordedByName,
+            });
+            switch (created.status) {
+              case 'created':
+                resultId = created.id;
+                break;
+              case 'forbidden':
+              case 'archived':
+                throw new RolledBack({ status: created.status });
+              case 'carrier_not_found':
+                throw new RolledBack({ status: 'not_found' });
+              // A saved location chosen in the form and removed since, or the same place twice
+              // as the database compares them.
+              case 'origin_not_found':
+                throw new RolledBack(incompleteFreight('origin', 'was not found'));
+              case 'destination_not_found':
+                throw new RolledBack(incompleteFreight('destination', 'was not found'));
+              case 'same_location':
+                throw new RolledBack(
+                  incompleteFreight('route', 'needs a different place at each end'),
+                );
+            }
             break;
           }
           case 'contact': {

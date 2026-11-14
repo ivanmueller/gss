@@ -232,6 +232,15 @@ export function fakeDatabase(): Mocked<Database> {
         resultId: '00000000-0000-4000-8000-000000000001',
       }),
     ),
+    draftToVerify: vi.fn<Database['draftToVerify']>(() =>
+      Promise.resolve({
+        kind: 'follow_up' as const,
+        organizationId: '00000000-0000-4000-8000-0000000000aa',
+        open: true,
+        allowed: true,
+        fields: { values: { task: 'Call back' } },
+      }),
+    ),
     correctCallVoicemail: vi.fn<Database['correctCallVoicemail']>(() => Promise.resolve('saved')),
     claimCounterpartySummaries: vi.fn<Database['claimCounterpartySummaries']>(() =>
       Promise.resolve([]),
