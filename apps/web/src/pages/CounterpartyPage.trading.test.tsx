@@ -250,6 +250,8 @@ describe('a buyer’s or seller’s page', () => {
     await screen.findByRole('menuitem', { name: 'Plan follow-up' });
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'New bid',
+      // Any company may quote a freight rate (F-235).
+      'New freight rate',
       'New email',
       'Plan follow-up',
     ]);
@@ -429,7 +431,7 @@ describe('a buyer’s or seller’s page', () => {
       'Contacts',
       'What they buy',
       'Locations',
-      'Freight to and from its locations',
+      'Freight rates',
     ]);
   });
 
@@ -452,7 +454,7 @@ describe('a buyer’s or seller’s page', () => {
       'Emails',
       'What they buy',
       'Locations',
-      'Freight to and from its locations',
+      'Freight rates',
     ]);
   });
 });
@@ -467,7 +469,7 @@ describe('a carrier’s page', () => {
   const carrierApi = (detail: object = CARRIER) =>
     mockApi({
       [`GET ${PATH}`]: () => Response.json(detail),
-      [`GET /freight-quotes?carrier_id=${ID}`]: () =>
+      [`GET /freight-quotes?counterparty_id=${ID}`]: () =>
         Response.json({ freight: [], truncated: false }),
     });
 
@@ -551,7 +553,7 @@ describe('a carrier’s page', () => {
   it('saves its equipment under Edit details', async () => {
     const calls = mockApi({
       [`GET ${PATH}`]: () => Response.json(CARRIER),
-      [`GET /freight-quotes?carrier_id=${ID}`]: () =>
+      [`GET /freight-quotes?counterparty_id=${ID}`]: () =>
         Response.json({ freight: [], truncated: false }),
       [`PATCH ${PATH}`]: () => Response.json(CARRIER),
     });

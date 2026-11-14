@@ -1,4 +1,11 @@
-import type { FreightFormValues, FreightLocation, FreightRevision } from '@grain/domain';
+import {
+  formatAlberta,
+  laneRegionName,
+  type FreightEnd,
+  type FreightFormValues,
+  type FreightLocation,
+  type FreightRevision,
+} from '@grain/domain';
 
 import { countryName } from './directory';
 import { formatAmount } from './format';
@@ -40,6 +47,21 @@ export function freightPayload(revision: Pick<FreightRevision, 'payload' | 'payl
     ? revision.payload.replace(/\.?0+$/, '')
     : revision.payload;
   return `${amount} ${PAYLOAD_UNIT_SHORT[revision.payloadUnit] ?? revision.payloadUnit} a load`;
+}
+
+/** The valid-until time in Alberta time, or "no end date" (F-235: optional). */
+export function freightValidUntil(revision: Pick<FreightRevision, 'validUntil'>): string {
+  return revision.validUntil === null ? 'no end date' : formatAlberta(revision.validUntil);
+}
+
+/**
+ * One end of a route in two lines: a saved location's company and place ("Synthetic Seller",
+ * "Synthetic City, SK"), or an area as written and its province or state ("Morris, MB",
+ * "Manitoba").
+ */
+export function freightEndLines(end: FreightEnd): { name: string; place: string } {
+  if (end.kind === 'area') return { name: end.text, place: laneRegionName(end.region) };
+  return { name: end.counterparty.legalName, place: freightPlace(end) };
 }
 
 /** "Synthetic Mill, Synthetic Town, MN": one end of a route, without its counterparty. */

@@ -55,18 +55,18 @@ const REQUIRED = new Set<FreightFieldId>([
   'rateUnit',
   'payload',
   'payloadUnit',
-  'validUntil',
   'sourceType',
 ]);
 
 const HINTS: Partial<Record<FreightFieldId, ReactNode>> = {
-  firmness: 'Firm only when the carrier committed to it.',
-  rate: 'As the carrier quoted it, e.g. 105.00.',
-  rateUnit: 'The unit the carrier quoted in.',
-  payload: 'The contract payload the carrier stated, so the rate can be worked out per tonne.',
+  firmness: 'Firm only when the company committed to it.',
+  rate: 'As the company quoted it, e.g. 105.00.',
+  rateUnit: 'The unit it was quoted in. “CMT” is Canadian dollars per metric tonne.',
+  payload: 'The contract payload stated, so the rate can be worked out per tonne.',
   inclusions: 'E.g. fuel surcharge included, border crossing extra.',
   quotedAt: 'Alberta time (MT). Leave empty for now.',
-  validUntil: 'Alberta time (MT).',
+  validUntil:
+    'Alberta time (MT). Optional: without one the rate is tagged outdated 30 days after it was quoted.',
   sourceReference: 'E.g. who you spoke to, or a reference number.',
 };
 

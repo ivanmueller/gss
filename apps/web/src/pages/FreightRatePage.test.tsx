@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { choose } from '../test/select';
 import { FREIGHT, FREIGHT_ID, FREIGHT_REVISION_1 } from '../test/freight';
+import { FreightPage } from './FreightPage';
 import { FreightRatePage } from './FreightRatePage';
 
 const PATH = `/freight-quotes/${FREIGHT_ID}`;
@@ -25,7 +26,7 @@ describe('FreightRatePage', () => {
     expect(route).toHaveTextContent('ToSynthetic BuyerSynthetic Mill, Synthetic Town, MN');
     expect(within(route).getByRole('link', { name: 'Synthetic Buyer' })).toHaveAttribute(
       'href',
-      `/counterparties/${FREIGHT.destination.counterparty.id}`,
+      `/counterparties/${FREIGHT.destination.kind === 'facility' ? FREIGHT.destination.counterparty.id : ''}`,
     );
     const current = screen.getByRole('region', { name: 'Current terms' });
     expect(current).toHaveTextContent(
@@ -109,6 +110,41 @@ describe('FreightRatePage', () => {
     expect(await screen.findByRole('region', { name: 'Current terms' })).toBeInTheDocument();
   });
 
+  // T-05 (as T-01 for bids and offers): a list of freight rates kept from before must not show
+  // a withdrawn rate as live while it loads again (the browser test saw it so).
+  it('after withdrawing, kept lists of freight rates load again', async () => {
+    let changed = false;
+    const live = `GET /freight-quotes?organization_id=${ORG.id}`;
+    mockApi({
+      // Before the change the list answers at once; after it, never, so the test sees exactly
+      // what the list shows while it loads again.
+      [live]: () =>
+        changed
+          ? new Promise<Response>(() => undefined)
+          : Response.json({ freight: [FREIGHT], truncated: false }),
+      [`GET ${PATH}`]: () => Response.json(FREIGHT),
+      [`POST ${PATH}/withdraw`]: () => {
+        changed = true;
+        return Response.json(FREIGHT);
+      },
+    });
+    const list = render(<FreightPage session={SESSION} />);
+    expect(await screen.findByRole('table', { name: 'Freight rates' })).toBeInTheDocument();
+    list.unmount();
+
+    const page = render(<FreightRatePage session={SESSION} id={FREIGHT_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    const confirm = screen.getByRole('group', { name: 'Withdraw this freight rate' });
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => {
+      expect(changed).toBe(true);
+    });
+    page.unmount();
+
+    render(<FreightPage session={SESSION} />);
+    expect(screen.queryByRole('table', { name: 'Freight rates' })).toBeNull();
+  });
+
   it('withdraws after a confirmation', async () => {
     let withdrawn = false;
     const calls = mockApi({
@@ -167,13 +203,13 @@ describe('FreightRatePage', () => {
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull();
   });
 
-  it('says when the carrier is archived and offers no changes', async () => {
+  it('says when the quoting company is archived and offers no changes', async () => {
     mockApi({
       [`GET ${PATH}`]: () =>
         Response.json({ ...FREIGHT, carrier: { ...FREIGHT.carrier, archived: true } }),
     });
     render(<FreightRatePage session={SESSION} id={FREIGHT_ID} />);
-    expect(await screen.findByText(/The carrier is archived/)).toBeInTheDocument();
+    expect(await screen.findByText(/The company quoting it is archived/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Record new terms' })).toBeNull();
   });
 

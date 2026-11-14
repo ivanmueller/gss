@@ -955,13 +955,19 @@ export function createDatabase(sql: postgres.Sql): Database {
                 'transport', case when r.truck and r.rail then 'rail_and_truck'
                                   when r.rail then 'rail' else 'truck' end)
                 order by r.origin, r.destination)
-              from (select o.country || '-' || o.region::text as origin,
-                           d.country || '-' || d.region::text as destination,
-                           bool_or(q.mode = 'truck') as truck, bool_or(q.mode = 'rail') as rail
-                    from app.freight_quotes q
-                    join app.facilities o on o.id = q.origin_facility_id
-                    join app.facilities d on d.id = q.destination_facility_id
-                    where q.carrier_id = c.id and o.region is not null and d.region is not null
+              from (select e.origin, e.destination,
+                           bool_or(e.mode = 'truck') as truck, bool_or(e.mode = 'rail') as rail
+                    -- Each end's province or state: its saved location's, or its area's (F-235).
+                    from (select q.mode,
+                                 coalesce(o.country || '-' || o.region::text,
+                                          q.origin_area_region::text) as origin,
+                                 coalesce(d.country || '-' || d.region::text,
+                                          q.destination_area_region::text) as destination
+                          from app.freight_quotes q
+                          left join app.facilities o on o.id = q.origin_facility_id
+                          left join app.facilities d on d.id = q.destination_facility_id
+                          where q.carrier_id = c.id) e
+                    where e.origin is not null and e.destination is not null
                     group by 1, 2) r), '[]') as quoted_lanes
   `;
 

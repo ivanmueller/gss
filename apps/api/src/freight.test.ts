@@ -36,6 +36,7 @@ const DETAIL: FreightDetail = {
   mode: 'truck',
   carrier: { id: CARRIER, legalName: 'Synthetic Carrier', tradingName: null, archived: false },
   origin: {
+    kind: 'facility',
     id: ORIGIN,
     name: null,
     city: 'Synthetic City',
@@ -44,6 +45,7 @@ const DETAIL: FreightDetail = {
     counterparty: { id: COUNTERPARTY, legalName: 'Synthetic Seller', archived: false },
   },
   destination: {
+    kind: 'facility',
     id: DESTINATION,
     name: 'Synthetic Mill',
     city: 'Synthetic Town',
@@ -52,6 +54,7 @@ const DETAIL: FreightDetail = {
     counterparty: { id: COUNTERPARTY, legalName: 'Synthetic Buyer', archived: false },
   },
   status: 'firm',
+  outdatedSince: null,
   withdrawnAt: null,
   createdAt: '2026-10-29T14:00:00.000Z',
   current: {
@@ -87,8 +90,8 @@ function request(method: string, path: string, body?: unknown) {
 const newFreight = (extra: Record<string, unknown> = {}) => ({
   organizationId: ORG,
   carrierId: CARRIER,
-  originFacilityId: ORIGIN,
-  destinationFacilityId: DESTINATION,
+  origin: { facilityId: ORIGIN },
+  destination: { facilityId: DESTINATION },
   mode: 'truck',
   values: VALUES,
   ...extra,
@@ -197,8 +200,8 @@ describe('/api/v1/freight-quotes', () => {
     expect(db.createFreight).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }), {
       organizationId: ORG,
       carrierId: CARRIER,
-      originFacilityId: ORIGIN,
-      destinationFacilityId: DESTINATION,
+      origin: { kind: 'facility', facilityId: ORIGIN },
+      destination: { kind: 'facility', facilityId: DESTINATION },
       mode: 'truck',
       terms: expect.objectContaining({
         rate: '105.00',
@@ -233,7 +236,9 @@ describe('/api/v1/freight-quotes', () => {
     for (const body of [
       newFreight({ mode: 'barge' }),
       newFreight({ carrierId: 'k1a' }),
-      newFreight({ originFacilityId: undefined }),
+      newFreight({ origin: undefined }),
+      newFreight({ origin: { facilityId: ORIGIN, area: { text: 'Town A', region: 'CA-MB' } } }),
+      newFreight({ origin: { area: { text: 'Town A', region: 'CA-MB', latitude: '49.1' } } }),
       newFreight({ values: { rate: 105 } }),
       { values: VALUES },
     ]) {
@@ -245,7 +250,6 @@ describe('/api/v1/freight-quotes', () => {
   it.each([
     [{ status: 'forbidden' }, 403, 'FORBIDDEN'],
     [{ status: 'carrier_not_found' }, 422, 'CARRIER_NOT_FOUND'],
-    [{ status: 'not_a_carrier' }, 422, 'NOT_A_CARRIER'],
     [{ status: 'archived' }, 409, 'ARCHIVED'],
     [{ status: 'origin_not_found' }, 422, 'ORIGIN_NOT_FOUND'],
     [{ status: 'destination_not_found' }, 422, 'DESTINATION_NOT_FOUND'],

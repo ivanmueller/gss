@@ -726,7 +726,8 @@ function CounterpartyView({
   const main = detail.contacts.find((contact) => contact.isMain) ?? null;
   const sides = quoteSides(detail.types);
   const canQuote = canEnterQuotes(organization.role) && !archived;
-  const canFreight = carrier && canEnterFreight(organization.role) && !archived;
+  // Any company may quote a freight rate (F-235).
+  const canFreight = canEnterFreight(organization.role) && !archived;
   const places = [detail.regions.join(', '), countryName(detail.primaryCountry)].filter(Boolean);
   // Only Log contact stays visible; the rest is in the "…" menu (the owner's request of
   // 2026-11-03).

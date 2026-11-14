@@ -129,6 +129,7 @@ export function fakeDatabase(): Mocked<Database> {
     createFreight: vi.fn<Database['createFreight']>(() =>
       Promise.resolve({ status: 'created', id: '00000000-0000-4000-8000-00000000e001' }),
     ),
+    canEnterFreight: vi.fn<Database['canEnterFreight']>(() => Promise.resolve(true)),
     reviseFreight: vi.fn<Database['reviseFreight']>(() => saved()),
     withdrawFreight: vi.fn<Database['withdrawFreight']>(() => saved()),
     listContactLog: vi.fn<Database['listContactLog']>(() => Promise.resolve([])),

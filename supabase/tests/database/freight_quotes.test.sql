@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(69);
+select plan(68);
 
 -- Fixtures ------------------------------------------------------------------
 -- Org A: tom (trader), adam (org_admin), olivia (operations), victor (viewer),
@@ -216,12 +216,7 @@ select throws_ok(
       '00000000-0000-4000-8000-00000000d3aa')),
   '42501', null, 'an archived carrier gets no new freight quotes'
 );
-select throws_ok(
-  format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
-    pg_temp.new_freight('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa',
-      '00000000-0000-4000-8000-00000000c2aa')),
-  '42501', null, 'a counterparty that is not a carrier quotes no freight'
-);
+-- Any company may quote freight since F-235: freight_areas.test.sql.
 select throws_ok(
   format('select pg_temp.api_changed(%L, %L)', '00000000-0000-4000-8000-0000000044aa',
     pg_temp.new_freight('00000000-0000-4000-8000-00000000e001', '00000000-0000-4000-8000-0000000044aa',

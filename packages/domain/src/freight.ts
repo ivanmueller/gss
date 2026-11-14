@@ -10,6 +10,8 @@ import {
   type QuoteSource,
   type QuoteStatus,
 } from './quotes';
+import { isLaneRegion } from './carrier-basics';
+import { normalizeRegion } from './regions';
 import {
   clean,
   cleanLines,
@@ -93,9 +95,9 @@ export interface FreightTerms {
   payloadUnit: PayloadUnit | null;
   /** What the rate includes, e.g. "Fuel surcharge included". */
   inclusions: string | null;
-  /** UTC ISO 8601 instants. */
+  /** UTC ISO 8601 instants. Without a valid-until the rate holds until withdrawn (F-235). */
   quotedAt: string;
-  validUntil: string;
+  validUntil: string | null;
   sourceType: EntrySource;
   sourceReference: string | null;
   notes: string | null;
@@ -103,17 +105,169 @@ export interface FreightTerms {
 
 const fieldValues = z.partialRecord(z.enum(FREIGHT_FIELD_IDS), z.string().max(4000));
 
-/** POST /api/v1/freight-quotes: a carrier's rate on a route, with its first terms. */
+/**
+ * Days after the time quoted when a rate without a valid-until is tagged outdated (the owner,
+ * 2026-11-13, F-235). An outdated rate is still listed, never usable for a calculation.
+ */
+export const FREIGHT_OUTDATED_AFTER_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * One end of a route as sent: a saved location, or an area as the company wrote it ("Morris,
+ * MB") with its province or state ("CA-MB") and, when Geocodio found the place and the
+ * person accepted it, the signed match from POST /freight-quotes/places. Coordinates are
+ * never sent by the browser: the Worker takes them from the match it signed.
+ */
+export const freightPlaceMatchSchema = z.strictObject({
+  latitude: z.string().max(20),
+  longitude: z.string().max(20),
+  precision: z.enum(['exact', 'approximate']),
+  expiresAt: z.string().max(40),
+  signature: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+export const freightEndSchema = z.union([
+  z.strictObject({ facilityId: z.uuid() }),
+  z.strictObject({
+    area: z.strictObject({
+      text: z.string().max(4000),
+      region: z.string().max(10),
+      match: freightPlaceMatchSchema.optional(),
+    }),
+  }),
+]);
+export type FreightEndInput = z.infer<typeof freightEndSchema>;
+
+/** POST /api/v1/freight-quotes: a company's rate on a route, with its first terms. */
 export const createFreightSchema = z.object({
   organizationId: z.uuid(),
+  /** The company quoting the rate: any company, not only carriers (F-235). */
   carrierId: z.uuid(),
-  originFacilityId: z.uuid(),
-  destinationFacilityId: z.uuid(),
+  origin: freightEndSchema,
+  destination: freightEndSchema,
   mode: z.enum(FREIGHT_MODES),
   values: fieldValues,
 });
 export type CreateFreightRequest = z.infer<typeof createFreightSchema>;
 
+/** POST /api/v1/freight-quotes/places: find a town or area, in its province or state, with Geocodio. */
+export const freightPlaceSchema = z.object({
+  organizationId: z.uuid(),
+  text: z.string().max(4000),
+  region: z.string().max(10),
+});
+
+/**
+ * A point Geocodio found for an area, signed by the Worker for that organization, text and
+ * province or state, so that only what it looked up is saved, within the hour.
+ */
+export type FreightPlaceMatch = z.infer<typeof freightPlaceMatchSchema>;
+
+/** The answer of POST /freight-quotes/places. */
+export type FreightPlaceAnswer =
+  | {
+      status: 'found';
+      match: FreightPlaceMatch;
+      /** The place Geocodio matched, for the person to recognize ("Morris, MB R0G, Canada"). */
+      formattedAddress: string;
+      /** Confident enough to accept without asking (LOW_CONFIDENCE); otherwise the person ticks it. */
+      sure: boolean;
+    }
+  /** Nothing found in that province or state, or only the province or state itself. */
+  | { status: 'not_found' };
+
+/** "MB", "Manitoba", "wi" as "CA-MB" or "US-WI"; null when the words name no province or state. */
+function regionOfWords(words: string): string | null {
+  for (const country of ['CA', 'US'] as const) {
+    const code = normalizeRegion(country, words);
+    if (code !== null) return `${country}-${code}`;
+  }
+  return null;
+}
+
+/**
+ * The province or state an area's text ends with ("Morris, MB", "Cochrane, Wi", "Muncie
+ * Indiana"), as "CA-MB"; null when its last one to three words name none, or the text is
+ * nothing but a province or state.
+ */
+export function regionFromAreaText(text: string): string | null {
+  const words = text.trim().split(/[\s,]+/);
+  for (const size of [3, 2, 1]) {
+    if (words.length <= size) continue;
+    const region = regionOfWords(words.slice(-size).join(' '));
+    if (region !== null) return region;
+  }
+  return null;
+}
+
+/**
+ * The text to look up as a town: the area's text without a trailing province or state that
+ * repeats the one chosen ("Morris, MB" in CA-MB: "Morris").
+ */
+export function areaPlaceName(text: string, region: string): string {
+  const words = text.trim().split(/[\s,]+/);
+  for (const size of [3, 2, 1]) {
+    if (words.length <= size) continue;
+    if (regionOfWords(words.slice(-size).join(' ')) === region) {
+      return words.slice(0, -size).join(' ');
+    }
+  }
+  return text.trim();
+}
+
+/** An area's text, cleaned: one line of at most LABEL_MAX characters. */
+export function parseFreightAreaText(
+  value: string,
+): { status: 'ok'; text: string } | { status: 'invalid'; message: string } {
+  const text = clean(value);
+  if (text === null) return { status: 'invalid', message: 'is required' };
+  if (/\p{Cc}/u.test(text)) {
+    return { status: 'invalid', message: 'has characters that cannot be shown' };
+  }
+  if (text.length > LABEL_MAX) {
+    return { status: 'invalid', message: `is longer than ${String(LABEL_MAX)} characters` };
+  }
+  return { status: 'ok', text };
+}
+
+/** Whether a province or state code ("CA-MB", "US-IN") is one an area may have. */
+export function isFreightRegion(code: string): boolean {
+  return isLaneRegion(code);
+}
+
+/**
+ * When a rate without a valid-until became outdated (UTC ISO 8601), or null: it has a
+ * valid-until, or is younger than FREIGHT_OUTDATED_AFTER_DAYS.
+ */
+export function freightOutdatedSince(
+  terms: { quotedAt: string; validUntil: string | null },
+  now: Date,
+): string | null {
+  if (terms.validUntil !== null) return null;
+  const since = Date.parse(terms.quotedAt) + FREIGHT_OUTDATED_AFTER_DAYS * DAY_MS;
+  return since <= now.getTime() ? new Date(since).toISOString() : null;
+}
+
+/**
+ * Withdrawn, expired, or live as firm or indicative (as quoteStatus, keeping firmness). A rate
+ * without a valid-until never expires; its freshness is freightOutdatedSince.
+ */
+export function freightStatus(
+  quote: { withdrawnAt: string | null; validUntil: string | null; firmness: QuoteFirmness },
+  now: Date,
+): QuoteStatus {
+  if (quote.withdrawnAt !== null) return 'withdrawn';
+  if (quote.validUntil !== null && Date.parse(quote.validUntil) <= now.getTime()) return 'expired';
+  return quote.firmness;
+}
+
+/**
+ * Whether a rate may be used for a calculation (the trading engine, not built yet): firm, not
+ * withdrawn or expired, and not outdated (docs/TRADING_RULES.md).
+ */
+export function isUsableFreight(status: QuoteStatus, outdatedSince: string | null): boolean {
+  return status === 'firm' && outdatedSince === null;
+}
 /**
  * POST /api/v1/freight-quotes/{id}/revisions: new terms, for the revision the person was
  * looking at, so new terms someone else recorded meanwhile are never replaced unseen.
@@ -183,6 +337,7 @@ export function parseFreightTerms(
     { quotedAt: 'quotedAt', validUntil: 'validUntil' },
     now,
     issue,
+    { validUntilOptional: true },
   );
   const sourceType = choice('sourceType', ENTRY_SOURCES);
   const sourceReference = label('sourceReference');
@@ -198,8 +353,7 @@ export function parseFreightTerms(
     currency === null ||
     rateUnit === null ||
     sourceType === null ||
-    quotedAt === null ||
-    validUntil === null
+    quotedAt === null
   ) {
     return { status: 'invalid', issues };
   }
@@ -232,7 +386,7 @@ export function freightTermsToFormValues(terms: FreightTerms | FreightRevision):
     payload: terms.payload ?? '',
     payloadUnit: terms.payloadUnit ?? '',
     inclusions: terms.inclusions ?? '',
-    validUntil: terms.validUntil,
+    validUntil: terms.validUntil ?? '',
     sourceType: ENTRY_SOURCES.includes(terms.sourceType as EntrySource) ? terms.sourceType : '',
     sourceReference: terms.sourceReference ?? '',
     notes: terms.notes ?? '',
@@ -253,6 +407,7 @@ export interface FreightRevision extends Omit<FreightTerms, 'sourceType'> {
 
 /** One end of a route: a location in the directory and the counterparty it belongs to. */
 export interface FreightLocation {
+  kind: 'facility';
   id: string;
   name: string | null;
   city: string | null;
@@ -261,15 +416,31 @@ export interface FreightLocation {
   counterparty: { id: string; legalName: string; archived: boolean };
 }
 
+/**
+ * One end of a route: an area as the company wrote it, with its province or state ("CA-MB")
+ * and, when Geocodio found it and a person accepted it, a point (decimal strings).
+ */
+export interface FreightArea {
+  kind: 'area';
+  text: string;
+  region: string;
+  point: { latitude: string; longitude: string; precision: 'exact' | 'approximate' } | null;
+}
+
+export type FreightEnd = FreightLocation | FreightArea;
+
 /** A freight quote with its latest terms, as lists show it. */
 export interface FreightSummary {
   id: string;
   mode: FreightMode;
+  /** The company quoting the rate (any company since F-235; the name kept from carriers). */
   carrier: { id: string; legalName: string; tradingName: string | null; archived: boolean };
-  origin: FreightLocation;
-  destination: FreightLocation;
-  /** Withdrawn, expired, or live as firm or indicative (quoteStatus). */
+  origin: FreightEnd;
+  destination: FreightEnd;
+  /** Withdrawn, expired, or live as firm or indicative (freightStatus). */
   status: QuoteStatus;
+  /** When a rate without a valid-until became outdated, or null (freightOutdatedSince). */
+  outdatedSince: string | null;
   withdrawnAt: string | null;
   createdAt: string;
   current: FreightRevision;

@@ -1,15 +1,21 @@
 import {
   createFreightSchema,
   FREIGHT_MODES,
+  freightPlaceSchema,
+  isFreightRegion,
+  parseFreightAreaText,
   parseFreightTerms,
   reviseFreightSchema,
+  type FreightEndInput,
   type FreightIssue,
   type FreightMode,
 } from '@grain/domain';
 import { Hono } from 'hono';
 
 import type { Database, RequestContext } from './db';
-import { FREIGHT_LIST_LIMIT, type FreightWriteResult } from './freight-db';
+import { geocoderFailure, notConfigured } from './facilities';
+import { FREIGHT_LIST_LIMIT, type FreightWriteResult, type NewFreightEnd } from './freight-db';
+import { findFreightPlace, GeocoderError, verifyFreightPlace } from './geocoding';
 import { recorderName } from './quotes';
 import {
   apiError,
@@ -33,6 +39,55 @@ function malformed(c: ApiContext, error: { issues: { path: PropertyKey[] }[] }) 
 
 function invalid(c: ApiContext, issues: FreightIssue[]) {
   return apiError(c, 422, 'VALIDATION_FAILED', 'Some fields need fixing.', { issues });
+}
+
+type EndCheck =
+  | { status: 'ok'; end: NewFreightEnd }
+  | { status: 'invalid'; message: string }
+  | { status: 'bad_match' };
+
+/**
+ * One end of a new route, checked: a saved location as sent, or an area with clean text, a
+ * province or state of the list, and a point only from a match this Worker signed for that
+ * organization, text and province or state within the hour.
+ */
+async function checkEnd(
+  end: FreightEndInput,
+  which: 'origin' | 'destination',
+  organizationId: string,
+  apiKey: string | undefined,
+  now: Date,
+): Promise<EndCheck> {
+  if ('facilityId' in end)
+    return { status: 'ok', end: { kind: 'facility', facilityId: end.facilityId } };
+  const label = which === 'origin' ? 'The place it leaves from' : 'The place it goes to';
+  const text = parseFreightAreaText(end.area.text);
+  if (text.status === 'invalid') return { status: 'invalid', message: `${label} ${text.message}.` };
+  if (!isFreightRegion(end.area.region)) {
+    return { status: 'invalid', message: `${label} needs its province or state.` };
+  }
+  const match = end.area.match;
+  if (match === undefined) {
+    return {
+      status: 'ok',
+      end: { kind: 'area', text: text.text, region: end.area.region, point: null },
+    };
+  }
+  if (
+    !apiKey ||
+    !(await verifyFreightPlace(apiKey, organizationId, text.text, end.area.region, match, now))
+  ) {
+    return { status: 'bad_match' };
+  }
+  return {
+    status: 'ok',
+    end: {
+      kind: 'area',
+      text: text.text,
+      region: end.area.region,
+      point: { latitude: match.latitude, longitude: match.longitude, precision: match.precision },
+    },
+  };
 }
 
 /** After a change: the freight quote as it now is, with every revision. */
@@ -79,8 +134,9 @@ async function savedFreight(
 }
 
 /**
- * /api/v1/freight-quotes: carrier freight rates by route (part of GT-050). Mounted after
- * requireUser, so every route needs a signed-in user.
+ * /api/v1/freight-quotes: freight rates by route (part of GT-050), quoted by any company,
+ * between saved locations or areas (F-235). Mounted after requireUser, so every route needs a
+ * signed-in user.
  */
 export function freightRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
@@ -142,16 +198,37 @@ export function freightRoutes(openDatabase: DatabaseFactory) {
     if (!body.ok) return body.response;
     const request = createFreightSchema.safeParse(body.value);
     if (!request.success) return malformed(c, request.error);
-    const parsed = parseFreightTerms(request.data.values, new Date());
+    const now = new Date();
+    const parsed = parseFreightTerms(request.data.values, now);
     if (parsed.status === 'invalid') return invalid(c, parsed.issues);
-    const { organizationId, carrierId, originFacilityId, destinationFacilityId, mode } =
-      request.data;
+    const { organizationId, carrierId, mode } = request.data;
+    const apiKey = c.env.GEOCODIO_API_KEY?.trim();
+    const origin = await checkEnd(request.data.origin, 'origin', organizationId, apiKey, now);
+    const destination = await checkEnd(
+      request.data.destination,
+      'destination',
+      organizationId,
+      apiKey,
+      now,
+    );
+    for (const end of [origin, destination]) {
+      if (end.status === 'invalid') return apiError(c, 422, 'VALIDATION_FAILED', end.message);
+      if (end.status === 'bad_match') {
+        return apiError(
+          c,
+          422,
+          'BAD_PLACE_MATCH',
+          'The place found on the map is no longer valid. Click Find again, then save.',
+        );
+      }
+    }
+    if (origin.status !== 'ok' || destination.status !== 'ok') throw new Error('unreachable');
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const created = await db.createFreight(ctx, {
         organizationId,
         carrierId,
-        originFacilityId,
-        destinationFacilityId,
+        origin: origin.end,
+        destination: destination.end,
         mode,
         terms: parsed.value,
         recordedByName: recorderName(c.get('user')),
@@ -166,20 +243,18 @@ export function freightRoutes(openDatabase: DatabaseFactory) {
         case 'forbidden':
           return apiError(c, 403, 'FORBIDDEN', FORBIDDEN);
         case 'carrier_not_found':
-          return apiError(c, 422, 'CARRIER_NOT_FOUND', 'Choose a carrier from the list.');
-        case 'not_a_carrier':
           return apiError(
             c,
             422,
-            'NOT_A_CARRIER',
-            'Freight rates come from a carrier. Mark this counterparty as a carrier on its page first.',
+            'CARRIER_NOT_FOUND',
+            'Choose the company quoting the rate from the list.',
           );
         case 'archived':
           return apiError(
             c,
             409,
             'ARCHIVED',
-            'The carrier or a counterparty of the route is archived. Restore it before entering freight.',
+            'The company quoting the rate or a counterparty of the route is archived. Restore it before entering freight.',
           );
         case 'origin_not_found':
           return apiError(
@@ -200,8 +275,41 @@ export function freightRoutes(openDatabase: DatabaseFactory) {
             c,
             422,
             'SAME_LOCATION',
-            'A route goes from one location to another; choose two different locations.',
+            'A route goes from one place to another; choose two different places.',
           );
+      }
+    });
+  });
+
+  // Finds a town or area for a freight rate with Geocodio, in the province or state the person
+  // chose (F-235). Nothing is saved here: the match is signed, and the form sends it back.
+  routes.post('/places', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const body = await readJson(c, 10_000);
+    if (!body.ok) return body.response;
+    const request = freightPlaceSchema.safeParse(body.value);
+    if (!request.success) return malformed(c, request.error);
+    const { organizationId, region } = request.data;
+    const text = parseFreightAreaText(request.data.text);
+    if (text.status === 'invalid') {
+      return apiError(c, 422, 'VALIDATION_FAILED', `The place ${text.message}.`);
+    }
+    if (!isFreightRegion(region)) {
+      return apiError(c, 422, 'VALIDATION_FAILED', 'Choose the province or state first.');
+    }
+    const apiKey = c.env.GEOCODIO_API_KEY?.trim();
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      if (!(await db.canEnterFreight(ctx, organizationId))) {
+        return apiError(c, 403, 'FORBIDDEN', FORBIDDEN);
+      }
+      if (!apiKey) return notConfigured(c);
+      try {
+        return c.json(
+          await findFreightPlace(apiKey, organizationId, text.text, region, new Date()),
+        );
+      } catch (error) {
+        if (error instanceof GeocoderError) return geocoderFailure(c, error);
+        throw error;
       }
     });
   });

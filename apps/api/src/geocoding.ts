@@ -1,6 +1,10 @@
 import {
+  areaPlaceName,
+  LOW_CONFIDENCE,
   normalizeCountry,
   normalizeRegion,
+  type FreightPlaceAnswer,
+  type FreightPlaceMatch,
   type GeocodeMatch,
   type GeocodeMiss,
   type GeocodeProposal,
@@ -200,32 +204,122 @@ export interface MatchSigner {
   verify: (organizationId: string, match: SignedMatch) => Promise<boolean>;
 }
 
-export async function matchSigner(apiKey: string): Promise<MatchSigner> {
+type SigningKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
+
+async function signingKey(apiKey: string): Promise<SigningKey> {
   const material = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(`grain-trading geocode match signing v1\n${apiKey}`),
   );
-  const key = await crypto.subtle.importKey(
-    'raw',
-    material,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign', 'verify'],
-  );
+  return crypto.subtle.importKey('raw', material, { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
+}
+
+async function hexSignature(key: SigningKey, text: Uint8Array): Promise<string> {
+  const signature = await crypto.subtle.sign('HMAC', key, text);
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function signatureBytes(hex: string): Uint8Array {
+  return Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
+}
+
+export async function matchSigner(apiKey: string): Promise<MatchSigner> {
+  const key = await signingKey(apiKey);
   return {
-    async sign(organizationId, match) {
-      const signature = await crypto.subtle.sign('HMAC', key, signedText(organizationId, match));
-      return [...new Uint8Array(signature)]
-        .map((byte) => byte.toString(16).padStart(2, '0'))
-        .join('');
-    },
+    sign: (organizationId, match) => hexSignature(key, signedText(organizationId, match)),
     verify(organizationId, match) {
-      const signature = Uint8Array.from(match.signature.match(/../g) ?? [], (pair) =>
-        parseInt(pair, 16),
+      return crypto.subtle.verify(
+        'HMAC',
+        key,
+        signatureBytes(match.signature),
+        signedText(organizationId, match),
       );
-      return crypto.subtle.verify('HMAC', key, signature, signedText(organizationId, match));
     },
   };
+}
+
+// Freight areas (F-235): a town or area typed on a freight rate ("Morris, MB"), looked up in
+// the province or state the person chose. The match is signed for the organization, the text
+// and the province or state, with its own first line, so a facility's match is never taken
+// for an area's or the other way round.
+
+type UnsignedPlace = Omit<FreightPlaceMatch, 'signature'>;
+
+function placeText(organizationId: string, text: string, region: string, match: UnsignedPlace) {
+  return new TextEncoder().encode(
+    [
+      'freight-area v1',
+      organizationId,
+      text,
+      region,
+      match.latitude,
+      match.longitude,
+      match.precision,
+      match.expiresAt,
+    ].join('\n'),
+  );
+}
+
+/**
+ * Looks an area up as a town in its province or state ("CA-MB"). Only the area's text and the
+ * province or state go to Geocodio. A result in another province or state, or only the
+ * province or state itself, is no match: the rate is then saved with its province or state.
+ */
+export async function findFreightPlace(
+  apiKey: string,
+  organizationId: string,
+  text: string,
+  region: string,
+  now: Date,
+  fetchImpl: typeof fetch = fetch,
+): Promise<FreightPlaceAnswer> {
+  const [country = '', code = ''] = region.split('-');
+  const name = areaPlaceName(text, region);
+  const query = { city: name, state_province: code, country: GEOCODIO_COUNTRY[country] ?? '' };
+  const results = await geocodeAddresses(apiKey, new Map([['area', query]]), fetchImpl);
+  const result = results.get('area') ?? null;
+  if (!result || TOO_VAGUE.has(result.accuracyType)) return { status: 'not_found' };
+  const foundCountry = result.country ? normalizeCountry(result.country) : null;
+  if (foundCountry !== country) return { status: 'not_found' };
+  const foundRegion = result.region ? normalizeRegion(foundCountry, result.region) : null;
+  if (foundRegion !== code) return { status: 'not_found' };
+  const match: UnsignedPlace = {
+    latitude: result.latitude.toFixed(6),
+    longitude: result.longitude.toFixed(6),
+    precision: precisionOf(result.accuracyType),
+    expiresAt: new Date(now.getTime() + MATCH_LIFETIME_MS).toISOString(),
+  };
+  const key = await signingKey(apiKey);
+  const signature = await hexSignature(key, placeText(organizationId, text, region, match));
+  return {
+    status: 'found',
+    match: { ...match, signature },
+    formattedAddress: result.formattedAddress,
+    sure: result.confidence >= LOW_CONFIDENCE,
+  };
+}
+
+/** True when the match is exactly as findFreightPlace signed it, and not expired. */
+export async function verifyFreightPlace(
+  apiKey: string,
+  organizationId: string,
+  text: string,
+  region: string,
+  match: FreightPlaceMatch,
+  now: Date,
+): Promise<boolean> {
+  const expires = Date.parse(match.expiresAt);
+  if (!Number.isFinite(expires) || expires <= now.getTime()) return false;
+  const key = await signingKey(apiKey);
+  return crypto.subtle.verify(
+    'HMAC',
+    key,
+    signatureBytes(match.signature),
+    placeText(organizationId, text, region, match),
+  );
 }
 
 /** Looks the facilities up and returns them with signed matches, in the given order. */

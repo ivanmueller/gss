@@ -186,8 +186,8 @@ describe("a carrier's lanes as app_api", () => {
       db.createFreight(as(users.tess), {
         organizationId: orgs.a,
         carrierId: counterparties.carrier,
-        originFacilityId: origin,
-        destinationFacilityId: facilities.buyer,
+        origin: { kind: 'facility', facilityId: origin },
+        destination: { kind: 'facility', facilityId: facilities.buyer },
         mode,
         terms,
         recordedByName: 'Tess Trader',
