@@ -1,3 +1,4 @@
+import type { OpenDraftView } from '@grain/domain';
 import { ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { useState } from 'react';
 
@@ -6,6 +7,7 @@ import { Link } from '../lib/router';
 import { useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import type { FreightListResponse } from '../pages/FreightPage';
+import { ClaudeDraftList, type DraftPlace } from './ClaudeDrafts';
 import { FreightList } from './FreightList';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
@@ -14,23 +16,30 @@ import { Card, CardHeader, CardTitle } from './ui/card';
  * Freight on a counterparty's page: the rates it quoted (any company may quote one since
  * F-235) and the rates to and from its locations, with a button to enter a new one. With
  * `folded`, it starts closed and loads its rates only when opened (a buyer's or seller's page).
+ * Claude's drafts of rates the company quoted (F-235 part 2) show above the list, even folded.
  */
 export function CounterpartyFreight({
   session,
   counterparty,
   folded = false,
   hideNew = false,
+  drafts = [],
+  place,
 }: {
   session: DirectorySession;
   counterparty: { id: string; types: string[]; archived: boolean; facilityCount: number };
   folded?: boolean;
   /** Leaves out New freight rate when the page has it already (a carrier's header). */
   hideNew?: boolean;
+  /** Claude's open freight drafts of this company. */
+  drafts?: readonly OpenDraftView[];
+  /** Where the drafts are saved from; needed when there are drafts. */
+  place?: DraftPlace;
 }) {
   const { token, organization } = session;
   const [everything, setEverything] = useState(false);
   const [open, setOpen] = useState(!folded);
-  const [list] = useApiResource<FreightListResponse>(
+  const [list, reload] = useApiResource<FreightListResponse>(
     open
       ? `/freight-quotes?counterparty_id=${counterparty.id}${everything ? '&status=all' : ''}`
       : null,
@@ -108,6 +117,19 @@ export function CounterpartyFreight({
     <Card asChild className="overflow-hidden">
       <section aria-labelledby="counterparty-freight-heading">
         {header}
+        {place !== undefined && (
+          <ClaudeDraftList
+            drafts={drafts}
+            className="border-b px-4 py-3"
+            place={{
+              ...place,
+              onChanged: (message, kind) => {
+                place.onChanged(message, kind);
+                reload();
+              },
+            }}
+          />
+        )}
         {open && (
           <>
             {list.status === 'loading' && (

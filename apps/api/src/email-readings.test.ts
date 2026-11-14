@@ -53,6 +53,7 @@ const CONTEXT: EmailReadingContextRow = {
 const ANSWER: CallReading = {
   voicemail: false,
   email: { wanted: false, about: null, lines: [] },
+  freightRates: [],
   summary: 'Pat bids on canola and asks for the contract.',
   quotes: [
     {

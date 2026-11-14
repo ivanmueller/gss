@@ -78,6 +78,7 @@ const reading = (overrides: Partial<CallReading> = {}): CallReading => ({
   quotes: [],
   followUps: [],
   contacts: [],
+  freightRates: [],
   email: { wanted: false, about: null, lines: [] },
   ...overrides,
 });
@@ -804,7 +805,7 @@ describe('the schema Claude answers with', () => {
     expect(Object.keys(schema.properties)).toEqual(Object.keys(shape));
     expect(schema.required).toEqual(Object.keys(shape));
     expect(schema.additionalProperties).toBe(false);
-    for (const key of ['quotes', 'followUps', 'contacts'] as const) {
+    for (const key of ['quotes', 'followUps', 'contacts', 'freightRates'] as const) {
       const items = schema.properties[key]?.items as unknown as {
         properties: Record<string, unknown>;
         required: string[];

@@ -1,9 +1,12 @@
 import type { FreightSummary } from '@grain/domain';
 import { Plus, Truck } from 'lucide-react';
+import { useState } from 'react';
+
+import { ClaudeDraftList, draftsOf, useOpenDrafts } from '../components/ClaudeDrafts';
 
 import { FreightListCard } from '../components/FreightList';
 import { Button } from '../components/ui/button';
-import { Card } from '../components/ui/card';
+import { Card, CardHeader, CardTitle } from '../components/ui/card';
 import { Select } from '../components/ui/select';
 import { SegmentedControl } from '../components/ui/segmented-control';
 import type { CounterpartyList } from '../lib/api';
@@ -23,7 +26,8 @@ export interface FreightListResponse {
 
 /**
  * /freight: carriers' freight rates by route, live ones by default. Withdrawn and expired
- * rates only when asked for, so neither ever passes for a live rate.
+ * rates only when asked for, so neither ever passes for a live rate. Claude's drafts of rates
+ * from calls and email (F-235 part 2) wait above the list, under the same filters.
  */
 export function FreightPage({ session }: { session: DirectorySession }) {
   const { token, organization } = session;
@@ -39,7 +43,16 @@ export function FreightPage({ session }: { session: DirectorySession }) {
   if (mode !== 'all') query.set('mode', mode);
   if (carrier) query.set('carrier_id', carrier);
   if (everything) query.set('status', 'all');
-  const [list] = useApiResource<FreightListResponse>(`/freight-quotes?${query.toString()}`, token);
+  const [list, reloadList] = useApiResource<FreightListResponse>(
+    `/freight-quotes?${query.toString()}`,
+    token,
+  );
+  const [draftList, reloadDrafts] = useOpenDrafts(session, { kind: 'freight' });
+  const [notice, setNotice] = useState<string | null>(null);
+  const drafts = draftsOf(draftList, 'freight').filter((draft) => {
+    const draftMode = (draft.fields as { mode: string | null }).mode;
+    return (mode === 'all' || draftMode === mode) && (!carrier || draft.counterpartyId === carrier);
+  });
   const [counterparties] = useApiResource<CounterpartyList>(
     `/counterparties?organization_id=${organization.id}`,
     token,
@@ -105,6 +118,36 @@ export function FreightPage({ session }: { session: DirectorySession }) {
         )}
       </div>
 
+      {notice !== null && (
+        <p role="status" className="text-sm text-success">
+          {notice}
+        </p>
+      )}
+      {drafts.length > 0 && (
+        <Card asChild className="overflow-hidden">
+          <section aria-labelledby="freight-drafts-heading">
+            <CardHeader>
+              <CardTitle id="freight-drafts-heading">
+                Claude’s drafts to verify ({drafts.length})
+              </CardTitle>
+            </CardHeader>
+            <ClaudeDraftList
+              drafts={drafts}
+              showCompany
+              className="px-4 py-3"
+              place={{
+                session,
+                team: null,
+                onChanged: (message) => {
+                  setNotice(message);
+                  reloadDrafts();
+                  reloadList();
+                },
+              }}
+            />
+          </section>
+        </Card>
+      )}
       {list.status === 'loading' && (
         <p className="text-sm text-muted-foreground">Loading freight rates…</p>
       )}

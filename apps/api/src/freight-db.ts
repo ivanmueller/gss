@@ -330,6 +330,66 @@ async function insertRevision(
   `;
 }
 
+/**
+ * Enters a company's rate on a route with its first terms, as the signed-in person, within the
+ * caller's transaction (POST /freight-quotes, and a verified Claude draft: F-235 part 2).
+ */
+export async function insertFreight(
+  tx: postgres.TransactionSql,
+  freight: NewFreight,
+): Promise<CreateFreightResult> {
+  const org = freight.organizationId;
+  const [check] = await tx<{ allowed: boolean }[]>`
+      select app.can_enter_freight(${org}) as allowed`;
+  if (check?.allowed !== true) return { status: 'forbidden' };
+  const [carrier] = await tx<{ archived: boolean }[]>`
+      select archived_at is not null as archived
+      from app.counterparties where id = ${freight.carrierId} and organization_id = ${org}`;
+  if (!carrier) return { status: 'carrier_not_found' };
+  if (carrier.archived) return { status: 'archived' };
+  if (await sameEnd(tx, freight.origin, freight.destination)) {
+    return { status: 'same_location' };
+  }
+  const facilityIds = [freight.origin, freight.destination].flatMap((end) =>
+    end.kind === 'facility' ? [end.facilityId] : [],
+  );
+  const ends =
+    facilityIds.length === 0
+      ? []
+      : await tx<{ id: string; archived: boolean }[]>`
+            select f.id, c.archived_at is not null as archived
+            from app.facilities f join app.counterparties c on c.id = f.counterparty_id
+            where f.organization_id = ${org}
+              and f.id in (${facilityIds[0] ?? null}, ${facilityIds[1] ?? facilityIds[0] ?? null})`;
+  const found = (end: NewFreightEnd) =>
+    end.kind === 'area' ? { archived: false } : ends.find((e) => e.id === end.facilityId);
+  const origin = found(freight.origin);
+  const destination = found(freight.destination);
+  if (!origin) return { status: 'origin_not_found' };
+  if (!destination) return { status: 'destination_not_found' };
+  if (origin.archived || destination.archived) return { status: 'archived' };
+  const o = endColumns(freight.origin);
+  const d = endColumns(freight.destination);
+  const [created] = await tx<{ id: string }[]>`
+      insert into app.freight_quotes
+        (organization_id, carrier_id, origin_facility_id, destination_facility_id, mode,
+         created_by,
+         origin_area_text, origin_area_region, origin_area_latitude, origin_area_longitude,
+         origin_area_precision,
+         destination_area_text, destination_area_region, destination_area_latitude,
+         destination_area_longitude, destination_area_precision)
+      values (${org}, ${freight.carrierId}, ${o.facilityId}, ${d.facilityId},
+              ${freight.mode}::app.freight_mode, app.current_user_id(),
+              ${o.text}, ${o.region}, ${o.latitude}::numeric, ${o.longitude}::numeric,
+              ${o.precision}::app.location_precision,
+              ${d.text}, ${d.region}, ${d.latitude}::numeric, ${d.longitude}::numeric,
+              ${d.precision}::app.location_precision)
+      returning id`;
+  if (!created) throw new Error('freight quote was not created');
+  await insertRevision(tx, org, created.id, freight.terms, freight.recordedByName);
+  return { status: 'created', id: created.id };
+}
+
 export function freightQueries(asUser: AsUser): FreightDatabase {
   const freightSelect = (tx: postgres.TransactionSql) => tx`
     select q.id, q.mode::text as mode, q.carrier_id, k.legal_name as carrier_legal_name,
@@ -400,58 +460,7 @@ export function freightQueries(asUser: AsUser): FreightDatabase {
     },
 
     createFreight(ctx, freight) {
-      return asUser(ctx, async (tx): Promise<CreateFreightResult> => {
-        const org = freight.organizationId;
-        const [check] = await tx<{ allowed: boolean }[]>`
-          select app.can_enter_freight(${org}) as allowed`;
-        if (check?.allowed !== true) return { status: 'forbidden' };
-        const [carrier] = await tx<{ archived: boolean }[]>`
-          select archived_at is not null as archived
-          from app.counterparties where id = ${freight.carrierId} and organization_id = ${org}`;
-        if (!carrier) return { status: 'carrier_not_found' };
-        if (carrier.archived) return { status: 'archived' };
-        if (await sameEnd(tx, freight.origin, freight.destination)) {
-          return { status: 'same_location' };
-        }
-        const facilityIds = [freight.origin, freight.destination].flatMap((end) =>
-          end.kind === 'facility' ? [end.facilityId] : [],
-        );
-        const ends =
-          facilityIds.length === 0
-            ? []
-            : await tx<{ id: string; archived: boolean }[]>`
-                select f.id, c.archived_at is not null as archived
-                from app.facilities f join app.counterparties c on c.id = f.counterparty_id
-                where f.organization_id = ${org}
-                  and f.id in (${facilityIds[0] ?? null}, ${facilityIds[1] ?? facilityIds[0] ?? null})`;
-        const found = (end: NewFreightEnd) =>
-          end.kind === 'area' ? { archived: false } : ends.find((e) => e.id === end.facilityId);
-        const origin = found(freight.origin);
-        const destination = found(freight.destination);
-        if (!origin) return { status: 'origin_not_found' };
-        if (!destination) return { status: 'destination_not_found' };
-        if (origin.archived || destination.archived) return { status: 'archived' };
-        const o = endColumns(freight.origin);
-        const d = endColumns(freight.destination);
-        const [created] = await tx<{ id: string }[]>`
-          insert into app.freight_quotes
-            (organization_id, carrier_id, origin_facility_id, destination_facility_id, mode,
-             created_by,
-             origin_area_text, origin_area_region, origin_area_latitude, origin_area_longitude,
-             origin_area_precision,
-             destination_area_text, destination_area_region, destination_area_latitude,
-             destination_area_longitude, destination_area_precision)
-          values (${org}, ${freight.carrierId}, ${o.facilityId}, ${d.facilityId},
-                  ${freight.mode}::app.freight_mode, app.current_user_id(),
-                  ${o.text}, ${o.region}, ${o.latitude}::numeric, ${o.longitude}::numeric,
-                  ${o.precision}::app.location_precision,
-                  ${d.text}, ${d.region}, ${d.latitude}::numeric, ${d.longitude}::numeric,
-                  ${d.precision}::app.location_precision)
-          returning id`;
-        if (!created) throw new Error('freight quote was not created');
-        await insertRevision(tx, org, created.id, freight.terms, freight.recordedByName);
-        return { status: 'created', id: created.id };
-      });
+      return asUser(ctx, (tx) => insertFreight(tx, freight));
     },
 
     reviseFreight(ctx, id, basedOnRevision, terms, recordedByName) {

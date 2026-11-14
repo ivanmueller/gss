@@ -4,8 +4,18 @@ import { albertaDay, albertaToUtc } from './alberta';
 import { COMMODITIES } from './commodities';
 import { parseFollowUp, type FollowUpInput } from './crm';
 import { parseContactFields, type ContactInput } from './directory';
+import {
+  FREIGHT_MODES,
+  freightEndSchema,
+  isFreightRegion,
+  parseFreightAreaText,
+  parseFreightTerms,
+  type FreightEndInput,
+  type FreightMode,
+  type FreightTerms,
+} from './freight';
 import { parseQuoteTerms, type QuoteFormValues, type QuoteSide, type QuoteTerms } from './quotes';
-import type { ContactFormValues, DraftInput, DraftKind } from './readings';
+import { DRAFT_KINDS, type ContactFormValues, type DraftInput, type DraftKind } from './readings';
 
 // Claude's drafts shown in their own sections and verified in one click (the owner's request
 // and answers of 2026-11-06, docs/DECISIONS.md, F-115). A draft stays a draft until a person
@@ -56,7 +66,7 @@ export interface OpenDraftList {
 export const listDraftsQuerySchema = z.object({
   organization_id: z.uuid(),
   counterparty_id: z.uuid().optional(),
-  kind: z.enum(['quote', 'follow_up', 'contact']).optional(),
+  kind: z.enum(DRAFT_KINDS).optional(),
 });
 
 /** The most form values an edited draft may carry. */
@@ -78,6 +88,15 @@ export const verifyDraftSchema = z
         values: z
           .record(z.string().max(40), z.string().max(5000))
           .refine((values) => Object.keys(values).length <= EDITED_FIELDS_MAX),
+        // A freight rate's route and mode as the person saved them in the form (F-235 part 2):
+        // an area with the match the Worker signed, or a saved location.
+        freight: z
+          .strictObject({
+            mode: z.enum(FREIGHT_MODES),
+            origin: freightEndSchema,
+            destination: freightEndSchema,
+          })
+          .optional(),
       })
       .strict()
       .optional(),
@@ -114,6 +133,15 @@ const MISSING_LABELS: Record<string, string> = {
   task: 'task',
   dueAt: 'due time',
   assignedTo: 'who it is for',
+  rate: 'rate',
+  rateUnit: 'rate unit',
+  payload: 'load size',
+  payloadUnit: 'load size unit',
+  inclusions: 'what the rate includes',
+  mode: 'truck or rail',
+  origin: 'from (town and province or state)',
+  destination: 'to (town and province or state)',
+  route: 'a different place at each end',
   contactName: 'name',
   contactRole: 'role',
   contactEmail: 'email',
@@ -121,7 +149,7 @@ const MISSING_LABELS: Record<string, string> = {
 };
 
 /** What a draft is missing or has wrong, once each, in plain words. */
-function missingOf(issues: readonly { field: string | null; message: string }[]): string[] {
+export function missingOf(issues: readonly { field: string | null; message: string }[]): string[] {
   const words = issues.map((issue) =>
     issue.field === null ? issue.message : (MISSING_LABELS[issue.field] ?? issue.field),
   );
@@ -148,7 +176,15 @@ export interface ListedContact {
 export type DraftToSave =
   | { kind: 'quote'; side: QuoteSide; commodity: string; terms: QuoteTerms }
   | { kind: 'follow_up'; followUp: FollowUpInput }
-  | { kind: 'contact'; contact: ContactInput };
+  | { kind: 'contact'; contact: ContactInput }
+  | {
+      kind: 'freight';
+      mode: FreightMode;
+      /** As the API takes them; a drafted area has no match (the Worker looks it up on Verify). */
+      origin: FreightEndInput;
+      destination: FreightEndInput;
+      terms: FreightTerms;
+    };
 
 /** A field the usual form would refuse, as the forms show it. */
 export interface DraftIssue {
@@ -230,5 +266,61 @@ export function draftReadiness(
       if (parsed.status === 'invalid') return incomplete(parsed.issues);
       return { status: 'ready', save: { kind: 'contact', contact: parsed.value } };
     }
+    case 'freight': {
+      const fields = draft.fields as Extract<DraftInput, { kind: 'freight' }>['fields'];
+      const parsed = parseFreightTerms(edited?.values ?? fields.values, now);
+      const issues: DraftIssue[] = parsed.status === 'invalid' ? [...parsed.issues] : [];
+      let route: { mode: FreightMode; origin: FreightEndInput; destination: FreightEndInput };
+      if (edited === undefined) {
+        const origin = draftArea(fields.origin, 'origin', issues);
+        const destination = draftArea(fields.destination, 'destination', issues);
+        if (fields.mode === null) issues.push({ field: 'mode', message: 'is required' });
+        if (origin === null || destination === null || fields.mode === null) {
+          return incomplete(issues);
+        }
+        route = { mode: fields.mode, origin, destination };
+      } else if (edited.freight === undefined) {
+        return incomplete([
+          ...issues,
+          { field: 'origin', message: 'is required' },
+          { field: 'destination', message: 'is required' },
+          { field: 'mode', message: 'is required' },
+        ]);
+      } else {
+        route = edited.freight;
+      }
+      if (sameArea(route.origin, route.destination)) {
+        issues.push({ field: 'route', message: 'needs a different place at each end' });
+      }
+      if (parsed.status === 'invalid' || issues.length > 0) return incomplete(issues);
+      return { status: 'ready', save: { kind: 'freight', ...route, terms: parsed.value } };
+    }
   }
+}
+
+/** A drafted route end as the API takes it (an area, no match), or null with why. */
+function draftArea(
+  area: { text: string | null; region: string | null },
+  field: 'origin' | 'destination',
+  issues: DraftIssue[],
+): FreightEndInput | null {
+  const text = area.text === null ? null : parseFreightAreaText(area.text);
+  if (text?.status !== 'ok' || area.region === null || !isFreightRegion(area.region)) {
+    issues.push({ field, message: 'is required' });
+    return null;
+  }
+  return { area: { text: text.text, region: area.region } };
+}
+
+/** The same area at both ends (case aside, in the same province or state): no route. */
+function sameArea(origin: FreightEndInput, destination: FreightEndInput): boolean {
+  if ('facilityId' in origin || 'facilityId' in destination) {
+    return 'facilityId' in origin && 'facilityId' in destination
+      ? origin.facilityId === destination.facilityId
+      : false;
+  }
+  return (
+    origin.area.region === destination.area.region &&
+    origin.area.text.trim().toLowerCase() === destination.area.text.trim().toLowerCase()
+  );
 }

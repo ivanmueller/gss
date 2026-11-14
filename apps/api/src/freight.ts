@@ -51,7 +51,7 @@ type EndCheck =
  * province or state of the list, and a point only from a match this Worker signed for that
  * organization, text and province or state within the hour.
  */
-async function checkEnd(
+export async function checkEnd(
   end: FreightEndInput,
   which: 'origin' | 'destination',
   organizationId: string,
@@ -87,6 +87,39 @@ async function checkEnd(
       region: end.area.region,
       point: { latitude: match.latitude, longitude: match.longitude, precision: match.precision },
     },
+  };
+}
+
+/**
+ * A drafted area, looked up with Geocodio when a person verifies the draft in one click (F-235
+ * part 2): placed on the map only when the match is sure, as the form accepts a sure match
+ * without asking; a doubtful match or none leaves it without a point, and so does a Worker
+ * without the Geocodio key. A failing lookup throws GeocoderError: the area can never be
+ * changed later, so the caller saves nothing rather than lose the point for good.
+ */
+export async function lookedUpEnd(
+  end: FreightEndInput,
+  organizationId: string,
+  apiKey: string | undefined,
+  now: Date,
+  fetchImpl: typeof fetch = fetch,
+): Promise<NewFreightEnd> {
+  if ('facilityId' in end) return { kind: 'facility', facilityId: end.facilityId };
+  const { text, region } = end.area;
+  if (!apiKey) return { kind: 'area', text, region, point: null };
+  const found = await findFreightPlace(apiKey, organizationId, text, region, now, fetchImpl);
+  return {
+    kind: 'area',
+    text,
+    region,
+    point:
+      found.status === 'found' && found.sure
+        ? {
+            latitude: found.match.latitude,
+            longitude: found.match.longitude,
+            precision: found.match.precision,
+          }
+        : null,
   };
 }
 
