@@ -158,6 +158,34 @@ Work shaped by the free plan's limit of about 10 ms of computing per request, to
 
 All of this is done: see `docs/FEATURES_DONE.md`.
 
+### Experiments in how the platform is built
+
+#### F-236 — More agents in the Claude + Codex pipeline (an experiment)
+
+**Status:** Needs owner input. **Asked:** 2026-11-14, after a discussion of AI agents (what they do, their gains and risks); recorded as an experiment, not a standing change. Changes to how agents work are governance (`AGENTS.md`, `docs/AI_WORKFLOW.md` §11.5 and §11.6): a reviewed pull request and the owner's approval of the exact commit before anything here is used.
+
+**Why:** today one Claude builds one feature at a time and Codex reviews it. Most waiting is on Codex rounds and on the owner's answers and checks, which more agents do not shorten. Two additions may still help: one for speed, one for catching mistakes.
+
+**Part A, a parallel builder for low-risk work (speed; to try first):**
+- While the main session works on one feature, a second Claude on a cheaper model (Sonnet or Haiku) does one low-risk task on its own branch and worktree: dependency updates (D-01 to D-05), documents, styles, flaky tests, small screens.
+- Never two high-risk tasks at once (database, sign-in, money, FX, Telnyx, Claude), and never two tasks touching the same tables, API routes or screens.
+- Its pull request follows the usual low-risk path (CI, Merge policy); a governance change (such as D-04, `supabase/setup-cli`) still waits for the owner's approval.
+
+**Part B, an independent test writer for high-risk work (robustness; to try with the trading engine, F-106):**
+- Before Claude builds a high-risk feature, a separate agent writes its tests from the rules alone (`docs/TRADING_RULES.md`, `docs/ACCEPTANCE_TESTS.md`, the database rules, the owner's answers), without seeing the code. Claude then makes them pass; a test is changed only when it misreads a rule, and the change is recorded.
+- Aim: a rule misunderstood by Claude no longer slips into both the code and its tests. Most useful for money (the 42 MT example: exactly CAD 46.00/MT and CAD 1,932.00), organization isolation and Claude's checks against transcripts.
+
+**Not part of the experiment:** a third reviewer of the same kind as Codex (expected to add overlapping findings, false alarms and tokens more than catches); agents inside the platform acting by themselves (`AGENTS.md` rules 8 and 9 stand).
+
+**How it would be judged (to agree with the owner):** for Part A, merges per week, review rounds per pull request, conflicts or redone work, and whether the owner feels overloaded; for Part B, mistakes the independent tests caught that Codex or CI did not, and review rounds saved. Both against the token cost, with Codex's usage limit (reached twice on 2026-11-11) watched.
+
+**Questions for the owner:**
+1. **When to start Part A:** during the next feature (for example texting, F-120), with the dependency updates as the first side task?
+2. **How long the trial runs:** for example two weeks or three side tasks, then a short report and a decision to keep, change or stop.
+3. **Budget:** a ceiling on extra usage (Claude and Codex), and whether the side builder stops when Codex nears its limit.
+4. **Notices:** one message per side merge, or one summary at the end of the session?
+5. **Part B:** try it with the trading engine (F-106) when that starts, or earlier on another high-risk feature?
+
 ### Owner's list (2026-11-06)
 
 | ID | Feature | Status | What it needs before work starts |
