@@ -6,15 +6,16 @@ import {
   QUOTE_STATUS_LABELS,
   utcToAlberta,
   type FreightDetail,
-  type FreightLocation,
+  type FreightEnd,
   type FreightRevision,
 } from '@grain/domain';
-import { Archive, ArrowRight, Ban, Pencil, TimerOff } from 'lucide-react';
+import { Archive, ArrowRight, Ban, Clock, Pencil, TimerOff } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import { BackLink } from '../components/BackLink';
 import { FreightForm } from '../components/FreightForm';
-import { FreightModeBadge } from '../components/FreightList';
+import { FreightModeBadge, FreightOutdatedBadge } from '../components/FreightList';
+import { FreightRouteMap } from '../components/FreightRouteMap';
 import { PageHeader } from '../components/PageHeader';
 import { QuoteStatusBadge } from '../components/QuoteStatusBadge';
 import { Button } from '../components/ui/button';
@@ -31,9 +32,15 @@ import {
   TableRowHeader,
 } from '../components/ui/table';
 import { ApiError, sendJson } from '../lib/api';
-import { canEnterFreight, freightPayload, freightPlace, freightRate } from '../lib/freight';
+import {
+  canEnterFreight,
+  freightEndLines,
+  freightPayload,
+  freightRate,
+  freightValidUntil,
+} from '../lib/freight';
 import { Link } from '../lib/router';
-import { useApiResource } from '../lib/useApiResource';
+import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from './CounterpartiesPage';
 
 const nameLink = 'font-medium text-foreground underline-offset-4 hover:underline';
@@ -60,7 +67,7 @@ function Terms({ revision }: { revision: FreightRevision }) {
       <Term label="Firm or indicative">{QUOTE_STATUS_LABELS[revision.firmness]}</Term>
       <Term label="What the rate includes">{revision.inclusions ?? 'Not stated'}</Term>
       <Term label="Quoted at">{formatAlberta(revision.quotedAt)}</Term>
-      <Term label="Valid until">{formatAlberta(revision.validUntil)}</Term>
+      <Term label="Valid until">{freightValidUntil(revision)}</Term>
       <Term label="Source">
         {QUOTE_SOURCE_LABELS[revision.sourceType]}
         {revision.sourceReference && (
@@ -155,9 +162,7 @@ function RevisionHistory({ freight }: { freight: FreightDetail }) {
                 </span>
               </TableCell>
               <TableCell className="text-xs">{revision.inclusions ?? '—'}</TableCell>
-              <TableCell className="whitespace-nowrap">
-                {formatAlberta(revision.validUntil)}
-              </TableCell>
+              <TableCell className="whitespace-nowrap">{freightValidUntil(revision)}</TableCell>
               <TableCell>
                 <QuoteStatusBadge status={latest ? freight.status : 'superseded'} />
               </TableCell>
@@ -176,19 +181,27 @@ function RevisionHistory({ freight }: { freight: FreightDetail }) {
 }
 
 /** One end of the route on the rate's page: the counterparty (linked) and the location. */
-function RouteEnd({ label, end }: { label: string; end: FreightLocation }) {
+function RouteEnd({ label, end }: { label: string; end: FreightEnd }) {
+  const { name, place } = freightEndLines(end);
   return (
     <div className="min-w-0">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <Link href={`/counterparties/${end.counterparty.id}`} className={nameLink}>
-        {end.counterparty.legalName}
-      </Link>
-      <p className="text-sm text-muted-foreground">{freightPlace(end)}</p>
+      {end.kind === 'facility' ? (
+        <Link href={`/counterparties/${end.counterparty.id}`} className={nameLink}>
+          {name}
+        </Link>
+      ) : (
+        <p className="font-medium">{name}</p>
+      )}
+      <p className="text-sm text-muted-foreground">
+        {place}
+        {end.kind === 'area' && end.point === null && ' · not on the map'}
+      </p>
     </div>
   );
 }
 
-/** /freight/:id: one carrier's rate on a route, its current terms and every earlier revision. */
+/** /freight/:id: one company's rate on a route, its current terms and every earlier revision. */
 export function FreightRatePage({ session, id }: { session: DirectorySession; id: string }) {
   const { token, organization } = session;
   const [resource, reload] = useApiResource<FreightDetail>(`/freight-quotes/${id}`, token);
@@ -199,6 +212,10 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
   function done(message: string) {
     setMode('view');
     setNotice(message);
+    // Every kept list of freight rates (Freight, a company's page) loads again rather than
+    // showing this rate as it was (T-05, as T-01 for bids and offers). This page keeps showing
+    // its own answer while it reloads.
+    forgetApiAnswers('/freight-quotes');
     reload();
   }
 
@@ -237,11 +254,12 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
                     </span>
                     <FreightModeBadge mode={freight.mode} />
                     <QuoteStatusBadge status={freight.status} />
+                    <FreightOutdatedBadge since={freight.outdatedSince} />
                   </span>
                 }
                 description={
                   <>
-                    Quoted by carrier{' '}
+                    Quoted by{' '}
                     <Link href={`/counterparties/${freight.carrier.id}`} className={nameLink}>
                       {freight.carrier.legalName}
                     </Link>
@@ -289,15 +307,26 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
               {freight.status === 'expired' && (
                 <Callout variant="warning" icon={TimerOff}>
                   <p>
-                    <strong>Expired</strong> at {formatAlberta(freight.current.validUntil)}. It is
-                    not live; record new terms with a later valid-until time if the carrier renewed
-                    it.
+                    <strong>Expired</strong> at {freightValidUntil(freight.current)}. It is not
+                    live; record new terms with a later valid-until time if the company renewed it.
+                  </p>
+                </Callout>
+              )}
+              {freight.outdatedSince !== null && !withdrawn && (
+                <Callout variant="warning" icon={Clock}>
+                  <p>
+                    <strong>Outdated</strong> since {formatAlberta(freight.outdatedSince)}: it has
+                    no end date and was quoted more than 30 days ago. Check it with the company and
+                    record new terms.
                   </p>
                 </Callout>
               )}
               {freight.carrier.archived && !withdrawn && (
                 <Callout variant="warning" icon={Archive}>
-                  <p>The carrier is archived. Restore it on its page before changing this rate.</p>
+                  <p>
+                    The company quoting it is archived. Restore it on its page before changing this
+                    rate.
+                  </p>
                 </Callout>
               )}
 
@@ -311,6 +340,7 @@ export function FreightRatePage({ session, id }: { session: DirectorySession; id
                     />
                     <RouteEnd label="To" end={freight.destination} />
                   </CardContent>
+                  <FreightRouteMap origin={freight.origin} destination={freight.destination} />
                 </section>
               </Card>
 

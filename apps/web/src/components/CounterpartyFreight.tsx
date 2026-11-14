@@ -11,8 +11,8 @@ import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle } from './ui/card';
 
 /**
- * Freight on a counterparty's page: a carrier's own rates, with a button to enter a new one;
- * for any other counterparty with locations, the rates to and from those locations. With
+ * Freight on a counterparty's page: the rates it quoted (any company may quote one since
+ * F-235) and the rates to and from its locations, with a button to enter a new one. With
  * `folded`, it starts closed and loads its rates only when opened (a buyer's or seller's page).
  */
 export function CounterpartyFreight({
@@ -31,18 +31,15 @@ export function CounterpartyFreight({
   const [everything, setEverything] = useState(false);
   const [open, setOpen] = useState(!folded);
   const carrier = counterparty.types.includes('carrier');
-  const shown = carrier || counterparty.facilityCount > 0;
   const [list] = useApiResource<FreightListResponse>(
-    shown && open
-      ? `/freight-quotes?${carrier ? 'carrier_id' : 'counterparty_id'}=${counterparty.id}${everything ? '&status=all' : ''}`
+    open
+      ? `/freight-quotes?counterparty_id=${counterparty.id}${everything ? '&status=all' : ''}`
       : null,
     token,
   );
-  if (!shown) return null;
-  const canAdd =
-    !hideNew && carrier && canEnterFreight(organization.role) && !counterparty.archived;
+  const canAdd = !hideNew && canEnterFreight(organization.role) && !counterparty.archived;
   const count = list.status === 'ok' ? list.data.freight.length : null;
-  const title = carrier ? 'Freight rates' : 'Freight to and from its locations';
+  const title = 'Freight rates';
 
   const options = (
     <>
@@ -130,9 +127,7 @@ export function CounterpartyFreight({
               ) : (
                 <FreightList
                   freight={list.data.freight}
-                  caption={
-                    carrier ? 'Freight rates of this carrier' : 'Freight to and from its locations'
-                  }
+                  caption="Freight rates it quoted, and to and from its locations"
                   showCarrier={!carrier}
                 />
               ))}

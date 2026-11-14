@@ -1,12 +1,12 @@
 import {
   FREIGHT_MODE_LABELS,
   formatAlberta,
-  type FreightLocation,
+  type FreightEnd,
   type FreightSummary,
 } from '@grain/domain';
-import { ArrowRight, TrainFront, Truck } from 'lucide-react';
+import { ArrowRight, Clock, TrainFront, Truck } from 'lucide-react';
 
-import { freightPayload, freightPlace, freightRate } from '../lib/freight';
+import { freightEndLines, freightPayload, freightRate, freightValidUntil } from '../lib/freight';
 import { Link } from '../lib/router';
 import { useMediaQuery } from '../lib/useMediaQuery';
 import { QuoteStatusBadge } from './QuoteStatusBadge';
@@ -36,15 +36,39 @@ export function FreightModeBadge({ mode }: { mode: FreightSummary['mode'] }) {
   );
 }
 
-/** One end of a route: its counterparty, then the location. */
-function End({ end }: { end: FreightLocation }) {
+/**
+ * "Outdated" on a rate without an end date quoted more than 30 days ago (F-235): still listed,
+ * never usable for a calculation.
+ */
+export function FreightOutdatedBadge({ since }: { since: string | null }) {
+  if (since === null) return null;
+  return (
+    <Badge
+      title={`Outdated since ${formatAlberta(since)} (MT): no end date, quoted over 30 days ago`}
+    >
+      <Clock aria-hidden="true" />
+      Outdated
+    </Badge>
+  );
+}
+
+/** One end of a route: a saved location's company and place, or an area and its province. */
+function End({ end }: { end: FreightEnd }) {
+  const { name, place } = freightEndLines(end);
   return (
     <span className="block min-w-36">
-      {end.counterparty.legalName}
-      {end.counterparty.archived && <Badge className="ml-2">Archived</Badge>}
-      <span className="block text-xs font-normal text-muted-foreground">{freightPlace(end)}</span>
+      {name}
+      {end.kind === 'facility' && end.counterparty.archived && (
+        <Badge className="ml-2">Archived</Badge>
+      )}
+      <span className="block text-xs font-normal text-muted-foreground">{place}</span>
     </span>
   );
+}
+
+function endLabel(end: FreightEnd): string {
+  const { name, place } = freightEndLines(end);
+  return `${name}, ${place}`;
 }
 
 /** From → to, linking to the rate's page. */
@@ -53,7 +77,7 @@ function Route({ freight }: { freight: FreightSummary }) {
     <Link
       href={`/freight/${freight.id}`}
       className={`${nameLink} flex flex-wrap items-start gap-x-2 gap-y-1`}
-      aria-label={`${freight.origin.counterparty.legalName}, ${freightPlace(freight.origin)} to ${freight.destination.counterparty.legalName}, ${freightPlace(freight.destination)}`}
+      aria-label={`${endLabel(freight.origin)} to ${endLabel(freight.destination)}`}
     >
       <End end={freight.origin} />
       <ArrowRight aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -108,6 +132,7 @@ export function FreightList({
             <span className="flex flex-wrap items-center gap-2">
               <FreightModeBadge mode={item.mode} />
               <QuoteStatusBadge status={item.status} />
+              <FreightOutdatedBadge since={item.outdatedSince} />
             </span>
             <span className="font-medium">
               <Route freight={item} />
@@ -125,7 +150,7 @@ export function FreightList({
             )}
             <span className="text-xs text-muted-foreground">
               Quoted {formatAlberta(item.current.quotedAt)} · valid until{' '}
-              {formatAlberta(item.current.validUntil)}
+              {freightValidUntil(item.current)}
             </span>
           </li>
         ))}
@@ -138,7 +163,7 @@ export function FreightList({
       <TableHeader>
         <tr>
           <TableHead>Route</TableHead>
-          {showCarrier && <TableHead>Carrier</TableHead>}
+          {showCarrier && <TableHead>Quoted by</TableHead>}
           <TableHead>Mode</TableHead>
           <TableHead>Rate</TableHead>
           <TableHead>Includes</TableHead>
@@ -166,12 +191,13 @@ export function FreightList({
             <TableCell className="text-xs">{item.current.inclusions ?? '—'}</TableCell>
             <TableCell className="text-xs whitespace-nowrap">
               {formatAlberta(item.current.quotedAt)}
-              <span className="block text-muted-foreground">
-                {formatAlberta(item.current.validUntil)}
-              </span>
+              <span className="block text-muted-foreground">{freightValidUntil(item.current)}</span>
             </TableCell>
             <TableCell>
-              <QuoteStatusBadge status={item.status} />
+              <span className="flex flex-wrap gap-1">
+                <QuoteStatusBadge status={item.status} />
+                <FreightOutdatedBadge since={item.outdatedSince} />
+              </span>
             </TableCell>
           </TableRow>
         ))}

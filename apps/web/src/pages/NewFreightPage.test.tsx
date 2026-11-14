@@ -57,6 +57,14 @@ const BUYER = {
   facilityCount: 1,
 };
 
+const MATCH = {
+  latitude: '49.354000',
+  longitude: '-97.365000',
+  precision: 'approximate',
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  signature: 'a'.repeat(64),
+};
+
 function location(
   owner: CounterpartySummary,
   id: string,
@@ -108,6 +116,13 @@ const BUYER_DETAIL = location(
   'MN',
 );
 
+/** The From end's Find on the map (the first on the page). */
+function firstFindButton(): HTMLElement {
+  const [button] = screen.getAllByRole('button', { name: 'Find on the map' });
+  if (!button) throw new Error('no Find on the map button');
+  return button;
+}
+
 function api() {
   return mockApi({
     [`GET /counterparties?organization_id=${ORG.id}`]: () =>
@@ -115,6 +130,13 @@ function api() {
     [`GET /counterparties/${SELLER.id}`]: () => Response.json(SELLER_DETAIL),
     [`GET /counterparties/${BUYER.id}`]: () => Response.json(BUYER_DETAIL),
     'POST /freight-quotes': () => Response.json(FREIGHT, { status: 201 }),
+    'POST /freight-quotes/places': () =>
+      Response.json({
+        status: 'found',
+        sure: true,
+        formattedAddress: 'Synthetic Town A, MB, Canada',
+        match: MATCH,
+      }),
   });
 }
 
@@ -131,20 +153,23 @@ describe('NewFreightPage', () => {
     const calls = api();
     render(<NewFreightPage session={SESSION} />);
     expect(screen.getByRole('heading', { name: 'New freight rate' })).toBeInTheDocument();
-    const carrier = screen.getByLabelText(/^Carrier/);
+    const carrier = screen.getByLabelText(/^Company quoting the rate/);
     await waitFor(() => {
       expect(carrier).toHaveTextContent('Choose…');
     });
-    // Only carriers that are not archived quote freight.
+    // Any company that is not archived quotes freight (F-235).
     await userEvent.click(carrier);
     expect(await screen.findByRole('option', { name: 'Synthetic Carrier' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Synthetic Old Carrier' })).toBeNull();
-    expect(screen.queryByRole('option', { name: 'Synthetic Seller' })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Synthetic Seller' })).toBeInTheDocument();
     await userEvent.type(screen.getByRole('combobox', { name: 'Search the list' }), 'carr');
     await userEvent.click(screen.getByRole('option', { name: 'Synthetic Carrier' }));
     await userEvent.click(screen.getByRole('button', { name: 'Rail' }));
 
-    // The ends of the route are counterparties with locations; a carrier without one is not.
+    // Saved locations: counterparties with locations; a carrier without one is not offered.
+    for (const button of screen.getAllByRole('button', { name: 'Saved location' })) {
+      await userEvent.click(button);
+    }
     await userEvent.click(screen.getByLabelText(/^From: company/));
     expect(await screen.findByRole('option', { name: 'Synthetic Seller' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Synthetic Carrier' })).toBeNull();
@@ -184,8 +209,8 @@ describe('NewFreightPage', () => {
     expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({
       organizationId: ORG.id,
       carrierId: CARRIER.id,
-      originFacilityId: SELLER_DETAIL.facilities[0]?.id,
-      destinationFacilityId: BUYER_DETAIL.facilities[0]?.id,
+      origin: { facilityId: SELLER_DETAIL.facilities[0]?.id },
+      destination: { facilityId: BUYER_DETAIL.facilities[0]?.id },
       mode: 'rail',
       values: {
         firmness: 'indicative',
@@ -200,14 +225,17 @@ describe('NewFreightPage', () => {
         sourceType: 'email',
       },
     });
-  });
+    // Many steps: more time when the whole suite runs at once.
+  }, 15_000);
 
   it('starts from the carrier in the address and goes back to its page', async () => {
     window.history.replaceState(null, '', `/freight/new?carrier=${CARRIER.id}`);
     api();
     render(<NewFreightPage session={SESSION} />);
     await waitFor(() => {
-      expect(screen.getByLabelText(/^Carrier/)).toHaveTextContent('Synthetic Carrier');
+      expect(screen.getByLabelText(/^Company quoting the rate/)).toHaveTextContent(
+        'Synthetic Carrier',
+      );
     });
     expect(screen.getByRole('link', { name: 'Synthetic Carrier' })).toHaveAttribute(
       'href',
@@ -215,15 +243,90 @@ describe('NewFreightPage', () => {
     );
   });
 
-  it('asks for the carrier, the route and the required terms before sending', async () => {
+  it('asks for the company, the route and the required terms before sending', async () => {
     const calls = api();
     render(<NewFreightPage session={SESSION} />);
     await userEvent.click(screen.getByRole('button', { name: 'Save freight rate' }));
-    expect(await screen.findByText('Choose the carrier that quoted the rate.')).toBeInTheDocument();
+    expect(await screen.findByText('Choose the company that quoted the rate.')).toBeInTheDocument();
     expect(screen.getByText('Rate is required.')).toBeInTheDocument();
-    expect(screen.getByText('Valid until is required.')).toBeInTheDocument();
+    // Optional since F-235.
+    expect(screen.queryByText('Valid until is required.')).toBeNull();
     expect(calls.some((call) => call.method === 'POST')).toBe(false);
   });
+
+  it('enters a buyer’s rate between two towns, one found on the map, with no end date', async () => {
+    const calls = api();
+    render(<NewFreightPage session={SESSION} />);
+    await choose(screen.getByLabelText(/^Company quoting the rate/), 'Synthetic Buyer');
+
+    // The province is read from the end of the text; Find on the map signs the town found.
+    await userEvent.type(screen.getByLabelText(/^From: town or area/), 'Synthetic Town A, MB');
+    expect(screen.getByLabelText(/^From: province or state/)).toHaveTextContent('Manitoba (MB)');
+    await userEvent.click(firstFindButton());
+    const found = await screen.findByRole('checkbox', { name: /That’s the place/ });
+    expect(found).toBeChecked();
+
+    // Not looked up: saved with its state only.
+    await userEvent.type(screen.getByLabelText(/^To: town or area/), 'Synthetic Town B Indiana');
+    await userEvent.type(screen.getByLabelText(/^Rate/), '335');
+    await choose(screen.getByLabelText(/^Currency/), 'CAD');
+    await choose(screen.getByLabelText(/^Source \(required\)/), 'Email');
+    await userEvent.click(screen.getByRole('button', { name: 'Save freight rate' }));
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe(`/freight/${FREIGHT.id}`);
+    });
+    expect(calls.find((call) => call.path === '/freight-quotes/places')?.body).toEqual({
+      organizationId: ORG.id,
+      text: 'Synthetic Town A, MB',
+      region: 'CA-MB',
+    });
+    const sent = calls.find(
+      (call) => call.method === 'POST' && call.path === '/freight-quotes',
+    )?.body;
+    expect(sent).toMatchObject({
+      carrierId: BUYER.id,
+      origin: { area: { text: 'Synthetic Town A, MB', region: 'CA-MB', match: MATCH } },
+      destination: { area: { text: 'Synthetic Town B Indiana', region: 'US-IN' } },
+      values: { rate: '335', currency: 'CAD', rateUnit: 'MT', validUntil: '' },
+    });
+    expect(JSON.stringify(sent)).not.toContain('"match":null');
+    // Many steps: more time when the whole suite runs at once.
+  }, 15_000);
+
+  it('saves a doubtful town only once the person ticks it', async () => {
+    const calls = mockApi({
+      [`GET /counterparties?organization_id=${ORG.id}`]: () =>
+        Response.json({ counterparties: [CARRIER, BUYER], truncated: false }),
+      'POST /freight-quotes/places': () =>
+        Response.json({
+          status: 'found',
+          sure: false,
+          formattedAddress: 'Elsewhere, MB',
+          match: MATCH,
+        }),
+      'POST /freight-quotes': () => Response.json(FREIGHT, { status: 201 }),
+    });
+    render(<NewFreightPage session={SESSION} />);
+    await choose(screen.getByLabelText(/^Company quoting the rate/), 'Synthetic Carrier');
+    await userEvent.type(screen.getByLabelText(/^From: town or area/), 'Synthetic Town A, MB');
+    await userEvent.click(firstFindButton());
+    const found = await screen.findByRole('checkbox', { name: /That’s the place/ });
+    expect(found).not.toBeChecked();
+    expect(screen.getByText(/Not a sure match/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/^To: town or area/), 'Synthetic Town B, WI');
+    await userEvent.type(screen.getByLabelText(/^Rate/), '182');
+    await choose(screen.getByLabelText(/^Currency/), 'CAD');
+    await choose(screen.getByLabelText(/^Source \(required\)/), 'Email');
+    await userEvent.click(screen.getByRole('button', { name: 'Save freight rate' }));
+    await waitFor(() => {
+      expect(window.location.pathname).toBe(`/freight/${FREIGHT.id}`);
+    });
+    const sent = calls.find((call) => call.method === 'POST' && call.path === '/freight-quotes')
+      ?.body as { origin: { area: Record<string, unknown> } };
+    expect(sent.origin.area).toEqual({ text: 'Synthetic Town A, MB', region: 'CA-MB' });
+    // Many steps: more time when the whole suite runs at once.
+  }, 15_000);
 
   it('is for traders, operations and admins only', () => {
     api();

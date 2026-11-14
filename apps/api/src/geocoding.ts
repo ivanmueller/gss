@@ -204,7 +204,9 @@ export interface MatchSigner {
   verify: (organizationId: string, match: SignedMatch) => Promise<boolean>;
 }
 
-async function signingKey(apiKey: string): Promise<CryptoKey> {
+type SigningKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
+
+async function signingKey(apiKey: string): Promise<SigningKey> {
   const material = await crypto.subtle.digest(
     'SHA-256',
     new TextEncoder().encode(`grain-trading geocode match signing v1\n${apiKey}`),
@@ -215,7 +217,7 @@ async function signingKey(apiKey: string): Promise<CryptoKey> {
   ]);
 }
 
-async function hexSignature(key: CryptoKey, text: Uint8Array): Promise<string> {
+async function hexSignature(key: SigningKey, text: Uint8Array): Promise<string> {
   const signature = await crypto.subtle.sign('HMAC', key, text);
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }

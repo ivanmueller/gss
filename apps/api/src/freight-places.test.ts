@@ -52,7 +52,7 @@ beforeEach(() => {
       if (input.includes('/auth/v1/user')) {
         return Promise.resolve(Response.json({ id: USER_ID, email: 'olivia@example.test' }));
       }
-      geocodioBodies.push(JSON.parse(String(init?.body)));
+      geocodioBodies.push(JSON.parse(typeof init?.body === 'string' ? init.body : 'null'));
       return Promise.resolve(geocodio());
     }),
   );
@@ -74,7 +74,7 @@ function post(path: string, body: unknown, env: object = WITH_KEY) {
 
 async function find(text = 'Synthetic Town A, MB', region = 'CA-MB', organizationId = ORG) {
   const res = await post('/places', { organizationId, text, region });
-  return { status: res.status, body: (await res.json()) as FreightPlaceAnswer };
+  return { status: res.status, body: await res.json<FreightPlaceAnswer>() };
 }
 
 const rate = (origin: unknown) => ({

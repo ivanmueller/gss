@@ -731,10 +731,21 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await page.getByRole('menuitem', { name: 'New freight rate' }).click();
 
   await expect(page.getByRole('heading', { name: 'New freight rate' })).toBeVisible();
-  await expect(page.getByLabel('Carrier (required)')).toContainText('Synthetic Hauling');
+  await expect(page.getByLabel('Company quoting the rate (required)')).toContainText(
+    'Synthetic Hauling',
+  );
   await page
     .getByRole('group', { name: 'Truck or rail' })
     .getByRole('button', { name: 'Rail' })
+    .click();
+  // Each end is a town or area unless a saved location is chosen (F-235).
+  await page
+    .getByRole('group', { name: 'From: where the freight leaves from' })
+    .getByRole('button', { name: 'Saved location' })
+    .click();
+  await page
+    .getByRole('group', { name: 'To: where the freight goes to' })
+    .getByRole('button', { name: 'Saved location' })
     .click();
   await choose(page.getByLabel('From: company (required)'), 'Synthetic Hand Grower');
   await choose(page.getByLabel('From: location (required)'), 'Synthetic Town, SK');
@@ -743,7 +754,7 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await page.getByRole('combobox', { name: 'Search the list' }).fill('mills');
   await page.getByRole('option', { name: 'Synthetic Mills', exact: true }).click();
   await choose(page.getByLabel('To: location (required)'), 'Beta, MB');
-  await page.getByLabel('Rate (required)').fill('4200.00');
+  await page.getByLabel('Rate (required)', { exact: true }).fill('4200.00');
   await choose(page.getByLabel('Currency (required)'), 'USD');
   await choose(
     page.getByLabel('Unit (required)', { exact: true }),
@@ -753,7 +764,7 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   await choose(page.getByLabel('Payload unit (required)'), 'metric tonnes');
   await choose(page.getByLabel('Firm or indicative (required)'), 'Firm');
   await page.getByLabel('What the rate includes').fill('Fuel surcharge included');
-  await page.getByLabel('Valid until (required)').fill('2099-11-05T16:00');
+  await page.getByLabel('Valid until', { exact: true }).fill('2099-11-05T16:00');
   await choose(page.getByLabel('Source (required)'), 'Email');
   await page.getByRole('button', { name: 'Save freight rate' }).click();
 
@@ -770,7 +781,7 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   // New terms are a new revision; the first terms stay in the history.
   await page.getByRole('button', { name: 'Record new terms' }).click();
   await choose(page.getByLabel('Unit (required)', { exact: true }), 'per metric tonne (MT)');
-  await page.getByLabel('Rate (required)').fill('46.50');
+  await page.getByLabel('Rate (required)', { exact: true }).fill('46.50');
   await page.getByRole('button', { name: 'Save new terms' }).click();
   await expect(page.getByText('New terms saved.', { exact: false })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Current terms' })).toContainText('USD 46.50/MT');
@@ -795,7 +806,9 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
     .getByRole('group', { name: 'Withdraw this freight rate' })
     .getByRole('button', { name: 'Withdraw' })
     .click();
-  await expect(page.getByText(/is never live again/)).toBeVisible();
+  // The notice shown once withdrawn (T-05: the confirmation also says "never live again", so
+  // waiting for those words let the test leave before the withdrawal was saved).
+  await expect(page.getByText(/kept with its history and is never live again/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Record new terms' })).toHaveCount(0);
   await page.getByRole('link', { name: 'All freight rates' }).click();
   await expect(page.getByText('No live freight rates here.')).toBeVisible();
@@ -809,8 +822,8 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
     data: {
       organizationId: OTHER_ORG.id,
       carrierId: OTHER_ORG.counterpartyId,
-      originFacilityId: OTHER_ORG.counterpartyId,
-      destinationFacilityId: OTHER_ORG.id,
+      origin: { facilityId: OTHER_ORG.counterpartyId },
+      destination: { area: { text: 'Synthetic Elsewhere', region: 'US-ND' } },
       mode: 'truck',
       values: {
         firmness: 'firm',
@@ -839,6 +852,41 @@ test('adds a carrier, enters its rate per load on a route, records new terms and
   );
   expect(otherLanes.status()).toBe(404);
 
+  expect(errors).toEqual([]);
+});
+
+// F-235: a buyer quotes a freight rate between two towns, with no end date. Geocodio is not
+// called in CI, so both towns are saved with their province or state only.
+test('a buyer quotes a rate between two towns, kept without an end date', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+
+  await page.goto('/freight/new');
+  await choose(page.getByLabel('Company quoting the rate (required)'), 'Synthetic Mills');
+  await page.getByLabel('From: town or area (required)').fill('Synthetic Town A, MB');
+  // The province is read from the end of the text.
+  await expect(page.getByLabel('From: province or state (required)')).toContainText('Manitoba');
+  await page.getByLabel('To: town or area (required)').fill('Synthetic Town B, IN');
+  await page.getByLabel('Rate (required)', { exact: true }).fill('335');
+  await choose(page.getByLabel('Currency (required)'), 'CAD');
+  await choose(page.getByLabel('Source (required)'), 'Email');
+  await page.getByRole('button', { name: 'Save freight rate' }).click();
+
+  await expect(page.getByRole('heading', { name: /Truck rate · Synthetic Mills/ })).toBeVisible();
+  const route = page.getByRole('region', { name: 'Route' });
+  await expect(route).toContainText('Synthetic Town A, MB');
+  await expect(route).toContainText('Manitoba · not on the map');
+  await expect(route).toContainText('Synthetic Town B, IN');
+  const current = page.getByRole('region', { name: 'Current terms' });
+  await expect(current).toContainText('CAD 335/MT');
+  await expect(current).toContainText('Valid untilno end date');
+
+  // Listed on the buyer's own page, though no saved location of its is on the route.
+  await page.getByRole('link', { name: 'Synthetic Mills' }).first().click();
+  await page.getByRole('button', { name: 'Freight rates' }).click();
+  await expect(page.getByRole('region', { name: 'Freight rates (1)' })).toContainText(
+    'Synthetic Town A, MB',
+  );
   expect(errors).toEqual([]);
 });
 

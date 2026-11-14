@@ -82,8 +82,6 @@ function mockApi(handlers: Parameters<typeof mockBaseApi>[0]) {
     [`GET /quotes?counterparty_id=${ID}`]: () => Response.json({ quotes: [], truncated: false }),
     [`GET /freight-quotes?counterparty_id=${ID}`]: () =>
       Response.json({ freight: [], truncated: false }),
-    [`GET /freight-quotes?carrier_id=${ID}`]: () =>
-      Response.json({ freight: [], truncated: false }),
     [`GET /contact-log?counterparty_id=${ID}`]: () =>
       Response.json({ entries: [], truncated: false }),
     [`GET /follow-ups?counterparty_id=${ID}&status=all`]: () =>
@@ -178,7 +176,7 @@ describe('CounterpartyPage', () => {
     const carrier = { ...DETAIL, types: ['carrier'], facilities: [] };
     mockApi({
       [`GET /counterparties/${ID}`]: () => Response.json(carrier),
-      [`GET /freight-quotes?carrier_id=${ID}`]: () =>
+      [`GET /freight-quotes?counterparty_id=${ID}`]: () =>
         Response.json({
           freight: [{ ...FREIGHT, carrier: { ...FREIGHT.carrier, id: ID } }],
           truncated: false,
@@ -191,7 +189,9 @@ describe('CounterpartyPage', () => {
       />,
     );
     const freight = await screen.findByRole('region', { name: 'Freight rates (1)' });
-    const table = within(freight).getByRole('table', { name: 'Freight rates of this carrier' });
+    const table = within(freight).getByRole('table', {
+      name: 'Freight rates it quoted, and to and from its locations',
+    });
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('CAD 105.00/MT');
     // The carrier is the page itself, so the table leaves it out.
     expect(within(table).queryByRole('columnheader', { name: 'Carrier' })).toBeNull();
@@ -204,7 +204,7 @@ describe('CounterpartyPage', () => {
     );
   });
 
-  it('lists freight to and from the locations of a counterparty that is not a carrier', async () => {
+  it('lists the freight rates of a company that is not a carrier, and offers a new one', async () => {
     const calls = mockApi({ [`GET /counterparties/${ID}`]: () => Response.json(DETAIL) });
     render(
       <CounterpartyPage
@@ -213,25 +213,20 @@ describe('CounterpartyPage', () => {
       />,
     );
     // Folded on a buyer's or seller's page, and loaded only when opened.
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Freight to and from its locations' }),
-    );
-    const freight = await screen.findByRole('region', {
-      name: 'Freight to and from its locations (0)',
-    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Freight rates' }));
+    const freight = await screen.findByRole('region', { name: 'Freight rates (0)' });
     expect(freight).toHaveTextContent('No live freight rates.');
     expect(within(freight).queryByRole('link', { name: 'New freight rate' })).toBeNull();
     expect(calls.map((call) => call.path)).not.toContain(`/freight-quotes?carrier_id=${ID}`);
     // Hide is in the heading row, where Show was.
-    const toggle = within(freight).getByRole('button', {
-      name: 'Freight to and from its locations (0)',
-    });
+    const toggle = within(freight).getByRole('button', { name: 'Freight rates (0)' });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(toggle).toHaveTextContent(/Hide$/);
     await userEvent.click(toggle);
-    expect(
-      screen.getByRole('button', { name: 'Freight to and from its locations' }),
-    ).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Freight rates' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
   });
 
   it('shows the counterparty, its contacts and its locations', async () => {

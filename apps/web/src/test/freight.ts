@@ -45,6 +45,7 @@ export const FREIGHT: FreightDetail = {
   mode: 'rail',
   carrier: { id: CARRIER_ID, legalName: 'Synthetic Carrier', tradingName: null, archived: false },
   origin: {
+    kind: 'facility',
     id: '00000000-0000-4000-8000-000000000f02',
     name: 'Synthetic Elevator',
     city: 'Synthetic City',
@@ -57,6 +58,7 @@ export const FREIGHT: FreightDetail = {
     },
   },
   destination: {
+    kind: 'facility',
     id: '00000000-0000-4000-8000-000000000f01',
     name: 'Synthetic Mill',
     city: 'Synthetic Town',
@@ -69,6 +71,7 @@ export const FREIGHT: FreightDetail = {
     },
   },
   status: 'indicative',
+  outdatedSince: null,
   withdrawnAt: null,
   createdAt: '2026-10-29T14:00:00.000Z',
   current: FREIGHT_REVISION_2,

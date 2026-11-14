@@ -240,6 +240,10 @@ function routeEnd(end: EndRow): FreightEnd {
 function summary(row: FreightRow): FreightSummary {
   const current = revision(row);
   const withdrawnAt = row.withdrawn_at?.toISOString() ?? null;
+  const status = freightStatus(
+    { withdrawnAt, validUntil: current.validUntil, firmness: current.firmness },
+    row.as_of,
+  );
   return {
     id: row.id,
     mode: row.mode,
@@ -253,22 +257,31 @@ function summary(row: FreightRow): FreightSummary {
     destination: routeEnd(row.destination),
     // The database's clock decides what has expired or is outdated, the same for every rate
     // in an answer.
-    status: freightStatus(
-      { withdrawnAt, validUntil: current.validUntil, firmness: current.firmness },
-      row.as_of,
-    ),
-    outdatedSince: freightOutdatedSince(current, row.as_of),
+    status,
+    // Only a live rate is outdated; a withdrawn or expired one says so instead.
+    outdatedSince:
+      status === 'firm' || status === 'indicative'
+        ? freightOutdatedSince(current, row.as_of)
+        : null,
     withdrawnAt,
     createdAt: row.created_at.toISOString(),
     current,
   };
 }
 
-/** Whether both ends are the same place: one saved location, or one area in one region. */
-function sameEnd(a: NewFreightEnd, b: NewFreightEnd): boolean {
+/**
+ * Whether both ends are the same place: one saved location, or one area in one region, its
+ * text compared by the database's lower(), as freight_quotes_not_same_area does.
+ */
+async function sameEnd(
+  tx: postgres.TransactionSql,
+  a: NewFreightEnd,
+  b: NewFreightEnd,
+): Promise<boolean> {
   if (a.kind === 'facility' && b.kind === 'facility') return a.facilityId === b.facilityId;
-  if (a.kind === 'area' && b.kind === 'area') {
-    return a.region === b.region && a.text.toLowerCase() === b.text.toLowerCase();
+  if (a.kind === 'area' && b.kind === 'area' && a.region === b.region) {
+    const [row] = await tx<{ same: boolean }[]>`select lower(${a.text}) = lower(${b.text}) as same`;
+    return row?.same === true;
   }
   return false;
 }
@@ -397,7 +410,9 @@ export function freightQueries(asUser: AsUser): FreightDatabase {
           from app.counterparties where id = ${freight.carrierId} and organization_id = ${org}`;
         if (!carrier) return { status: 'carrier_not_found' };
         if (carrier.archived) return { status: 'archived' };
-        if (sameEnd(freight.origin, freight.destination)) return { status: 'same_location' };
+        if (await sameEnd(tx, freight.origin, freight.destination)) {
+          return { status: 'same_location' };
+        }
         const facilityIds = [freight.origin, freight.destination].flatMap((end) =>
           end.kind === 'facility' ? [end.facilityId] : [],
         );
