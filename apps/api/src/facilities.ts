@@ -27,7 +27,7 @@ const MAX_SAVE_BODY_BYTES = 1024 * 1024;
 
 const FORBIDDEN_MESSAGE = 'Only operations and admin members can find and save coordinates.';
 
-function notConfigured(c: ApiContext) {
+export function notConfigured(c: ApiContext) {
   return apiError(
     c,
     503,
@@ -37,7 +37,7 @@ function notConfigured(c: ApiContext) {
 }
 
 /** Geocodio failed for the whole request. Only its HTTP status is logged, never addresses. */
-function geocoderFailure(c: ApiContext, error: GeocoderError) {
+export function geocoderFailure(c: ApiContext, error: GeocoderError) {
   console.error(
     `Geocodio ${error.kind} in request ${c.get('requestId')}: status=${String(error.status)}`,
   );

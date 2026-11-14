@@ -1,6 +1,8 @@
 import {
-  quoteStatus,
+  freightOutdatedSince,
+  freightStatus,
   type FreightDetail,
+  type FreightEnd,
   type FreightLocation,
   type FreightMode,
   type FreightRateUnit,
@@ -16,7 +18,8 @@ import type postgres from 'postgres';
 
 import type { RequestContext } from './db';
 
-// Carrier freight rates in Postgres (20261029020000_freight_quotes.sql). Every call runs as
+// Freight rates in Postgres (20261029020000_freight_quotes.sql; areas, any quoting company and
+// an optional valid-until since 20261119010000_freight_areas.sql, F-235). Every call runs as
 // the verified user, so row level security decides what is visible and writable; the checks
 // here only choose the answer to give.
 
@@ -28,18 +31,35 @@ export interface FreightFilter {
   carrierId: string | null;
   /** Routes that start or end at this location. */
   facilityId: string | null;
-  /** Routes that start or end at a location of this counterparty. */
+  /** Rates this counterparty quoted, and routes that start or end at one of its locations. */
   counterpartyId: string | null;
   mode: FreightMode | null;
-  /** Only firm and indicative rates still valid now; otherwise withdrawn and expired too. */
+  /**
+   * Only firm and indicative rates not withdrawn and not expired (outdated ones included,
+   * tagged); otherwise withdrawn and expired too.
+   */
   liveOnly: boolean;
 }
 
+/**
+ * One end of a new route: a saved location, or an area with its province or state and the
+ * point the Worker signed for it (never one sent by the browser).
+ */
+export type NewFreightEnd =
+  | { kind: 'facility'; facilityId: string }
+  | {
+      kind: 'area';
+      text: string;
+      region: string;
+      point: { latitude: string; longitude: string; precision: 'exact' | 'approximate' } | null;
+    };
+
 export interface NewFreight {
   organizationId: string;
+  /** The company quoting the rate: any company that is not archived (F-235). */
   carrierId: string;
-  originFacilityId: string;
-  destinationFacilityId: string;
+  origin: NewFreightEnd;
+  destination: NewFreightEnd;
   mode: FreightMode;
   terms: FreightTerms;
   /** The recorder's name as shown with the revision. */
@@ -50,10 +70,8 @@ export type CreateFreightResult =
   | { status: 'created'; id: string }
   | { status: 'forbidden' }
   | { status: 'carrier_not_found' }
-  /** The carrier, or the counterparty of a location, is archived. */
+  /** The quoting company, or the counterparty of a location, is archived. */
   | { status: 'archived' }
-  /** Freight comes from a counterparty marked as a carrier. */
-  | { status: 'not_a_carrier' }
   | { status: 'origin_not_found' }
   | { status: 'destination_not_found' }
   | { status: 'same_location' };
@@ -73,6 +91,8 @@ export interface FreightDatabase {
   /** A freight quote with every revision; null when missing or not visible. */
   getFreight: (ctx: RequestContext, id: string) => Promise<FreightDetail | null>;
   createFreight: (ctx: RequestContext, freight: NewFreight) => Promise<CreateFreightResult>;
+  /** Whether the user may enter freight rates in the organization (app.can_enter_freight). */
+  canEnterFreight: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   /** Appends new terms, unless someone recorded newer ones than `basedOnRevision`. */
   reviseFreight: (
     ctx: RequestContext,
@@ -105,7 +125,7 @@ interface RevisionRow {
   payload_unit: PayloadUnit | null;
   inclusions: string | null;
   quoted_at: Date;
-  valid_until: Date;
+  valid_until: Date | null;
   source_type: QuoteSource;
   source_reference: string | null;
   notes: string | null;
@@ -120,17 +140,30 @@ interface FreightRow extends RevisionRow {
   carrier_legal_name: string;
   carrier_trading_name: string | null;
   carrier_archived: boolean;
-  origin: Omit<FreightLocation, 'counterparty'> & {
-    counterparty_id: string;
-    legal_name: string;
-    archived: boolean;
-  };
-  destination: FreightRow['origin'];
+  origin: EndRow;
+  destination: EndRow;
   withdrawn_at: Date | null;
   withdrawn_by_name: string | null;
   created_at: Date;
   as_of: Date;
 }
+
+/** One end as read: a saved location's columns, or an area's. */
+type EndRow =
+  | (Omit<FreightLocation, 'counterparty' | 'kind'> & {
+      kind: 'facility';
+      counterparty_id: string;
+      legal_name: string;
+      archived: boolean;
+    })
+  | {
+      kind: 'area';
+      text: string;
+      region: string;
+      latitude: string | null;
+      longitude: string | null;
+      precision: 'exact' | 'approximate' | null;
+    };
 
 /** The revision columns, read from a row aliased `r`. Decimals and dates as text, as stored. */
 const revisionColumns = (tx: postgres.TransactionSql) => tx`
@@ -140,13 +173,24 @@ const revisionColumns = (tx: postgres.TransactionSql) => tx`
   r.recorded_by_name, r.created_at as recorded_at
 `;
 
-/** One end of the route as JSON, from a location aliased `f` and its counterparty `c`. */
-const locationJson = (tx: postgres.TransactionSql, f: string, c: string) => tx`
-  jsonb_build_object(
+/**
+ * One end of the route as JSON: the location aliased `f` with its counterparty `c` when the
+ * end is a saved location, else the area's columns (`origin` or `destination`) of `q`.
+ */
+const endJson = (tx: postgres.TransactionSql, f: string, c: string, end: string) => tx`
+  case when ${tx(f)}.id is not null then jsonb_build_object(
+    'kind', 'facility',
     'id', ${tx(f)}.id, 'name', ${tx(f)}.name, 'city', ${tx(f)}.city,
     'region', ${tx(f)}.region, 'country', ${tx(f)}.country,
     'counterparty_id', ${tx(c)}.id, 'legal_name', ${tx(c)}.legal_name,
     'archived', ${tx(c)}.archived_at is not null)
+  else jsonb_build_object(
+    'kind', 'area',
+    'text', q.${tx(`${end}_area_text`)}, 'region', q.${tx(`${end}_area_region`)}::text,
+    'latitude', q.${tx(`${end}_area_latitude`)}::text,
+    'longitude', q.${tx(`${end}_area_longitude`)}::text,
+    'precision', q.${tx(`${end}_area_precision`)}::text)
+  end
 `;
 
 function revision(row: RevisionRow): FreightRevision {
@@ -161,7 +205,7 @@ function revision(row: RevisionRow): FreightRevision {
     payloadUnit: row.payload_unit,
     inclusions: row.inclusions,
     quotedAt: row.quoted_at.toISOString(),
-    validUntil: row.valid_until.toISOString(),
+    validUntil: row.valid_until?.toISOString() ?? null,
     sourceType: row.source_type,
     sourceReference: row.source_reference,
     notes: row.notes,
@@ -170,8 +214,20 @@ function revision(row: RevisionRow): FreightRevision {
   };
 }
 
-function location(end: FreightRow['origin']): FreightLocation {
+function routeEnd(end: EndRow): FreightEnd {
+  if (end.kind === 'area') {
+    return {
+      kind: 'area',
+      text: end.text,
+      region: end.region,
+      point:
+        end.latitude !== null && end.longitude !== null && end.precision !== null
+          ? { latitude: end.latitude, longitude: end.longitude, precision: end.precision }
+          : null,
+    };
+  }
   return {
+    kind: 'facility',
     id: end.id,
     name: end.name,
     city: end.city,
@@ -193,16 +249,49 @@ function summary(row: FreightRow): FreightSummary {
       tradingName: row.carrier_trading_name,
       archived: row.carrier_archived,
     },
-    origin: location(row.origin),
-    destination: location(row.destination),
-    // The database's clock decides what has expired, the same for every rate in an answer.
-    status: quoteStatus(
+    origin: routeEnd(row.origin),
+    destination: routeEnd(row.destination),
+    // The database's clock decides what has expired or is outdated, the same for every rate
+    // in an answer.
+    status: freightStatus(
       { withdrawnAt, validUntil: current.validUntil, firmness: current.firmness },
       row.as_of,
     ),
+    outdatedSince: freightOutdatedSince(current, row.as_of),
     withdrawnAt,
     createdAt: row.created_at.toISOString(),
     current,
+  };
+}
+
+/** Whether both ends are the same place: one saved location, or one area in one region. */
+function sameEnd(a: NewFreightEnd, b: NewFreightEnd): boolean {
+  if (a.kind === 'facility' && b.kind === 'facility') return a.facilityId === b.facilityId;
+  if (a.kind === 'area' && b.kind === 'area') {
+    return a.region === b.region && a.text.toLowerCase() === b.text.toLowerCase();
+  }
+  return false;
+}
+
+/** An end's columns for the insert; nulls for the kind it is not. */
+function endColumns(end: NewFreightEnd) {
+  if (end.kind === 'facility') {
+    return {
+      facilityId: end.facilityId,
+      text: null,
+      region: null,
+      latitude: null,
+      longitude: null,
+      precision: null,
+    };
+  }
+  return {
+    facilityId: null,
+    text: end.text,
+    region: end.region,
+    latitude: end.point?.latitude ?? null,
+    longitude: end.point?.longitude ?? null,
+    precision: end.point?.precision ?? null,
   };
 }
 
@@ -232,16 +321,16 @@ export function freightQueries(asUser: AsUser): FreightDatabase {
   const freightSelect = (tx: postgres.TransactionSql) => tx`
     select q.id, q.mode::text as mode, q.carrier_id, k.legal_name as carrier_legal_name,
            k.trading_name as carrier_trading_name, k.archived_at is not null as carrier_archived,
-           ${locationJson(tx, 'o', 'oc')} as origin,
-           ${locationJson(tx, 'd', 'dc')} as destination,
+           ${endJson(tx, 'o', 'oc', 'origin')} as origin,
+           ${endJson(tx, 'd', 'dc', 'destination')} as destination,
            q.withdrawn_at, q.withdrawn_by_name, q.created_at, now() as as_of,
            ${revisionColumns(tx)}
     from app.freight_quotes q
     join app.counterparties k on k.id = q.carrier_id
-    join app.facilities o on o.id = q.origin_facility_id
-    join app.counterparties oc on oc.id = o.counterparty_id
-    join app.facilities d on d.id = q.destination_facility_id
-    join app.counterparties dc on dc.id = d.counterparty_id
+    left join app.facilities o on o.id = q.origin_facility_id
+    left join app.counterparties oc on oc.id = o.counterparty_id
+    left join app.facilities d on d.id = q.destination_facility_id
+    left join app.counterparties dc on dc.id = d.counterparty_id
     join lateral (
       select * from app.freight_quote_revisions x where x.freight_quote_id = q.id
       order by x.revision_number desc limit 1
@@ -263,10 +352,10 @@ export function freightQueries(asUser: AsUser): FreightDatabase {
             and ${
               filter.counterpartyId === null
                 ? tx`true`
-                : tx`(o.counterparty_id = ${filter.counterpartyId} or d.counterparty_id = ${filter.counterpartyId})`
+                : tx`(q.carrier_id = ${filter.counterpartyId} or o.counterparty_id = ${filter.counterpartyId} or d.counterparty_id = ${filter.counterpartyId})`
             }
             and ${filter.mode === null ? tx`true` : tx`q.mode = ${filter.mode}::app.freight_mode`}
-            and ${filter.liveOnly ? tx`q.withdrawn_at is null and r.valid_until > now()` : tx`true`}
+            and ${filter.liveOnly ? tx`q.withdrawn_at is null and (r.valid_until is null or r.valid_until > now())` : tx`true`}
           order by r.quoted_at desc, q.id
           limit ${FREIGHT_LIST_LIMIT + 1}
         `;
@@ -289,38 +378,60 @@ export function freightQueries(asUser: AsUser): FreightDatabase {
       });
     },
 
+    canEnterFreight(ctx, organizationId) {
+      return asUser(ctx, async (tx) => {
+        const [check] = await tx<{ allowed: boolean }[]>`
+          select app.can_enter_freight(${organizationId}) as allowed`;
+        return check?.allowed === true;
+      });
+    },
+
     createFreight(ctx, freight) {
       return asUser(ctx, async (tx): Promise<CreateFreightResult> => {
         const org = freight.organizationId;
         const [check] = await tx<{ allowed: boolean }[]>`
           select app.can_enter_freight(${org}) as allowed`;
         if (check?.allowed !== true) return { status: 'forbidden' };
-        const [carrier] = await tx<{ carrier: boolean; archived: boolean }[]>`
-          select 'carrier' = any (types) as carrier, archived_at is not null as archived
+        const [carrier] = await tx<{ archived: boolean }[]>`
+          select archived_at is not null as archived
           from app.counterparties where id = ${freight.carrierId} and organization_id = ${org}`;
         if (!carrier) return { status: 'carrier_not_found' };
         if (carrier.archived) return { status: 'archived' };
-        if (!carrier.carrier) return { status: 'not_a_carrier' };
-        if (freight.originFacilityId === freight.destinationFacilityId) {
-          return { status: 'same_location' };
-        }
-        const ends = await tx<{ id: string; archived: boolean }[]>`
-          select f.id, c.archived_at is not null as archived
-          from app.facilities f join app.counterparties c on c.id = f.counterparty_id
-          where f.organization_id = ${org}
-            and f.id in (${freight.originFacilityId}, ${freight.destinationFacilityId})`;
-        const origin = ends.find((end) => end.id === freight.originFacilityId);
-        const destination = ends.find((end) => end.id === freight.destinationFacilityId);
+        if (sameEnd(freight.origin, freight.destination)) return { status: 'same_location' };
+        const facilityIds = [freight.origin, freight.destination].flatMap((end) =>
+          end.kind === 'facility' ? [end.facilityId] : [],
+        );
+        const ends =
+          facilityIds.length === 0
+            ? []
+            : await tx<{ id: string; archived: boolean }[]>`
+                select f.id, c.archived_at is not null as archived
+                from app.facilities f join app.counterparties c on c.id = f.counterparty_id
+                where f.organization_id = ${org}
+                  and f.id in (${facilityIds[0] ?? null}, ${facilityIds[1] ?? facilityIds[0] ?? null})`;
+        const found = (end: NewFreightEnd) =>
+          end.kind === 'area' ? { archived: false } : ends.find((e) => e.id === end.facilityId);
+        const origin = found(freight.origin);
+        const destination = found(freight.destination);
         if (!origin) return { status: 'origin_not_found' };
         if (!destination) return { status: 'destination_not_found' };
         if (origin.archived || destination.archived) return { status: 'archived' };
+        const o = endColumns(freight.origin);
+        const d = endColumns(freight.destination);
         const [created] = await tx<{ id: string }[]>`
           insert into app.freight_quotes
             (organization_id, carrier_id, origin_facility_id, destination_facility_id, mode,
-             created_by)
-          values (${org}, ${freight.carrierId}, ${freight.originFacilityId},
-                  ${freight.destinationFacilityId}, ${freight.mode}::app.freight_mode,
-                  app.current_user_id())
+             created_by,
+             origin_area_text, origin_area_region, origin_area_latitude, origin_area_longitude,
+             origin_area_precision,
+             destination_area_text, destination_area_region, destination_area_latitude,
+             destination_area_longitude, destination_area_precision)
+          values (${org}, ${freight.carrierId}, ${o.facilityId}, ${d.facilityId},
+                  ${freight.mode}::app.freight_mode, app.current_user_id(),
+                  ${o.text}, ${o.region}, ${o.latitude}::numeric, ${o.longitude}::numeric,
+                  ${o.precision}::app.location_precision,
+                  ${d.text}, ${d.region}, ${d.latitude}::numeric, ${d.longitude}::numeric,
+                  ${d.precision}::app.location_precision)
           returning id`;
         if (!created) throw new Error('freight quote was not created');
         await insertRevision(tx, org, created.id, freight.terms, freight.recordedByName);

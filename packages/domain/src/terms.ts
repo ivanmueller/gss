@@ -90,6 +90,7 @@ export function quantity<F>(
 /**
  * The time quoted (now when left empty, never in the future) and the valid-until time (later
  * than now and than the time quoted), as UTC ISO 8601 instants; null after reporting why not.
+ * With `validUntilOptional` (freight rates, F-235), an empty valid-until is null without an issue.
  */
 export function quoteTimes<F>(
   quotedText: string | null,
@@ -97,6 +98,7 @@ export function quoteTimes<F>(
   fields: { quotedAt: F; validUntil: F },
   now: Date,
   issue: Report<F>,
+  options: { validUntilOptional?: boolean } = {},
 ): { quotedAt: string | null; validUntil: string | null } {
   let quotedAt: string | null = now.toISOString();
   if (quotedText !== null) {
@@ -108,8 +110,9 @@ export function quoteTimes<F>(
     }
   }
   let validUntil: string | null = null;
-  if (validText === null) issue(fields.validUntil, 'is required');
-  else {
+  if (validText === null) {
+    if (options.validUntilOptional !== true) issue(fields.validUntil, 'is required');
+  } else {
     validUntil = instant(validText);
     if (validUntil === null) issue(fields.validUntil, 'must be a date and time');
     else if (Date.parse(validUntil) <= now.getTime()) {

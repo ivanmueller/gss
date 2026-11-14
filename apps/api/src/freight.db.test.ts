@@ -88,8 +88,8 @@ afterAll(async () => {
 const route = (extra: Partial<Parameters<Database['createFreight']>[1]> = {}) => ({
   organizationId: orgs.a,
   carrierId: counterparties.carrier,
-  originFacilityId: facilities.seller,
-  destinationFacilityId: facilities.buyer,
+  origin: { kind: 'facility' as const, facilityId: facilities.seller },
+  destination: { kind: 'facility' as const, facilityId: facilities.buyer },
   mode: 'truck' as const,
   terms: terms(),
   recordedByName: 'Olivia Operations',
@@ -117,8 +117,10 @@ describe('carrier freight rates as app_api', () => {
     expect(freight).toMatchObject({
       mode: 'truck',
       status: 'firm',
+      outdatedSince: null,
       carrier: { id: counterparties.carrier, legalName: 'Synthetic Carrier', archived: false },
       origin: {
+        kind: 'facility',
         id: facilities.seller,
         name: null,
         city: 'Synthetic City',
@@ -160,7 +162,7 @@ describe('carrier freight rates as app_api', () => {
         }),
       }),
     );
-    if (created.status !== 'created') throw new Error('not created');
+    if (created.status !== 'created') throw new Error(`not created: ${created.status}`);
     expect((await db.getFreight(as(users.tess), created.id))?.current).toMatchObject({
       rate: '4200',
       rateUnit: 'LOAD',
@@ -169,7 +171,7 @@ describe('carrier freight rates as app_api', () => {
     });
   });
 
-  it('refuses other roles, other organizations, non-carriers and bad routes', async () => {
+  it('refuses other roles, other organizations, archived companies and bad routes', async () => {
     expect((await db.createFreight(as(users.victor), route())).status).toBe('forbidden');
     expect((await db.createFreight(as(users.bob), route())).status).toBe('forbidden');
     expect((await db.createFreight(as(users.bob), route({ organizationId: orgs.b }))).status).toBe(
@@ -184,24 +186,28 @@ describe('carrier freight rates as app_api', () => {
       ).status,
     ).toBe('archived');
     expect(
-      (await db.createFreight(as(users.olivia), route({ carrierId: counterparties.seller })))
-        .status,
-    ).toBe('not_a_carrier');
-    expect(
       (
         await db.createFreight(
           as(users.olivia),
-          route({ destinationFacilityId: facilities.seller }),
+          route({ destination: { kind: 'facility', facilityId: facilities.seller } }),
         )
       ).status,
     ).toBe('same_location');
     expect(
-      (await db.createFreight(as(users.olivia), route({ originFacilityId: facilities.other })))
-        .status,
+      (
+        await db.createFreight(
+          as(users.olivia),
+          route({ origin: { kind: 'facility', facilityId: facilities.other } }),
+        )
+      ).status,
     ).toBe('origin_not_found');
     expect(
-      (await db.createFreight(as(users.olivia), route({ destinationFacilityId: facilities.other })))
-        .status,
+      (
+        await db.createFreight(
+          as(users.olivia),
+          route({ destination: { kind: 'facility', facilityId: facilities.other } }),
+        )
+      ).status,
     ).toBe('destination_not_found');
   });
 
@@ -256,8 +262,9 @@ describe('carrier freight rates as app_api', () => {
       await db.listFreight(as(users.victor), { ...filter, counterpartyId: counterparties.seller }),
     ).toHaveLength(2);
     expect(
+      // A company's own rates are listed under it too (design review D1-03).
       await db.listFreight(as(users.victor), { ...filter, counterpartyId: counterparties.carrier }),
-    ).toEqual([]);
+    ).toHaveLength(2);
     expect(await db.listFreight(as(users.bob), everything)).toEqual([]);
     expect(await db.getFreight(as(users.bob), freightId)).toBeNull();
   });
@@ -290,7 +297,7 @@ describe('carrier freight rates as app_api', () => {
 
   it('refuses new terms once the carrier is archived', async () => {
     const created = await db.createFreight(as(users.olivia), route());
-    if (created.status !== 'created') throw new Error('not created');
+    if (created.status !== 'created') throw new Error(`not created: ${created.status}`);
     await admin`update app.counterparties set archived_at = now() where id = ${counterparties.carrier}`;
     try {
       expect(await db.reviseFreight(as(users.olivia), created.id, 1, terms(), 'Olivia')).toEqual({
@@ -324,5 +331,101 @@ describe('deleting a counterparty with freight rates, as app_api', () => {
       });
       expect(await db.getCounterparty(as(users.ada), counterparty)).not.toBeNull();
     }
+  });
+});
+
+describe('freight rates between areas, from any company (F-235)', () => {
+  beforeAll(async () => {
+    // The deletion tests above archive the carrier and the buyer; restore them.
+    await admin`update app.counterparties set archived_at = null
+                where id in (${counterparties.carrier}, ${counterparties.buyer})`;
+  });
+
+  const area = (text: string, region: string, point = false) => ({
+    kind: 'area' as const,
+    text,
+    region,
+    point: point
+      ? { latitude: '49.354000', longitude: '-97.365000', precision: 'approximate' as const }
+      : null,
+  });
+
+  it('takes a rate between areas from a buyer with no end date, and lists it on its page', async () => {
+    const created = await db.createFreight(
+      as(users.olivia),
+      route({
+        carrierId: counterparties.buyer,
+        origin: area('Synthetic Town A, MB', 'CA-MB', true),
+        destination: area('Synthetic Town B', 'US-IN'),
+        terms: terms({ validUntil: null, firmness: 'indicative' }),
+      }),
+    );
+    if (created.status !== 'created') throw new Error(`not created: ${created.status}`);
+    const freight = await db.getFreight(as(users.victor), created.id);
+    expect(freight).toMatchObject({
+      status: 'indicative',
+      outdatedSince: null,
+      carrier: { id: counterparties.buyer },
+      origin: {
+        kind: 'area',
+        text: 'Synthetic Town A, MB',
+        region: 'CA-MB',
+        point: { latitude: '49.354000', longitude: '-97.365000', precision: 'approximate' },
+      },
+      destination: { kind: 'area', text: 'Synthetic Town B', region: 'US-IN', point: null },
+      current: { validUntil: null },
+    });
+    // The company's page: rates it quoted, though it has no location on the route.
+    const listed = await db.listFreight(as(users.victor), {
+      ...everything,
+      counterpartyId: counterparties.buyer,
+      liveOnly: true,
+    });
+    expect(listed.map((f) => f.id)).toContain(created.id);
+  });
+
+  it('accepts one town name in two provinces or states, refuses the same area twice', async () => {
+    expect(
+      (
+        await db.createFreight(
+          as(users.olivia),
+          route({
+            carrierId: counterparties.seller,
+            origin: area('Synthetic Springfield', 'US-IL'),
+            destination: area('Synthetic Springfield', 'US-MO'),
+          }),
+        )
+      ).status,
+    ).toBe('created');
+    expect(
+      (
+        await db.createFreight(
+          as(users.olivia),
+          route({
+            carrierId: counterparties.seller,
+            origin: area('Synthetic Springfield', 'US-IL'),
+            destination: area('synthetic springfield', 'US-IL'),
+          }),
+        )
+      ).status,
+    ).toBe('same_location');
+  });
+
+  it('tags a rate without an end date outdated after 30 days, still listed as live', async () => {
+    const created = await db.createFreight(
+      as(users.olivia),
+      route({ carrierId: counterparties.seller, terms: terms({ validUntil: null }) }),
+    );
+    if (created.status !== 'created') throw new Error(`not created: ${created.status}`);
+    // Age it as if quoted 31 days ago (the admin connection; revisions are otherwise kept).
+    await admin`alter table app.freight_quote_revisions disable trigger user`;
+    await admin`update app.freight_quote_revisions
+                set quoted_at = now() - interval '31 days', valid_from = now() - interval '31 days'
+                where freight_quote_id = ${created.id}`;
+    await admin`alter table app.freight_quote_revisions enable trigger user`;
+    const listed = await db.listFreight(as(users.victor), { ...everything, liveOnly: true });
+    const aged = listed.find((f) => f.id === created.id);
+    expect(aged?.status).toBe('firm');
+    expect(aged?.outdatedSince).not.toBeNull();
   });
 });

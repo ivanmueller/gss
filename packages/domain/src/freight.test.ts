@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createFreightSchema,
+  freightOutdatedSince,
+  freightStatus,
   freightTermsToFormValues,
+  isFreightRegion,
+  areaPlaceName,
+  isUsableFreight,
+  parseFreightAreaText,
   parseFreightTerms,
+  regionFromAreaText,
   reviseFreightSchema,
   type FreightFormValues,
   type FreightIssue,
@@ -152,10 +159,13 @@ describe('parseFreightTerms', () => {
     ]);
   });
 
-  it('needs a rate still valid after now and after the time quoted', () => {
-    expect(issuesOf({ ...VALID, validUntil: '' })).toEqual([
-      { field: 'validUntil', message: 'is required' },
-    ]);
+  it('needs a rate still valid after now and after the time quoted, when a date is given', () => {
+    // Optional since F-235 (the owner, 2026-11-13): without one the rate holds until withdrawn.
+    expect(parseFreightTerms({ ...VALID, validUntil: '' }, NOW)).toMatchObject({
+      status: 'ok',
+      value: { validUntil: null },
+    });
+    expect(freightTermsToFormValues({ ...okTerms(), validUntil: null }).validUntil).toBe('');
     expect(issuesOf({ ...VALID, validUntil: '2026-10-29T14:00:00Z' })).toEqual([
       { field: 'validUntil', message: 'must be later than now' },
     ]);
@@ -196,9 +206,33 @@ describe('freight request schemas', () => {
   const ids = {
     organizationId: '00000000-0000-4000-8000-0000000000aa',
     carrierId: '00000000-0000-4000-8000-00000000d1aa',
-    originFacilityId: '00000000-0000-4000-8000-000000000f2a',
-    destinationFacilityId: '00000000-0000-4000-8000-000000000f1a',
+    origin: { facilityId: '00000000-0000-4000-8000-000000000f2a' },
+    destination: { facilityId: '00000000-0000-4000-8000-000000000f1a' },
   };
+
+  it('takes an end as a saved location or an area, never both or coordinates', () => {
+    const match = {
+      latitude: '49.354000',
+      longitude: '-97.365000',
+      precision: 'approximate',
+      expiresAt: '2026-10-29T16:00:00.000Z',
+      signature: 'a'.repeat(64),
+    };
+    const area = { area: { text: 'Town A, MB', region: 'CA-MB', match } };
+    expect(
+      createFreightSchema.safeParse({ ...ids, origin: area, mode: 'truck', values: VALID }).success,
+    ).toBe(true);
+    for (const end of [
+      { facilityId: ids.origin.facilityId, area: area.area },
+      { area: { ...area.area, latitude: '49.3' } },
+      {},
+    ]) {
+      expect(
+        createFreightSchema.safeParse({ ...ids, origin: end, mode: 'truck', values: VALID })
+          .success,
+      ).toBe(false);
+    }
+  });
 
   it('takes a carrier, a route, a mode and the terms', () => {
     expect(createFreightSchema.safeParse({ ...ids, mode: 'rail', values: VALID }).success).toBe(
@@ -221,5 +255,76 @@ describe('freight request schemas', () => {
     expect(reviseFreightSchema.safeParse({ basedOnRevision: 0, values: VALID }).success).toBe(
       false,
     );
+  });
+});
+
+describe('freight areas and freshness (F-235)', () => {
+  it('cleans an area and refuses empty, long or unshowable text', () => {
+    expect(parseFreightAreaText('  Town A,   MB ')).toEqual({ status: 'ok', text: 'Town A, MB' });
+    expect(parseFreightAreaText('   ')).toMatchObject({ status: 'invalid' });
+    expect(parseFreightAreaText('x'.repeat(201))).toMatchObject({ status: 'invalid' });
+    expect(parseFreightAreaText('Town\u0007A')).toMatchObject({ status: 'invalid' });
+  });
+
+  it('knows the provinces and states an area may have', () => {
+    expect(isFreightRegion('CA-MB')).toBe(true);
+    expect(isFreightRegion('US-IN')).toBe(true);
+    expect(isFreightRegion('MB')).toBe(false);
+    expect(isFreightRegion('US-ZZ')).toBe(false);
+  });
+
+  it('tags a rate without an end date outdated 30 days after it was quoted', () => {
+    const quotedAt = '2026-10-01T15:00:00.000Z';
+    const at = (iso: string) => freightOutdatedSince({ quotedAt, validUntil: null }, new Date(iso));
+    expect(at('2026-10-31T14:59:59.999Z')).toBeNull();
+    expect(at('2026-10-31T15:00:00.000Z')).toBe('2026-10-31T15:00:00.000Z');
+    // A rate with an end date expires instead; it is never outdated.
+    expect(
+      freightOutdatedSince({ quotedAt, validUntil: '2027-01-01T00:00:00.000Z' }, NOW),
+    ).toBeNull();
+  });
+
+  it('keeps firmness in the status, and a rate without an end date never expires', () => {
+    const base = { withdrawnAt: null, validUntil: null, firmness: 'indicative' as const };
+    expect(freightStatus(base, NOW)).toBe('indicative');
+    expect(freightStatus({ ...base, firmness: 'firm' }, NOW)).toBe('firm');
+    expect(freightStatus({ ...base, validUntil: '2026-10-29T14:00:00.000Z' }, NOW)).toBe('expired');
+    expect(freightStatus({ ...base, withdrawnAt: '2026-10-29T14:00:00.000Z' }, NOW)).toBe(
+      'withdrawn',
+    );
+  });
+
+  it('counts only a firm rate that is not outdated as usable', () => {
+    expect(isUsableFreight('firm', null)).toBe(true);
+    // A fresh indicative rate is listed, never usable (design review D1-02).
+    expect(isUsableFreight('indicative', null)).toBe(false);
+    expect(isUsableFreight('firm', '2026-10-31T15:00:00.000Z')).toBe(false);
+    expect(isUsableFreight('expired', null)).toBe(false);
+  });
+});
+
+function okTerms() {
+  const result = parseFreightTerms(VALID, NOW);
+  if (result.status !== 'ok') throw new Error('fixture');
+  return result.value;
+}
+
+describe('reading the province or state of an area (F-235)', () => {
+  it('reads it from the end of the text, by code or name, any case', () => {
+    expect(regionFromAreaText('Synthetic Town, MB')).toBe('CA-MB');
+    expect(regionFromAreaText('Synthetic Town, Wi')).toBe('US-WI');
+    expect(regionFromAreaText('Synthetic Town Indiana')).toBe('US-IN');
+    expect(regionFromAreaText('Synthetic Town North Dakota')).toBe('US-ND');
+    expect(regionFromAreaText('Synthetic Town')).toBeNull();
+    // The text is no town when it is only a province.
+    expect(regionFromAreaText('Manitoba')).toBeNull();
+  });
+
+  it('looks up the town without the province it repeats', () => {
+    expect(areaPlaceName('Synthetic Town A, MB', 'CA-MB')).toBe('Synthetic Town A');
+    expect(areaPlaceName('Synthetic Town North Dakota', 'US-ND')).toBe('Synthetic Town');
+    // Another province than the one chosen stays part of the text.
+    expect(areaPlaceName('Synthetic Town, SK', 'CA-MB')).toBe('Synthetic Town, SK');
+    expect(areaPlaceName('Manitoba', 'CA-MB')).toBe('Manitoba');
   });
 });
