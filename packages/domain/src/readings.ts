@@ -5,6 +5,14 @@ import type { TranscriptLine } from './calls';
 import { COMMODITIES, type CommodityCode } from './commodities';
 import type { FollowUpFormValues } from './crm';
 import type { ContactFieldId } from './directory';
+import {
+  FREIGHT_MODES,
+  regionFromAreaText,
+  type FreightFormValues,
+  type FreightMode,
+  type FreightRateUnit,
+  type PayloadUnit,
+} from './freight';
 import { isCalendarDate } from './fx';
 import {
   DELIVERY_BASES,
@@ -29,7 +37,7 @@ import { LABEL_MAX, NOTE_MAX } from './terms';
 // tonnes, or a North American phone number. Anything else stays blank.
 // The database keeps the drafts (20261105010000_call_readings.sql).
 
-export const DRAFT_KINDS = ['quote', 'follow_up', 'contact'] as const;
+export const DRAFT_KINDS = ['quote', 'follow_up', 'contact', 'freight'] as const;
 export type DraftKind = (typeof DRAFT_KINDS)[number];
 
 export const DRAFT_STATUSES = ['open', 'accepted', 'dismissed'] as const;
@@ -37,6 +45,8 @@ export type DraftStatus = (typeof DRAFT_STATUSES)[number];
 
 /** Most drafts of each kind kept from one call. */
 export const DRAFTS_PER_KIND_MAX = 10;
+/** Most drafts kept from one call or email (app.keep_call_reading and keep_email_reading). */
+export const DRAFTS_MAX = 30;
 /** Most transcript lines a draft points to. */
 const DRAFT_LINES_MAX = 20;
 /** Longest notes of a call (call_recordings.read_summary). */
@@ -92,6 +102,21 @@ export const callReadingSchema = z.object({
       role: nullableText,
       email: nullableText,
       phoneSaid: nullableText,
+      lines: z.array(z.number()),
+    }),
+  ),
+  // Freight rates the counterparty quoted (F-235 part 2), any company.
+  freightRates: z.array(
+    z.object({
+      originSaid: nullableText,
+      destinationSaid: nullableText,
+      rateSaid: nullableText,
+      payloadSaid: nullableText,
+      mode: blankable(z.enum(FREIGHT_MODES)),
+      firmness: blankable(z.enum(QUOTE_FIRMNESS)),
+      validUntil: nullableText,
+      inclusions: nullableText,
+      notes: nullableText,
       lines: z.array(z.number()),
     }),
   ),
@@ -199,6 +224,36 @@ export const CALL_READING_JSON_SCHEMA: JsonSchema = object({
       lines: lineNumbers,
     }),
   },
+  freightRates: {
+    type: 'array',
+    description:
+      'Freight rates the counterparty quoted to move grain from one place to another by truck or rail; empty when none.',
+    items: object({
+      originSaid: text(
+        'Where the route starts, exactly as written, with its province or state when written with it, e.g. "Morris MB".',
+      ),
+      destinationSaid: text(
+        'Where the route ends, exactly as written, with its province or state when written with it, e.g. "Cochrane, Wi".',
+      ),
+      rateSaid: text(
+        'The rate exactly as written in one line, copied character for character with its currency and unit, e.g. "335/CMT", "$2500 usd per load".',
+      ),
+      payloadSaid: text(
+        'For a rate per load: the size of one load exactly as written in one line, e.g. "25st".',
+      ),
+      mode: choice(FREIGHT_MODES, 'truck or rail, only when said.'),
+      firmness: choice(
+        QUOTE_FIRMNESS,
+        'firm only when the counterparty said it is firm; indicative when they said it is indicative or only an idea.',
+      ),
+      validUntil: text(
+        'Until when the rate holds, as Alberta time YYYY-MM-DDTHH:MM, only when said.',
+      ),
+      inclusions: text('What the rate includes, as said, e.g. "fuel surcharge included".'),
+      notes: text('Anything else said about this rate.'),
+      lines: lineNumbers,
+    }),
+  },
   email: object({
     wanted: {
       type: 'boolean',
@@ -243,6 +298,17 @@ export type ContactFormValues = Partial<Record<ContactFieldId, string>>;
 export type QuoteChecks = Partial<Record<'price' | 'quantityMin' | 'quantityMax', SaidCheck>>;
 /** Where a draft contact's phone number was said, and why to look twice at it. */
 export type ContactChecks = Partial<Record<'contactPhone', SaidCheck>>;
+/** Where a draft freight rate's rate and load size were said, and why to look twice. */
+export type FreightChecks = Partial<Record<'rate' | 'payload', SaidCheck>>;
+
+/**
+ * One end of a draft freight route: the town or area exactly as written (only when it stands in
+ * a line the draft points to) and the province or state it ends with, else null.
+ */
+export interface DraftArea {
+  text: string | null;
+  region: string | null;
+}
 
 export type DraftInput =
   | {
@@ -261,6 +327,17 @@ export type DraftInput =
       /** A listed contact these are new details of; null for a new person. */
       contactId: string | null;
       fields: { values: ContactFormValues; checks: ContactChecks };
+      lines: number[];
+    }
+  | {
+      kind: 'freight';
+      fields: {
+        mode: FreightMode | null;
+        origin: DraftArea;
+        destination: DraftArea;
+        values: FreightFormValues;
+        checks: FreightChecks;
+      };
       lines: number[];
     };
 
@@ -432,6 +509,17 @@ her hi his i is it it's me my number office ok
 okay on our phone reach thanks that that's the their this us
 we will x yeah yes`.split(/\s+/),
 );
+/**
+ * The same for a freight rate (F-235 part 2): the words of a plain bid or offer, and those of a
+ * plain rate on a route ("to", "per load", "CMT", "by truck"). The route's own towns, as the
+ * draft has them, are not counted.
+ */
+const PLAIN_RATE_WORDS: ReadonlySet<string> = new Set([
+  ...PLAIN_AMOUNT_WORDS,
+  ...`by cmt freight from hopper hoppers ld lb lbs load loads of per rail railcar railcars rate
+rates st to truck trucking trucks via`.split(/\s+/),
+]);
+
 /** Numbers in words: never plain. */
 const NUMBER_WORDS = new Set(
   `billion couple double dozen eight eighteen eighty eleven few fifteen fifth fifty
@@ -484,7 +572,13 @@ function spansOf(line: string, phrases: readonly string[]): { at: number; length
  * number anywhere in the line (other than the ones `explained`: the draft's own price and
  * quantities, only those filled in), or currency or unit words next to it left out of the copy.
  */
-function amountDoubt(found: Found, line: string, explained: readonly string[]): string | null {
+function amountDoubt(
+  found: Found,
+  line: string,
+  explained: readonly string[],
+  plain: ReadonlySet<string> = PLAIN_AMOUNT_WORDS,
+  named: readonly string[] = [],
+): string | null {
   const text = squash(line);
   const sign = SIGN_WORDS.exec(text);
   if (sign !== null) return `The line says “${sign[0]}”.`;
@@ -502,7 +596,7 @@ function amountDoubt(found: Found, line: string, explained: readonly string[]): 
   if (PRICE_WORD_BEFORE.test(found.before) || PRICE_WORD_AFTER.test(found.after)) {
     return 'Words right next to it may belong to it.';
   }
-  const word = unusualWord(line, [found, ...spansOf(line, explained)], PLAIN_AMOUNT_WORDS);
+  const word = unusualWord(line, [found, ...spansOf(line, [...explained, ...named])], plain);
   if (word !== null) return `The line has a word to check, “${word}”.`;
   return null;
 }
@@ -664,6 +758,163 @@ export function saidTonnes(
 }
 
 /**
+ * A freight rate as said, whole (F-235 part 2): a price's words (PRICE_SAID), with the freight
+ * units too: a load ("per load", "/ld") and "CMT", which the owner reads as Canadian dollars per
+ * metric tonne (2026-11-13), alone after the number or after "per" or "/".
+ */
+const RATE_UNIT = String.raw`(metric[- ]tonnes?|metric tons?|tonnes?|mts?|t|short tons?|tons?|bushels?|bu|hundredweights?|cwt|cmt|loads?|ld)`;
+const RATE_SAID = new RegExp(
+  String.raw`^(?:(usd|cad|cdn\.?)\s*\$?|(us|u\.s\.|c|canadian|american)\s*\$|(canadian|american|us|u\.s\.)\s+dollars|(\$))?\s*${NUMBER}\s*${CURRENCY_AFTER}?\s*(dollars?|bucks)?\s*${CURRENCY_AFTER}?\s*(?:(?:a|an|per|/)\s*${RATE_UNIT}|(cmt))?\s*${CURRENCY_AFTER}?$`,
+);
+
+/** The freight rate unit a unit word names; "ton" alone is not clear (short or metric). */
+function rateUnitOf(word: string | undefined): FreightRateUnit | null {
+  if (word === undefined) return null;
+  if (word === 'cmt') return 'MT';
+  if (/^(?:loads?|ld)$/.test(word)) return 'LOAD';
+  return unitOf(word);
+}
+
+/**
+ * A freight rate as one thing said in the cited lines, as saidPrice reads a price: its amount,
+ * and its currency and unit only from those same words ("335/CMT" is CAD per MT, "$2500 usd per
+ * load" USD per load), with where it was said and why to look twice. Null when not said whole,
+ * when nothing marks it as a rate (a number alone), or when it names two currencies ("US$
+ * 335/CMT").
+ */
+export function saidRate(
+  said: string | null,
+  cited: readonly CitedLine[],
+  explained: readonly (string | null)[] = [],
+  /** The route's ends as written, which are not words to check. */
+  named: readonly string[] = [],
+): {
+  amount: string;
+  currency: QuoteCurrency | null;
+  unit: FreightRateUnit | null;
+  check: SaidCheck;
+} | null {
+  if (said === null) return null;
+  const words = squash(said);
+  const sign = SIGN_COPIED.exec(words);
+  const match = RATE_SAID.exec(sign === null ? words : words.slice(sign[0].length));
+  if (match === null) return null;
+  const [
+    ,
+    codeBefore,
+    shortBefore,
+    wordsBefore,
+    dollarSign,
+    written = '',
+    after1,
+    dollars,
+    after2,
+    unitAfterPer,
+    unitAlone,
+    after3,
+  ] = match;
+  const unitWord = unitAfterPer ?? unitAlone;
+  const codes = [after1, after2, after3].filter((code) => code !== undefined);
+  const codeOnly = codes.some((code) => /^(?:usd|cad|cdn\.?)$/.test(code));
+  if (
+    !(codeBefore ?? shortBefore ?? wordsBefore ?? dollarSign ?? dollars ?? unitWord) &&
+    !codeOnly
+  ) {
+    return null;
+  }
+  const currencies = new Set(
+    [codeBefore, shortBefore, wordsBefore, ...codes]
+      .map((word) => currencyOf(word))
+      .filter((currency) => currency !== null),
+  );
+  if (unitWord === 'cmt') currencies.add('CAD');
+  if (currencies.size > 1) return null;
+  const amount = plainNumber(written);
+  if (!PRICE.test(amount) || isZero(amount)) return null;
+  const found = find(said, cited, AMOUNT_CUT);
+  if (found === null) return null;
+  const line = cited.find((c) => c.line === found.line)?.text ?? '';
+  return {
+    amount,
+    currency: [...currencies][0] ?? null,
+    unit: rateUnitOf(unitWord),
+    check: {
+      said,
+      line: found.line,
+      doubt:
+        sign === null
+          ? amountDoubt(
+              found,
+              line,
+              explained.filter((e) => e !== null),
+              PLAIN_RATE_WORDS,
+              named,
+            )
+          : 'It was said with a sign.',
+    },
+  };
+}
+
+/** One load's size as said, whole: the number and its unit ("25st", "25 tonnes", "52,000 lbs"). */
+const PAYLOAD_SAID = new RegExp(
+  String.raw`^${NUMBER}\s*(metric[- ]tonnes?|metric tons?|tonnes?|mts?|t|short tons?|st|tons?|lbs?|pounds?)$`,
+);
+
+function payloadUnitOf(word: string): PayloadUnit | null {
+  if (/^(?:metric[- ]tonnes?|metric tons?|tonnes?|mts?|t)$/.test(word)) return 'MT';
+  if (/^(?:short tons?|st)$/.test(word)) return 'ST';
+  if (/^(?:lbs?|pounds?)$/.test(word)) return 'LB';
+  return null;
+}
+
+/**
+ * A load's size as one thing said in the cited lines, with where; its unit null when "tons"
+ * does not say which. Null when not said whole.
+ */
+export function saidPayload(
+  said: string | null,
+  cited: readonly CitedLine[],
+  explained: readonly (string | null)[] = [],
+  named: readonly string[] = [],
+): { amount: string; unit: PayloadUnit | null; check: SaidCheck } | null {
+  if (said === null) return null;
+  const words = squash(said);
+  const sign = SIGN_COPIED.exec(words);
+  const match = PAYLOAD_SAID.exec(sign === null ? words : words.slice(sign[0].length));
+  if (match === null) return null;
+  const amount = plainNumber(match[1] ?? '');
+  if (!QUANTITY.test(amount) || isZero(amount)) return null;
+  const found = find(said, cited, AMOUNT_CUT);
+  if (found === null) return null;
+  const line = cited.find((c) => c.line === found.line)?.text ?? '';
+  let doubt = amountDoubt(
+    found,
+    line,
+    explained.filter((e) => e !== null),
+    PLAIN_RATE_WORDS,
+    named,
+  );
+  if (sign !== null) doubt = 'It was said with a sign.';
+  else if (/(?:\b(?:per|a|an|each)|\/)\s*$/.test(found.before)) {
+    doubt = 'It is said after “per”: it may be part of a rate.';
+  }
+  return { amount, unit: payloadUnitOf(match[2] ?? ''), check: { said, line: found.line, doubt } };
+}
+
+/**
+ * A town or area as written in the cited lines (case and spacing aside, never inside a longer
+ * word), cleaned as a label, with the province or state it ends with; both null when it is not
+ * written there.
+ */
+function writtenArea(said: string | null, cited: readonly CitedLine[]): DraftArea {
+  const text = label(said);
+  if (text === null || find(text, cited, () => false) === null) {
+    return { text: null, region: null };
+  }
+  return { text, region: regionFromAreaText(text) };
+}
+
+/**
  * A North American phone number as said, whole: a "1" or "+1" only when said, the area code,
  * the number (spaces, dots, dashes or slashes between), and at most one extension ("x12",
  * "ext. 12", "ext: 12", "extn 12", "extension 12", "#12").
@@ -811,6 +1062,56 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
     });
   }
 
+  // Freight rates (F-235 part 2), from any company: each end only as written in a cited line,
+  // the rate and a load's size only when copied whole, as bids and offers are.
+  for (const rate of reading.freightRates.slice(0, DRAFTS_PER_KIND_MAX)) {
+    const { lines, cited } = evidence(rate.lines);
+    if (lines.length === 0) continue;
+    const values: FreightFormValues = { quotedAt, sourceType: fromEmail ? 'email' : 'phone' };
+    put(values, 'sourceReference', reference);
+    put(values, 'firmness', rate.firmness);
+    const checks: FreightChecks = {};
+    const filled = (said: string | null, ok: unknown) => (ok === null ? null : said);
+    const origin = writtenArea(rate.originSaid, cited);
+    const destination = writtenArea(rate.destinationSaid, cited);
+    const named = [origin.text, destination.text].filter((end) => end !== null);
+    const rateOk = filled(rate.rateSaid, saidRate(rate.rateSaid, cited));
+    const payloadOk = filled(rate.payloadSaid, saidPayload(rate.payloadSaid, cited));
+    const said = saidRate(rate.rateSaid, cited, [payloadOk], named);
+    if (said !== null) {
+      // Several routes may be listed one per line: a rate whose line names neither end may
+      // belong to another route.
+      const line = squash(context.lines[said.check.line]?.text ?? '');
+      const onLine = named.some((end) => line.includes(squash(end)));
+      checks.rate =
+        said.check.doubt === null && !onLine
+          ? { ...said.check, doubt: 'The route is not on the same line as the rate.' }
+          : said.check;
+    }
+    put(values, 'rate', said?.amount ?? null);
+    put(values, 'currency', said?.currency ?? null);
+    put(values, 'rateUnit', said?.unit ?? null);
+    // A load's size only for a rate per load, as the form keeps it.
+    const payload =
+      said?.unit === 'LOAD' ? saidPayload(rate.payloadSaid, cited, [rateOk], named) : null;
+    if (payload !== null) checks.payload = payload.check;
+    put(values, 'payload', payload?.amount ?? null);
+    put(values, 'payloadUnit', payload?.unit ?? null);
+    put(values, 'inclusions', label(rate.inclusions));
+    const validUntil = albertaInstant(rate.validUntil);
+    put(
+      values,
+      'validUntil',
+      validUntil !== null && Date.parse(validUntil) > Date.parse(quotedAt) ? validUntil : null,
+    );
+    put(values, 'notes', notes(rate.notes, NOTE_MAX));
+    drafts.push({
+      kind: 'freight',
+      fields: { mode: rate.mode, origin, destination, values, checks },
+      lines,
+    });
+  }
+
   for (const followUp of reading.followUps.slice(0, DRAFTS_PER_KIND_MAX)) {
     const { lines } = evidence(followUp.lines);
     const task = label(followUp.task);
@@ -882,7 +1183,8 @@ export function checkReading(reading: CallReading, context: ReadingContext): Che
   return {
     voicemail: reading.voicemail,
     summary: notes(reading.summary, READING_SUMMARY_MAX),
-    drafts,
+    // Four kinds of up to ten each, kept to what the database takes from one call or email.
+    drafts: drafts.slice(0, DRAFTS_MAX),
     emailAbout,
   };
 }
