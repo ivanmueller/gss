@@ -32,7 +32,6 @@ For freight and landed costs, store responsibility and applicability (which leg 
 - A `USD/bushel` quote cannot normalize without a vetted commodity-specific and applicable contractual pounds-per-bushel convention. The conversion value, source and version must be snapshotted.
 - Distinguish U.S. short ton (`2,000 lb`), metric tonne (`1,000 kg`), and other vendor-specific units.
 - Freight quoted per load requires an actual contract payload assumption to convert to per-MT; do not infer payload from truck class alone.
-- A freight rate's valid-until is optional (owner, 2026-11-13, F-235). A rate without one is **outdated** 30 days after it was quoted and is then not usable; only a **firm** rate that is neither expired, withdrawn nor outdated may enter a calculation (`isUsableFreight` in `packages/domain/src/freight.ts`). An indicative rate is shown, never usable. "CMT" in carriers' quotes is CAD per metric tonne.
 - Quantities, rates and totals retain working precision; round only at explicit reporting or settlement boundaries. On screen, converted amounts are rounded to cents, half away from zero; ranking, spreads and sums use the exact amounts.
 - Negative margin is valid and displayed plainly. Unavailable margin is **null plus an error**, never zero.
 
