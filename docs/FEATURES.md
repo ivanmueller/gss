@@ -137,6 +137,21 @@ Step 2 merged (ivanmueller/gss#218, 2026-11-10). Step 3 merged (ivanmueller/gss#
 - **Reply** (and Claude's reply drafts) go to the original sender, "Re: " + the original subject, not threaded (the original's Message-ID is not known for an inline forward).
 - Not done: a forward from an address not confirmed stays ordinary mail from that person (as today); nothing is sent or answered by itself (`AGENTS.md` rule 8).
 
+#### 1b. F-235 — Claude drafts freight rates from email and calls, on routes between areas
+
+**Status:** Planned (asked 2026-11-13; plan and Codex design review next). **Asked:** the owner forwarded a logistics company's email quoting a rate; Claude drafted nothing from it. Found 2026-11-13: Claude's readings of calls and email draft only bids and offers on grain, follow-ups and contact details (`packages/domain/src/readings.ts`); a freight rate is not among them. A freight rate today must come from a company marked as a carrier and run between two saved locations (`20261029020000_freight_quotes.sql`).
+
+**Owner's answers (2026-11-13):**
+1. **Route places:** not bound to saved locations; a broad address or just an area ("Morris, MB" to "Muncie, IN") must work.
+2. **What Claude drafts:** rates only (not lanes or equipment).
+3. **From calls too:** yes, as from email.
+4. **Which companies:** any company that quotes a freight rate, not only carriers.
+5. **Examples of the wording (made up):** "Morris MB to Muncie IN 335/CMT", "Morris MB to Lacrosse WI 182/CMT", "Morris, Mb to Cochrane, Wi: $2500 usd per load-25st loads". **CMT** means Canadian dollars per metric tonne.
+6. **How long a rate holds:** a valid-until date is optional, on the form too; without one the rate holds indefinitely and is tagged **outdated** 30 days after it was quoted.
+7. **On the map:** yes, area routes drawn at the towns found by Geocodio, doubtful matches checked by the person before saving (as for counterparties).
+
+As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, and every rate and quantity is kept only when copied whole from a cited line of the email or transcript. High risk (database, Claude, money): Codex design review first.
+
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
 Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).
