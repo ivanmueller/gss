@@ -410,8 +410,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     const report = () => {
       const bounds = instance.getBounds();
       latest.current.onViewChange?.(
-        bounds &&
-          bboxFromBounds(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()),
+        bboxFromBounds(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()),
         instance.getZoom(),
       );
     };
