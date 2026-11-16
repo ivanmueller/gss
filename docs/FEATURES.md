@@ -292,8 +292,8 @@ Test file names are short: `*.spec.ts` are browser tests in `tests/e2e/specs/`; 
 
 | ID | Pull request | Status |
 |---|---|---|
-| D-01 | Dependabot #224 (was #191, before it #112): 16 minor and patch updates | Reopened 2026-11-09. Still fails lint (one `no-unnecessary-condition` error at line 400 of a changed file, as before at `FacilityMap.tsx`); redo on our own branch with the lint fixed and a review register. |
+| D-01 | Dependabot #224 (was #191, before it #112): 16 minor and patch updates | Merged 2026-11-15 in ivanmueller/gss#251 (our own branch, the `FacilityMap.tsx` lint error fixed; register `docs/reviews/D-01.md`); #224 closed. |
 | D-02 | Dependabot #192 (was #113): postgres (the Worker's database library) 3 → 4.1.0, a major version | Its CI failed one browser test ("adds a carrier, enters its rate per load…", `counterparties.spec.ts:635`; unit and database tests passed). To test on its own branch with all database tests, finding whether postgres 4 or a flaky test is the cause; Codex review. |
-| D-03 | Dependabot #114: `@types/node` 22 → 26 | Not wanted: CI and deploys run Node 22. Close, and tell Dependabot to skip major `@types/node` updates. |
+| D-03 | Dependabot #114: `@types/node` 22 → 26 | Closed 2026-11-15 (CI and deploys run Node 22), with Dependabot told to ignore that major version. Offered: a lasting rule in `.github/dependabot.yml` (governance). |
 | D-04 | Dependabot #190: `supabase/setup-cli` action 1 → 3 | Changes `ci.yml` and `deploy-staging.yml`: governance, so it needs a review register and the owner's approval of the exact commit. Merge policy held it (2026-11-10), as designed. |
-| D-05 | Dependabot #193: jsdom 30 → 31 (web tests only) | A major version of a test library; CI green; needs a review register. |
+| D-05 | Dependabot #193: jsdom 30 → 31 (web tests only) | Merged 2026-11-15 in ivanmueller/gss#251, with D-01; #193 closed. |
