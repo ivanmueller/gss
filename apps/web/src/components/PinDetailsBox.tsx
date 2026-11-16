@@ -4,11 +4,15 @@ import { useEffect, type CSSProperties } from 'react';
 import type { PinDetails } from '../lib/mapbox';
 import { Link } from '../lib/router';
 
-/** Where a chosen pin is in the map's box, in pixels, and whether the box opens to its left. */
+/**
+ * Where a chosen pin is in the map, in pixels, the map's height, and whether the pin is in its
+ * lower half (the box then opens upward, so it stays inside the map).
+ */
 export interface PinAnchor {
   x: number;
   y: number;
-  flip: boolean;
+  height: number;
+  up: boolean;
 }
 
 /**
@@ -37,18 +41,24 @@ export function PinDetailsBox({
   }, [onClose]);
 
   const style = anchor
-    ? ({ '--pin-x': `${String(anchor.x)}px`, '--pin-y': `${String(anchor.y)}px` } as CSSProperties)
+    ? ({
+        '--pin-x': `${String(anchor.x)}px`,
+        // Downward: its top a little above the pin. Upward: its bottom a little below it.
+        '--pin-top': `${String(anchor.y - 32)}px`,
+        '--pin-bottom': `${String(anchor.height - anchor.y - 8)}px`,
+      } as CSSProperties)
     : undefined;
   return (
     <section
       aria-label="Selected location"
       style={style}
-      data-flip={anchor?.flip ? 'true' : undefined}
+      data-up={anchor?.up ? 'true' : undefined}
       className={[
         'absolute inset-x-0 bottom-0 z-10 flex flex-col gap-1 rounded-t-card border bg-card px-4 py-3 pr-10 text-sm shadow-md',
-        // On a computer: beside the pin, to its right, or its left near the map's right edge.
-        'md:inset-x-auto md:bottom-auto md:left-(--pin-x) md:top-(--pin-y) md:w-72 md:-translate-y-8 md:ml-4 md:rounded-card',
-        'md:data-[flip=true]:-translate-x-full md:data-[flip=true]:-ml-4',
+        // On a computer: to the pin's right, kept inside the map's width, and opening downward
+        // or (pin in the lower half) upward, so it is never cut off by the map's edge.
+        'md:inset-x-auto md:bottom-auto md:left-[clamp(8px,calc(var(--pin-x)_+_16px),calc(100%_-_296px))] md:top-(--pin-top) md:w-72 md:rounded-card',
+        'md:data-[up=true]:top-auto md:data-[up=true]:bottom-(--pin-bottom)',
         anchor ? '' : 'md:hidden',
       ].join(' ')}
     >

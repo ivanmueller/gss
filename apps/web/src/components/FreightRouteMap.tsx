@@ -53,6 +53,7 @@ export function FreightRouteMap({
   const [refused, setRefused] = useState(false);
   const [theme] = useTheme();
   const pins = useMemo(() => routePins([origin, destination]), [origin, destination]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const bounds = pinBounds(pins);
   if (mapbox.status !== 'ok' || refused || bounds === null) return null;
   return (
@@ -68,12 +69,12 @@ export function FreightRouteMap({
           basemap="map"
           theme={theme}
           pins={pins}
-          selectedId={null}
+          selectedId={selectedId}
           start={bounds}
           startMaxZoom={APPROXIMATE_MAX_ZOOM - 4}
           cooperative
           simple
-          onSelect={() => undefined}
+          onSelect={setSelectedId}
           onTokenRefused={() => {
             setRefused(true);
           }}

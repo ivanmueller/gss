@@ -471,9 +471,14 @@ export default function FacilityMap(props: FacilityMapProps) {
     const point = instance.project([pin.longitude, pin.latitude]);
     const x = Math.round(point.x);
     const y = Math.round(point.y);
-    const flip = point.x > instance.getContainer().clientWidth - 320;
+    // The box opens downward from the pin, or upward when the pin is in the map's lower half,
+    // so it stays inside the map whatever its height.
+    const height = instance.getContainer().clientHeight;
+    const up = point.y > height / 2;
     setAnchor((before) =>
-      before?.x === x && before.y === y && before.flip === flip ? before : { x, y, flip },
+      before?.x === x && before.y === y && before.height === height && before.up === up
+        ? before
+        : { x, y, height, up },
     );
   }, []);
   const closeBox = useCallback(() => {
@@ -598,18 +603,22 @@ export default function FacilityMap(props: FacilityMapProps) {
         properties: { ...(feature.properties ?? {}) },
       });
     });
-    instance.on('click', PINS, (event) => {
-      const id: unknown = event.features?.[0]?.properties?.id;
-      if (typeof id !== 'string') return;
-      handlers.current.reopen();
-      latest.current.onSelect(id);
-    });
-    instance.on('mouseenter', PINS, () => {
-      instance.getCanvas().style.cursor = 'pointer';
-    });
-    instance.on('mouseleave', PINS, () => {
-      instance.getCanvas().style.cursor = '';
-    });
+    // The chosen pin's larger copy is clickable too: it stays on the map when its place sits
+    // inside a bubble, and a click on it opens its box again.
+    for (const layer of [PINS, SELECTED]) {
+      instance.on('click', layer, (event) => {
+        const id: unknown = event.features?.[0]?.properties?.id;
+        if (typeof id !== 'string') return;
+        handlers.current.reopen();
+        latest.current.onSelect(id);
+      });
+      instance.on('mouseenter', layer, () => {
+        instance.getCanvas().style.cursor = 'pointer';
+      });
+      instance.on('mouseleave', layer, () => {
+        instance.getCanvas().style.cursor = '';
+      });
+    }
     instance.on('error', (event: { error?: unknown }) => {
       const refusal = mapRequestRefusal(event.error);
       if (refusal === 'mapbox-token') latest.current.onTokenRefused();
