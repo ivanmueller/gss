@@ -66,9 +66,21 @@ describe('locationPins', () => {
         ],
         ['seller'],
       ),
-    ).toEqual([
-      { id: 'f1', latitude: 52.133214, longitude: -106.670046, tone: 'offer', hollow: false },
-      { id: 'f2', latitude: 49.5, longitude: -97.1, tone: 'offer', hollow: true },
+    ).toMatchObject([
+      {
+        id: 'f1',
+        latitude: 52.133214,
+        longitude: -106.670046,
+        tone: 'offer',
+        kind: 'seller',
+        name: 'Synthetic f1',
+        hollow: false,
+        details: {
+          title: 'Synthetic f1',
+          lines: ['Seller', 'Synthetic Town, SK, Canada', 'Exact location'],
+        },
+      },
+      { id: 'f2', latitude: 49.5, longitude: -97.1, tone: 'offer', kind: 'seller', hollow: true },
     ]);
   });
 });

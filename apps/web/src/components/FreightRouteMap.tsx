@@ -22,7 +22,18 @@ export function routePins(ends: readonly FreightEnd[]): MapPin[] {
             latitude: Number(end.point.latitude),
             longitude: Number(end.point.longitude),
             tone: 'mixed' as const,
+            kind: 'carrier' as const,
+            name: end.text,
             hollow: end.point.precision !== 'exact',
+            details: {
+              title: end.text,
+              lines: [
+                'Town on the route',
+                end.point.precision === 'exact'
+                  ? 'Exact location'
+                  : 'Approximate location (e.g. the town)',
+              ],
+            },
           },
         ]
       : [],

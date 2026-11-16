@@ -38,8 +38,17 @@ const SAVED: FreightEnd = {
 
 describe('FreightRouteMap (F-235)', () => {
   it('pins only the towns found on the map, hollow when approximate', () => {
-    expect(routePins([TOWN_A, TOWN_B, SAVED])).toEqual([
-      { id: 'end-0', latitude: 49.354, longitude: -97.365, tone: 'mixed', hollow: true },
+    expect(routePins([TOWN_A, TOWN_B, SAVED])).toMatchObject([
+      {
+        id: 'end-0',
+        latitude: 49.354,
+        longitude: -97.365,
+        tone: 'mixed',
+        kind: 'carrier',
+        name: 'Synthetic Town A, MB',
+        hollow: true,
+        details: { title: 'Synthetic Town A, MB' },
+      },
     ]);
   });
 

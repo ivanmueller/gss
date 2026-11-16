@@ -2,7 +2,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 
 import { bboxFromBounds, type Bbox } from '@grain/domain';
 import mapboxgl, { type FilterSpecification, type GeoJSONSource } from 'mapbox-gl';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   basemapStyle,
@@ -17,6 +17,7 @@ import {
   type PinFeatureCollection,
 } from '../lib/mapbox';
 import type { LaneAreas } from '../lib/lanes';
+import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
 import {
   isLayerPictureUrl,
   mapRequestRefusal,
@@ -27,6 +28,7 @@ import {
   type PickedFeature,
 } from '../lib/mapLayers';
 import type { Theme } from '../lib/theme';
+import { PinDetailsBox, type PinAnchor } from './PinDetailsBox';
 
 // The only module that calls Mapbox GL JS (docs/DECISIONS.md, map decision). It is loaded
 // on demand by the pages with a map, so the rest of the app does not download it.
@@ -35,7 +37,18 @@ import type { Theme } from '../lib/theme';
 const START: [number, number, number, number] = [-120, 42, -88, 57];
 const SOURCE = 'facilities';
 const PINS = 'facilities';
+// Places close together are grouped into a bubble with their count (F-101).
+const CLUSTERS = 'facilities-clusters';
+const CLUSTER_COUNT = 'facilities-cluster-count';
+// Each place's name, from a close zoom.
+const LABELS = 'facilities-labels';
+// The chosen place, drawn larger on top, from a source of its own so that no bubble hides it.
+const SELECTED_SOURCE = 'facilities-selected-source';
 const SELECTED = 'facilities-selected';
+const NAMES_FROM_ZOOM = 9;
+const CLUSTER_UP_TO_ZOOM = 11;
+const NOTHING = (): void => undefined;
+const NOT_GROUPED: mapboxgl.FilterSpecification = ['!', ['has', 'point_count']];
 // A carrier's lanes (owner's request, 2026-11-01): the places it runs between, shaded.
 const AREAS = 'lane-areas';
 const AREA_FILL = 'lane-areas-fill';
@@ -89,28 +102,35 @@ export interface FacilityMapProps {
   onTokenRefused: () => void;
 }
 
-function selectedFilter(selectedId: string | null): mapboxgl.FilterSpecification {
-  return ['==', ['get', 'id'], selectedId ?? ''];
+function selectedData(pins: readonly MapPin[], selectedId: string | null): PinFeatureCollection {
+  return pinFeatures(pins.filter((pin) => pin.id === selectedId));
 }
 
-function pinPaint(colours: MapColours): {
-  'circle-color': mapboxgl.ExpressionSpecification;
-  'circle-stroke-color': mapboxgl.ExpressionSpecification;
-} {
-  const tone: mapboxgl.ExpressionSpecification = [
-    'match',
-    ['get', 'tone'],
-    'offer',
-    colours.offer,
-    'mixed',
-    colours.mixed,
-    colours.bid,
-  ];
-  return {
-    // Approximate locations are hollow, exact ones filled (specification section 6).
-    'circle-color': ['case', ['get', 'hollow'], colours.hollow, tone],
-    'circle-stroke-color': tone,
-  };
+/** The picture of each pin, by its kind, tone and fill; the layer picks one by its properties. */
+const PIN_IMAGE: mapboxgl.ExpressionSpecification = [
+  'concat',
+  'pin-',
+  ['get', 'kind'],
+  '-',
+  ['get', 'tone'],
+  '-',
+  ['case', ['get', 'hollow'], 'h', 'f'],
+];
+
+/** Draws the pin pictures in the theme's colours and gives them to the map. */
+function addPinImages(map: mapboxgl.Map, colours: MapColours) {
+  for (const kind of PIN_KINDS) {
+    for (const tone of PIN_TONES) {
+      for (const hollow of [false, true]) {
+        // Approximate locations are hollow, exact ones filled (specification section 6).
+        const image = drawPin(kind, tone, hollow, colours);
+        if (!image) return;
+        const id = pinImageId(kind, tone, hollow);
+        if (map.hasImage(id)) map.updateImage(id, image);
+        else map.addImage(id, image, { pixelRatio: PIN_RATIO });
+      }
+    }
+  }
 }
 
 /** Hides road names, highway numbers and points of interest on a simple map. */
@@ -136,7 +156,7 @@ function addAreaLayers(map: mapboxgl.Map, areas: LaneAreas) {
   const entered: mapboxgl.FilterSpecification = ['!=', ['get', 'role'], 'quoted'];
   map.addSource(AREAS, { type: 'geojson', data: areas.regions });
   // Under the pins, whenever they were added.
-  const below = map.getLayer(SELECTED) ? SELECTED : undefined;
+  const below = map.getLayer(CLUSTERS) ? CLUSTERS : undefined;
   const addLayer = (layer: mapboxgl.LayerSpecification) => {
     map.addLayer(layer, below);
   };
@@ -177,36 +197,95 @@ function paintTheme(map: mapboxgl.Map, basemap: Basemap) {
       }
     }
   }
-  if (map.getLayer(PINS)) {
-    const paint = pinPaint(colours);
-    map.setPaintProperty(PINS, 'circle-color', paint['circle-color']);
-    map.setPaintProperty(PINS, 'circle-stroke-color', paint['circle-stroke-color']);
-    map.setPaintProperty(SELECTED, 'circle-stroke-color', colours.selected);
+  addPinImages(map, colours);
+  if (map.getLayer(CLUSTERS)) {
+    map.setPaintProperty(CLUSTERS, 'circle-color', colours.selected);
+    map.setPaintProperty(CLUSTERS, 'circle-stroke-color', colours.hollow);
+    map.setPaintProperty(CLUSTER_COUNT, 'text-color', colours.hollow);
+    map.setPaintProperty(LABELS, 'text-color', colours.label);
+    map.setPaintProperty(LABELS, 'text-halo-color', colours.labelHalo);
   }
   paintAreas(map, colours);
 }
 
-function addPinLayers(map: mapboxgl.Map, data: PinFeatureCollection, selectedId: string | null) {
+function addPinLayers(
+  map: mapboxgl.Map,
+  data: PinFeatureCollection,
+  selected: PinFeatureCollection,
+) {
   if (map.getSource(SOURCE)) return;
   const colours = readMapColours();
-  map.addSource(SOURCE, { type: 'geojson', data });
+  addPinImages(map, colours);
+  map.addSource(SOURCE, {
+    type: 'geojson',
+    data,
+    cluster: true,
+    clusterMaxZoom: CLUSTER_UP_TO_ZOOM,
+    clusterRadius: 40,
+  });
+  map.addSource(SELECTED_SOURCE, { type: 'geojson', data: selected });
   map.addLayer({
-    id: SELECTED,
+    id: CLUSTERS,
     type: 'circle',
     source: SOURCE,
-    filter: selectedFilter(selectedId),
+    filter: ['has', 'point_count'],
     paint: {
-      'circle-radius': 11,
-      'circle-color': 'rgba(0, 0, 0, 0)',
-      'circle-stroke-color': colours.selected,
-      'circle-stroke-width': 3,
+      'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 50, 22],
+      'circle-color': colours.selected,
+      'circle-stroke-color': colours.hollow,
+      'circle-stroke-width': 2,
     },
   });
   map.addLayer({
-    id: PINS,
-    type: 'circle',
+    id: CLUSTER_COUNT,
+    type: 'symbol',
     source: SOURCE,
-    paint: { 'circle-radius': 6, 'circle-stroke-width': 2, ...pinPaint(colours) },
+    filter: ['has', 'point_count'],
+    layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 },
+    paint: { 'text-color': colours.hollow },
+  });
+  map.addLayer({
+    id: PINS,
+    type: 'symbol',
+    source: SOURCE,
+    filter: NOT_GROUPED,
+    layout: {
+      'icon-image': PIN_IMAGE,
+      'icon-anchor': 'bottom',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+    },
+  });
+  map.addLayer({
+    id: LABELS,
+    type: 'symbol',
+    source: SOURCE,
+    minzoom: NAMES_FROM_ZOOM,
+    filter: NOT_GROUPED,
+    layout: {
+      'text-field': ['get', 'name'],
+      'text-size': 12,
+      'text-anchor': 'top',
+      'text-offset': [0, 0.3],
+      'text-max-width': 9,
+    },
+    paint: {
+      'text-color': colours.label,
+      'text-halo-color': colours.labelHalo,
+      'text-halo-width': 1.5,
+    },
+  });
+  map.addLayer({
+    id: SELECTED,
+    type: 'symbol',
+    source: SELECTED_SOURCE,
+    layout: {
+      'icon-image': PIN_IMAGE,
+      'icon-anchor': 'bottom',
+      'icon-size': 1.3,
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+    },
   });
 }
 
@@ -271,7 +350,7 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
     if (id.startsWith(OVERLAY) && !wanted.has(id)) map.removeSource(id);
   }
   // Under the lanes and the pins, whichever is lowest.
-  const below = [AREA_FILL, SELECTED, PINS].find((id) => map.getLayer(id));
+  const below = [AREA_FILL, CLUSTERS].find((id) => map.getLayer(id));
   for (const overlay of overlays) {
     const source = `${OVERLAY}${overlay.id}`;
     const [fill, line, point, pictures] = overlayLayerIds(overlay.id) as [
@@ -362,6 +441,11 @@ export default function FacilityMap(props: FacilityMapProps) {
   const pictureSignIns = useRef(new PictureSignIns());
   // The latest props, read by map event handlers that are registered once.
   const latest = useRef({ ...props, data: pinFeatures(pins) });
+  // The box on the map: where the chosen pin is on screen, and the pin whose box was closed.
+  const [anchor, setAnchor] = useState<PinAnchor | null>(null);
+  const [closedId, setClosedId] = useState<string | null>(null);
+  // The latest handlers, read by map event handlers that are registered once.
+  const handlers = useRef({ close: NOTHING, reopen: NOTHING, place: NOTHING });
   // A map layer's pictures asked for again with a renewed sign-in.
   const reloadPictures = (instance: mapboxgl.Map) => {
     for (const overlay of latest.current.overlays ?? []) {
@@ -374,6 +458,36 @@ export default function FacilityMap(props: FacilityMapProps) {
   useEffect(() => {
     latest.current = { ...props, data: pinFeatures(props.pins) };
   });
+
+  // Where the chosen pin is in the map's box, kept up to date while the map moves.
+  const place = useCallback(() => {
+    const instance = map.current;
+    const { pins: current, selectedId: id } = latest.current;
+    const pin = id === null ? undefined : current.find((candidate) => candidate.id === id);
+    if (!instance || !pin) {
+      setAnchor(null);
+      return;
+    }
+    const point = instance.project([pin.longitude, pin.latitude]);
+    const x = Math.round(point.x);
+    const y = Math.round(point.y);
+    const flip = point.x > instance.getContainer().clientWidth - 320;
+    setAnchor((before) =>
+      before?.x === x && before.y === y && before.flip === flip ? before : { x, y, flip },
+    );
+  }, []);
+  const closeBox = useCallback(() => {
+    setClosedId(latest.current.selectedId);
+  }, []);
+  useEffect(() => {
+    handlers.current = {
+      close: closeBox,
+      reopen: () => {
+        setClosedId(null);
+      },
+      place,
+    };
+  }, [place, closeBox]);
 
   useEffect(() => {
     const element = container.current;
@@ -421,8 +535,44 @@ export default function FacilityMap(props: FacilityMapProps) {
       if (latest.current.simple) hideClutter(instance);
       if (latest.current.areas) addAreaLayers(instance, latest.current.areas);
       paintTheme(instance, latest.current.basemap);
-      addPinLayers(instance, latest.current.data, latest.current.selectedId);
+      addPinLayers(
+        instance,
+        latest.current.data,
+        selectedData(latest.current.pins, latest.current.selectedId),
+      );
       syncOverlays(instance, latest.current.overlays ?? []);
+      handlers.current.place();
+    });
+    instance.on('move', () => {
+      handlers.current.place();
+    });
+    // A click on the empty map closes the box on the map.
+    instance.on('click', (event) => {
+      const layers = [CLUSTERS, PINS, SELECTED].filter((id) => instance.getLayer(id));
+      if (layers.length > 0 && instance.queryRenderedFeatures(event.point, { layers }).length > 0) {
+        return;
+      }
+      handlers.current.close();
+    });
+    // A click on a bubble zooms in on the places it holds.
+    instance.on('click', CLUSTERS, (event) => {
+      const feature = event.features?.[0];
+      const id: unknown = feature?.properties?.cluster_id;
+      const source = instance.getSource<GeoJSONSource>(SOURCE);
+      if (!feature || typeof id !== 'number' || !source) return;
+      source.getClusterExpansionZoom(id, (error, zoom) => {
+        if (error || zoom === null || zoom === undefined || feature.geometry.type !== 'Point') {
+          return;
+        }
+        const [lng, lat] = feature.geometry.coordinates as [number, number];
+        instance.easeTo({ center: [lng, lat], zoom });
+      });
+    });
+    instance.on('mouseenter', CLUSTERS, () => {
+      instance.getCanvas().style.cursor = 'pointer';
+    });
+    instance.on('mouseleave', CLUSTERS, () => {
+      instance.getCanvas().style.cursor = '';
     });
     // A click on a map layer's feature, unless it is on a pin (the pin wins).
     instance.on('click', (event) => {
@@ -432,7 +582,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       if (layers.length === 0) return;
       if (
         instance.getLayer(PINS) &&
-        instance.queryRenderedFeatures(event.point, { layers: [PINS] }).length > 0
+        instance.queryRenderedFeatures(event.point, { layers: [PINS, CLUSTERS] }).length > 0
       ) {
         return;
       }
@@ -450,7 +600,9 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     instance.on('click', PINS, (event) => {
       const id: unknown = event.features?.[0]?.properties?.id;
-      if (typeof id === 'string') latest.current.onSelect(id);
+      if (typeof id !== 'string') return;
+      handlers.current.reopen();
+      latest.current.onSelect(id);
     });
     instance.on('mouseenter', PINS, () => {
       instance.getCanvas().style.cursor = 'pointer';
@@ -503,7 +655,9 @@ export default function FacilityMap(props: FacilityMapProps) {
 
   useEffect(() => {
     map.current?.getSource<GeoJSONSource>(SOURCE)?.setData(pinFeatures(pins));
-  }, [pins]);
+    map.current?.getSource<GeoJSONSource>(SELECTED_SOURCE)?.setData(selectedData(pins, selectedId));
+    place();
+  }, [pins, selectedId, place]);
 
   useEffect(() => {
     const instance = map.current;
@@ -529,11 +683,15 @@ export default function FacilityMap(props: FacilityMapProps) {
     map.current.fitBounds(bounds, { padding: 40, maxZoom: 12, duration: 600 });
   }, [fitKey]);
 
-  useEffect(() => {
-    if (map.current?.getLayer(SELECTED)) {
-      map.current.setFilter(SELECTED, selectedFilter(selectedId));
-    }
-  }, [selectedId]);
+  const details =
+    selectedId === null ? undefined : pins.find((pin) => pin.id === selectedId)?.details;
 
-  return <div ref={container} className="size-full" />;
+  return (
+    <div className="relative size-full">
+      <div ref={container} className="size-full" />
+      {details && selectedId !== closedId && (
+        <PinDetailsBox details={details} anchor={anchor} onClose={closeBox} />
+      )}
+    </div>
+  );
 }

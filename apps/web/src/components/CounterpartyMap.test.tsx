@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MapFacilities, MapFacility } from '../lib/api';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { CounterpartyMap } from './CounterpartyMap';
+import { PinDetailsBox } from './PinDetailsBox';
 import type { FacilityMapProps } from './FacilityMap';
 
 // Mapbox GL JS needs WebGL and Mapbox's servers; a stand-in reports the same events.
@@ -24,6 +25,12 @@ vi.mock('./FacilityMap', () => ({
       <button type="button" onClick={props.onTokenRefused}>
         Refuse the token
       </button>
+      {/* The real map shows this box beside the chosen pin (F-101). */}
+      {props.pins.map((pin) =>
+        pin.id === props.selectedId && pin.details ? (
+          <PinDetailsBox key={pin.id} details={pin.details} anchor={null} onClose={vi.fn()} />
+        ) : null,
+      )}
     </div>
   ),
 }));
@@ -91,7 +98,7 @@ describe('CounterpartyMap', () => {
     expect(screen.queryByText(/in view|no coordinates yet/)).not.toBeInTheDocument();
     expect(screen.queryByRole('list', { name: /Locations/ })).not.toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Map legend' })).toHaveTextContent(
-      'BuyerSellerBuyer and seller, broker or carrier',
+      'BuyerSellerCarrierBrokerHollow: approximate location (e.g. the town)Blue: buys and sells, or carrier or broker',
     );
   });
 
@@ -120,10 +127,11 @@ describe('CounterpartyMap', () => {
       'href',
       `/counterparties/${TERMINAL.counterpartyId}`,
     );
-    expect(selected).toHaveTextContent('Buyer, Seller · Terminal · MB, Canada');
-    expect(selected).toHaveTextContent(
-      'Approximate location (e.g. the town) · 49.000000, -97.000000',
-    );
+    expect(selected).toHaveTextContent('Buyer, Seller · Terminal');
+    expect(selected).toHaveTextContent('MB, Canada');
+    expect(selected).toHaveTextContent('Approximate location (e.g. the town)');
+    // On the map's box, not in a panel under the map (F-101).
+    expect(screen.getAllByRole('region', { name: 'Selected location' })).toHaveLength(1);
   });
 
   it('switches between the street map and satellite', async () => {
