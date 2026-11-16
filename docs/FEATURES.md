@@ -152,6 +152,33 @@ Step 2 merged (ivanmueller/gss#218, 2026-11-10). Step 3 merged (ivanmueller/gss#
 
 As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, and every rate and quantity is kept only when copied whole from a cited line of the email or transcript. High risk (database, Claude, money): Codex design review first.
 
+#### 1c. F-101 — Map markers: company types told apart, grouping, names, details on the map
+
+**Status:** Planned (the owner's answers, 2026-11-16). Normal risk (screens only: no database, money or sign-in change). **Asked:** 2026-11-06; answered 2026-11-16.
+
+**Today:** every place on every map is a small round dot drawn by one component (`FacilityMap.tsx`): buyers in the bid colour, sellers in the offer colour, both or neither in the mixed colour; filled for an exact location, hollow for an approximate one. A click shows the place's details in a panel below the map. The pins carry only an id, a colour and the fill (no names).
+
+**Owner's answers (2026-11-16):**
+1. **What to change:** tell company types apart; and a click shows the company's details on the map, not below it.
+2. **Shapes:** a teardrop pin with a small symbol inside: buyer (a building or elevator), seller (a wheat ear), carrier (a truck), broker (a handshake or two arrows). Colours stay as today; filled or hollow stays for exact or approximate.
+3. **A company of several types:** the symbol of its main type, in the mixed colour when it both buys and sells.
+4. **Close places:** grouped into a bubble with their count when zoomed out; a click or zooming in splits them.
+5. **Names:** shown beside the markers only when zoomed in close enough not to pile up.
+6. **The details box:** the company's name (a link to its page), its type and the location (place, how exact it is).
+7. **On a phone:** the details slide up from the bottom of the map; on a computer, a box opens beside the marker.
+8. **Which maps:** all alike (Workspace, Counterparties map view, a company's small map, carrier lanes, freight routes).
+
+**Plan (an agent, 2026-11-16; readings to confirm marked "reading"):**
+- One change in `FacilityMap.tsx` and `apps/web/src/lib/mapbox.ts`, so every map gets it (the Mapbox calls stay in that one component). Symbols drawn as small images added to the map (no new icon service, no data leaving the app); colours from the design tokens, light and dark.
+- **Main type (reading):** buyer, then seller, then broker, then carrier: a buyer and seller shows the buyer symbol in the mixed colour; a seller and carrier the seller symbol. Workspace pins follow each place's live bids and offers as today.
+- **Grouping:** Mapbox's own clustering of the pins; a bubble shows the count; a click zooms in on it. The selected place is never hidden inside a bubble.
+- **Names:** the company name added to each pin's data and drawn from a set zoom level, Mapbox hiding labels that would overlap.
+- **Details box:** name (link), type and location in a box beside the marker on a computer, a panel sliding up on a phone; closed with ✕, Escape or a click on the map. **Workspace (reading):** its list of the place's live bids and offers stays below the map, as today; only the name, type and location move into the box.
+- A legend (the four symbols, filled and hollow) on the two large maps.
+- Tests: unit tests of the main type and the pin data (`mapbox.ts`), component tests of the box and the phone panel, the browser tests kept green (no Mapbox token in CI, T-03, so the drawing itself is checked on staging).
+
+**Owner check on staging (once merged):** the four symbols on the Workspace and Counterparties maps; bubbles with counts when zoomed out; names when zoomed in; a click opens the box beside the marker (on a phone, the panel from the bottom); a company's own map, lanes and freight routes look alike.
+
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
 Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).
@@ -190,7 +217,7 @@ All of this is done: see `docs/FEATURES_DONE.md`.
 
 | ID | Feature | Status | What it needs before work starts |
 |---|---|---|---|
-| F-101 | **Change map markers** | Needs owner input | Today every place is a round dot: buyers in the bid colour, sellers in the ask colour, filled for an exact location and hollow for an approximate one. Which maps (Workspace, Counterparties map view, a company's small map, lanes), and what should change: shape, colour, logo in the marker, size, grouping of close places, labels? |
+| F-101 | **Change map markers** | Planned (the owner's answers, 2026-11-16) | See "Next up", 1c, for the answers and the plan. |
 | F-102 | **CSV template for importing buyers and sellers** | Planned | A **Download template** link in the + window's Import spreadsheet step: a CSV with the column headers the import recognizes, the required ones marked (today **Company name** and **Country**), and one made-up example row. One template for buyers and sellers, or one each (sellers have Grain type, Seller kind, Tonnes a year, Organic certificate; buyers have Market)? The carrier sheet could get its own. |
 | F-103 | **Buying frequency and contracts** | Needs owner input | What to record: how often each buyer buys (e.g. monthly, by season), its usual tonnes, standing contracts (start, end, tonnes, commodity)? Entered by hand, or counted from bids, offers and the contact log? Shown where (buyer's page, a filter on Counterparties)? Contract documents themselves are Phase 6 (GT-061). |
 | F-104 | **Backload strategy** | Needs owner input | Our reading: when a carrier delivers to a buyer, find a load for the trip back (or the reverse), from carriers' lanes and freight rates and sellers near the drop-off. To confirm: which direction, how near is "near", and whether it should suggest loads or only show them on the map. Relates to candidate matching (GT-053). |

@@ -4,12 +4,14 @@ import type { Facility } from '../lib/api';
 import {
   BASEMAPS,
   counterpartyTone,
+  mainKind,
   mapboxToken,
   pinBounds,
   type Basemap,
   type MapboxToken,
   type MapPin,
 } from '../lib/mapbox';
+import { countryName, facilityTypeLabel, typeLabel } from '../lib/directory';
 import { useTheme } from '../lib/theme';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -26,19 +28,34 @@ export const APPROXIMATE_MAX_ZOOM = 14;
 /** A location with coordinates as a map pin, in its counterparty's colour. */
 export function locationPins(facilities: readonly Facility[], types: readonly string[]): MapPin[] {
   const tone = counterpartyTone(types);
-  return facilities.flatMap((facility) =>
-    facility.latitude !== null && facility.longitude !== null
-      ? [
-          {
-            id: facility.id,
-            latitude: Number(facility.latitude),
-            longitude: Number(facility.longitude),
-            tone,
-            hollow: facility.locationPrecision !== 'exact',
-          },
-        ]
-      : [],
-  );
+  const kind = mainKind(types);
+  return facilities.flatMap((facility) => {
+    if (facility.latitude === null || facility.longitude === null) return [];
+    const name = facility.name ?? facilityTypeLabel(facility.facilityType) ?? 'Location';
+    const hollow = facility.locationPrecision !== 'exact';
+    const place = [facility.city, facility.region, countryName(facility.country)]
+      .filter((part) => part !== null && part !== '')
+      .join(', ');
+    return [
+      {
+        id: facility.id,
+        latitude: Number(facility.latitude),
+        longitude: Number(facility.longitude),
+        tone,
+        kind,
+        name,
+        hollow,
+        details: {
+          title: name,
+          lines: [
+            types.map(typeLabel).join(', '),
+            place,
+            hollow ? 'Approximate location (e.g. the town)' : 'Exact location',
+          ].filter((line) => line !== ''),
+        },
+      },
+    ];
+  });
 }
 
 /**

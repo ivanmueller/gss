@@ -22,7 +22,18 @@ export function routePins(ends: readonly FreightEnd[]): MapPin[] {
             latitude: Number(end.point.latitude),
             longitude: Number(end.point.longitude),
             tone: 'mixed' as const,
+            kind: 'carrier' as const,
+            name: end.text,
             hollow: end.point.precision !== 'exact',
+            details: {
+              title: end.text,
+              lines: [
+                'Town on the route',
+                end.point.precision === 'exact'
+                  ? 'Exact location'
+                  : 'Approximate location (e.g. the town)',
+              ],
+            },
           },
         ]
       : [],
@@ -42,6 +53,7 @@ export function FreightRouteMap({
   const [refused, setRefused] = useState(false);
   const [theme] = useTheme();
   const pins = useMemo(() => routePins([origin, destination]), [origin, destination]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const bounds = pinBounds(pins);
   if (mapbox.status !== 'ok' || refused || bounds === null) return null;
   return (
@@ -57,12 +69,12 @@ export function FreightRouteMap({
           basemap="map"
           theme={theme}
           pins={pins}
-          selectedId={null}
+          selectedId={selectedId}
           start={bounds}
           startMaxZoom={APPROXIMATE_MAX_ZOOM - 4}
           cooperative
           simple
-          onSelect={() => undefined}
+          onSelect={setSelectedId}
           onTokenRefused={() => {
             setRefused(true);
           }}

@@ -4,6 +4,7 @@ import type { MapFacility } from './api';
 import {
   basemapStyle,
   facilityPin,
+  mainKind,
   isClutterLayer,
   mapboxToken,
   mapPaint,
@@ -53,14 +54,20 @@ const FACILITY: MapFacility = {
 };
 
 describe('map pins', () => {
-  it('makes one point per pin with only its id, tone and fill', () => {
+  it('makes one point per pin with only its id, tone, kind, name and fill, never its details', () => {
     expect(pinFeatures([facilityPin(FACILITY)])).toEqual({
       type: 'FeatureCollection',
       features: [
         {
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [-106.670046, 52.133214] },
-          properties: { id: FACILITY.id, tone: 'bid', hollow: true },
+          properties: {
+            id: FACILITY.id,
+            tone: 'bid',
+            kind: 'buyer',
+            name: 'Synthetic Prairie Mills',
+            hollow: true,
+          },
         },
       ],
     });
@@ -73,6 +80,35 @@ describe('map pins', () => {
     expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'seller'] }).tone).toBe('mixed');
     expect(facilityPin({ ...FACILITY, counterpartyTypes: ['broker'] }).tone).toBe('mixed');
     expect(facilityPin({ ...FACILITY, counterpartyTypes: ['buyer', 'broker'] }).tone).toBe('bid');
+  });
+});
+
+describe('a pin symbol and its box (F-101)', () => {
+  it('takes the symbol of the main type: buyer, then seller, then broker, then carrier', () => {
+    expect(mainKind(['seller', 'buyer'])).toBe('buyer');
+    expect(mainKind(['carrier', 'seller'])).toBe('seller');
+    expect(mainKind(['carrier', 'broker'])).toBe('broker');
+    expect(mainKind(['carrier'])).toBe('carrier');
+    expect(mainKind([])).toBe('broker');
+  });
+
+  it('names the pin by the company and gives its box the name, type, place and precision', () => {
+    expect(facilityPin({ ...FACILITY, tradingName: 'Prairie Mills' })).toMatchObject({
+      kind: 'buyer',
+      name: 'Prairie Mills',
+      details: {
+        title: 'Synthetic Prairie Mills',
+        href: '/counterparties/00000000-0000-4000-8000-00000000c0aa',
+        lines: [
+          'Buyer · Synthetic Elevator',
+          'Synthetic Town, SK, Canada',
+          'Approximate location (e.g. the town)',
+        ],
+      },
+    });
+    expect(facilityPin({ ...FACILITY, locationPrecision: 'exact' }).details?.lines.at(-1)).toBe(
+      'Exact location',
+    );
   });
 });
 

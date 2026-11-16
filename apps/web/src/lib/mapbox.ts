@@ -1,5 +1,6 @@
 import type { MapFacility } from './api';
 import { cssColourToHex } from './colour';
+import { countryName, facilityTypeLabel, typeLabel } from './directory';
 import type { Theme } from './theme';
 
 // Mapbox settings for the map pages (docs/DECISIONS.md, 2026-10-27 map decisions). Every
@@ -153,14 +154,31 @@ export function isClutterLayer(layer: Pick<StyleLayer, 'id' | 'type'>): boolean 
 /** A buyer's (bid), a seller's (offer), or one that is both or neither (mixed). */
 export type PinTone = 'bid' | 'offer' | 'mixed';
 
-/** One pin: where it is, whose it is (its tone), filled or hollow. */
+/** The symbol inside a pin: a company's main type (F-101). */
+export type PinKind = 'buyer' | 'seller' | 'carrier' | 'broker';
+
+/** What the box on the map says about a chosen pin (F-101): never prices or contacts. */
+export interface PinDetails {
+  title: string;
+  /** The company's page, when there is one. */
+  href?: string;
+  /** Its type, then where it is and how exact. */
+  lines: readonly string[];
+}
+
+/** One pin: where it is, whose it is (its tone), what it is (its kind), filled or hollow. */
 export interface MapPin {
   id: string;
   latitude: number;
   longitude: number;
   tone: PinTone;
+  kind: PinKind;
+  /** Shown beside the pin when the map is zoomed in close. */
+  name: string;
   /** Approximate locations are hollow, exact ones filled (specification section 6). */
   hollow: boolean;
+  /** For the box on the map when the pin is chosen. */
+  details?: PinDetails;
 }
 
 export interface PinFeatureCollection {
@@ -168,18 +186,24 @@ export interface PinFeatureCollection {
   features: {
     type: 'Feature';
     geometry: { type: 'Point'; coordinates: [number, number] };
-    properties: { id: string; tone: PinTone; hollow: boolean };
+    properties: { id: string; tone: PinTone; kind: PinKind; name: string; hollow: boolean };
   }[];
 }
 
-/** Map pins as GeoJSON, carrying only an id, tone and fill: no names or prices. */
+/** Map pins as GeoJSON, carrying only an id, tone, kind, name and fill: no prices. */
 export function pinFeatures(pins: readonly MapPin[]): PinFeatureCollection {
   return {
     type: 'FeatureCollection',
     features: pins.map((pin) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [pin.longitude, pin.latitude] },
-      properties: { id: pin.id, tone: pin.tone, hollow: pin.hollow },
+      properties: {
+        id: pin.id,
+        tone: pin.tone,
+        kind: pin.kind,
+        name: pin.name,
+        hollow: pin.hollow,
+      },
     })),
   };
 }
@@ -193,14 +217,42 @@ export function counterpartyTone(types: readonly string[]): PinTone {
   return 'mixed';
 }
 
+/**
+ * The symbol of a company's main type (F-101, the owner's answer 3): buyer, then seller,
+ * then broker, then carrier. A company of no known type is drawn as a broker's (two arrows).
+ */
+export function mainKind(types: readonly string[]): PinKind {
+  for (const kind of ['buyer', 'seller', 'broker', 'carrier'] as const) {
+    if (types.includes(kind)) return kind;
+  }
+  return 'broker';
+}
+
 /** A directory location as a pin: buyers in the bid colour, sellers in the offer colour. */
 export function facilityPin(facility: MapFacility): MapPin {
+  const place = [facility.city, facility.region, countryName(facility.country)]
+    .filter((part) => part !== null && part !== '')
+    .join(', ');
+  const where = facility.name ?? facilityTypeLabel(facility.facilityType) ?? 'Location';
   return {
     id: facility.id,
     latitude: Number(facility.latitude),
     longitude: Number(facility.longitude),
     tone: counterpartyTone(facility.counterpartyTypes),
+    kind: mainKind(facility.counterpartyTypes),
+    name: facility.tradingName ?? facility.legalName,
     hollow: facility.locationPrecision === 'approximate',
+    details: {
+      title: facility.legalName,
+      href: `/counterparties/${facility.counterpartyId}`,
+      lines: [
+        `${facility.counterpartyTypes.map(typeLabel).join(', ')} · ${where}`,
+        place,
+        facility.locationPrecision === 'exact'
+          ? 'Exact location'
+          : 'Approximate location (e.g. the town)',
+      ].filter((line) => line !== ''),
+    },
   };
 }
 

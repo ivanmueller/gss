@@ -13,6 +13,7 @@ import {
   PickedFeatureCard,
   useMapLayers,
 } from '../components/MapLayers';
+import { MapPinLegend } from '../components/MapPinLegend';
 import { OrderBook } from '../components/OrderBook';
 import { SelectedFacility } from '../components/SelectedFacility';
 import { SegmentedControl } from '../components/ui/segmented-control';
@@ -21,6 +22,7 @@ import { SYNTHETIC_COMMODITIES, SYNTHETIC_FACILITIES, SYNTHETIC_FX } from '../da
 import type { Facility, FacilityRole } from '../data/types';
 import { useDemoData } from '../lib/demo';
 import { bankOfCanadaRate } from '../lib/fx';
+import { formatPlace } from '../lib/format';
 import { mapboxToken, type MapboxToken, type MapPin } from '../lib/mapbox';
 import { buildOrderBooks } from '../lib/orderBook';
 import { useTheme } from '../lib/theme';
@@ -61,29 +63,22 @@ function pinsOf(facility: Facility): MapPin[] {
       latitude: facility.latitude,
       longitude: facility.longitude,
       tone: facility.roles.includes('buyer') ? 'bid' : 'offer',
+      kind: facility.roles.includes('buyer') ? 'buyer' : 'seller',
+      name: facility.name,
       hollow: facility.locationPrecision !== 'exact',
+      details: {
+        title: facility.name,
+        ...(facility.href && { href: facility.href }),
+        lines: [
+          facility.roles.map((role) => (role === 'buyer' ? 'Buyer' : 'Seller')).join(', '),
+          formatPlace(facility.region, facility.country),
+          facility.locationPrecision === 'exact'
+            ? 'Exact location'
+            : 'Approximate location (e.g. the town)',
+        ].filter((line) => line !== ''),
+      },
     },
   ];
-}
-
-function Legend() {
-  const dot = 'size-3 rounded-full border-2';
-  return (
-    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1.5">
-        <span aria-hidden="true" className={`${dot} border-offer bg-offer`} />
-        Seller ask
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span aria-hidden="true" className={`${dot} border-bid bg-bid`} />
-        Buyer bid
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span aria-hidden="true" className={`${dot} border-muted-foreground bg-background`} />
-        Hollow: approximate location
-      </span>
-    </p>
-  );
 }
 
 function MapUnavailable({ refused }: { refused: boolean }) {
@@ -322,7 +317,7 @@ export function Workspace({
           />
           {session && <MapLayersButton state={layers} />}
           <div className="lg:ml-auto">
-            <Legend />
+            <MapPinLegend />
           </div>
         </div>
         <MapLayersLegend state={layers} />

@@ -1,14 +1,35 @@
 import type { FreightEnd } from '@grain/domain';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { FacilityMapProps } from './FacilityMap';
+import { PinDetailsBox } from './PinDetailsBox';
 import { FreightRouteMap, routePins } from './FreightRouteMap';
 
 // Mapbox GL JS needs WebGL and Mapbox's servers; a stand-in shows what the map was given.
 vi.mock('./FacilityMap', () => ({
   default: (props: FacilityMapProps) => (
-    <p>{`Stand-in map: ${props.pins.map((pin) => `${String(pin.latitude)},${String(pin.longitude)}${pin.hollow ? ' hollow' : ''}`).join(' | ')}`}</p>
+    <div>
+      <p>{`Stand-in map: ${props.pins.map((pin) => `${String(pin.latitude)},${String(pin.longitude)}${pin.hollow ? ' hollow' : ''}`).join(' | ')}`}</p>
+      {props.pins.map((pin) => (
+        <button
+          key={pin.id}
+          type="button"
+          onClick={() => {
+            props.onSelect(pin.id);
+          }}
+        >
+          {`Click ${pin.name}`}
+        </button>
+      ))}
+      {/* The real map shows this box beside the chosen pin (F-101). */}
+      {props.pins.map((pin) =>
+        pin.id === props.selectedId && pin.details ? (
+          <PinDetailsBox key={pin.id} details={pin.details} anchor={null} onClose={vi.fn()} />
+        ) : null,
+      )}
+    </div>
   ),
 }));
 
@@ -38,8 +59,17 @@ const SAVED: FreightEnd = {
 
 describe('FreightRouteMap (F-235)', () => {
   it('pins only the towns found on the map, hollow when approximate', () => {
-    expect(routePins([TOWN_A, TOWN_B, SAVED])).toEqual([
-      { id: 'end-0', latitude: 49.354, longitude: -97.365, tone: 'mixed', hollow: true },
+    expect(routePins([TOWN_A, TOWN_B, SAVED])).toMatchObject([
+      {
+        id: 'end-0',
+        latitude: 49.354,
+        longitude: -97.365,
+        tone: 'mixed',
+        kind: 'carrier',
+        name: 'Synthetic Town A, MB',
+        hollow: true,
+        details: { title: 'Synthetic Town A, MB' },
+      },
     ]);
   });
 
@@ -50,5 +80,15 @@ describe('FreightRouteMap (F-235)', () => {
     expect(await screen.findByText('Stand-in map: 49.354,-97.365 hollow')).toBeInTheDocument();
     rerender(<FreightRouteMap origin={SAVED} destination={TOWN_B} mapbox={MAPBOX} />);
     expect(screen.queryByRole('region', { name: 'Map of the route’s towns' })).toBeNull();
+  });
+
+  it('shows a town’s details on the map when its pin is chosen (F-101)', async () => {
+    render(<FreightRouteMap origin={TOWN_A} destination={TOWN_B} mapbox={MAPBOX} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Click Synthetic Town A, MB' }),
+    );
+    const box = screen.getByRole('region', { name: 'Selected location' });
+    expect(box).toHaveTextContent('Synthetic Town A, MB');
+    expect(box).toHaveTextContent('Approximate location (e.g. the town)');
   });
 });
