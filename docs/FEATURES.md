@@ -179,6 +179,18 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 **Owner check on staging (once merged):** the four symbols on the Workspace and Counterparties maps; bubbles with counts when zoomed out; names when zoomed in; a click opens the box beside the marker (on a phone, the panel from the bottom); a company's own map, lanes and freight routes look alike.
 
+#### 1d. F-237 — Map pins as Google Maps draws saved places
+
+**Status:** In progress (`feat/f-237-google-style-pins`). Normal risk (screens only). **Asked:** 2026-11-16, after seeing F-101 on staging: the owner does not like the black count bubbles or the teardrop icons, and wants the pins to look like the saved places on Google Maps (three screenshots shown: Calgary close up, southern Alberta, and British Columbia to Montana zoomed out).
+
+**Owner's answers (2026-11-16):**
+1. **Zoomed out:** no bubbles or numbers: "when they zoom out it's still the same dots". Every place keeps its own pin at every zoom, overlapping where crowded, as on Google Maps.
+2. **Symbols:** the same symbols (building, wheat ear, truck, arrows), white inside a round badge in the type's colour with a white edge, Google style.
+
+**Built (an agent, 2026-11-16):** the teardrop replaced by a round badge with a white edge, a soft shadow and a short point at the bottom (`apps/web/src/lib/mapPinImages.ts`); an approximate location keeps a white centre with a ring and symbol in the colour. Grouping removed from `FacilityMap.tsx` (no bubbles, no count, no click-to-zoom on a bubble). Unchanged: colours, names from zoom 9, the details box, the larger chosen pin, the legend (drawn with the same pictures). Tests: `mapPinImages.test.ts` (white edge first, then the badge; picture size).
+
+**Owner check on staging (once merged):** on the Workspace and Counterparties maps, zoomed all the way out and in: round badges with white edges and symbols, never black bubbles or numbers; crowded places overlap as on Google Maps; a click on any pin still opens its box.
+
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
 Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).
@@ -218,6 +230,7 @@ All of this is done: see `docs/FEATURES_DONE.md`.
 | ID | Feature | Status | What it needs before work starts |
 |---|---|---|---|
 | F-101 | **Change map markers** | Live, check pending (ivanmueller/gss#253, 2026-11-16) | See "Next up", 1c, for the answers and the plan. |
+| F-237 | **Map pins as Google Maps draws saved places** | In progress (`feat/f-237-google-style-pins`) | See "Next up", 1d. Follows F-101 on staging. |
 | F-102 | **CSV template for importing buyers and sellers** | Planned | A **Download template** link in the + window's Import spreadsheet step: a CSV with the column headers the import recognizes, the required ones marked (today **Company name** and **Country**), and one made-up example row. One template for buyers and sellers, or one each (sellers have Grain type, Seller kind, Tonnes a year, Organic certificate; buyers have Market)? The carrier sheet could get its own. |
 | F-103 | **Buying frequency and contracts** | Needs owner input | What to record: how often each buyer buys (e.g. monthly, by season), its usual tonnes, standing contracts (start, end, tonnes, commodity)? Entered by hand, or counted from bids, offers and the contact log? Shown where (buyer's page, a filter on Counterparties)? Contract documents themselves are Phase 6 (GT-061). |
 | F-104 | **Backload strategy** | Needs owner input | Our reading: when a carrier delivers to a buyer, find a load for the trip back (or the reverse), from carriers' lanes and freight rates and sellers near the drop-off. To confirm: which direction, how near is "near", and whether it should suggest loads or only show them on the map. Relates to candidate matching (GT-053). |
