@@ -48,6 +48,30 @@ describe('PinDetailsBox (F-101)', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
+  it('keeps the box 8px inside the map’s top and bottom edges', () => {
+    const { rerender } = render(
+      <PinDetailsBox
+        details={DETAILS}
+        anchor={{ x: 40, y: 16, height: 240, up: false }}
+        onClose={vi.fn()}
+      />,
+    );
+    const top = screen.getByRole('region', { name: 'Selected location' });
+    expect(top.style.getPropertyValue('--pin-top')).toBe('8px');
+    rerender(
+      <PinDetailsBox
+        details={DETAILS}
+        anchor={{ x: 40, y: 236, height: 240, up: true }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen
+        .getByRole('region', { name: 'Selected location' })
+        .style.getPropertyValue('--pin-bottom'),
+    ).toBe('8px');
+  });
+
   it('closes with the ✕ button and with Escape', async () => {
     const onClose = vi.fn();
     render(<PinDetailsBox details={DETAILS} anchor={null} onClose={onClose} />);

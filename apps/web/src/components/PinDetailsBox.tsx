@@ -43,9 +43,10 @@ export function PinDetailsBox({
   const style = anchor
     ? ({
         '--pin-x': `${String(anchor.x)}px`,
-        // Downward: its top a little above the pin. Upward: its bottom a little below it.
-        '--pin-top': `${String(anchor.y - 32)}px`,
-        '--pin-bottom': `${String(anchor.height - anchor.y - 8)}px`,
+        // Downward: its top a little above the pin. Upward: its bottom a little below it. Never
+        // closer than 8px to the map's edge.
+        '--pin-top': `${String(Math.max(8, anchor.y - 32))}px`,
+        '--pin-bottom': `${String(Math.max(8, anchor.height - anchor.y - 8))}px`,
       } as CSSProperties)
     : undefined;
   return (
