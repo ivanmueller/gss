@@ -154,7 +154,7 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 #### 1c. F-101 — Map markers: company types told apart, grouping, names, details on the map
 
-**Status:** Planned (the owner's answers, 2026-11-16). Normal risk (screens only: no database, money or sign-in change). **Asked:** 2026-11-06; answered 2026-11-16.
+**Status:** Live, check pending (merged as ivanmueller/gss#253 on 2026-11-16; register `docs/reviews/F-101.md`; the main type order buyer, seller, broker, carrier is an agent's reading for the owner to confirm). Normal risk (screens only: no database, money or sign-in change). **Asked:** 2026-11-06; answered 2026-11-16.
 
 **Today:** every place on every map is a small round dot drawn by one component (`FacilityMap.tsx`): buyers in the bid colour, sellers in the offer colour, both or neither in the mixed colour; filled for an exact location, hollow for an approximate one. A click shows the place's details in a panel below the map. The pins carry only an id, a colour and the fill (no names).
 
@@ -217,7 +217,7 @@ All of this is done: see `docs/FEATURES_DONE.md`.
 
 | ID | Feature | Status | What it needs before work starts |
 |---|---|---|---|
-| F-101 | **Change map markers** | Planned (the owner's answers, 2026-11-16) | See "Next up", 1c, for the answers and the plan. |
+| F-101 | **Change map markers** | Live, check pending (ivanmueller/gss#253, 2026-11-16) | See "Next up", 1c, for the answers and the plan. |
 | F-102 | **CSV template for importing buyers and sellers** | Planned | A **Download template** link in the + window's Import spreadsheet step: a CSV with the column headers the import recognizes, the required ones marked (today **Company name** and **Country**), and one made-up example row. One template for buyers and sellers, or one each (sellers have Grain type, Seller kind, Tonnes a year, Organic certificate; buyers have Market)? The carrier sheet could get its own. |
 | F-103 | **Buying frequency and contracts** | Needs owner input | What to record: how often each buyer buys (e.g. monthly, by season), its usual tonnes, standing contracts (start, end, tonnes, commodity)? Entered by hand, or counted from bids, offers and the contact log? Shown where (buyer's page, a filter on Counterparties)? Contract documents themselves are Phase 6 (GT-061). |
 | F-104 | **Backload strategy** | Needs owner input | Our reading: when a carrier delivers to a buyer, find a load for the trip back (or the reverse), from carriers' lanes and freight rates and sellers near the drop-off. To confirm: which direction, how near is "near", and whether it should suggest loads or only show them on the map. Relates to candidate matching (GT-053). |
@@ -258,6 +258,7 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 | ID | What to check | Pull requests |
 |---|---|---|
 | F-231 | **Reminder after an unanswered email** (F-114 step 5c part 2; its thread context was checked 2026-11-12): from a made-up test company's page, email your personal address a question and do not answer; from 2026-11-18 at the earliest (three business days later; reminders only for mail sent from 2026-11-13), "Reminder: no answer to …" on its **Emails** card and **Follow-ups → Emails to send**, for you; **Open** (To your address, "Re: …"), **Send**: the same thread in your mail program; a thanks-only email, or one answered in time, gets no reminder. | #236 |
+| F-101 | **Map markers:** on the Workspace and Counterparties maps, the four symbols (building, wheat ear, truck, handshake) in the usual colours, hollow when approximate, as in the legend; count bubbles when zoomed out (a click zooms in); names when zoomed in; a click on a pin opens a box beside it (name as a link, type, location; ✕, Escape or a click away closes it), on a phone a panel from the bottom; a company's own map and a freight route map alike. Confirm the main type of a company of several types: buyer, then seller, broker, carrier. | #253 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
