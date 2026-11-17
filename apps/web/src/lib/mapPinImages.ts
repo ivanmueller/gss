@@ -26,74 +26,122 @@ export const PIN_IMAGE_EXPRESSION = [
 ] as const;
 
 /** Logical size of a pin picture in pixels; drawn at twice this for sharp screens. */
-export const PIN_WIDTH = 26;
-export const PIN_HEIGHT = 28;
+export const PIN_WIDTH = 28;
+export const PIN_HEIGHT = 29;
 export const PIN_RATIO = 2;
 
-type Path = (c: CanvasRenderingContext2D) => void;
+/** A symbol drawer; `cut` is the badge's own colour, for holes in a filled symbol. */
+type Path = (c: CanvasRenderingContext2D, cut: string) => void;
 
-/** The four symbols, drawn in a 24 by 24 box centred on the badge (scaled to fit it). */
+/**
+ * The four symbols as bold filled shapes (F-237, as Google Maps draws its saved places), in a
+ * box of about 16 by 16 centred on the badge.
+ */
 const SYMBOLS: Record<PinKind, Path> = {
-  // A grain elevator: a tall bin with a small head house and a base.
+  // A grain elevator: a tall bin with a peaked head house, on a base.
   buyer: (c) => {
-    c.strokeRect(-4, -3, 8, 9);
-    c.strokeRect(-2, -7, 4, 4);
     c.beginPath();
-    c.moveTo(-6, 6);
-    c.lineTo(6, 6);
-    c.stroke();
+    c.moveTo(-2.5, -4);
+    c.lineTo(0, -7);
+    c.lineTo(2.5, -4);
+    c.lineTo(2.5, -2);
+    c.lineTo(4.5, -2);
+    c.lineTo(4.5, 5);
+    c.lineTo(6.5, 5);
+    c.lineTo(6.5, 7);
+    c.lineTo(-6.5, 7);
+    c.lineTo(-6.5, 5);
+    c.lineTo(-4.5, 5);
+    c.lineTo(-4.5, -2);
+    c.lineTo(-2.5, -2);
+    c.closePath();
+    c.fill();
   },
-  // A wheat ear: a stem with pairs of grains.
+  // A wheat ear: a stem with three pairs of grains and one on top.
   seller: (c) => {
+    c.lineWidth = 1.6;
     c.beginPath();
-    c.moveTo(0, 7);
-    c.lineTo(0, -6);
+    c.moveTo(0, 8);
+    c.lineTo(0, -3);
     c.stroke();
-    for (const y of [-4, -0.5, 3]) {
+    const grain = (x: number, y: number, angle: number) => {
       c.beginPath();
-      c.moveTo(0, y + 2);
-      c.lineTo(-4, y - 1);
-      c.moveTo(0, y + 2);
-      c.lineTo(4, y - 1);
-      c.stroke();
+      c.ellipse(x, y, 1.5, 2.8, angle, 0, Math.PI * 2);
+      c.fill();
+    };
+    for (const y of [-2, 1.8, 5.6]) {
+      grain(-2.6, y - 1.5, -0.7);
+      grain(2.6, y - 1.5, 0.7);
     }
+    grain(0, -5.8, 0);
   },
-  // A truck: trailer, cab and two wheels.
-  carrier: (c) => {
-    c.strokeRect(-7, -5, 8, 8);
+  // A truck: a box trailer, a cab with its window cut out, two wheels.
+  carrier: (c, cut) => {
+    c.fillRect(-8, -5.5, 10, 9);
     c.beginPath();
-    c.moveTo(1, -2);
-    c.lineTo(5, -2);
-    c.lineTo(7, 1);
-    c.lineTo(7, 3);
-    c.lineTo(1, 3);
-    c.stroke();
-    for (const x of [-4, 4]) {
+    c.moveTo(3, -2.5);
+    c.lineTo(6, -2.5);
+    c.lineTo(8, 0.5);
+    c.lineTo(8, 3.5);
+    c.lineTo(3, 3.5);
+    c.closePath();
+    c.fill();
+    const ink = c.fillStyle;
+    c.fillStyle = cut;
+    c.beginPath();
+    c.moveTo(4.2, -1.3);
+    c.lineTo(5.5, -1.3);
+    c.lineTo(6.6, 0.5);
+    c.lineTo(4.2, 0.5);
+    c.closePath();
+    c.fill();
+    for (const x of [-4.5, 4.5]) {
       c.beginPath();
-      c.arc(x, 5, 1.5, 0, Math.PI * 2);
+      c.arc(x, 4.5, 2.6, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.fillStyle = ink;
+    for (const x of [-4.5, 4.5]) {
+      c.beginPath();
+      c.arc(x, 4.5, 1.8, 0, Math.PI * 2);
       c.fill();
     }
   },
-  // Two arrows, one each way: a broker between two sides.
+  // Two thick arrows, one each way: a broker between two sides.
   broker: (c) => {
-    c.beginPath();
-    c.moveTo(-6, -3);
-    c.lineTo(6, -3);
-    c.moveTo(3, -6);
-    c.lineTo(6, -3);
-    c.lineTo(3, 0);
-    c.moveTo(6, 3);
-    c.lineTo(-6, 3);
-    c.moveTo(-3, 0);
-    c.lineTo(-6, 3);
-    c.lineTo(-3, 6);
-    c.stroke();
+    c.lineWidth = 2.2;
+    const arrow = (from: number, to: number, y: number) => {
+      const head = to > from ? -1 : 1;
+      c.beginPath();
+      c.moveTo(from, y);
+      c.lineTo(to + head * 3, y);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(to, y);
+      c.lineTo(to + head * 4, y - 3.5);
+      c.lineTo(to + head * 4, y + 3.5);
+      c.closePath();
+      c.fill();
+    };
+    arrow(-7, 7.5, -3.5);
+    arrow(7, -7.5, 3.5);
   },
 };
 
-/** The colour of a tone, from the map colours. */
-export function toneColour(colours: MapColours, tone: PinTone): string {
-  return tone === 'bid' ? colours.bid : tone === 'offer' ? colours.offer : colours.mixed;
+/**
+ * The badges' colours, close to Google Maps' own (the owner, 2026-11-16): a green for buyers,
+ * the pink-red of Google's saved places for sellers, Google's blue for the rest. The same in
+ * light and dark, as on Google Maps, so they stand out on either map.
+ */
+export const PIN_COLOURS: Record<PinTone, string> = {
+  bid: '#1e8e3e',
+  offer: '#e8436b',
+  mixed: '#1a73e8',
+};
+
+/** The colour of a tone's badge. */
+export function toneColour(tone: PinTone): string {
+  return PIN_COLOURS[tone];
 }
 
 /**
@@ -144,13 +192,13 @@ function paintPin(
   canvas.height = PIN_HEIGHT * PIN_RATIO;
   const c = canvas.getContext('2d');
   if (!c) return null;
-  const colour = toneColour(colours, tone);
+  const colour = toneColour(tone);
   c.scale(PIN_RATIO, PIN_RATIO);
   // A round badge with a short point at the bottom middle (F-237, as Google Maps' saved
   // places): a white edge with a soft shadow, then the badge in the tone's colour.
   const cx = PIN_WIDTH / 2;
-  const cy = 12;
-  badge(c, cx, cy, 11, PIN_HEIGHT - 1);
+  const cy = 13;
+  badge(c, cx, cy, 12, PIN_HEIGHT - 1);
   c.save();
   c.shadowColor = 'rgba(0, 0, 0, 0.35)';
   c.shadowBlur = 2;
@@ -158,26 +206,24 @@ function paintPin(
   c.fillStyle = '#ffffff';
   c.fill();
   c.restore();
-  badge(c, cx, cy, 9, PIN_HEIGHT - 3.5);
+  badge(c, cx, cy, 10.5, PIN_HEIGHT - 3);
   c.fillStyle = hollow ? colours.hollow : colour;
   c.fill();
   if (hollow) {
     // Approximate: a light badge with a ring and symbol in the tone's colour.
     c.strokeStyle = colour;
-    c.lineWidth = 2;
+    c.lineWidth = 1.6;
     c.stroke();
   }
   // The symbol: white inside a filled pin, the tone's colour inside a hollow one.
   c.save();
   c.translate(cx, cy);
-  c.scale(0.8, 0.8);
   const ink = hollow ? colour : '#ffffff';
   c.strokeStyle = ink;
   c.fillStyle = ink;
-  c.lineWidth = 2;
   c.lineCap = 'round';
   c.lineJoin = 'round';
-  SYMBOLS[kind](c);
+  SYMBOLS[kind](c, hollow ? colours.hollow : colour);
   c.restore();
   return canvas;
 }

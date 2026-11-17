@@ -63,19 +63,19 @@ describe('pin pictures (F-101, F-237)', () => {
   it('draws a white edge, then a filled badge in the tone’s colour or a light one ringed in it (F-237)', () => {
     const filled = fakeCanvas();
     expect(drawPin('seller', 'offer', false, COLOURS, () => filled.canvas)).not.toBeNull();
-    expect(filled.fills.slice(0, 2)).toEqual(['#ffffff', '#c10007']);
+    expect(filled.fills.slice(0, 2)).toEqual(['#ffffff', '#e8436b']);
     expect(filled.strokes[0]).toBe('#ffffff');
     const hollow = fakeCanvas();
     drawPin('seller', 'offer', true, COLOURS, () => hollow.canvas);
     expect(hollow.fills.slice(0, 2)).toEqual(['#ffffff', '#fafafa']);
-    expect(hollow.strokes[0]).toBe('#c10007');
+    expect(hollow.strokes[0]).toBe('#e8436b');
   });
 
   it('draws every symbol without failing, at twice the size for sharp screens', () => {
     for (const kind of PIN_KINDS) {
       const { canvas } = fakeCanvas();
       expect(drawPin(kind, 'mixed', false, COLOURS, () => canvas)).not.toBeNull();
-      expect([canvas.width, canvas.height]).toEqual([52, 56]);
+      expect([canvas.width, canvas.height]).toEqual([56, 58]);
     }
   });
 
