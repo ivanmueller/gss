@@ -1,9 +1,10 @@
 import type { MapColours, PinKind, PinTone } from './mapbox';
 
-// The pictures of the map's pins (F-101): a teardrop in the tone's colour with the symbol of
-// the company's main type inside, filled for an exact location and hollow for an approximate
-// one. Drawn here on a canvas, so no picture files or outside services are needed; FacilityMap
-// hands them to Mapbox.
+// The pictures of the map's pins (F-101, F-237): a round badge in the tone's colour with a white
+// edge, a short point at the bottom and the symbol of the company's main type inside, filled for an
+// exact location and light for an approximate one; drawn the same at every zoom, as Google Maps
+// draws saved places. Drawn here on a canvas, so no picture files or outside services are
+// needed; FacilityMap hands them to Mapbox.
 
 export const PIN_KINDS: readonly PinKind[] = ['buyer', 'seller', 'carrier', 'broker'];
 export const PIN_TONES: readonly PinTone[] = ['bid', 'offer', 'mixed'];
@@ -25,13 +26,13 @@ export const PIN_IMAGE_EXPRESSION = [
 ] as const;
 
 /** Logical size of a pin picture in pixels; drawn at twice this for sharp screens. */
-export const PIN_WIDTH = 24;
-export const PIN_HEIGHT = 32;
+export const PIN_WIDTH = 26;
+export const PIN_HEIGHT = 28;
 export const PIN_RATIO = 2;
 
 type Path = (c: CanvasRenderingContext2D) => void;
 
-/** The four symbols, drawn in a 24 by 24 box centred on the teardrop's round part. */
+/** The four symbols, drawn in a 24 by 24 box centred on the badge (scaled to fit it). */
 const SYMBOLS: Record<PinKind, Path> = {
   // A grain elevator: a tall bin with a small head house and a base.
   buyer: (c) => {
@@ -97,7 +98,7 @@ export function toneColour(colours: MapColours, tone: PinTone): string {
 
 /**
  * One pin picture as pixels, or null where a canvas cannot be made (a test without one).
- * The tip of the teardrop is the bottom middle, where the map anchors it.
+ * The badge's point is the bottom middle, where the map anchors it.
  */
 export function drawPin(
   kind: PinKind,
@@ -145,31 +146,48 @@ function paintPin(
   if (!c) return null;
   const colour = toneColour(colours, tone);
   c.scale(PIN_RATIO, PIN_RATIO);
-  // The teardrop: a circle on top of a point at the bottom middle.
+  // A round badge with a short point at the bottom middle (F-237, as Google Maps' saved
+  // places): a white edge with a soft shadow, then the badge in the tone's colour.
   const cx = PIN_WIDTH / 2;
-  const cy = 11;
-  const r = 9.5;
-  c.beginPath();
-  c.moveTo(cx, PIN_HEIGHT - 1);
-  c.bezierCurveTo(cx - 3, PIN_HEIGHT - 8, cx - r, cy + 6, cx - r, cy);
-  c.arc(cx, cy, r, Math.PI, 0);
-  c.bezierCurveTo(cx + r, cy + 6, cx + 3, PIN_HEIGHT - 8, cx, PIN_HEIGHT - 1);
-  c.closePath();
-  c.fillStyle = hollow ? colours.hollow : colour;
-  c.strokeStyle = colour;
-  c.lineWidth = 2;
+  const cy = 12;
+  badge(c, cx, cy, 11, PIN_HEIGHT - 1);
+  c.save();
+  c.shadowColor = 'rgba(0, 0, 0, 0.35)';
+  c.shadowBlur = 2;
+  c.shadowOffsetY = 0.5;
+  c.fillStyle = '#ffffff';
   c.fill();
-  c.stroke();
+  c.restore();
+  badge(c, cx, cy, 9, PIN_HEIGHT - 3.5);
+  c.fillStyle = hollow ? colours.hollow : colour;
+  c.fill();
+  if (hollow) {
+    // Approximate: a light badge with a ring and symbol in the tone's colour.
+    c.strokeStyle = colour;
+    c.lineWidth = 2;
+    c.stroke();
+  }
   // The symbol: white inside a filled pin, the tone's colour inside a hollow one.
   c.save();
   c.translate(cx, cy);
+  c.scale(0.8, 0.8);
   const ink = hollow ? colour : '#ffffff';
   c.strokeStyle = ink;
   c.fillStyle = ink;
-  c.lineWidth = 1.6;
+  c.lineWidth = 2;
   c.lineCap = 'round';
   c.lineJoin = 'round';
   SYMBOLS[kind](c);
   c.restore();
   return canvas;
+}
+
+/** A circle of radius r around (cx, cy) with a point at (cx, tip) below it. */
+function badge(c: CanvasRenderingContext2D, cx: number, cy: number, r: number, tip: number) {
+  // Where the point leaves the circle: about 25 degrees either side of straight down.
+  const side = Math.PI / 2 - 0.45;
+  c.beginPath();
+  c.arc(cx, cy, r, Math.PI - side, side);
+  c.lineTo(cx, tip);
+  c.closePath();
 }

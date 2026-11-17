@@ -50,7 +50,7 @@ function fakeCanvas() {
   return { canvas, fills, strokes };
 }
 
-describe('pin pictures (F-101)', () => {
+describe('pin pictures (F-101, F-237)', () => {
   it('names one picture for each kind, tone and fill, as the map layer builds the name', () => {
     expect(pinImageId('buyer', 'bid', false)).toBe('pin-buyer-bid-f');
     expect(pinImageId('carrier', 'mixed', true)).toBe('pin-carrier-mixed-h');
@@ -60,13 +60,14 @@ describe('pin pictures (F-101)', () => {
     expect(new Set(names).size).toBe(24);
   });
 
-  it('draws a filled pin in the tone’s colour and a hollow one in the hollow colour', () => {
+  it('draws a white edge, then a filled badge in the tone’s colour or a light one ringed in it (F-237)', () => {
     const filled = fakeCanvas();
     expect(drawPin('seller', 'offer', false, COLOURS, () => filled.canvas)).not.toBeNull();
-    expect(filled.fills[0]).toBe('#c10007');
+    expect(filled.fills.slice(0, 2)).toEqual(['#ffffff', '#c10007']);
+    expect(filled.strokes[0]).toBe('#ffffff');
     const hollow = fakeCanvas();
     drawPin('seller', 'offer', true, COLOURS, () => hollow.canvas);
-    expect(hollow.fills[0]).toBe('#fafafa');
+    expect(hollow.fills.slice(0, 2)).toEqual(['#ffffff', '#fafafa']);
     expect(hollow.strokes[0]).toBe('#c10007');
   });
 
@@ -74,7 +75,7 @@ describe('pin pictures (F-101)', () => {
     for (const kind of PIN_KINDS) {
       const { canvas } = fakeCanvas();
       expect(drawPin(kind, 'mixed', false, COLOURS, () => canvas)).not.toBeNull();
-      expect([canvas.width, canvas.height]).toEqual([48, 64]);
+      expect([canvas.width, canvas.height]).toEqual([52, 56]);
     }
   });
 

@@ -37,18 +37,14 @@ import { PinDetailsBox, type PinAnchor } from './PinDetailsBox';
 const START: [number, number, number, number] = [-120, 42, -88, 57];
 const SOURCE = 'facilities';
 const PINS = 'facilities';
-// Places close together are grouped into a bubble with their count (F-101).
-const CLUSTERS = 'facilities-clusters';
-const CLUSTER_COUNT = 'facilities-cluster-count';
 // Each place's name, from a close zoom.
 const LABELS = 'facilities-labels';
-// The chosen place, drawn larger on top, from a source of its own so that no bubble hides it.
+// The chosen place, drawn larger on top of the others, from a source of its own. Every place
+// keeps its own pin at every zoom, overlapping where crowded, never grouped (F-237).
 const SELECTED_SOURCE = 'facilities-selected-source';
 const SELECTED = 'facilities-selected';
 const NAMES_FROM_ZOOM = 9;
-const CLUSTER_UP_TO_ZOOM = 11;
 const NOTHING = (): void => undefined;
-const NOT_GROUPED: mapboxgl.FilterSpecification = ['!', ['has', 'point_count']];
 // A carrier's lanes (owner's request, 2026-11-01): the places it runs between, shaded.
 const AREAS = 'lane-areas';
 const AREA_FILL = 'lane-areas-fill';
@@ -156,7 +152,7 @@ function addAreaLayers(map: mapboxgl.Map, areas: LaneAreas) {
   const entered: mapboxgl.FilterSpecification = ['!=', ['get', 'role'], 'quoted'];
   map.addSource(AREAS, { type: 'geojson', data: areas.regions });
   // Under the pins, whenever they were added.
-  const below = map.getLayer(CLUSTERS) ? CLUSTERS : undefined;
+  const below = map.getLayer(PINS) ? PINS : undefined;
   const addLayer = (layer: mapboxgl.LayerSpecification) => {
     map.addLayer(layer, below);
   };
@@ -198,10 +194,7 @@ function paintTheme(map: mapboxgl.Map, basemap: Basemap) {
     }
   }
   addPinImages(map, colours);
-  if (map.getLayer(CLUSTERS)) {
-    map.setPaintProperty(CLUSTERS, 'circle-color', colours.selected);
-    map.setPaintProperty(CLUSTERS, 'circle-stroke-color', colours.hollow);
-    map.setPaintProperty(CLUSTER_COUNT, 'text-color', colours.hollow);
+  if (map.getLayer(LABELS)) {
     map.setPaintProperty(LABELS, 'text-color', colours.label);
     map.setPaintProperty(LABELS, 'text-halo-color', colours.labelHalo);
   }
@@ -216,39 +209,12 @@ function addPinLayers(
   if (map.getSource(SOURCE)) return;
   const colours = readMapColours();
   addPinImages(map, colours);
-  map.addSource(SOURCE, {
-    type: 'geojson',
-    data,
-    cluster: true,
-    clusterMaxZoom: CLUSTER_UP_TO_ZOOM,
-    clusterRadius: 40,
-  });
+  map.addSource(SOURCE, { type: 'geojson', data });
   map.addSource(SELECTED_SOURCE, { type: 'geojson', data: selected });
-  map.addLayer({
-    id: CLUSTERS,
-    type: 'circle',
-    source: SOURCE,
-    filter: ['has', 'point_count'],
-    paint: {
-      'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 50, 22],
-      'circle-color': colours.selected,
-      'circle-stroke-color': colours.hollow,
-      'circle-stroke-width': 2,
-    },
-  });
-  map.addLayer({
-    id: CLUSTER_COUNT,
-    type: 'symbol',
-    source: SOURCE,
-    filter: ['has', 'point_count'],
-    layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 },
-    paint: { 'text-color': colours.hollow },
-  });
   map.addLayer({
     id: PINS,
     type: 'symbol',
     source: SOURCE,
-    filter: NOT_GROUPED,
     layout: {
       'icon-image': PIN_IMAGE,
       'icon-anchor': 'bottom',
@@ -261,7 +227,6 @@ function addPinLayers(
     type: 'symbol',
     source: SOURCE,
     minzoom: NAMES_FROM_ZOOM,
-    filter: NOT_GROUPED,
     layout: {
       'text-field': ['get', 'name'],
       'text-size': 12,
@@ -350,7 +315,7 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
     if (id.startsWith(OVERLAY) && !wanted.has(id)) map.removeSource(id);
   }
   // Under the lanes and the pins, whichever is lowest.
-  const below = [AREA_FILL, CLUSTERS].find((id) => map.getLayer(id));
+  const below = [AREA_FILL, PINS].find((id) => map.getLayer(id));
   for (const overlay of overlays) {
     const source = `${OVERLAY}${overlay.id}`;
     const [fill, line, point, pictures] = overlayLayerIds(overlay.id) as [
@@ -553,31 +518,11 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     // A click on the empty map closes the box on the map.
     instance.on('click', (event) => {
-      const layers = [CLUSTERS, PINS, SELECTED].filter((id) => instance.getLayer(id));
+      const layers = [PINS, SELECTED].filter((id) => instance.getLayer(id));
       if (layers.length > 0 && instance.queryRenderedFeatures(event.point, { layers }).length > 0) {
         return;
       }
       handlers.current.close();
-    });
-    // A click on a bubble zooms in on the places it holds.
-    instance.on('click', CLUSTERS, (event) => {
-      const feature = event.features?.[0];
-      const id: unknown = feature?.properties?.cluster_id;
-      const source = instance.getSource<GeoJSONSource>(SOURCE);
-      if (!feature || typeof id !== 'number' || !source) return;
-      source.getClusterExpansionZoom(id, (error, zoom) => {
-        if (error || zoom === null || zoom === undefined || feature.geometry.type !== 'Point') {
-          return;
-        }
-        const [lng, lat] = feature.geometry.coordinates as [number, number];
-        instance.easeTo({ center: [lng, lat], zoom });
-      });
-    });
-    instance.on('mouseenter', CLUSTERS, () => {
-      instance.getCanvas().style.cursor = 'pointer';
-    });
-    instance.on('mouseleave', CLUSTERS, () => {
-      instance.getCanvas().style.cursor = '';
     });
     // A click on a map layer's feature, unless it is on a pin (the pin wins).
     instance.on('click', (event) => {
@@ -587,7 +532,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       if (layers.length === 0) return;
       if (
         instance.getLayer(PINS) &&
-        instance.queryRenderedFeatures(event.point, { layers: [PINS, CLUSTERS] }).length > 0
+        instance.queryRenderedFeatures(event.point, { layers: [PINS, SELECTED] }).length > 0
       ) {
         return;
       }
@@ -603,8 +548,7 @@ export default function FacilityMap(props: FacilityMapProps) {
         properties: { ...(feature.properties ?? {}) },
       });
     });
-    // The chosen pin's larger copy is clickable too: it stays on the map when its place sits
-    // inside a bubble, and a click on it opens its box again.
+    // The chosen pin's larger copy is clickable too: a click on it opens its box again.
     for (const layer of [PINS, SELECTED]) {
       instance.on('click', layer, (event) => {
         const id: unknown = event.features?.[0]?.properties?.id;
