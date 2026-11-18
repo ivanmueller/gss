@@ -8,8 +8,9 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 | ID | Feature | Status |
 |---|---|---|
-| F-239 | The oil and gas map page: empty, with map styles and layers | In progress (`feat/f-239-oil-gas-map`) |
-| F-240 | Alberta reference layers: township grid and formation outlines; oil and gas layers kept apart from grain's | Planned (next) |
+| F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260, 2026-11-18) |
+| F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | Planned (next; Codex design review first) |
+| F-240 | Alberta reference layers: township grid and formation outlines | Planned (after F-247) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
 | F-243 | Wells, new licences and rig activity (AER) | Needs owner input |
@@ -24,15 +25,27 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-239 — The oil and gas map page
 
-**Status:** In progress (`feat/f-239-oil-gas-map`). Normal risk (screens only). **Asked:** 2026-11-18, after seeing F-238 on staging: "clean everything in this map. I did not ask you to put counterparties. We can potentially leave map layers … Let's clear the map so that it's still the same structure, but there's no data on the map yet."
+**Status:** Live, check pending (merged as ivanmueller/gss#260 on 2026-11-18; register `docs/reviews/F-239.md`). Normal risk (screens only). **Asked:** 2026-11-18, after seeing F-238 on staging: "clean everything in this map. I did not ask you to put counterparties. We can potentially leave map layers … Let's clear the map so that it's still the same structure, but there's no data on the map yet."
 
 **Built:** the full-page map at `map.torvenco.com` and `/map` shows no companies; it starts on Canada, with the map styles (street map, satellite) and the team's map layers (Layers button), as before. Signed-in members only.
 
-**Owner's answer (2026-11-18):** oil and gas has its own layers; until F-240 separates them, the Layers button still offers the team's grain layers.
+**Owner's answer (2026-11-18):** oil and gas has its own layers (F-247); until then the Layers button still offers the team's grain layers.
+
+**Owner check on staging:** open `https://map.torvenco.com` (Ctrl+F5 if the old page shows): Canada filling the window, no pins, the map style switch and Layers top left.
+
+## F-247 — Oil and gas map layers: their own system
+
+**Status:** Planned (next). High risk (a database change): Codex design review before code. **Asked:** 2026-11-18, after the first attempt (F-240 part 1, ivanmueller/gss#261, closed unmerged): one list of layers shared by grain and oil and gas, marked by area. Codex's final reviews kept finding new edge cases of that sharing (browser tabs running the previous app, the shared Team list); the owner: "Why can't we just build our own map layer input system on the oil/gas side? That way we don't mix it up with the grain one … The oil/gas side can have its own settings etc?"
+
+**Owner's answers (2026-11-18):**
+1. **Where:** a **Settings** button on the oil and gas map (`map.torvenco.com`), where layers are added and managed; not on Team.
+2. **Who adds layers:** admins. (Everyone on the team opens the map and switches layers on and off.)
+
+**Plan (to write and put to Codex's design review):** oil and gas layers stored apart from grain's `app.map_layers` (grain's layers, Team page and maps unchanged), with their source and terms recorded before they are shown, as F-107 requires; the Worker's existing ArcGIS and WMS fetching reused, not copied, where it can be shared safely; the Layers button on the oil and gas map offering only these layers. To settle in the plan: where these tables live (the main database, beside sign-in and membership, or the separate oil and gas Supabase project decided on 2026-11-18), which kinds of layer are needed first (live ArcGIS layers for Alberta's government services; files and whole ArcGIS maps later?), and what else "settings" holds beyond layers (the owner may add more).
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 
-**Status:** Needs owner input. **What:** the layers that turn land descriptions and formation names into shapes:
+**Status:** Planned (after F-247). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
 - the **Alberta Township System** grid (township, section, quarter section, legal subdivision), from the province's ATS map service (also AltaLIS's ATS product);
 - **formation outlines**: the Alberta Geological Survey's shale plays (Digital Dataset 2013-0024: Duvernay, Muskwa, Montney, Basal Banff/Exshaw, North Nordegg, Wilrich) and its Geological Framework of Alberta, version 3 (about 90 geological units, among them Cardium, Mannville, Wabamun, Leduc).
 
@@ -92,7 +105,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 3. **Live layers first:** "if you think it's smartest; we can continue exploring the best way forward." The agent's recommendation: yes, F-240 then F-241, free and quick, while the stored data is planned.
 4. **Storage:** open to a paid database plan; the owner's wish is to load as much as the free plan holds, build with it, and buy the Pro plan once it is full. **Caution (agent):** the oil and gas tables would share the staging database that holds GSS's real grain records; a full database on the free plan is restricted by Supabase, which could stop saving bids, calls and email. Proposed instead: a size budget well under the free plan's limit (the limit and Supabase's behaviour read from its own pages first), each load measured, and the paid plan bought before the budget is reached. To confirm with the owner when F-242 is planned.
 5. **Who may open the page:** everyone on the team.
-6. **Layers:** oil and gas has its own layers, apart from grain's (F-240: a migration marking each map layer grain or oil and gas, the Layers button on each page offering only its own; high risk, Codex design review first).
+6. **Layers:** oil and gas has its own layers, apart from grain's. First built as one shared list marked by area (ivanmueller/gss#261, closed unmerged); then, at the owner's request, a separate system with a Settings button on the oil and gas map, admins adding layers (F-247).
 
 ## Questions as first asked (2026-11-18)
 
