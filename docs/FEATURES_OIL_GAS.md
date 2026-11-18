@@ -9,7 +9,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | ID | Feature | Status |
 |---|---|---|
 | F-239 | The oil and gas map page: empty, with map styles and layers | In progress (`feat/f-239-oil-gas-map`) |
-| F-240 | Alberta reference layers: township grid and formation outlines; oil and gas layers kept apart from grain's | Planned (next) |
+| F-240 | Alberta reference layers: township grid and formation outlines; oil and gas layers kept apart from grain's | In progress: part 1, layers kept apart (`feat/f-240-oil-gas-layers`) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
 | F-243 | Wells, new licences and rig activity (AER) | Needs owner input |
@@ -35,6 +35,10 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 **Status:** Needs owner input. **What:** the layers that turn land descriptions and formation names into shapes:
 - the **Alberta Township System** grid (township, section, quarter section, legal subdivision), from the province's ATS map service (also AltaLIS's ATS product);
 - **formation outlines**: the Alberta Geological Survey's shale plays (Digital Dataset 2013-0024: Duvernay, Muskwa, Montney, Basal Banff/Exshaw, North Nordegg, Wilrich) and its Geological Framework of Alberta, version 3 (about 90 geological units, among them Cardium, Mannville, Wabamun, Leduc).
+
+**Part 1 (built, an agent, 2026-11-18):** each map layer is grain or oil and gas (migration `20261121010000_map_layer_area.sql`; earlier layers are grain); Team → Map layers → Add (by hand or a whole ArcGIS map) and Edit have a **For** choice (Grain, Oil and gas), the list marks oil and gas layers; the grain maps ask the server for grain layers only, the oil and gas map for oil and gas layers only, and an open map asks again when its window comes back into view. Codex design review first (register `docs/reviews/F-240.md`).
+
+**Part 2 (the layers themselves):** added by the owner on Team, with exact links once each source's terms are read and recorded.
 
 **How:** the grid as a live ArcGIS layer (no storage); the outlines as file layers or live layers, as the AGS publishes them. Credit line on the map: "Contains information licensed under the Open Government Licence – Alberta", plus the AGS as source.
 

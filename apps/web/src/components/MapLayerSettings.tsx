@@ -4,6 +4,7 @@ import {
   featureFields,
   featureValueCounts,
   formatAlberta,
+  MAP_LAYER_AREA_LABELS,
   MAP_LAYER_KIND_LABELS,
   normalizeFeatureCollection,
   OTHER_VALUES_COLOUR,
@@ -11,6 +12,7 @@ import {
   railroadPreset,
   type LayerInspection,
   type LayerFeatureCollection,
+  type MapLayerArea,
   type MapLayerList,
   type MapLayerView,
 } from '@grain/domain';
@@ -23,7 +25,9 @@ import { message, prepareWithProgress, takesOverview } from '../lib/mapLayerPrep
 import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { ImportArcgisMapForm } from './ArcgisMapImport';
+import { MapLayerAreaControl } from './MapLayerAreaControl';
 import { panelEntries } from './MapLayers';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
@@ -268,6 +272,7 @@ function EditMapLayerForm({
   const [sourceName, setSourceName] = useState(layer.sourceName);
   const [termsUrl, setTermsUrl] = useState(layer.termsUrl);
   const [termsNote, setTermsNote] = useState(layer.termsNote);
+  const [area, setArea] = useState<MapLayerArea>(layer.area);
   const [wmsLayers, setWmsLayers] = useState(layer.wmsLayers ?? '');
   const [colour, setColour] = useState(layer.colour);
   const [colourField, setColourField] = useState(layer.colourField ?? NO_FIELD);
@@ -357,6 +362,7 @@ function EditMapLayerForm({
       sourceName: sourceName.trim(),
       termsUrl: termsUrl.trim(),
       termsNote: termsNote.trim(),
+      area,
       wmsLayers: layer.kind === 'wms' ? wmsLayers.trim() : null,
       colour: chosen === null ? colour : OTHER_VALUES_COLOUR,
       colourField: chosen,
@@ -405,6 +411,7 @@ function EditMapLayerForm({
           }}
         />
       </div>
+      <MapLayerAreaControl value={area} onChange={setArea} />
       {layer.kind === 'wms' && (
         <div className="flex flex-col gap-1.5">
           <label htmlFor={field('wms')} className="font-medium">
@@ -545,6 +552,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   const field = (name: string) => `${id}-${name}`;
   const query = `?organization_id=${organization.id}`;
   const [source, setSource] = useState<Source>('web');
+  const [area, setArea] = useState<MapLayerArea>('grain');
   const [url, setUrl] = useState('');
   const [inspection, setInspection] = useState<LayerInspection | null>(null);
   const [file, setFile] = useState<{
@@ -649,6 +657,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     if (!ready) return;
     const details = {
       name: name.trim(),
+      area,
       sourceName: sourceName.trim(),
       termsUrl: termsUrl.trim(),
       termsNote: termsNote.trim(),
@@ -738,7 +747,8 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     return (
       <div className="flex flex-col gap-4 text-sm">
         {sourceControl}
-        <ImportArcgisMapForm session={session} onAdded={onAdded} />
+        <MapLayerAreaControl value={area} onChange={setArea} />
+        <ImportArcgisMapForm session={session} area={area} onAdded={onAdded} />
       </div>
     );
   }
@@ -746,6 +756,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   return (
     <form className="flex flex-col gap-4 text-sm" onSubmit={save}>
       {sourceControl}
+      <MapLayerAreaControl value={area} onChange={setArea} />
 
       {source === 'web' ? (
         <div className="flex flex-col gap-1.5">
@@ -1037,6 +1048,9 @@ function LayerRow({
             style={{ backgroundColor: layer.colours[0]?.[1] ?? layer.colour }}
           />
           {layer.name}
+          {layer.area !== 'grain' && (
+            <Badge className="font-normal">{MAP_LAYER_AREA_LABELS[layer.area]}</Badge>
+          )}
         </span>
         {confirming ? (
           <span className="flex gap-2">
@@ -1414,7 +1428,7 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [list, reload] = useApiResource<MapLayerList>(
-    `/map-layers?organization_id=${organization.id}`,
+    `/map-layers?organization_id=${organization.id}&area=all`,
     token,
   );
 

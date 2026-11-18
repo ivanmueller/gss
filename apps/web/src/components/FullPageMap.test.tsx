@@ -33,7 +33,12 @@ describe('FullPageMap', () => {
     expect(screen.getByRole('group', { name: 'Map style' })).toBeInTheDocument();
     // No company's places are asked for or shown; only the team's map layers.
     expect(calls.some((call) => call.path.startsWith('/facilities'))).toBe(false);
-    expect(calls.some((call) => call.path.startsWith('/map-layers'))).toBe(true);
+    // Its own layers: oil and gas (F-240).
+    expect(
+      calls.some(
+        (call) => call.path.startsWith('/map-layers') && call.path.endsWith('&area=oil_gas'),
+      ),
+    ).toBe(true);
     expect(screen.queryByRole('list', { name: 'Map legend' })).not.toBeInTheDocument();
   });
 

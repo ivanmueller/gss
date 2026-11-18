@@ -19,6 +19,7 @@ const live: MapLayerView = {
   id: LAYER,
   name: 'Synthetic rail lines',
   kind: 'arcgis_features',
+  area: 'grain',
   url: 'https://services.example.com/rest/services/Rail/FeatureServer/0',
   wmsLayers: null,
   sourceName: 'Synthetic publisher',

@@ -16,6 +16,7 @@ import {
   type LayerFeatureCollection,
   type LayerInspection,
   type LayerStyle,
+  type MapLayerArea,
   type MapLayerKind,
 } from '@grain/domain';
 import { useId, useState, type SubmitEvent } from 'react';
@@ -259,9 +260,12 @@ function plannedDetails(layer: PlannedLayer): string {
 /** Team → Map layers → Add map layer → ArcGIS map. */
 export function ImportArcgisMapForm({
   session,
+  area = 'grain',
   onAdded,
 }: {
   session: DirectorySession;
+  /** The side of the platform every layer of the map is for (F-240). */
+  area?: MapLayerArea;
   onAdded: () => void;
 }) {
   const { token, organization } = session;
@@ -330,6 +334,7 @@ export function ImportArcgisMapForm({
           setBusy(`Adding layer ${String(i + 1)} of ${String(chosen.length)}: ${layer.title}…`);
           const common = {
             name: layer.title,
+            area,
             sourceName: sourceName.trim(),
             termsUrl: termsUrl.trim(),
             termsNote: termsNote.trim(),

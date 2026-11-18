@@ -31,6 +31,26 @@ export const MAP_LAYER_KIND_LABELS: Record<MapLayerKind, string> = {
   file: 'File',
 };
 
+/**
+ * The side of the platform a layer belongs to (F-240): the grain maps offer only grain layers,
+ * the oil and gas map (map.torvenco.com) only oil and gas layers.
+ */
+export const MAP_LAYER_AREAS = ['grain', 'oil_gas'] as const;
+export type MapLayerArea = (typeof MAP_LAYER_AREAS)[number];
+
+export const MAP_LAYER_AREA_LABELS: Record<MapLayerArea, string> = {
+  grain: 'Grain',
+  oil_gas: 'Oil and gas',
+};
+
+/**
+ * Which layers GET /api/v1/map-layers returns (?area=…): one area, or every layer (Team). Without
+ * it, grain only, so a browser still running the app from before F-240 never draws an oil and
+ * gas layer on a grain map.
+ */
+export const MAP_LAYER_LIST_AREAS = [...MAP_LAYER_AREAS, 'all'] as const;
+export type MapLayerListArea = (typeof MAP_LAYER_LIST_AREAS)[number];
+
 /** The largest file kept, as GeoJSON text after its checks (the database has the same limit). */
 export const MAX_LAYER_FILE_BYTES = 5 * 1024 * 1024;
 /** The most features a file may hold. */
@@ -313,9 +333,13 @@ export function safeFilter(text: string): boolean {
   return DEFINITION_EXPRESSION.test(text) && balancedFilter(text);
 }
 
+/** A new layer's area; grain when left out (as from a browser running the app before F-240). */
+const newArea = { area: z.enum(MAP_LAYER_AREAS).default('grain') };
+
 /** POST /api/v1/map-layers?organization_id=… : a web service. */
 export const createServiceLayerSchema = z.strictObject({
   ...layerDetails,
+  ...newArea,
   ...presentation,
   definitionExpression: z.string().refine(safeFilter).nullable().default(null),
   source: z.literal('web'),
@@ -326,6 +350,7 @@ export const createServiceLayerSchema = z.strictObject({
 /** POST /api/v1/map-layers?organization_id=… : a file, already turned into GeoJSON. */
 export const createFileLayerSchema = z.strictObject({
   ...layerDetails,
+  ...newArea,
   ...presentation,
   source: z.literal('file'),
   fileName: label(200),
@@ -343,6 +368,8 @@ export type CreateMapLayer = z.infer<typeof createMapLayerSchema>;
 export const updateMapLayerSchema = z.strictObject({
   version: z.string().min(1).max(100),
   ...layerDetails,
+  /** Left out: unchanged (a browser running the app before F-240 never moves a layer). */
+  area: z.enum(MAP_LAYER_AREAS).optional(),
   wmsLayers: z.string().regex(WMS_LAYERS).nullable(),
 });
 export type UpdateMapLayer = z.infer<typeof updateMapLayerSchema>;
@@ -382,6 +409,7 @@ export interface MapLayerView {
   id: string;
   name: string;
   kind: MapLayerKind;
+  area: MapLayerArea;
   /** A web service's address; null for a file. */
   url: string | null;
   wmsLayers: string | null;

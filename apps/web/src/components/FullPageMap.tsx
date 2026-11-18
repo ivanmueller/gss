@@ -47,7 +47,7 @@ export function FullPageMap({
   const [refused, setRefused] = useState(false);
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
-  const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
+  const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null, 'oil_gas');
 
   if (mapbox.status !== 'ok' || refused) {
     const text = refused

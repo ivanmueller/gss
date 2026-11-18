@@ -22,6 +22,7 @@ import {
   tileBounds,
   tileBoundsMercator,
   tilesForView,
+  updateMapLayerSchema,
   type LayerFeatureCollection,
 } from './mapLayers';
 
@@ -129,6 +130,45 @@ describe('colours', () => {
     const assigned = assignColours(values);
     expect(assigned).toHaveLength(2000);
     expect(assigned[0]?.[0]).toBe('R2499');
+  });
+});
+
+describe('a layer’s area (F-240)', () => {
+  const web = {
+    name: 'Township grid',
+    sourceName: 'Synthetic publisher',
+    termsUrl: 'https://example.com/terms',
+    termsNote: 'Open licence.',
+    colour: '#2f6baa',
+    colourField: null,
+    colours: [],
+    source: 'web',
+    url: 'https://maps.example.com/arcgis/rest/services/Grid/MapServer/1',
+    wmsLayers: null,
+  };
+
+  it('is grain unless said otherwise when a layer is added', () => {
+    expect(createMapLayerSchema.parse(web).area).toBe('grain');
+    expect(createMapLayerSchema.parse({ ...web, area: 'oil_gas' }).area).toBe('oil_gas');
+    expect(createMapLayerSchema.safeParse({ ...web, area: 'steel' }).success).toBe(false);
+  });
+
+  it('stays unchanged when an edit leaves it out (a browser from before F-240)', () => {
+    const edit = {
+      name: web.name,
+      sourceName: web.sourceName,
+      termsUrl: web.termsUrl,
+      termsNote: web.termsNote,
+      colour: web.colour,
+      colourField: web.colourField,
+      colours: web.colours,
+      wmsLayers: null,
+    };
+    expect(updateMapLayerSchema.parse({ ...edit, version: '1' }).area).toBeUndefined();
+    expect(updateMapLayerSchema.parse({ ...edit, version: '1', area: 'oil_gas' }).area).toBe(
+      'oil_gas',
+    );
+    expect(updateMapLayerSchema.safeParse({ ...edit, version: '1', area: '' }).success).toBe(false);
   });
 });
 

@@ -50,6 +50,7 @@ const SERVICE: NewMapLayer = {
   map: null,
   mapVisible: true,
   tileLevels: null,
+  area: 'grain',
   file: null,
 };
 
@@ -89,7 +90,7 @@ describe('map layers as app_api', () => {
       const added = await db.createMapLayer(as(ADAM), ORG_A, SERVICE);
       if (added.status !== 'saved') throw new Error('not added');
 
-      const [layer] = (await db.listMapLayers(as(VERA), ORG_A)) ?? [];
+      const [layer] = (await db.listMapLayers(as(VERA), ORG_A, 'all')) ?? [];
       expect(layer).toMatchObject({
         id: added.id,
         name: SERVICE.name,
@@ -99,8 +100,8 @@ describe('map layers as app_api', () => {
         fileName: null,
         createdByName: 'adam.layers@example.test',
       });
-      expect(await db.listMapLayers(as(BOB), ORG_A)).toBeNull();
-      expect(await db.listMapLayers(as(BOB), ORG_B)).toEqual([]);
+      expect(await db.listMapLayers(as(BOB), ORG_A, 'all')).toBeNull();
+      expect(await db.listMapLayers(as(BOB), ORG_B, 'all')).toEqual([]);
       expect(await db.getMapLayerSource(as(BOB), added.id)).toBeNull();
       expect(await db.getMapLayerSource(as(VERA), added.id)).toEqual({
         id: added.id,
@@ -144,7 +145,7 @@ describe('map layers as app_api', () => {
       expect(await db.updateMapLayer(as(ADAM), added.id, version, changes)).toEqual({
         status: 'stale',
       });
-      const [changed] = (await db.listMapLayers(as(ADAM), ORG_A)) ?? [];
+      const [changed] = (await db.listMapLayers(as(ADAM), ORG_A, 'all')) ?? [];
       expect(changed).toMatchObject({ name: 'Railways', colourField: null, colours: [] });
 
       expect(await db.removeMapLayer(as(VERA), added.id, changed?.version ?? '')).toEqual({
@@ -154,11 +155,71 @@ describe('map layers as app_api', () => {
         status: 'saved',
         id: added.id,
       });
-      expect(await db.listMapLayers(as(VERA), ORG_A)).toEqual([]);
+      expect(await db.listMapLayers(as(VERA), ORG_A, 'all')).toEqual([]);
       expect(await db.getMapLayerSource(as(VERA), added.id)).toBeNull();
       const [kept] = await admin<{ archived_by: string }[]>`
         select archived_by from app.map_layers where id = ${added.id}`;
       expect(kept?.archived_by).toBe(ADAM);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('lists one area’s layers, and keeps an oil and gas layer’s area when an edit leaves it out (F-240)', async () => {
+    const db = postgresDatabase(API_URL);
+    try {
+      const grain = await db.createMapLayer(as(ADAM), ORG_A, SERVICE);
+      const oil = await db.createMapLayer(as(ADAM), ORG_A, {
+        ...SERVICE,
+        name: 'Synthetic township grid',
+        area: 'oil_gas',
+      });
+      if (grain.status !== 'saved' || oil.status !== 'saved') throw new Error('not added');
+      const ids = async (area: 'grain' | 'oil_gas' | 'all') =>
+        ((await db.listMapLayers(as(VERA), ORG_A, area)) ?? [])
+          .filter((l) => l.id === grain.id || l.id === oil.id)
+          .map((l) => `${l.name}: ${l.area}`);
+      expect(await ids('grain')).toEqual(['Synthetic rail lines: grain']);
+      expect(await ids('oil_gas')).toEqual(['Synthetic township grid: oil_gas']);
+      expect(await ids('all')).toEqual([
+        'Synthetic rail lines: grain',
+        'Synthetic township grid: oil_gas',
+      ]);
+      expect(await db.listMapLayers(as(BOB), ORG_A, 'oil_gas')).toBeNull();
+
+      // An edit from a browser running the app before F-240 carries no area.
+      const [listed] = (await db.listMapLayers(as(ADAM), ORG_A, 'oil_gas')) ?? [];
+      const edit = {
+        name: 'Township grid',
+        wmsLayers: null,
+        sourceName: SERVICE.sourceName,
+        termsUrl: SERVICE.termsUrl,
+        termsNote: SERVICE.termsNote,
+        colour: '#000000',
+        colourField: null,
+        colours: [] as [string, string][],
+        alsoFields: [],
+        onlyField: null,
+        onlyValues: [],
+      };
+      expect(await db.updateMapLayer(as(ADAM), oil.id, listed?.version ?? '', edit)).toEqual({
+        status: 'saved',
+        id: oil.id,
+      });
+      expect(await ids('oil_gas')).toEqual(['Township grid: oil_gas']);
+
+      // An admin moves it back to grain.
+      const [moved] = (await db.listMapLayers(as(ADAM), ORG_A, 'oil_gas')) ?? [];
+      expect(
+        await db.updateMapLayer(as(ADAM), oil.id, moved?.version ?? '', { ...edit, area: 'grain' }),
+      ).toEqual({ status: 'saved', id: oil.id });
+      expect(await ids('oil_gas')).toEqual([]);
+      for (const id of [grain.id, oil.id]) {
+        const [layer] = (await db.listMapLayers(as(ADAM), ORG_A, 'all'))?.filter(
+          (l) => l.id === id,
+        ) ?? [undefined];
+        await db.removeMapLayer(as(ADAM), id, layer?.version ?? '');
+      }
     } finally {
       await db.close();
     }
@@ -191,7 +252,9 @@ describe('map layers as app_api', () => {
       expect(JSON.parse(new TextDecoder().decode(file?.geojson))).toEqual(checked.collection);
       expect(file?.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(await db.getMapLayerFile(as(BOB), added.id)).toBeNull();
-      const layer = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
+      const layer = (await db.listMapLayers(as(VERA), ORG_A, 'all'))?.find(
+        (l) => l.id === added.id,
+      );
       expect(layer).toMatchObject({ kind: 'file', fileName: 'elevators.geojson', featureCount: 1 });
     } finally {
       await db.close();
@@ -262,7 +325,9 @@ describe('map layers as app_api', () => {
       expect(read?.version).toBe(v1);
       expect(read?.parts.map((p) => new TextDecoder().decode(p))).toHaveLength(2);
       expect(await db.getMapLayerOverview(as(BOB), added.id)).toBeNull();
-      const listed = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
+      const listed = (await db.listMapLayers(as(VERA), ORG_A, 'all'))?.find(
+        (l) => l.id === added.id,
+      );
       expect(listed?.overview).toMatchObject({
         colourField: 'OWNER',
         featureCount: 2,
@@ -348,7 +413,9 @@ describe('map layers as app_api', () => {
       // Built without the shared fields: refused.
       expect(await publish(groupingOf({ ...shared, alsoFields: [] }))).toEqual({ status: 'stale' });
       expect(await publish(groupingOf(shared))).toEqual({ status: 'saved', id: added.id });
-      const listed = (await db.listMapLayers(as(VERA), ORG_A))?.find((l) => l.id === added.id);
+      const listed = (await db.listMapLayers(as(VERA), ORG_A, 'all'))?.find(
+        (l) => l.id === added.id,
+      );
       expect(listed).toMatchObject({
         alsoFields: ['OWNER2'],
         onlyField: 'NET',
@@ -430,7 +497,7 @@ describe('map layers as app_api', () => {
       const bottom = await db.createMapLayer(as(ADAM), ORG_A, { ...presented, name: 'Bottom' });
       const top = await db.createMapLayer(as(ADAM), ORG_A, { ...presented, name: 'Top' });
       if (bottom.status !== 'saved' || top.status !== 'saved') throw new Error('not added');
-      const listed = ((await db.listMapLayers(as(VERA), ORG_A)) ?? []).filter(
+      const listed = ((await db.listMapLayers(as(VERA), ORG_A, 'all')) ?? []).filter(
         (l) => l.map !== null,
       );
       expect(listed.map((l) => l.name)).toEqual(['Bottom', 'Top']);
@@ -446,7 +513,7 @@ describe('map layers as app_api', () => {
       expect((await db.getMapLayerSource(as(VERA), top.id))?.definitionExpression).toBe(
         "NET IN ('M','I')",
       );
-      expect(await db.listMapLayers(as(BOB), ORG_B)).toEqual(
+      expect(await db.listMapLayers(as(BOB), ORG_B, 'all')).toEqual(
         expect.not.arrayContaining([expect.objectContaining({ map })]),
       );
     } finally {
@@ -471,7 +538,7 @@ describe('map layers as app_api', () => {
       expect(await db.createMapLayer(as(BOB), ORG_A, tiles)).toEqual({ status: 'forbidden' });
       const added = await db.createMapLayer(as(ADAM), ORG_A, tiles);
       if (added.status !== 'saved') throw new Error('not added');
-      const listed = ((await db.listMapLayers(as(VERA), ORG_A)) ?? []).find(
+      const listed = ((await db.listMapLayers(as(VERA), ORG_A, 'all')) ?? []).find(
         (l) => l.id === added.id,
       );
       expect(listed).toMatchObject({

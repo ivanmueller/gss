@@ -31,12 +31,15 @@ vi.mock('../lib/mapOverview', () => ({ prepareOverview: prepare }));
 const RAIL = '00000000-0000-4000-8000-0000000a1a01';
 const FILE = '00000000-0000-4000-8000-0000000a1a02';
 const SERVICE = 'https://services.example.com/rest/services/Rail/FeatureServer/0';
-const LIST = `GET /map-layers?organization_id=${ORG.id}`;
+// A grain map's layers, and Team's list of every layer (F-240).
+const LIST = `GET /map-layers?organization_id=${ORG.id}&area=grain`;
+const ALL = `GET /map-layers?organization_id=${ORG.id}&area=all`;
 
 const rail: MapLayerView = {
   id: RAIL,
   name: 'Synthetic rail lines',
   kind: 'arcgis_features',
+  area: 'grain',
   url: SERVICE,
   wmsLayers: null,
   sourceName: 'Synthetic publisher',
@@ -467,7 +470,7 @@ describe('Team → Map layers', () => {
   it('adds a web layer coloured by a field, each value its own colour', async () => {
     let layers: MapLayerView[] = [];
     const calls = mockApi({
-      [LIST]: () => Response.json({ layers }),
+      [ALL]: () => Response.json({ layers }),
       [`POST /map-layers/inspect?organization_id=${ORG.id}`]: ({ body }) =>
         Response.json(
           (body as { field: string | null }).field === null
@@ -525,6 +528,7 @@ describe('Team → Map layers', () => {
     const saved = calls.find((c) => c.method === 'POST' && c.path.startsWith('/map-layers?'));
     expect(saved?.body).toEqual({
       name: 'Synthetic Rail Lines',
+      area: 'grain',
       sourceName: 'Synthetic publisher',
       termsUrl: 'https://example.com/terms',
       termsNote: 'Public domain.',
@@ -552,7 +556,7 @@ describe('Team → Map layers', () => {
 
   it('says when the layer was added but its zoomed-out view could not be prepared', async () => {
     mockApi({
-      [LIST]: () => Response.json({ layers: [] }),
+      [ALL]: () => Response.json({ layers: [] }),
       [`POST /map-layers/inspect?organization_id=${ORG.id}`]: () => Response.json(inspection),
       [`POST /map-layers?organization_id=${ORG.id}`]: () =>
         Response.json({ id: RAIL }, { status: 201 }),
@@ -600,7 +604,7 @@ describe('Team → Map layers', () => {
       },
     };
     const calls = mockApi({
-      [LIST]: () => Response.json({ layers: [tracks] }),
+      [ALL]: () => Response.json({ layers: [tracks] }),
       [`POST /map-layers/inspect?organization_id=${ORG.id}`]: ({ body }) =>
         Response.json(
           (body as { field: string | null }).field === null
@@ -625,6 +629,7 @@ describe('Team → Map layers', () => {
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
       version: 'v1',
       name: 'Synthetic rail lines',
+      area: 'grain',
       sourceName: 'Synthetic publisher',
       termsUrl: 'https://example.com/terms',
       termsNote: 'Public domain.',
@@ -644,7 +649,7 @@ describe('Team → Map layers', () => {
   });
 
   it('prepares a zoomed-out view from the list', async () => {
-    mockApi({ [LIST]: () => Response.json({ layers: [rail] }) });
+    mockApi({ [ALL]: () => Response.json({ layers: [rail] }) });
     prepare.mockResolvedValue({ features: 1, pieces: 300 });
     const user = userEvent.setup();
     render(<MapLayerSettings session={SESSION} />);
@@ -658,7 +663,7 @@ describe('Team → Map layers', () => {
   it('removes a layer for everyone after asking', async () => {
     let layers = [rail];
     const calls = mockApi({
-      [LIST]: () => Response.json({ layers }),
+      [ALL]: () => Response.json({ layers }),
       [`POST /map-layers/${RAIL}/remove`]: () => {
         layers = [];
         return Response.json({ id: RAIL });
@@ -804,7 +809,7 @@ describe('shared track and limits', () => {
   it('applies the publisher’s railroad settings from Edit, counting values again and preparing the view', async () => {
     const tracks: MapLayerView = { ...rail, colourField: 'TRACKS', colours: [['1', '#e6194b']] };
     const calls = mockApi({
-      [LIST]: () => Response.json({ layers: [tracks] }),
+      [ALL]: () => Response.json({ layers: [tracks] }),
       [`POST /map-layers/inspect?organization_id=${ORG.id}`]: ({ body }) =>
         Response.json({
           kind: 'arcgis_features',

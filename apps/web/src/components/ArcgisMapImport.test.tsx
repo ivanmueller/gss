@@ -139,7 +139,7 @@ describe('Team → Map layers → Add map layer → ArcGIS map', () => {
   it('adds a map’s layers bottom to top as ArcGIS draws them', async () => {
     let next = 0;
     const calls = mockApi({
-      [`GET /map-layers${Q}`]: () => Response.json({ layers: [] }),
+      [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers: [] }),
       [`POST /map-layers/arcgis-item${Q}`]: ({ body }) => {
         const { itemId, part } = body as { itemId: string; part: string };
         if (itemId === MAP && part === 'info') {
@@ -240,7 +240,7 @@ describe('Team → Map layers → Add map layer → ArcGIS map', () => {
 
   it('says why a link is not a map, and what an item is when it is not one', async () => {
     mockApi({
-      [`GET /map-layers${Q}`]: () => Response.json({ layers: [] }),
+      [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers: [] }),
       [`POST /map-layers/arcgis-item${Q}`]: ({ body }) =>
         (body as { part: string }).part === 'info'
           ? Response.json({ id: MAP, title: 'Synthetic', type: 'Feature Service' })
@@ -268,6 +268,7 @@ const base: MapLayerView = {
   id: 'one',
   name: 'Synthetic layer',
   kind: 'arcgis_features',
+  area: 'grain',
   url: CPKC,
   wmsLayers: null,
   sourceName: 'Synthetic',
@@ -326,6 +327,7 @@ describe('how a map’s layers are shown', () => {
       picked: null,
       setPicked: vi.fn(),
       error: null,
+      area: 'grain',
     } satisfies MapLayersState;
     const user = userEvent.setup();
     render(<MapLayersPanel state={state} side="right" />);
@@ -368,6 +370,7 @@ describe('how a map’s layers are shown', () => {
       picked: null,
       setPicked: vi.fn(),
       error: null,
+      area: 'grain',
     } satisfies MapLayersState;
     const user = userEvent.setup();
     render(<MapLayersPanel state={state} side="left" />);
@@ -418,7 +421,7 @@ describe('how a map’s layers are shown', () => {
 describe('Codex’s review of 1f328f9', () => {
   it('does not add a layer whose own item has a filter GSS cannot send', async () => {
     mockApi({
-      [`GET /map-layers${Q}`]: () => Response.json({ layers: [] }),
+      [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers: [] }),
       [`POST /map-layers/arcgis-item${Q}`]: ({ body }) => {
         const { itemId, part } = body as { itemId: string; part: string };
         if (itemId === MAP && part === 'info') {
@@ -479,7 +482,7 @@ describe('a map of pre-drawn pictures, such as a heat map (F-141)', () => {
   it('adds its layers as pre-drawn pictures, those ArcGIS shows at first marked so', async () => {
     let next = 0;
     const calls = mockApi({
-      [`GET /map-layers${Q}`]: () => Response.json({ layers: [] }),
+      [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers: [] }),
       [`POST /map-layers/arcgis-item${Q}`]: ({ body }) =>
         (body as { part: string }).part === 'info'
           ? Response.json({ id: MAP, title: 'Synthetic crop density', type: 'Web Map' })
@@ -582,6 +585,7 @@ describe('a map of pre-drawn pictures, such as a heat map (F-141)', () => {
       picked: null,
       setPicked: vi.fn(),
       error: null,
+      area: 'grain',
     } satisfies MapLayersState;
     render(<MapLayersLegend state={state} />);
     expect(await screen.findByText('Most Dense - Least Dense')).toBeVisible();
@@ -615,7 +619,7 @@ describe('a map’s layers kept together on Team (F-142)', () => {
   ];
 
   it('lists a map as one entry, folded, with its source once', async () => {
-    mockApi({ [`GET /map-layers${Q}`]: () => Response.json({ layers }) });
+    mockApi({ [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers }) });
     const user = userEvent.setup();
     render(<MapLayerSettings session={SESSION} />);
     expect(await screen.findByText('Synthetic elevators')).toBeVisible();
@@ -635,7 +639,7 @@ describe('a map’s layers kept together on Team (F-142)', () => {
   it('removes only the layers selected, after asking', async () => {
     let shown = layers;
     const calls = mockApi({
-      [`GET /map-layers${Q}`]: () => Response.json({ layers: shown }),
+      [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers: shown }),
       'POST /map-layers/middle/remove': () => {
         shown = shown.filter((l) => l.id !== 'middle');
         return Response.json({ id: 'middle' });
@@ -661,7 +665,7 @@ describe('a map’s layers kept together on Team (F-142)', () => {
   it('removes the whole map, after asking', async () => {
     let shown = layers;
     const calls = mockApi({
-      [`GET /map-layers${Q}`]: () => Response.json({ layers: shown }),
+      [`GET /map-layers${Q}&area=all`]: () => Response.json({ layers: shown }),
       ...Object.fromEntries(
         ['bottom', 'middle', 'top'].map((id) => [
           `POST /map-layers/${id}/remove`,

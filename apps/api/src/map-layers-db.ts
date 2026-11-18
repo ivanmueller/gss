@@ -1,4 +1,10 @@
-import { groupingOf, type MapLayerKind, type MapLayerView } from '@grain/domain';
+import {
+  groupingOf,
+  type MapLayerArea,
+  type MapLayerKind,
+  type MapLayerListArea,
+  type MapLayerView,
+} from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { RequestContext } from './db';
@@ -42,6 +48,8 @@ export interface NewMapLayer {
   /** Whether its ArcGIS map shows it at first, and a pre-drawn layer's levels (F-141). */
   mapVisible: boolean;
   tileLevels: { min: number; max: number } | null;
+  /** Grain or oil and gas (F-240). */
+  area: MapLayerArea;
   /** A file layer's file: its name, its checked GeoJSON as UTF-8 and how many features. */
   file: { name: string; geojson: Uint8Array; featureCount: number } | null;
 }
@@ -61,7 +69,11 @@ export type MapLayerChanges = Omit<
   | 'map'
   | 'mapVisible'
   | 'tileLevels'
->;
+  | 'area'
+> & {
+  /** Left out: unchanged (F-240). */
+  area?: MapLayerArea | undefined;
+};
 
 /** What the Worker needs to fetch a live layer for the map. */
 export interface MapLayerSource {
@@ -83,7 +95,12 @@ export interface MapLayerSource {
 
 export interface MapLayersDatabase {
   /** The organization's layers that are not removed, oldest first; null for a non-member. */
-  listMapLayers: (ctx: RequestContext, organizationId: string) => Promise<MapLayerView[] | null>;
+  /** The layers of one area, or all of them (Team). */
+  listMapLayers: (
+    ctx: RequestContext,
+    organizationId: string,
+    area: MapLayerListArea,
+  ) => Promise<MapLayerView[] | null>;
   /** A layer that is not removed, as the Worker fetches it; null when not visible. */
   getMapLayerSource: (ctx: RequestContext, id: string) => Promise<MapLayerSource | null>;
   /** A file layer's GeoJSON and its checksum; null when not visible. */
@@ -146,6 +163,7 @@ interface LayerRow {
   id: string;
   name: string;
   kind: MapLayerKind;
+  area: MapLayerArea;
   source_url: string | null;
   wms_layers: string | null;
   source_name: string;
@@ -200,13 +218,13 @@ async function writable(
 
 export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
   return {
-    listMapLayers(ctx, organizationId) {
+    listMapLayers(ctx, organizationId, area) {
       return asUser(ctx, async (tx) => {
         const [member] = await tx<{ ok: boolean }[]>`
           select app.is_active_member(${organizationId}) as ok`;
         if (member?.ok !== true) return null;
         const rows = await tx<LayerRow[]>`
-          select l.id, l.name, l.kind, l.source_url, l.wms_layers, l.source_name, l.terms_url,
+          select l.id, l.name, l.kind, l.area, l.source_url, l.wms_layers, l.source_name, l.terms_url,
                  l.terms_note, l.colour, l.colour_field, l.colours, to_jsonb(l.also_fields) as also_fields,
                  l.only_field, to_jsonb(l.only_values) as only_values, f.file_name, f.feature_count,
                  app.member_name(l.organization_id, l.created_by) as created_by_name,
@@ -223,11 +241,13 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
           left join app.map_layer_files f on f.layer_id = l.id
           left join app.map_layer_overviews o on o.layer_id = l.id
           where l.organization_id = ${organizationId} and l.archived_at is null
+            and (${area} = 'all' or l.area = ${area})
           order by l.created_at, l.id`;
         return rows.map((row) => ({
           id: row.id,
           name: row.name,
           kind: row.kind,
+          area: row.area,
           url: row.source_url,
           wmsLayers: row.wms_layers,
           sourceName: row.source_name,
@@ -312,7 +332,7 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             id_field, source_name, terms_url, terms_note, colour, colour_field, colours,
             also_fields, only_field, only_values, line_width, opacity, min_zoom, max_zoom,
             definition_expression, others_shown, map_item_id, map_title, map_visible,
-            tile_min_level, tile_max_level, created_by, updated_by)
+            tile_min_level, tile_max_level, area, created_by, updated_by)
           values (${organizationId}, ${layer.name}, ${layer.kind}, ${layer.url},
             ${layer.wmsLayers}, ${layer.idField}, ${layer.sourceName}, ${layer.termsUrl}, ${layer.termsNote},
             ${layer.colour}, ${layer.colourField}, ${tx.json(layer.colours)},
@@ -321,7 +341,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             ${layer.lineWidth}, ${layer.opacity}, ${layer.minZoom}, ${layer.maxZoom},
             ${layer.definitionExpression}, ${layer.othersShown}, ${layer.map?.itemId ?? null},
             ${layer.map?.title ?? null}, ${layer.mapVisible}, ${layer.tileLevels?.min ?? null},
-            ${layer.tileLevels?.max ?? null}, app.current_user_id(), app.current_user_id())
+            ${layer.tileLevels?.max ?? null}, ${layer.area}, app.current_user_id(),
+            app.current_user_id())
           returning id`;
         if (!saved) throw new Error('map layer was not saved');
         if (layer.file) {
@@ -347,6 +368,8 @@ export function mapLayerQueries(asUser: AsUser): MapLayersDatabase {
             colour_field = ${changes.colourField}, colours = ${tx.json(changes.colours)},
             also_fields = array(select jsonb_array_elements_text(${tx.json(changes.alsoFields)}::jsonb)), only_field = ${changes.onlyField},
             only_values = array(select jsonb_array_elements_text(${tx.json(changes.onlyValues)}::jsonb)),
+            -- Left out by a browser from before F-240: unchanged (postgres.js refuses undefined).
+            area = coalesce(${changes.area ?? null}, area),
             updated_by = app.current_user_id()
           where id = ${id} and updated_at::text = ${version} and archived_at is null`;
         return updated.count === 1 ? { status: 'saved', id } : { status: 'stale' };

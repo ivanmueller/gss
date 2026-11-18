@@ -152,6 +152,7 @@ const PLAIN = {
   mapVisible: true,
   tileLevels: null,
   definitionExpression: null,
+  area: 'grain',
 };
 
 describe('GET /api/v1/map-layers', () => {
@@ -172,6 +173,23 @@ describe('GET /api/v1/map-layers', () => {
   it('refuses an organization the person is not in', async () => {
     const res = await send('?organization_id=org-b', 'GET');
     expect(res.status).toBe(403);
+    expect(db.listMapLayers).not.toHaveBeenCalled();
+  });
+
+  it('lists one area, grain unless asked, or all of them (F-240)', async () => {
+    db.listMapLayers.mockResolvedValue([]);
+    for (const [query, area] of [
+      ['', 'grain'],
+      ['?area=grain', 'grain'],
+      ['?area=oil_gas', 'oil_gas'],
+      ['?area=all', 'all'],
+    ] as const) {
+      db.listMapLayers.mockClear();
+      expect((await send(query, 'GET')).status).toBe(200);
+      expect(db.listMapLayers.mock.calls[0]?.[2]).toBe(area);
+    }
+    db.listMapLayers.mockClear();
+    expect((await send('?area=steel', 'GET')).status).toBe(400);
     expect(db.listMapLayers).not.toHaveBeenCalled();
   });
 });
@@ -349,6 +367,24 @@ describe('POST /api/v1/map-layers', () => {
       wmsLayers: null,
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('a layer’s area (F-240)', () => {
+  it('adds an oil and gas layer when asked, grain otherwise', async () => {
+    const body = { ...details, source: 'web', url: SERVICE, wmsLayers: null };
+    expect((await send('', 'POST', { ...body, area: 'oil_gas' })).status).toBe(201);
+    expect(db.createMapLayer.mock.calls[0]?.[2]).toMatchObject({ area: 'oil_gas' });
+    expect((await send('', 'POST', { ...body, area: 'steel' })).status).toBe(422);
+  });
+
+  it('moves a layer when an edit names the area, and leaves it when the edit does not', async () => {
+    db.getMapLayerSource.mockResolvedValue(source);
+    const edit = { ...details, version: 'v1', wmsLayers: null };
+    expect((await send(`/${LAYER}`, 'PATCH', { ...edit, area: 'oil_gas' })).status).toBe(200);
+    expect(db.updateMapLayer.mock.calls[0]?.[3]).toMatchObject({ area: 'oil_gas' });
+    expect((await send(`/${LAYER}`, 'PATCH', edit)).status).toBe(200);
+    expect(db.updateMapLayer.mock.calls[1]?.[3]?.area).toBeUndefined();
   });
 });
 

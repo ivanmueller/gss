@@ -1,4 +1,10 @@
-import type { LayerLegend, MapLayerList, MapLayerView } from '@grain/domain';
+import {
+  MAP_LAYER_AREA_LABELS,
+  type LayerLegend,
+  type MapLayerArea,
+  type MapLayerList,
+  type MapLayerView,
+} from '@grain/domain';
 import { ChevronDown, ChevronRight, Layers, Search, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 
@@ -33,6 +39,8 @@ const LEGEND_VALUES = 8;
 export interface MapLayersState {
   /** The person's sign-in, for a picture layer's legend (F-141). */
   token: string;
+  /** The side of the platform whose layers these are (F-240). */
+  area: MapLayerArea;
   layers: MapLayerView[];
   chosen: ReadonlySet<string>;
   toggle: (id: string) => void;
@@ -53,18 +61,37 @@ export interface MapLayersState {
   error: string | null;
 }
 
-/** The organization's map layers, the ones this person has on, and their features in view. */
+/**
+ * The organization's map layers of one area (F-240: grain maps grain, the oil and gas map oil
+ * and gas), the ones this person has on, and their features in view. The list is asked for again
+ * whenever the window comes back into view, so a layer an admin moved or removed meanwhile (in
+ * another tab, or on the other address) leaves this map (Codex's design review of F-240).
+ */
 export function useMapLayers(
   session: { token: string; organization: { id: string } } | null,
+  area: MapLayerArea = 'grain',
 ): MapLayersState {
   const token = session?.token ?? '';
-  const [list] = useApiResource<MapLayerList>(
-    session ? `/map-layers?organization_id=${session.organization.id}` : null,
+  const [list, reload] = useApiResource<MapLayerList>(
+    session ? `/map-layers?organization_id=${session.organization.id}&area=${area}` : null,
     token,
+    { keepPrevious: true },
   );
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reload();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [reload]);
   const layers = useMemo(
-    () => (list.status === 'ok' && Array.isArray(list.data.layers) ? list.data.layers : []),
-    [list],
+    () =>
+      list.status === 'ok' && Array.isArray(list.data.layers)
+        ? list.data.layers.filter((layer) => layer.area === area)
+        : [],
+    [list, area],
   );
   const [chosen, toggle, setMany] = useLayerChoice(token);
   const on = useMemo(() => layers.filter((layer) => chosen.has(layer.id)), [layers, chosen]);
@@ -75,6 +102,7 @@ export function useMapLayers(
   const [panelOpen, setPanelOpen] = useState(false);
   return {
     token,
+    area,
     layers,
     chosen,
     toggle,
@@ -450,7 +478,10 @@ export function MapLayersPanel({
           <p className="text-danger">Could not load: {state.error}</p>
         ) : state.layers.length === 0 ? (
           <p className="text-muted-foreground">
-            No map layers yet. Admins add them on Team → Map layers.
+            {state.area === 'grain'
+              ? 'No map layers yet.'
+              : `No ${MAP_LAYER_AREA_LABELS[state.area].toLowerCase()} map layers yet.`}{' '}
+            Admins add them on Team → Map layers.
           </p>
         ) : (
           <ul className="flex flex-col divide-y">

@@ -23,6 +23,8 @@ import {
   type LayerInspection,
   type LayerLegend,
   type MapLayerList,
+  MAP_LAYER_LIST_AREAS,
+  type MapLayerListArea,
   type Tile,
   type ValueCount,
 } from '@grain/domain';
@@ -889,10 +891,16 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
 
   routes.get('/', (c) => {
     c.header('Cache-Control', 'no-store');
+    // One area's layers, or every layer (Team); grain without ?area= (F-240).
+    const asked = c.req.query('area') ?? 'grain';
+    const area = (MAP_LAYER_LIST_AREAS as readonly string[]).includes(asked)
+      ? (asked as MapLayerListArea)
+      : null;
+    if (area === null) return apiError(c, 400, 'VALIDATION_FAILED', 'No such map area.');
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
-      const layers = await db.listMapLayers(ctx, org);
+      const layers = await db.listMapLayers(ctx, org, area);
       if (layers === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       return c.json({ layers } satisfies MapLayerList);
     });
@@ -1026,6 +1034,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       othersShown: input.othersShown,
       map: input.map,
       mapVisible: input.mapVisible,
+      area: input.area,
     };
     if (
       details.minZoom !== null &&
