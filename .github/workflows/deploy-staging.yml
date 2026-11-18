@@ -153,3 +153,16 @@ jobs:
             echo "$path (no sign-in) -> $status"
             test "$status" = 401
           done
+
+          # The oil and gas database's readiness (F-247-1-D1-03): the route must exist and answer
+          # either "ok" (reachable and migrated) or, until the Worker has its PETROLEUM binding,
+          # "not set up". A missing route (401), an unreachable or unmigrated database (503
+          # DATABASE_UNAVAILABLE) or anything else fails the deploy's check.
+          ready=$(curl --silent --show-error --write-out '\n%{http_code}' "$URL/api/v1/petroleum/ready")
+          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ }"
+          case "$ready" in
+            *'"status":"ok"'*$'\n'200) ;;
+            *'"code":"PETROLEUM_NOT_SET_UP"'*$'\n'503)
+              echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
+            *) echo "::error::/api/v1/petroleum/ready did not answer as expected."; exit 1 ;;
+          esac
