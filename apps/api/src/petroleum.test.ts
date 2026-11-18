@@ -136,53 +136,54 @@ describe('GET /api/v1/petroleum/ready', () => {
     expect(petroleum.schemaVersion).toHaveBeenCalledTimes(2);
   });
 
-  // F-247-1-R8-02: a failed or cut-off check is never handed to later requests; the check is kept
-  // running by the request that started it, and gives up at its deadline.
-  it('reuses only an "ok" answer, keeps the check running, and gives up at its deadline', async () => {
+  // F-247-1-R8-02, R9-01: the check is kept running by the request that started it; a failure is
+  // reused for the window too (no retry storm in an outage); a slow check is never doubled, even
+  // after the window; each request gives up at its deadline.
+  it('cools down after a failure, runs one check at a time, and gives up at its deadline', async () => {
     const cachingApp = createApp(openDatabase, {
       petroleum: openPetroleum,
       petroleumReadyDeadlineMs: 50,
     });
-    vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const waitUntil = vi.fn();
     const executionCtx = { waitUntil, passThroughOnException: vi.fn(), props: {} };
+    const ready = () =>
+      cachingApp.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM, executionCtx);
 
+    // A fast failure: answered, and reused for the window without new attempts.
     petroleum.schemaVersion.mockRejectedValueOnce(new Error('down'));
-    const failed = await cachingApp.request(
-      '/api/v1/petroleum/ready',
-      {},
-      WITH_PETROLEUM,
-      executionCtx,
-    );
-    expect(failed.status).toBe(503);
+    expect((await ready()).status).toBe(503);
     expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
-    await Promise.resolve();
+    for (let i = 0; i < 5; i += 1) expect((await ready()).status).toBe(503);
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(1);
 
-    const retried = await cachingApp.request(
-      '/api/v1/petroleum/ready',
-      {},
-      WITH_PETROLEUM,
-      executionCtx,
-    );
-    expect(retried.status).toBe(200);
+    // After the window, one new check.
+    now.mockReturnValue(2_000_000 + 15_000);
+    expect((await ready()).status).toBe(200);
     expect(petroleum.schemaVersion).toHaveBeenCalledTimes(2);
 
-    vi.spyOn(Date, 'now').mockReturnValue(2_000_000 + 15_000);
-    petroleum.schemaVersion.mockReturnValueOnce(new Promise<number>(() => undefined));
-    const stalled = await cachingApp.request(
-      '/api/v1/petroleum/ready',
-      {},
-      WITH_PETROLEUM,
-      executionCtx,
+    // A stalled check: each request gives up at its deadline, and no second check starts while
+    // it runs, even after the window.
+    let finish: (version: number) => void = () => undefined;
+    petroleum.schemaVersion.mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve;
+      }),
     );
+    now.mockReturnValue(2_000_000 + 30_000);
+    const stalled = await ready();
     expect(stalled.status).toBe(503);
     expect(await stalled.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
-    await Promise.resolve();
-    expect(
-      (await cachingApp.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM, executionCtx))
-        .status,
-    ).toBe(200);
+    now.mockReturnValue(2_000_000 + 60_000);
+    expect((await ready()).status).toBe(503);
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(3);
+
+    // When it finishes, its answer is used.
+    finish(PETROLEUM_SCHEMA_VERSION);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await ready()).status).toBe(200);
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(3);
   });
 
   it('accepts a database ahead of the code (a newer migration applied first)', async () => {
