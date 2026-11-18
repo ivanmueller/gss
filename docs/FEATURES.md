@@ -286,8 +286,7 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 
 | ID | What to check | Pull requests |
 |---|---|---|
-
-None waiting (2026-11-18).
+| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch and Layers are top left. | ivanmueller/gss#260 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
