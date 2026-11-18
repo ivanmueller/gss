@@ -47,8 +47,19 @@ describe('matchRoute', () => {
     });
   });
 
-  it('sends the old map addresses to the counterparties page', () => {
-    expect(matchRoute('/map')).toEqual({ page: 'redirect', to: '/counterparties?view=map' });
+  it('opens the full-page map at /map, and at the home page of a map. address (F-238)', () => {
+    expect(matchRoute('/map')).toEqual({ page: 'map' });
+    expect(matchRoute('/map/')).toEqual({ page: 'map' });
+    expect(matchRoute('/', 'map.example.com')).toEqual({ page: 'map' });
+    expect(matchRoute('/', 'app.example.com')).toEqual({ page: 'workspace' });
+    expect(matchRoute('/', 'localhost')).toEqual({ page: 'workspace' });
+    // Other pages open as usual at a map. address (a company's name in a pin's box).
+    expect(matchRoute('/counterparties', 'map.example.com')).toEqual({ page: 'counterparties' });
+    // Only the start of the host counts.
+    expect(matchRoute('/', 'roadmap.example.com')).toEqual({ page: 'workspace' });
+  });
+
+  it('sends the old map coordinates address to the counterparties page', () => {
     expect(matchRoute('/map/coordinates/')).toEqual({ page: 'redirect', to: '/counterparties' });
   });
 

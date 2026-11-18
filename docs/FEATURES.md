@@ -193,6 +193,19 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 **Owner check on staging (once merged):** on the Workspace and Counterparties maps, zoomed all the way out and in: round badges with white edges and symbols, never black bubbles or numbers; crowded places overlap as on Google Maps; a click on any pin still opens its box.
 
+#### 1e. F-238 — The map on its own page, at map.torvenco.com
+
+**Status:** In progress (`feat/f-238-map-page`). Normal risk (screens only: no database, money or sign-in change). **Asked:** 2026-11-18: "build a mapping tool or part of the platform on its own page … map.torvenco.com"; the owner will describe what the page should hold later; to start, a full-page map shown at that address.
+
+**Plan (an agent, 2026-11-18):**
+- The same app and Worker, no new service (as `app.torvenco.com`, F-153): opened at an address starting with `map.`, the app shows only the full-page map, without the menu; the same page at `/map` on any address (which until now led to Counterparties → map view), so it can be tried on the workers.dev address.
+- Signed in as for the rest of the app (the map shows GSS's companies). A new address is a new site for the browser: the first visit asks for the email, password and authenticator code once.
+- To start: every located place of a company that is not archived, with the pins, legend, details box, map styles and map layers of the Counterparties map, filling the window.
+
+**Owner steps once merged:** (1) Cloudflare → Workers & Pages → `grain-trading-api-staging` → Settings → Domains & Routes → Add → Custom domain → `map.torvenco.com`; (2) Mapbox → Tokens → the app's public token → URL restrictions: add `https://map.torvenco.com`.
+
+**Open (for the owner's detailed description):** what the page adds beyond the map (tools, filters, lists, drawing), who may open it, and whether `/map` should keep leading to Counterparties instead.
+
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
 Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).

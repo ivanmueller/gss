@@ -118,15 +118,21 @@ export type Route =
   | { page: 'freight-rate'; id: string }
   | { page: 'follow-ups' }
   | { page: 'grains' }
+  /** The map filling the window, without the menu (F-238). */
+  | { page: 'map' }
   /** An old address that now lives elsewhere. */
   | { page: 'redirect'; to: string }
   | { page: 'not-found' };
 
-export function matchRoute(path: string): Route {
+/**
+ * The page for an address. `host` is the site's host name: at an address starting with `map.`
+ * (map.torvenco.com, F-238) the home page is the full-page map.
+ */
+export function matchRoute(path: string, host = ''): Route {
   const trimmed = path.replace(/\/+$/, '') || '/';
-  if (trimmed === '/') return { page: 'workspace' };
-  // The map moved into Counterparties (owner's request, 2026-10-28).
-  if (trimmed === '/map') return { page: 'redirect', to: '/counterparties?view=map' };
+  if (trimmed === '/') return host.startsWith('map.') ? { page: 'map' } : { page: 'workspace' };
+  // The map on its own page (owner's request, 2026-11-18; until then it led to Counterparties).
+  if (trimmed === '/map') return { page: 'map' };
   // Coordinates are found when counterparties are added, and on their pages (2026-10-30).
   if (trimmed === '/map/coordinates' || trimmed === '/counterparties/coordinates')
     return { page: 'redirect', to: '/counterparties' };

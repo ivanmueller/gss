@@ -4,6 +4,7 @@ import type { Account } from './auth/AuthGate';
 import { ChoosePassword, YourName } from './auth/FirstSignIn';
 import { notePasswordChanged } from './auth/passwordNotice';
 import { AppShell, type NavSection } from './components/AppShell';
+import { CounterpartyMap } from './components/CounterpartyMap';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { IncomingCalls } from './components/IncomingCalls';
@@ -55,6 +56,7 @@ function section(route: Route): NavSection | null {
       return 'freight';
     case 'grains':
       return 'grains';
+    case 'map':
     case 'redirect':
     case 'not-found':
       return null;
@@ -65,7 +67,7 @@ export function App({ account }: { account?: Account }) {
   const health = useApiHealth();
   const [meVersion, setMeVersion] = useState(0);
   const me = useMe(account?.accessToken ?? null, meVersion);
-  const route = matchRoute(usePath());
+  const route = matchRoute(usePath(), window.location.hostname);
   const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
   const redirectTo = route.page === 'redirect' ? route.to : null;
   const userId = me.status === 'ok' ? (me.id ?? undefined) : undefined;
@@ -143,6 +145,10 @@ export function App({ account }: { account?: Account }) {
         </Suspense>
       );
       break;
+    case 'map':
+      // Shown on its own, without the menu (below).
+      page = null;
+      break;
     case 'redirect':
       page = null;
       break;
@@ -190,6 +196,23 @@ export function App({ account }: { account?: Account }) {
     );
   }
 
+  const incomingCalls = account && organization && canLogContacts(organization.role) && (
+    // A callback ringing the person's cell shows on every page (F-132).
+    <IncomingCalls token={account.accessToken} organizationId={organization.id} />
+  );
+
+  // The full-page map (F-238): the window is the map, with no menu around it.
+  if (route.page === 'map') {
+    return (
+      <main className="h-dvh w-full bg-background">
+        {directory((session) => (
+          <CounterpartyMap session={session} fullPage />
+        ))}
+        {incomingCalls}
+      </main>
+    );
+  }
+
   return (
     <AppShell
       current={section(route)}
@@ -205,10 +228,7 @@ export function App({ account }: { account?: Account }) {
       })}
     >
       {page}
-      {account && organization && canLogContacts(organization.role) && (
-        // A callback ringing the person's cell shows on every page (F-132).
-        <IncomingCalls token={account.accessToken} organizationId={organization.id} />
-      )}
+      {incomingCalls}
     </AppShell>
   );
 }
