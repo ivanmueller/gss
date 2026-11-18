@@ -57,6 +57,9 @@ jobs:
       url: ${{ steps.deploy.outputs.url }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commit before this push, to see whether it changes the PETROLEUM binding.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -95,8 +98,11 @@ jobs:
         if: needs.preflight.outputs.petroleum == 'true'
         env:
           PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        # At most 5 minutes (a lock held on that database must not run the job into its
+        # 15-minute limit before grain's Worker deploys, F-247-1-R4-02); running out counts as a
+        # failure below.
         run: |
-          if supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes; then
+          if timeout 300 supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes; then
             echo "applied=true" >> "$GITHUB_OUTPUT"
           elif [ "$GITHUB_EVENT_NAME" = push ]; then
             echo "::warning::The oil and gas database's migrations could not be applied (paused or unreachable?); grain deploys, the next deploy tries again."
@@ -118,6 +124,8 @@ jobs:
       - name: Smoke test
         env:
           URL: ${{ steps.deploy.outputs.url }}
+          # The commit before this push (empty on a run started by hand).
+          BEFORE: ${{ github.event.before }}
         run: |
           if [ -z "$URL" ]; then
             echo "::error::No workers.dev URL found in the wrangler output."
@@ -146,13 +154,26 @@ jobs:
           # missing one answers 401) and answer:
           # - "ok": reachable, migrated to the schema version the Worker needs;
           # - "not set up": only while apps/api/wrangler.jsonc gives the Worker no PETROLEUM binding;
-          # - unavailable or not ready: a failure on a run started by hand, a warning on a release
-          #   from a push, so a paused oil and gas database never holds grain up.
+          # - unavailable or not ready: a failure on a run started by hand and on the release whose
+          #   push changes the PETROLEUM binding (F-247-1-R4-01); a warning on other releases, so a
+          #   paused oil and gas database never holds grain up.
           # After a release that changes the oil and gas side (its migrations or its binding), Claude
-          # runs this workflow by hand to prove the connection (README, "The oil and gas database").
+          # also runs this workflow by hand to prove the connection (README, "The oil and gas
+          # database"): two pushes merged during one deploy can leave the second run's range
+          # without the first push's change.
           if grep -q '"binding": *"PETROLEUM"' apps/api/wrangler.jsonc; then bound=true; else bound=false; fi
+          required=false
+          if [ "$GITHUB_EVENT_NAME" != push ]; then
+            required=true
+          elif [ "$bound" = true ]; then
+            # The PETROLEUM binding changed in this push, or the commit before it is unknown.
+            if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
+              || git diff "$BEFORE" HEAD -- apps/api/wrangler.jsonc | grep -q PETROLEUM; then
+              required=true
+            fi
+          fi
           ready=$(curl --silent --show-error --write-out '\n%{http_code}' "$URL/api/v1/petroleum/ready")
-          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding configured: $bound)"
+          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding configured: $bound, connection required: $required)"
           case "$ready" in
             *'"status":"ok"'*$'\n'200) ;;
             *'"code":"PETROLEUM_NOT_SET_UP"'*$'\n'503)
@@ -161,7 +182,7 @@ jobs:
               fi
               echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
             *'"code":"DATABASE_UNAVAILABLE"'*$'\n'503 | *'"code":"PETROLEUM_NOT_READY"'*$'\n'503)
-              if [ "$GITHUB_EVENT_NAME" != push ]; then
+              if [ "$required" = true ]; then
                 echo "::error::The oil and gas database is unavailable or not migrated."; exit 1
               fi
               echo "::warning::The oil and gas database is unavailable or not migrated (paused?); grain deployed." ;;
