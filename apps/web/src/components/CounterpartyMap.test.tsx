@@ -102,35 +102,12 @@ describe('CounterpartyMap', () => {
     );
   });
 
-  it('fills its container with every place when full page, controls over the map (F-238)', async () => {
-    mockApi({ [WORLD]: answer() });
-    render(<CounterpartyMap session={SESSION} fullPage mapbox={MAPBOX} />);
-    expect(await screen.findByText('Stand-in map: map, light, 2 pins')).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Map legend' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Map style' })).toBeInTheDocument();
-    expect(screen.queryByText(/Not every place is shown/)).not.toBeInTheDocument();
-  });
-
   it('says so when the server sent only part of the places (F-238-R1-01)', async () => {
     mockApi({ [WORLD]: answer({ truncated: true }) });
-    render(<CounterpartyMap session={SESSION} fullPage mapbox={MAPBOX} />);
+    render(<CounterpartyMap session={SESSION} only={BOTH} mapbox={MAPBOX} />);
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Not every place is shown: the map loads at most 2.',
     );
-  });
-
-  it('keeps the full-page controls off a failed request’s message (F-238-R1-02)', async () => {
-    mockApi({
-      [WORLD]: () =>
-        Response.json(
-          { error: { code: 'DATABASE_UNAVAILABLE', message: 'The database is unavailable.' } },
-          { status: 503 },
-        ),
-    });
-    render(<CounterpartyMap session={SESSION} fullPage mapbox={MAPBOX} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('The locations could not be loaded');
-    expect(screen.queryByRole('group', { name: 'Map style' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('list', { name: 'Map legend' })).not.toBeInTheDocument();
   });
 
   it('narrows to the counterparties the filters leave, and refits, without asking again', async () => {

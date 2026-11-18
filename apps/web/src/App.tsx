@@ -4,7 +4,7 @@ import type { Account } from './auth/AuthGate';
 import { ChoosePassword, YourName } from './auth/FirstSignIn';
 import { notePasswordChanged } from './auth/passwordNotice';
 import { AppShell, type NavSection } from './components/AppShell';
-import { CounterpartyMap } from './components/CounterpartyMap';
+import { FullPageMap } from './components/FullPageMap';
 import { Link, matchRoute, redirect, usePath, type Route } from './lib/router';
 import { useApiHealth } from './lib/useApiHealth';
 import { IncomingCalls } from './components/IncomingCalls';
@@ -83,8 +83,11 @@ export function App({ account }: { account?: Account }) {
   }, [redirectTo]);
 
   // Pages with GSS's records need a signed-in, active member.
-  function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
-    if (!account) return <Notice>Sign in to see the counterparties.</Notice>;
+  function directory(
+    render: (session: DirectorySession) => ReactNode,
+    signedOut = 'Sign in to see the counterparties.',
+  ): ReactNode {
+    if (!account) return <Notice>{signedOut}</Notice>;
     if (me.status === 'error')
       return <Notice>The records appear once the server confirms your session.</Notice>;
     if (organization === undefined) return <Notice>Loading…</Notice>;
@@ -201,13 +204,16 @@ export function App({ account }: { account?: Account }) {
     <IncomingCalls token={account.accessToken} organizationId={organization.id} />
   );
 
-  // The full-page map (F-238): the window is the map, with no menu around it.
+  // The full-page map (F-238, F-239): the window is the map, with no menu around it.
   if (route.page === 'map') {
     return (
       <main className="h-dvh w-full bg-background">
-        {directory((session) => (
-          <CounterpartyMap session={session} fullPage />
-        ))}
+        {directory(
+          (session) => (
+            <FullPageMap session={session} />
+          ),
+          'Sign in to see the map.',
+        )}
         {incomingCalls}
       </main>
     );
