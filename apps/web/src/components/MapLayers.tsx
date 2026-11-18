@@ -76,7 +76,6 @@ export function useMapLayers(
   const [list, reload] = useApiResource<MapLayerList>(
     session ? `/map-layers?organization_id=${session.organization.id}&area=${area}` : null,
     token,
-    { keepPrevious: true },
   );
   useEffect(() => {
     const onVisible = () => {

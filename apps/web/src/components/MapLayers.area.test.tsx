@@ -54,8 +54,14 @@ const grid: MapLayerView = {
   area: 'oil_gas',
 };
 
-function Map({ area }: { area?: MapLayerArea }) {
-  const state = useMapLayers(SESSION, area);
+function Map({
+  area,
+  session = SESSION,
+}: {
+  area?: MapLayerArea;
+  session?: { token: string; organization: { id: string } };
+}) {
+  const state = useMapLayers(session, area);
   return (
     <>
       <MapLayersButton state={state} />
@@ -129,6 +135,21 @@ describe('a map’s layers', () => {
       expect(screen.queryByRole('switch', { name: 'Synthetic rail lines' })).toBeNull();
     });
   });
+
+  it('never shows another organization’s layers while the new one’s load (Codex’s final review of F-240)', async () => {
+    const other = '00000000-0000-4000-8000-0000000000bb';
+    mockApi({
+      [GRAIN]: () => Response.json({ layers: [rail] }),
+      [`GET /map-layers?organization_id=${other}&area=grain`]: () =>
+        new Promise<Response>(() => undefined),
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(<Map />);
+    await user.click(await screen.findByRole('button', { name: 'Layers' }));
+    expect(await screen.findByRole('switch', { name: 'Synthetic rail lines' })).toBeVisible();
+    rerender(<Map session={{ ...SESSION, organization: { id: other } }} />);
+    expect(screen.queryByRole('switch', { name: 'Synthetic rail lines' })).toBeNull();
+  });
 });
 
 describe('Team → Map layers', () => {
@@ -167,6 +188,54 @@ describe('Team → Map layers', () => {
       expect(calls.some((c) => c.path === `/map-layers/${fields.id}/remove`)).toBe(true);
     });
     expect(calls.some((c) => c.path === `/map-layers/${wells.id}/remove`)).toBe(false);
+  });
+
+  it('removes what the confirmation showed, even if the list changes while it is open (Codex’s final review of F-240)', async () => {
+    const map = { itemId: 'b'.repeat(32), title: 'Synthetic pipeline map' };
+    const a = { ...rail, id: '00000000-0000-4000-8000-0000000a4c01', name: 'Pipes A', map };
+    const b = { ...rail, id: '00000000-0000-4000-8000-0000000a4c02', name: 'Pipes B', map };
+    const c = { ...rail, id: '00000000-0000-4000-8000-0000000a4c03', name: 'Pipes C', map };
+    let layers: MapLayerView[] = [a, b, { ...c, area: 'oil_gas' }];
+    const calls = mockApi({
+      [ALL]: () => Response.json({ layers }),
+      [`POST /map-layers/${a.id}/remove`]: () => Response.json({ id: a.id }),
+      [`POST /map-layers/${b.id}/remove`]: () =>
+        Response.json(
+          { error: { code: 'STALE', message: 'This layer was changed meanwhile.' } },
+          { status: 409 },
+        ),
+      [`POST /map-layers/${c.id}/remove`]: () => Response.json({ id: c.id }),
+    });
+    const jwt = (n: number) =>
+      `x.${btoa(JSON.stringify({ sub: 'synthetic-admin', n })).replace(/=+$/, '')}.y`;
+    const user = userEvent.setup();
+    const { rerender } = render(<MapLayerSettings session={{ ...SESSION, token: jwt(1) }} />);
+    const grainGroup = (
+      await screen.findAllByRole('button', { name: 'Show the layers of Synthetic pipeline map' })
+    )
+      .map((button) => button.closest('li'))
+      .find((li) => li !== null && within(li).queryByText('Oil and gas') === null);
+    if (!grainGroup) throw new Error('no grain group');
+    await user.click(within(grainGroup).getByRole('button', { name: 'Remove map' }));
+    // Meanwhile another admin moves B to oil and gas and C to grain: still two grain layers.
+    layers = [a, { ...c, version: 'v2' }, { ...b, area: 'oil_gas', version: 'v2' }];
+    rerender(<MapLayerSettings session={{ ...SESSION, token: jwt(2) }} />);
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path.endsWith('&area=all'))).toHaveLength(2);
+    });
+    await user.click(within(grainGroup).getByRole('button', { name: /Remove all 2 layers/ }));
+    await waitFor(() => {
+      expect(calls.some((call) => call.path === `/map-layers/${b.id}/remove`)).toBe(true);
+    });
+    // A and B as shown, B at the version shown (refused as changed); never C.
+    await waitFor(() => {
+      expect(calls.some((call) => call.path === `/map-layers/${a.id}/remove`)).toBe(true);
+    });
+    const removals = calls.filter((call) => call.path.endsWith('/remove'));
+    expect(removals.map((call) => call.path).sort()).toEqual(
+      [`/map-layers/${a.id}/remove`, `/map-layers/${b.id}/remove`].sort(),
+    );
+    expect(removals.find((call) => call.path.includes(b.id))?.body).toEqual({ version: 'v1' });
   });
 
   it('saves an open edit against the version it was opened on (Codex’s final review of F-240)', async () => {

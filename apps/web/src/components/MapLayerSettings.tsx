@@ -1212,7 +1212,12 @@ function MapLayerGroup({
 }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const [confirming, setConfirming] = useState<'all' | 'selected' | null>(null);
+  // What a confirmation shows is what it removes, at the versions shown: a list refreshed while
+  // it is open never changes its targets (Codex's final review of F-240).
+  const [confirming, setConfirming] = useState<{
+    which: 'all' | 'selected';
+    targets: MapLayerView[];
+  } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const first = layers[0];
@@ -1267,17 +1272,17 @@ function MapLayerGroup({
             <Badge className="shrink-0 font-normal">{MAP_LAYER_AREA_LABELS[area]}</Badge>
           )}
         </span>
-        {confirming === 'all' ? (
+        {confirming?.which === 'all' ? (
           <span className="flex gap-2">
             <Button
               size="sm"
               variant="danger"
               disabled={busy !== null}
               onClick={() => {
-                remove(layers);
+                remove(confirming.targets);
               }}
             >
-              Remove all {count(layers.length)} for everyone
+              Remove all {count(confirming.targets.length)} for everyone
             </Button>
             <Button
               size="sm"
@@ -1296,7 +1301,7 @@ function MapLayerGroup({
             variant="outline"
             disabled={busy !== null}
             onClick={() => {
-              setConfirming('all');
+              setConfirming({ which: 'all', targets: layers });
             }}
           >
             Remove map
@@ -1357,17 +1362,17 @@ function MapLayerGroup({
               Select none
             </Button>
             {chosen.length > 0 &&
-              (confirming === 'selected' ? (
+              (confirming?.which === 'selected' ? (
                 <span className="ml-auto flex gap-2">
                   <Button
                     size="sm"
                     variant="danger"
                     disabled={busy !== null}
                     onClick={() => {
-                      remove(chosen);
+                      remove(confirming.targets);
                     }}
                   >
-                    Remove {count(chosen.length)} for everyone
+                    Remove {count(confirming.targets.length)} for everyone
                   </Button>
                   <Button
                     size="sm"
@@ -1387,7 +1392,7 @@ function MapLayerGroup({
                   className="ml-auto"
                   disabled={busy !== null}
                   onClick={() => {
-                    setConfirming('selected');
+                    setConfirming({ which: 'selected', targets: chosen });
                   }}
                 >
                   Remove selected
