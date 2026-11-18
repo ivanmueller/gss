@@ -379,6 +379,54 @@ describe('review evidence check', () => {
     );
   });
 
+  // F-247-1-D1-05: the oil and gas database (petroleum/supabase) has the same checks, each
+  // database's new migrations needing tests in its own folder.
+  test('petroleum migrations are append-only and need pgTAP tests in their own folder', () => {
+    git('switch', '-q', '-c', 'petrobase', main);
+    const withMigration = commit(
+      { 'petroleum/supabase/migrations/0_old.sql': 'select 0;\n' },
+      'old petroleum migration',
+    );
+    git('switch', '-q', '-c', 'petroedit', withMigration);
+    const edited = commit({ 'petroleum/supabase/migrations/0_old.sql': 'select 2;\n' }, 'edit');
+    const editBlockers = evaluate({ base: withMigration, head: edited }).blockers;
+    assert.ok(
+      editBlockers.some((b) =>
+        /Migration petroleum\/supabase\/migrations\/0_old\.sql is changed/.test(b),
+      ),
+      editBlockers.join('\n'),
+    );
+
+    git('switch', '-q', '-c', 'petrowrongtests', withMigration);
+    const grainTestOnly = commit(
+      {
+        'petroleum/supabase/migrations/1_new.sql': 'select 1;\n',
+        'supabase/tests/database/x.test.sql': 'select 1;\n',
+      },
+      'petroleum migration with a grain test',
+    );
+    const wrongBlockers = evaluate({ base: withMigration, head: grainTestOnly }).blockers;
+    assert.ok(
+      wrongBlockers.some((b) =>
+        /new migration without pgTAP tests: add or change a test in petroleum\/supabase\/tests\/database/.test(
+          b,
+        ),
+      ),
+      wrongBlockers.join('\n'),
+    );
+
+    git('switch', '-q', '-c', 'petrotested', withMigration);
+    const tested = commit(
+      {
+        'petroleum/supabase/migrations/1_new.sql': 'select 1;\n',
+        'petroleum/supabase/tests/database/x.test.sql': 'select 1;\n',
+      },
+      'petroleum migration with its test',
+    );
+    const testedBlockers = evaluate({ base: withMigration, head: tested }).blockers;
+    assert.ok(!testedBlockers.some((b) => /migration/i.test(b)), testedBlockers.join('\n'));
+  });
+
   // F-150-R2-02: the final review must approve, even when it raised only P3 findings.
   test('a high-risk final review that needs attention does not pass, even with only P3', () => {
     branch('highfinalp3');
@@ -809,6 +857,8 @@ describe('register rules', () => {
   });
   test('risk tiers follow the paths', () => {
     assert.equal(fileTier('supabase/migrations/2026_x.sql'), 'high');
+    assert.equal(fileTier('petroleum/supabase/migrations/2026_x.sql'), 'high');
+    assert.equal(fileTier('petroleum/supabase/config.toml'), 'high');
     assert.equal(fileTier('apps/api/src/telnyx.ts'), 'high');
     assert.equal(fileTier('packages/domain/src/money.ts'), 'high');
     assert.equal(fileTier('docs/DECISIONS.md'), 'normal');

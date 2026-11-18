@@ -73,6 +73,9 @@ export const REGISTER_EXCLUDED = ['docs/reviews/README.md', 'docs/reviews/ACCEPT
 export const isRegisterPath = (path) =>
   /^docs\/reviews\/[A-Za-z0-9._-]+\.md$/.test(path) && !REGISTER_EXCLUDED.includes(path);
 
+/** The Supabase projects' folders: grain's (gss-staging) and oil and gas (petroleum-staging, F-247). */
+export const DATABASE_ROOTS = ['supabase', 'petroleum/supabase'];
+
 // Governance (the owner's decision, 2026-11-09): the rules and machinery that decide merging, and the
 // documents that set the project's rules. Held for the owner's approval of the exact commit, so the
 // process can never loosen its own safeguards unattended; also meets every high-risk requirement.
@@ -92,6 +95,8 @@ const GOVERNANCE = [
 // review, a final full review that approves, append-only migrations with database tests.
 const HIGH = [
   /^supabase\//,
+  // The oil and gas database (petroleum-staging, F-247).
+  /^petroleum\/supabase\//,
   /^packages\/trading-engine\//,
   /^packages\/database\//,
   // The whole API Worker, tests apart: it is where organization isolation, permissions and every

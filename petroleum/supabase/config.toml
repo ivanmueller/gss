@@ -1,0 +1,6 @@
+# The oil and gas database, Supabase project petroleum-staging (F-247, docs/DECISIONS.md
+# 2026-11-18). Kept apart from grain's project (../../supabase): the Supabase CLI is always run
+# here with `--workdir petroleum` and `--db-url`, never linked, never `supabase start`.
+# It has no users and no sign-in: people sign in through grain's project, and the API Worker
+# checks their membership there before it queries this database.
+project_id = "petroleum"

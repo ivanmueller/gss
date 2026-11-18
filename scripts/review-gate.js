@@ -21,6 +21,7 @@ import {
   changesRules,
   fileTier,
   codeReviewChain,
+  DATABASE_ROOTS,
   documentsOnly,
   isRegisterPath,
   OWNER_APPROVAL_LABEL,
@@ -66,46 +67,43 @@ export function evaluate({ base, head, labels = [] }) {
   if (documentsOnly(files))
     return { ...result, evidence: 'not-needed', note: 'Documents only: no Codex review needed.' };
 
-  // Automated database checks (AGENTS.md, "Database rules"): a migration is never edited or removed
-  // once it is on the base branch, and a new migration comes with pgTAP tests.
+  // Automated database checks (AGENTS.md, "Database rules"), for each database (grain's and the oil
+  // and gas one, F-247-1-D1-05): a migration is never edited or removed once it is on the base
+  // branch, and a new migration comes with pgTAP tests in the same database's tests.
   // With -z, git writes status and path as separate NUL-terminated fields (F-150-R4-01).
-  const fields = git([
-    'diff',
-    '--name-status',
-    '-z',
-    '--no-renames',
-    mergeBase,
-    head,
-    '--',
-    'supabase/migrations',
-  ]).split('\0');
-  const migrations = [];
-  for (let i = 0; i + 1 < fields.length; i += 2)
-    if (fields[i]) migrations.push([fields[i], fields[i + 1]]);
-  for (const [status, path] of migrations)
-    if (status !== 'A')
-      result.blockers.push(
-        `Migration ${path} is ${status === 'D' ? 'removed' : 'changed'}: migrations are only ever added (a new file).`,
-      );
-  // Only an added or changed pgTAP test (*.test.sql) counts; a deleted test or another file does
-  // not (F-150-R5-02).
-  const testFields = git([
-    'diff',
-    '--name-status',
-    '-z',
-    '--no-renames',
-    mergeBase,
-    head,
-    '--',
-    'supabase/tests/database',
-  ]).split('\0');
-  let testAdded = false;
-  for (let i = 0; i + 1 < testFields.length; i += 2)
-    if (/^[AM]$/.test(testFields[i]) && /\.test\.sql$/.test(testFields[i + 1])) testAdded = true;
-  if (migrations.some(([status]) => status === 'A') && !testAdded)
-    result.blockers.push(
-      'A new migration without pgTAP tests: add or change a test in supabase/tests/database/.',
+  const changed = (path) => {
+    const fields = git([
+      'diff',
+      '--name-status',
+      '-z',
+      '--no-renames',
+      mergeBase,
+      head,
+      '--',
+      path,
+    ]).split('\0');
+    const pairs = [];
+    for (let i = 0; i + 1 < fields.length; i += 2)
+      if (fields[i]) pairs.push([fields[i], fields[i + 1]]);
+    return pairs;
+  };
+  for (const root of DATABASE_ROOTS) {
+    const migrations = changed(`${root}/migrations`);
+    for (const [status, path] of migrations)
+      if (status !== 'A')
+        result.blockers.push(
+          `Migration ${path} is ${status === 'D' ? 'removed' : 'changed'}: migrations are only ever added (a new file).`,
+        );
+    // Only an added or changed pgTAP test (*.test.sql) counts; a deleted test or another file does
+    // not (F-150-R5-02).
+    const testAdded = changed(`${root}/tests/database`).some(
+      ([status, path]) => /^[AM]$/.test(status) && /\.test\.sql$/.test(path),
     );
+    if (migrations.some(([status]) => status === 'A') && !testAdded)
+      result.blockers.push(
+        `A new migration without pgTAP tests: add or change a test in ${root}/tests/database/.`,
+      );
+  }
 
   const registers = files.filter(isRegisterPath);
   if (registers.length !== 1) {

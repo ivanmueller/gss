@@ -244,6 +244,15 @@ Supabase Postgres. Migrations live in `supabase/migrations/` and pgTAP tests in 
 
 Application tables live in the private `app` schema, which the Supabase Data API does not expose; the API Worker reaches them as the least-privilege `app_api` role (`docs/DECISIONS.md`). On staging the Worker connects through the Hyperdrive binding ("Staging database connection" above). `DATABASE_URL` is only a fallback when there is no binding (local runs, CI), set in `apps/api/.dev.vars.staging`; the old Cloudflare `DATABASE_URL` secret is no longer used. `pnpm --filter @grain/api test:db` runs the API's database code as `app_api` against a database with the migrations applied (`API_TEST_ADMIN_DATABASE_URL`, `API_TEST_DATABASE_URL`).
 
+### The oil and gas database
+
+The oil and gas side (`map.torvenco.com`, F-247) keeps its data in a second Supabase project, `petroleum-staging` (ref `ubgyatbzjctsgzcsvwgc`), with its own migrations and pgTAP tests in `petroleum/supabase/`. It has no users: people sign in through `gss-staging` as everywhere, and the API Worker checks their membership there before it queries this database as the least-privilege `petro_api` role (`docs/DECISIONS.md`, 2026-11-18). The Supabase CLI is always run on it with `--workdir petroleum` and `--db-url`.
+
+- **Pull requests:** CI creates a second database, `petroleum`, in the same local Supabase, applies its migrations and runs its pgTAP tests.
+- **Staging:** Deploy staging applies its migrations (`supabase --workdir petroleum db push`) only when a release brings new ones since the last successful deploy, or on a run started by hand; otherwise a paused or unreachable oil and gas database never holds up a grain release. It skips with a notice until the `PETROLEUM_STAGING_DB_URL` repository secret exists; after adding that secret, run **Deploy staging** once by hand.
+- **Locally:** with the local Supabase running, `docker exec supabase_db_gss psql -U postgres -c "create database petroleum"`, then `supabase --workdir petroleum db push --db-url postgresql://postgres:postgres@127.0.0.1:54322/petroleum` and `supabase --workdir petroleum --network-id supabase_network_gss test db --db-url postgresql://postgres:postgres@127.0.0.1:54322/petroleum`.
+- **Hyperdrive:** the **Set up Hyperdrive (staging)** workflow takes the database to set up: `staging` (grain's, `SUPABASE_HYPERDRIVE_URL`) or `petroleum` (`PETROLEUM_HYPERDRIVE_URL`, login `petro_api.<ref>`, configuration `gss-petroleum-staging`).
+
 ## Layout
 
 ```
@@ -252,6 +261,7 @@ apps/web/            React + Vite + Tailwind web app (workspace on live bids and
 tests/e2e/           Playwright browser tests against the staging Worker config
 packages/domain/     shared code for web and API: validation (counterparty import rows, bid and offer terms, members, PNG check, regions), quote status, and exact money arithmetic (spreads, USD→CAD, rounding)
 supabase/            database migrations, pgTAP tests and local CLI config
+petroleum/supabase/  the oil and gas database (petroleum-staging): migrations, pgTAP tests, CLI config
 docs/                specification sections, AI coding system, decisions, handoff, changelog
 .github/             CI workflow, Dependabot, issue and PR templates
 ```

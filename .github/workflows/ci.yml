@@ -92,6 +92,15 @@ jobs:
       # Runs before app_api has a login: the suite checks migrations never grant one.
       - name: Database tests
         run: supabase test db
+      # The oil and gas database (petroleum-staging, F-247): its own migrations and pgTAP tests, in a
+      # second database of the same local Postgres (roles are shared, as on Supabase). The tests run
+      # on grain's Docker network, the one the local Supabase started.
+      - name: Oil and gas database tests
+        run: |
+          psql "$API_TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "create database petroleum"
+          url="${API_TEST_ADMIN_DATABASE_URL%/*}/petroleum"
+          supabase --workdir petroleum db push --db-url "$url" --yes
+          supabase --workdir petroleum --network-id supabase_network_gss test db --db-url "$url"
       # The API's database role gets a login for this throwaway database only.
       - name: Enable the app_api login (local database only)
         run: >-

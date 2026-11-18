@@ -3,10 +3,18 @@
 // verified. Run by .github/workflows/hyperdrive-staging.yml; prints no secrets.
 //
 // Env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, SUPABASE_HYPERDRIVE_URL
-// (postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres).
+// (postgresql://<role>.<project-ref>:<password>@<pooler-host>:5432/postgres), and
+// HYPERDRIVE_TARGET: "staging" (grain's database, gss-staging, as app_api; the default) or
+// "petroleum" (the oil and gas database, petroleum-staging, as petro_api; F-247).
 import { appendFileSync, readFileSync } from 'node:fs';
 
-const CONFIG_NAME = 'gss-staging';
+const TARGETS = {
+  staging: { config: 'gss-staging', role: 'app_api' },
+  petroleum: { config: 'gss-petroleum-staging', role: 'petro_api' },
+};
+const TARGET = TARGETS[process.env.HYPERDRIVE_TARGET || 'staging'];
+if (!TARGET) throw new Error('HYPERDRIVE_TARGET must be "staging" or "petroleum".');
+const CONFIG_NAME = TARGET.config;
 // Hyperdrive keeps its own pool; a few origin connections are plenty for this app and stay
 // well inside the Supabase free plan's session pool.
 const ORIGIN_CONNECTION_LIMIT = 5;
@@ -60,6 +68,10 @@ function origin() {
   // host and login. Hyperdrive already pools in transaction mode, and stacking a second
   // transaction pooler behind it drops connections, so always use session mode.
   const supabasePooler = url.hostname.endsWith('.pooler.supabase.com');
+  // A secret meant for the other database is refused before anything is changed.
+  const user = decodeURIComponent(url.username);
+  if (user !== TARGET.role && !user.startsWith(`${TARGET.role}.`))
+    throw new Error(`The database login for ${CONFIG_NAME} must be ${TARGET.role}.`);
   return {
     scheme: 'postgres',
     host: url.hostname,
@@ -114,7 +126,7 @@ async function main() {
   }
 
   const summary = [
-    '### Hyperdrive for staging',
+    `### Hyperdrive ${CONFIG_NAME}`,
     '',
     `- Configuration: \`${CONFIG_NAME}\``,
     `- ID: \`${config.id}\``,
