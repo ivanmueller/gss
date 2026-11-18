@@ -258,6 +258,35 @@ describe('Team → Map layers', () => {
     expect(calls.some((call) => call.path.endsWith('/remove'))).toBe(false);
   });
 
+  it('removes a single layer at the version its confirmation was opened on (Codex’s final review of F-240, R11-01)', async () => {
+    let layers = [rail];
+    const calls = mockApi({
+      [ALL]: () => Response.json({ layers }),
+      [`POST /map-layers/${rail.id}/remove`]: () =>
+        Response.json(
+          { error: { code: 'STALE', message: 'This layer was changed meanwhile.' } },
+          { status: 409 },
+        ),
+    });
+    const jwt = (n: number) =>
+      `x.${btoa(JSON.stringify({ sub: 'synthetic-admin', n })).replace(/=+$/, '')}.y`;
+    const user = userEvent.setup();
+    const { rerender } = render(<MapLayerSettings session={{ ...SESSION, token: jwt(1) }} />);
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    // Another admin moves it to oil and gas; a renewed sign-in asks for the list again.
+    layers = [{ ...rail, area: 'oil_gas', version: 'v2' }];
+    rerender(<MapLayerSettings session={{ ...SESSION, token: jwt(2) }} />);
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path.endsWith('&area=all'))).toHaveLength(2);
+    });
+    await user.click(screen.getByRole('button', { name: 'Remove for everyone' }));
+    await waitFor(() => {
+      expect(calls.find((call) => call.path.endsWith('/remove'))?.body).toEqual({
+        version: 'v1',
+      });
+    });
+  });
+
   it('saves an open edit against the version it was opened on (Codex’s final review of F-240)', async () => {
     let layers = [rail];
     const calls = mockApi({

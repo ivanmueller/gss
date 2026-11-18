@@ -999,7 +999,10 @@ function LayerRow({
   /** Its tick box under its map, to remove only some of the map's layers (F-142). */
   selected?: { checked: boolean; onChange: () => void };
 }) {
-  const [confirming, setConfirming] = useState(false);
+  // The version the Remove confirmation was opened on: a list refreshed meanwhile (another admin's
+  // change, a move between areas) makes the removal refused as stale, never applied to the
+  // changed layer (Codex's final review of F-240, R11-01).
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState<string | null>(null);
@@ -1021,7 +1024,7 @@ function LayerRow({
   function remove() {
     setBusy(true);
     setProblem(null);
-    sendJson(`/map-layers/${layer.id}/remove`, session.token, 'POST', { version: layer.version })
+    sendJson(`/map-layers/${layer.id}/remove`, session.token, 'POST', { version: confirming })
       .then(() => {
         forgetApiAnswers('/map-layers');
         onChanged();
@@ -1055,7 +1058,7 @@ function LayerRow({
             <Badge className="font-normal">{MAP_LAYER_AREA_LABELS[layer.area]}</Badge>
           )}
         </span>
-        {confirming ? (
+        {confirming !== null ? (
           <span className="flex gap-2">
             <Button size="sm" variant="danger" disabled={busy} onClick={remove}>
               Remove for everyone
@@ -1065,7 +1068,7 @@ function LayerRow({
               variant="ghost"
               disabled={busy}
               onClick={() => {
-                setConfirming(false);
+                setConfirming(null);
               }}
             >
               Keep
@@ -1095,7 +1098,7 @@ function LayerRow({
               size="sm"
               variant="outline"
               onClick={() => {
-                setConfirming(true);
+                setConfirming(layer.version);
               }}
             >
               Remove
