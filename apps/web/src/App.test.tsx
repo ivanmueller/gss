@@ -338,18 +338,15 @@ describe('navigation', () => {
     );
   });
 
-  it('sends the old map addresses to the counterparties map', async () => {
+  it('shows the full-page map at /map, without the menu, for signed-in members only (F-238)', () => {
     window.history.replaceState(null, '', '/map');
     render(<App />);
-    await waitFor(() => {
-      expect(window.location.pathname + window.location.search).toBe('/counterparties?view=map');
-    });
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getByRole('link', { name: 'Counterparties' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    expect(window.location.pathname).toBe('/map');
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument();
+    expect(screen.getByText('Sign in to see the counterparties.')).toBeInTheDocument();
+  });
 
+  it('sends the old map coordinates address to the counterparties page', async () => {
     window.history.replaceState(null, '', '/map/coordinates');
     render(<App />);
     await waitFor(() => {

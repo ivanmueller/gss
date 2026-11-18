@@ -1,6 +1,6 @@
 import { formatBbox, type Bbox } from '@grain/domain';
 import { TriangleAlert } from 'lucide-react';
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 
 import type { MapFacilities } from '../lib/api';
 import {
@@ -51,14 +51,20 @@ function SetupNote({ token }: { token: Exclude<MapboxToken['status'], 'ok'> | 'r
  * filters leave (`only`, counterparty ids), whatever part of the map is in view, and the
  * map fitted to them (owner's request, 2026-10-30: no count and no list under the map).
  * Archived counterparties are never shown.
+ *
+ * `fullPage` (F-238, map.torvenco.com): the map fills its container (the window), every
+ * located place shown, with the legend and controls laid over it.
  */
 export function CounterpartyMap({
   session,
   only,
+  fullPage = false,
   mapbox = mapboxToken(),
 }: {
   session: DirectorySession;
-  only: ReadonlySet<string>;
+  /** Counterparty ids to show; every one when left out. */
+  only?: ReadonlySet<string>;
+  fullPage?: boolean;
   mapbox?: MapboxToken;
 }) {
   const { token, organization } = session;
@@ -78,34 +84,56 @@ export function CounterpartyMap({
   );
   const data = result.status === 'ok' ? result.data : null;
   const facilities = useMemo(
-    () => (data?.facilities ?? []).filter((facility) => only.has(facility.counterpartyId)),
+    () =>
+      (data?.facilities ?? []).filter(
+        (facility) => only === undefined || only.has(facility.counterpartyId),
+      ),
     [data, only],
   );
   const pins = useMemo(() => facilities.map(facilityPin), [facilities]);
   const bounds = pinBounds(pins);
 
-  if (mapbox.status !== 'ok') return <SetupNote token={mapbox.status} />;
-  if (refused) return <SetupNote token="refused" />;
+  const setup = (note: ReactNode) => (fullPage ? <div className="p-4">{note}</div> : note);
+  if (mapbox.status !== 'ok') return setup(<SetupNote token={mapbox.status} />);
+  if (refused) return setup(<SetupNote token="refused" />);
+
+  const controls = (
+    <>
+      <MapPinLegend />
+      <div className="flex flex-wrap items-center gap-2">
+        <MapLayersButton state={layers} />
+        <SegmentedControl
+          label="Map style"
+          options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
+            value: key,
+            label: BASEMAPS[key].label,
+          }))}
+          value={basemap}
+          onChange={setBasemap}
+        />
+      </div>
+    </>
+  );
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <MapPinLegend />
-          <div className="flex flex-wrap items-center gap-2">
-            <MapLayersButton state={layers} />
-            <SegmentedControl
-              label="Map style"
-              options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
-                value: key,
-                label: BASEMAPS[key].label,
-              }))}
-              value={basemap}
-              onChange={setBasemap}
-            />
-          </div>
-        </div>
-        <div className="relative h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]">
+    <div className={fullPage ? 'h-full' : 'flex flex-col gap-4'}>
+      <div className={fullPage ? 'h-full' : 'flex flex-col gap-2'}>
+        {!fullPage && (
+          <div className="flex flex-wrap items-center justify-between gap-2">{controls}</div>
+        )}
+        <div
+          className={
+            fullPage
+              ? 'relative h-full overflow-hidden bg-muted'
+              : 'relative h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]'
+          }
+        >
+          {fullPage && (
+            // Over the map, top left; the zoom buttons and layers panel are top right.
+            <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
+              {controls}
+            </div>
+          )}
           {result.status === 'error' ? (
             <p role="alert" className="p-4 text-sm text-danger">
               The locations could not be loaded: {result.error.message}
@@ -136,8 +164,13 @@ export function CounterpartyMap({
           {/* Below the zoom buttons, top right (F-139). */}
           <MapLayersPanel state={layers} side="right" />
           <PickedFeatureCard state={layers} token={token} className="left-3" />
+          {fullPage && (
+            <div className="absolute bottom-8 left-3 z-10 max-w-[calc(100%-1.5rem)]">
+              <MapLayersLegend state={layers} />
+            </div>
+          )}
         </div>
-        <MapLayersLegend state={layers} />
+        {!fullPage && <MapLayersLegend state={layers} />}
       </div>
     </div>
   );
