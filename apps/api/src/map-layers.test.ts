@@ -171,7 +171,7 @@ describe('GET /api/v1/map-layers', () => {
   it('lists the organization’s layers', async () => {
     const layer = { id: LAYER, name: 'Rail lines' } as MapLayerView;
     db.listMapLayers.mockResolvedValueOnce([layer]);
-    const res = await send('', 'GET');
+    const res = await send('?area=grain', 'GET');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ layers: [layer] });
     expect(db.listMapLayers.mock.calls[0]?.[1]).toBe('org-a');
@@ -183,50 +183,67 @@ describe('GET /api/v1/map-layers', () => {
     expect(db.listMapLayers).not.toHaveBeenCalled();
   });
 
-  it('lists one area, grain unless asked, or all of them (F-240)', async () => {
+  it('lists the area asked for, or all of them (F-240)', async () => {
     db.listMapLayers.mockResolvedValue([]);
-    for (const [query, area] of [
-      ['', 'grain'],
-      ['?area=grain', 'grain'],
-      ['?area=oil_gas', 'oil_gas'],
-      ['?area=all', 'all'],
-    ] as const) {
+    for (const area of ['grain', 'oil_gas', 'all'] as const) {
       db.listMapLayers.mockClear();
-      expect((await send(query, 'GET')).status).toBe(200);
+      expect((await send(`?area=${area}`, 'GET')).status).toBe(200);
       expect(db.listMapLayers.mock.calls[0]?.[2]).toBe(area);
     }
-    // Without ?area= on the oil and gas address, its own layers (Codex's review of 07d45b7).
-    db.listMapLayers.mockClear();
-    const onMap = await app.request(
-      'https://map.example.com/api/v1/map-layers',
-      { method: 'GET', headers: AUTH },
-      ENV,
-    );
-    expect(onMap.status).toBe(200);
-    expect(db.listMapLayers.mock.calls[0]?.[2]).toBe('oil_gas');
     db.listMapLayers.mockClear();
     expect((await send('?area=steel', 'GET')).status).toBe(400);
+    expect(db.listMapLayers).not.toHaveBeenCalled();
   });
 
-  it('takes the area of the page asking when ?area= is left out (Codex’s review of 6b9cc0b)', () => {
+  it('without ?area=, lists the area of the page asking, or nothing when it cannot be told (Codex’s final reviews of F-240)', async () => {
+    db.listMapLayers.mockResolvedValue([{ id: LAYER, name: 'Rail lines' } as MapLayerView]);
+    const ask = (host: string, referer?: string) =>
+      app.request(
+        `https://${host}/api/v1/map-layers`,
+        { method: 'GET', headers: { ...AUTH, ...(referer !== undefined && { Referer: referer }) } },
+        ENV,
+      );
+    for (const [host, referer, area] of [
+      ['app.example.com', 'https://app.example.com/', 'grain'],
+      ['app.example.com', 'https://app.example.com/map', 'oil_gas'],
+      ['map.example.com', 'https://map.example.com/', 'oil_gas'],
+      ['map.example.com', 'https://map.example.com/counterparties?view=map', 'grain'],
+    ] as const) {
+      db.listMapLayers.mockClear();
+      const res = await ask(host, referer);
+      expect(res.status).toBe(200);
+      expect(db.listMapLayers.mock.calls[0]?.[2]).toBe(area);
+    }
+    // No Referer, or another site's: an empty list, whatever the address.
+    for (const [host, referer] of [
+      ['app.example.com', undefined],
+      ['map.example.com', undefined],
+      ['map.example.com', 'https://elsewhere.example.com/map'],
+    ] as const) {
+      db.listMapLayers.mockClear();
+      const res = await ask(host, referer);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ layers: [] });
+      expect(db.listMapLayers).not.toHaveBeenCalled();
+    }
+  });
+
+  it('takes the area of the page asking from its same-address Referer, else none', () => {
     const api = 'https://app.example.com/api/v1/map-layers';
-    expect(defaultArea(api, undefined)).toBe('grain');
+    const onMap = 'https://map.example.com/api/v1/map-layers';
+    expect(defaultArea(api, undefined)).toBeNull();
+    expect(defaultArea(onMap, undefined)).toBeNull();
     expect(defaultArea(api, 'https://app.example.com/')).toBe('grain');
     expect(defaultArea(api, 'https://app.example.com/counterparties?view=map')).toBe('grain');
     expect(defaultArea(api, 'https://app.example.com/map')).toBe('oil_gas');
     expect(defaultArea(api, 'https://app.example.com/map/')).toBe('oil_gas');
     expect(defaultArea(api, 'https://app.example.com/mapping')).toBe('grain');
-    const onMap = 'https://map.example.com/api/v1/map-layers';
     expect(defaultArea(onMap, 'https://map.example.com/')).toBe('oil_gas');
     expect(defaultArea(onMap, 'https://map.example.com/map')).toBe('oil_gas');
-    expect(defaultArea(onMap, undefined)).toBe('oil_gas');
-    // A grain page opened on the map. address stays grain (Codex's final review of F-240).
     expect(defaultArea(onMap, 'https://map.example.com/counterparties?view=map')).toBe('grain');
-    // Another site's Referer is not trusted: the address decides.
-    expect(defaultArea(onMap, 'https://elsewhere.example.com/counterparties')).toBe('oil_gas');
-    expect(defaultArea(api, 'https://elsewhere.example.com/map')).toBe('grain');
-    expect(defaultArea(api, 'not a web address')).toBe('grain');
-    expect(db.listMapLayers).not.toHaveBeenCalled();
+    expect(defaultArea(onMap, 'https://elsewhere.example.com/counterparties')).toBeNull();
+    expect(defaultArea(api, 'https://elsewhere.example.com/map')).toBeNull();
+    expect(defaultArea(api, 'not a web address')).toBeNull();
   });
 });
 

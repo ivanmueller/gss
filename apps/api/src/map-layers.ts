@@ -885,47 +885,48 @@ function serviceFailed(c: ApiContext, error: unknown, what: string) {
   );
 }
 
-/** /api/v1/map-layers. Mounted after requireUser. */
 /**
- * The area of a map layer list asked for without ?area= (F-240, the app from before it): oil and
- * gas for the full-page map (/ on the map. address, or /map on any), grain for any other page;
- * without a usable Referer, oil and gas on the map. address, grain elsewhere.
+ * The area of a map layer list asked for without ?area= (F-240: only the app from before it does
+ * so), from the page asking as its same-address Referer says: oil and gas for the full-page map
+ * (/map on any address, or / on the map. address), grain for any other page. Null when the page
+ * cannot be told (no usable Referer): the list is then empty until that tab is reloaded, so an
+ * old tab never shows the other area's layers (Codex's final reviews of F-240, R13-01).
  */
-export function defaultArea(url: string, referer: string | undefined): 'grain' | 'oil_gas' {
-  const api = new URL(url);
-  // The page asking, when the browser says (same address only): its own address and path decide,
-  // so a grain page opened on the map. address stays grain (Codex's final review of F-240).
-  if (referer !== undefined) {
-    try {
-      const from = new URL(referer);
-      if (from.host === api.host) {
-        const path = from.pathname.replace(/\/+$/, '') || '/';
-        const fullPageMap = path === '/map' || (path === '/' && from.hostname.startsWith('map.'));
-        return fullPageMap ? 'oil_gas' : 'grain';
-      }
-    } catch {
-      // Not a web address: decided by the address below.
-    }
+export function defaultArea(url: string, referer: string | undefined): 'grain' | 'oil_gas' | null {
+  if (referer === undefined) return null;
+  try {
+    const api = new URL(url);
+    const from = new URL(referer);
+    if (from.host !== api.host) return null;
+    const path = from.pathname.replace(/\/+$/, '') || '/';
+    const fullPageMap = path === '/map' || (path === '/' && from.hostname.startsWith('map.'));
+    return fullPageMap ? 'oil_gas' : 'grain';
+  } catch {
+    return null;
   }
-  return api.hostname.startsWith('map.') ? 'oil_gas' : 'grain';
 }
 
+/** /api/v1/map-layers. Mounted after requireUser. */
 export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
 
   routes.get('/', (c) => {
     c.header('Cache-Control', 'no-store');
     // One area's layers, or every layer (Team). Without ?area= (an app from before F-240), the
-    // area of the page asking: oil and gas from the full-page map (the map. address, or /map on
-    // any address, as its Referer says), grain elsewhere (Codex's reviews of 07d45b7 and 6b9cc0b).
-    const asked = c.req.query('area') ?? defaultArea(c.req.url, c.req.header('Referer'));
-    const area = (MAP_LAYER_LIST_AREAS as readonly string[]).includes(asked)
-      ? (asked as MapLayerListArea)
-      : null;
-    if (area === null) return apiError(c, 400, 'VALIDATION_FAILED', 'No such map area.');
+    // area of the page asking (defaultArea), or none when it cannot be told.
+    const named = c.req.query('area');
+    const asked = named ?? defaultArea(c.req.url, c.req.header('Referer'));
+    const area =
+      asked !== null && (MAP_LAYER_LIST_AREAS as readonly string[]).includes(asked)
+        ? (asked as MapLayerListArea)
+        : null;
+    if (named !== undefined && area === null) {
+      return apiError(c, 400, 'VALIDATION_FAILED', 'No such map area.');
+    }
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const org = await organizationOf(c, db);
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+      if (area === null) return c.json({ layers: [] } satisfies MapLayerList);
       const layers = await db.listMapLayers(ctx, org, area);
       if (layers === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       return c.json({ layers } satisfies MapLayerList);
