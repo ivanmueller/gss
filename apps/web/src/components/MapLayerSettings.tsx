@@ -273,6 +273,9 @@ function EditMapLayerForm({
   const [termsUrl, setTermsUrl] = useState(layer.termsUrl);
   const [termsNote, setTermsNote] = useState(layer.termsNote);
   const [area, setArea] = useState<MapLayerArea>(layer.area);
+  // The version the form was opened on: a list refreshed meanwhile (a renewed sign-in) must not
+  // make an older form's values overwrite another admin's change (Codex's final review of F-240).
+  const [version] = useState(layer.version);
   const [wmsLayers, setWmsLayers] = useState(layer.wmsLayers ?? '');
   const [colour, setColour] = useState(layer.colour);
   const [colourField, setColourField] = useState(layer.colourField ?? NO_FIELD);
@@ -357,7 +360,7 @@ function EditMapLayerForm({
     setBusy('Saving…');
     setProblem(null);
     sendJson(`/map-layers/${layer.id}`, token, 'PATCH', {
-      version: layer.version,
+      version,
       name: name.trim(),
       sourceName: sourceName.trim(),
       termsUrl: termsUrl.trim(),
@@ -1455,7 +1458,7 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
             </DialogTrigger>
             <DialogContent
               title="Add map layer"
-              description="From a web address (ArcGIS or a WMS map service) or a file. Everyone can switch it on under Layers on the Workspace map and Counterparties → map view."
+              description="From a web address (ArcGIS or a WMS map service) or a file. Everyone can switch it on under Layers: a grain layer on the Workspace map and Counterparties → map view, an oil and gas layer on the oil and gas map (map.torvenco.com)."
             >
               <AddMapLayerForm
                 session={session}
@@ -1477,7 +1480,8 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
           ) : list.data.layers.length === 0 ? (
             <p className="text-muted-foreground">
               No map layers yet. Add one from a web address or a file; everyone can then switch it
-              on under Layers on the Workspace map and Counterparties → map view.
+              on under Layers: grain layers on the Workspace map and Counterparties → map view, oil
+              and gas layers on the oil and gas map (map.torvenco.com).
             </p>
           ) : (
             <ul>

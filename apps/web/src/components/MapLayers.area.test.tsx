@@ -169,6 +169,40 @@ describe('Team → Map layers', () => {
     expect(calls.some((c) => c.path === `/map-layers/${wells.id}/remove`)).toBe(false);
   });
 
+  it('saves an open edit against the version it was opened on (Codex’s final review of F-240)', async () => {
+    let layers = [rail];
+    const calls = mockApi({
+      [ALL]: () => Response.json({ layers }),
+      [`PATCH /map-layers/${rail.id}`]: () =>
+        Response.json(
+          { error: { code: 'STALE', message: 'This layer was changed meanwhile.' } },
+          { status: 409 },
+        ),
+    });
+    // Two sign-ins of the same person (a token and its renewal).
+    const jwt = (n: number) =>
+      `x.${btoa(JSON.stringify({ sub: 'synthetic-admin', n })).replace(/=+$/, '')}.y`;
+    const user = userEvent.setup();
+    const { rerender } = render(<MapLayerSettings session={{ ...SESSION, token: jwt(1) }} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Synthetic rail lines' });
+    // Another admin moves it meanwhile; a renewed sign-in asks for the list again.
+    layers = [{ ...rail, area: 'oil_gas', version: 'v2' }];
+    rerender(<MapLayerSettings session={{ ...SESSION, token: jwt(2) }} />);
+    await waitFor(() => {
+      expect(calls.filter((c) => c.path.endsWith('&area=all'))).toHaveLength(2);
+    });
+    await user.clear(within(dialog).getByLabelText('Name'));
+    await user.type(within(dialog).getByLabelText('Name'), 'Railways');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({
+        version: 'v1',
+        area: 'grain',
+      });
+    });
+  });
+
   it('moves a layer to oil and gas from Edit', async () => {
     const calls = mockApi({
       [ALL]: () => Response.json({ layers: [rail] }),
