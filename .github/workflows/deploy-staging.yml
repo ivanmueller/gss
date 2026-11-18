@@ -43,6 +43,10 @@ jobs:
           fi
           if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" != push ]; then
+            # A run by hand is a check, so it never ends green without deploying (F-247-1-R8-01).
+            echo "::error::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; nothing can be deployed or checked."
+            exit 1
           else
             echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; staging deploy skipped."
             echo "ready=false" >> "$GITHUB_OUTPUT"

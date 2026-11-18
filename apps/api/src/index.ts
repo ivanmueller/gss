@@ -45,6 +45,8 @@ export function createApp(
     petroleum?: PetroleumFactory;
     /** How long /petroleum/ready reuses its answer (tests set 0). */
     petroleumReadyCacheMs?: number;
+    /** How long /petroleum/ready waits for the database (tests set it short). */
+    petroleumReadyDeadlineMs?: number;
   } = {},
 ) {
   const telnyx = options.telnyx ?? telnyxClient;
@@ -77,7 +79,14 @@ export function createApp(
 
   // Public readiness of the oil and gas database (F-247), for the deploy's smoke test: reachable
   // and migrated, or not. It reads no data and returns no tenant or environment data.
-  app.get('/petroleum/ready', petroleumReadyRoute(openPetroleum, options.petroleumReadyCacheMs));
+  app.get(
+    '/petroleum/ready',
+    petroleumReadyRoute(
+      openPetroleum,
+      options.petroleumReadyCacheMs,
+      options.petroleumReadyDeadlineMs,
+    ),
+  );
 
   // Telnyx's call events carry no signed-in user; each is checked by its Ed25519 signature.
   app.route('/telnyx', telnyxWebhookRoutes(openDatabase, telnyx));

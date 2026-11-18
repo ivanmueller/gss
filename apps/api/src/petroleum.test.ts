@@ -136,6 +136,55 @@ describe('GET /api/v1/petroleum/ready', () => {
     expect(petroleum.schemaVersion).toHaveBeenCalledTimes(2);
   });
 
+  // F-247-1-R8-02: a failed or cut-off check is never handed to later requests; the check is kept
+  // running by the request that started it, and gives up at its deadline.
+  it('reuses only an "ok" answer, keeps the check running, and gives up at its deadline', async () => {
+    const cachingApp = createApp(openDatabase, {
+      petroleum: openPetroleum,
+      petroleumReadyDeadlineMs: 50,
+    });
+    vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const waitUntil = vi.fn();
+    const executionCtx = { waitUntil, passThroughOnException: vi.fn(), props: {} };
+
+    petroleum.schemaVersion.mockRejectedValueOnce(new Error('down'));
+    const failed = await cachingApp.request(
+      '/api/v1/petroleum/ready',
+      {},
+      WITH_PETROLEUM,
+      executionCtx,
+    );
+    expect(failed.status).toBe(503);
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    await Promise.resolve();
+
+    const retried = await cachingApp.request(
+      '/api/v1/petroleum/ready',
+      {},
+      WITH_PETROLEUM,
+      executionCtx,
+    );
+    expect(retried.status).toBe(200);
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(2);
+
+    vi.spyOn(Date, 'now').mockReturnValue(2_000_000 + 15_000);
+    petroleum.schemaVersion.mockReturnValueOnce(new Promise<number>(() => undefined));
+    const stalled = await cachingApp.request(
+      '/api/v1/petroleum/ready',
+      {},
+      WITH_PETROLEUM,
+      executionCtx,
+    );
+    expect(stalled.status).toBe(503);
+    expect(await stalled.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
+    await Promise.resolve();
+    expect(
+      (await cachingApp.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM, executionCtx))
+        .status,
+    ).toBe(200);
+  });
+
   it('accepts a database ahead of the code (a newer migration applied first)', async () => {
     petroleum.schemaVersion.mockResolvedValue(PETROLEUM_SCHEMA_VERSION + 1);
     expect((await app.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM)).status).toBe(200);

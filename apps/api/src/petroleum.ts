@@ -87,22 +87,73 @@ async function withPetroleum(
  * instance checks the database at most once per `cacheMs` and gives every request in that window
  * the same answer (concurrent requests share the one check in flight). A deploy starts new
  * instances, so the deploy's smoke test still gets a fresh check.
+ *
+ * The shared check is kept running by the request that started it (waitUntil), even if that
+ * client goes away, and gives up after READY_DEADLINE_MS; only an "ok" answer is reused, so a
+ * failed or cut-off check is never handed to later requests (F-247-1-R8-02).
  */
 export const READY_CACHE_MS = 15_000;
+export const READY_DEADLINE_MS = 20_000;
 
-export function petroleumReadyRoute(openPetroleum: PetroleumFactory, cacheMs = READY_CACHE_MS) {
-  let cached: { until: number; answer: Promise<{ status: number; body: unknown }> } | null = null;
+interface ReadyAnswer {
+  status: number;
+  body: unknown;
+}
+
+export function petroleumReadyRoute(
+  openPetroleum: PetroleumFactory,
+  cacheMs = READY_CACHE_MS,
+  deadlineMs = READY_DEADLINE_MS,
+) {
+  let cached: { until: number; answer: Promise<ReadyAnswer> } | null = null;
   return async (c: ApiContext) => {
     const now = Date.now();
-    if (cached === null || now >= cached.until) {
-      cached = {
-        until: now + cacheMs,
-        answer: withPetroleum(c, openPetroleum, () =>
-          Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
-        ).then(async (res) => ({ status: res.status, body: await res.json<unknown>() })),
-      };
+    let current = cached;
+    if (current === null || now >= current.until) {
+      const check = withPetroleum(c, openPetroleum, () =>
+        Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
+      ).then(async (res): Promise<ReadyAnswer> => ({ status: res.status, body: await res.json() }));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<ReadyAnswer>((resolve) => {
+        timer = setTimeout(() => {
+          resolve({
+            status: 503,
+            body: {
+              error: {
+                code: 'DATABASE_UNAVAILABLE',
+                message: 'The oil and gas database is unavailable.',
+              },
+            },
+          });
+        }, deadlineMs);
+      });
+      const answer = Promise.race([check, deadline])
+        .catch((): ReadyAnswer => ({
+          status: 503,
+          body: {
+            error: {
+              code: 'DATABASE_UNAVAILABLE',
+              message: 'The oil and gas database is unavailable.',
+            },
+          },
+        }))
+        .finally(() => {
+          clearTimeout(timer);
+        });
+      const entry = { until: now + cacheMs, answer };
+      cached = entry;
+      current = entry;
+      // Only an "ok" answer is reused; anything else is dropped once known.
+      void answer.then((result) => {
+        if (result.status !== 200 && cached === entry) cached = null;
+      });
+      try {
+        c.executionCtx.waitUntil(answer);
+      } catch {
+        // No execution context (tests): the check still runs.
+      }
     }
-    const { status, body } = await cached.answer;
+    const { status, body } = await current.answer;
     c.header('Cache-Control', 'no-store');
     return c.json(body, status as ContentfulStatusCode);
   };
