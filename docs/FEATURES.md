@@ -206,9 +206,9 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 **Open (for the owner's detailed description):** what the page adds beyond the map (tools, filters, lists, drawing), who may open it, and whether `/map` should keep leading to Counterparties instead.
 
-#### 1f. F-239 to F-246 — The oil and gas side
+#### 1f. F-239 to F-247 — The oil and gas side
 
-The oil and gas features (the map page emptied of companies, then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's questions. Asked 2026-11-18.
+The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; next its own layer system with a Settings button, F-247; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
@@ -286,8 +286,7 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 
 | ID | What to check | Pull requests |
 |---|---|---|
-
-None waiting (2026-11-18).
+| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch and Layers are top left. | ivanmueller/gss#260 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
