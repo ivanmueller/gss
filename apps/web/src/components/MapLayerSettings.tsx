@@ -1222,6 +1222,13 @@ function MapLayerGroup({
   const [problem, setProblem] = useState<string | null>(null);
   const first = layers[0];
   const chosen = layers.filter((layer) => selected.has(layer.id));
+
+  // Changing the ticks ends an open Remove selected confirmation, which removes only what it
+  // showed (Codex's re-review of 3090003).
+  function select(update: (current: ReadonlySet<string>) => ReadonlySet<string>) {
+    setSelected(update);
+    setConfirming((current) => (current?.which === 'selected' ? null : current));
+  }
   const count = (n: number) => `${n.toLocaleString('en-CA')} ${n === 1 ? 'layer' : 'layers'}`;
 
   function remove(which: MapLayerView[]) {
@@ -1346,7 +1353,7 @@ function MapLayerGroup({
               variant="ghost"
               className="h-6 px-2 text-xs"
               onClick={() => {
-                setSelected(new Set(layers.map((layer) => layer.id)));
+                select(() => new Set(layers.map((layer) => layer.id)));
               }}
             >
               Select all
@@ -1356,7 +1363,7 @@ function MapLayerGroup({
               variant="ghost"
               className="h-6 px-2 text-xs"
               onClick={() => {
-                setSelected(new Set());
+                select(() => new Set());
               }}
             >
               Select none
@@ -1410,7 +1417,7 @@ function MapLayerGroup({
                 selected={{
                   checked: selected.has(layer.id),
                   onChange: () => {
-                    setSelected((current) => {
+                    select((current) => {
                       const next = new Set(current);
                       if (next.has(layer.id)) next.delete(layer.id);
                       else next.add(layer.id);

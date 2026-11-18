@@ -238,6 +238,26 @@ describe('Team → Map layers', () => {
     expect(removals.find((call) => call.path.includes(b.id))?.body).toEqual({ version: 'v1' });
   });
 
+  it('ends a Remove selected confirmation when the ticks change (Codex’s re-review of 3090003)', async () => {
+    const map = { itemId: 'c'.repeat(32), title: 'Synthetic well map' };
+    const a = { ...rail, id: '00000000-0000-4000-8000-0000000a4d01', name: 'Wells A', map };
+    const b = { ...rail, id: '00000000-0000-4000-8000-0000000a4d02', name: 'Wells B', map };
+    const calls = mockApi({ [ALL]: () => Response.json({ layers: [a, b] }) });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Show the layers of Synthetic well map' }),
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Select Wells A' }));
+    await user.click(screen.getByRole('button', { name: 'Remove selected' }));
+    expect(screen.getByRole('button', { name: 'Remove 1 layer for everyone' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Select none' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Wells B' }));
+    expect(screen.queryByRole('button', { name: 'Remove 1 layer for everyone' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove selected' })).toBeVisible();
+    expect(calls.some((call) => call.path.endsWith('/remove'))).toBe(false);
+  });
+
   it('saves an open edit against the version it was opened on (Codex’s final review of F-240)', async () => {
     let layers = [rail];
     const calls = mockApi({
