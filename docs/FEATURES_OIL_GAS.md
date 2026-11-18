@@ -9,7 +9,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | ID | Feature | Status |
 |---|---|---|
 | F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260, 2026-11-18) |
-| F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | Planned (next; Codex design review first) |
+| F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | In progress (branch `feat/f-247-petroleum-db`: plan, Codex design review) |
 | F-240 | Alberta reference layers: township grid and formation outlines | Planned (after F-247) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
@@ -41,7 +41,28 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 1. **Where:** a **Settings** button on the oil and gas map (`map.torvenco.com`), where layers are added and managed; not on Team.
 2. **Who adds layers:** admins. (Everyone on the team opens the map and switches layers on and off.)
 
-**Plan (to write and put to Codex's design review):** oil and gas layers stored apart from grain's `app.map_layers` (grain's layers, Team page and maps unchanged), with their source and terms recorded before they are shown, as F-107 requires; the Worker's existing ArcGIS and WMS fetching reused, not copied, where it can be shared safely; the Layers button on the oil and gas map offering only these layers. To settle in the plan: where these tables live (the main database, beside sign-in and membership, or the separate oil and gas Supabase project decided on 2026-11-18), which kinds of layer are needed first (live ArcGIS layers for Alberta's government services; files and whole ArcGIS maps later?), and what else "settings" holds beyond layers (the owner may add more).
+**Owner's answers (2026-11-18, second round):**
+3. **Which layers first:** live layers from Alberta's government ArcGIS services only (township grid, formations, Crown agreements). Uploaded files and whole ArcGIS maps from a link come later.
+4. **What Settings holds:** layers only for now; other settings later.
+5. **Where the records live:** in the owner's new Supabase project **`petroleum-staging`** (same Supabase organization as `gss-staging`), the database for everything on the oil and gas side, from the first table on. Project ref `ubgyatbzjctsgzcsvwgc`, session pooler host `aws-1-us-east-2.pooler.supabase.com` (U.S. East, Ohio).
+6. **Sign-in:** the same as GSS (the same people, password and authenticator app; GSS's admins are admins here); the petroleum project holds no user accounts.
+
+**Plan (draft for Codex's design review).** Two pull requests.
+
+*Part 1: the petroleum database wired to the Worker* (high risk and governance: database, Worker configuration, CI and deploy workflows; held for the owner's approval of the exact commit).
+- **Sign-in stays GSS's** (`gss-staging`'s Supabase Auth, as on every page): the petroleum project has no users and no sign-in of its own. The Worker checks the session and the person's membership and role in `gss-staging` exactly as today, then queries the petroleum database. The browser never talks to the petroleum project (no keys for it in the web app).
+- **Files:** `petroleum/supabase/` (its own `config.toml`, `migrations/`, `tests/database/`), run with the Supabase CLI's `--workdir petroleum`; `scripts/review-register.js` gains `^petroleum/supabase/` as high risk.
+- **Database:** schema `petro`; role `petro_api` (no login in migrations; its password set by SQL on `petroleum-staging` by the owner, never committed), revoked from `public`, `anon`, `authenticated` and `service_role` as in `app`. Every table enables row level security keyed on `petro.current_organization_id()` and `petro.current_member_role()`, which read transaction-local settings the Worker sets (`set_config(..., true)`) from the membership it has just checked in `gss-staging`. The petroleum database therefore trusts the Worker for who is asking: recorded as an architecture decision in `docs/DECISIONS.md`. Writes go through functions that refuse anyone but an admin; pgTAP tests for those refusals and for another organization's rows.
+- **Worker:** a second Hyperdrive configuration `gss-petroleum-staging`, binding `PETROLEUM` (`apps/api/wrangler.jsonc`); the Hyperdrive workflow and `scripts/setup-hyperdrive.js` take the configuration name and secret (`PETROLEUM_HYPERDRIVE_URL`) so both are set up the same way (TLS `verify-full` against Supabase's root CA, at most 5 connections). Without the binding's database, oil and gas routes answer "not set up" and grain is untouched. A signed-in health check `GET /api/v1/petroleum/health`.
+- **CI:** the petroleum migrations applied to a second database (`petroleum`) inside the same local Supabase, then its pgTAP tests, then its API database tests as `petro_api`.
+- **Deploy:** after grain's migrations, `supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL"`; skipped with a notice while that secret is missing.
+- **Owner steps (then):** the `petro_api` password by SQL in `petroleum-staging`; GitHub secrets `PETROLEUM_STAGING_DB_URL` and `PETROLEUM_HYPERDRIVE_URL`; run **Set up Hyperdrive (petroleum)** once. Exact click paths given then.
+
+*Part 2: oil and gas layers* (high risk: database and Worker).
+- **Table** `petro.map_layers`: name, ArcGIS service address and layer, source, terms of use and their link (required before a layer is shown, F-107), on or off by default, who added it and when (UTC); removal marked, never deleted; changes kept as new versions.
+- **API** under `/api/v1/petroleum/layers`: list (members); add, change, remove (admins). The Worker's ArcGIS fetching by map square and drawing rules (F-107, F-141) reused from grain's code (`@grain/domain` and the map layer fetch), not copied; grain's `app.map_layers`, Team page and maps unchanged.
+- **Screens:** a **Settings** button on the oil and gas map (admins), a Layers list there to add an ArcGIS layer from its address (the Worker reads its name and fields), set its source and terms, and remove it; the **Layers** button on the oil and gas map lists only these layers.
+- **Tests:** pgTAP (admins only write, other organizations denied), API unit and database tests, a browser test of adding and showing a layer.
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 
