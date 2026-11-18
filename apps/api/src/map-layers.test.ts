@@ -4,7 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { arcgisSquareUrl, crc32, overviewPageUrl, pictureType, pictureUrl } from './map-layers';
+import {
+  arcgisSquareUrl,
+  crc32,
+  defaultArea,
+  overviewPageUrl,
+  pictureType,
+  pictureUrl,
+} from './map-layers';
 import type { MapLayerSource } from './map-layers-db';
 import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 
@@ -199,6 +206,19 @@ describe('GET /api/v1/map-layers', () => {
     expect(db.listMapLayers.mock.calls[0]?.[2]).toBe('oil_gas');
     db.listMapLayers.mockClear();
     expect((await send('?area=steel', 'GET')).status).toBe(400);
+  });
+
+  it('takes the area of the page asking when ?area= is left out (Codex’s review of 6b9cc0b)', () => {
+    const api = 'https://app.example.com/api/v1/map-layers';
+    expect(defaultArea(api, undefined)).toBe('grain');
+    expect(defaultArea(api, 'https://app.example.com/')).toBe('grain');
+    expect(defaultArea(api, 'https://app.example.com/counterparties?view=map')).toBe('grain');
+    expect(defaultArea(api, 'https://app.example.com/map')).toBe('oil_gas');
+    expect(defaultArea(api, 'https://app.example.com/map/')).toBe('oil_gas');
+    expect(defaultArea(api, 'https://app.example.com/mapping')).toBe('grain');
+    expect(defaultArea(api, 'https://map.example.com/')).toBe('oil_gas');
+    expect(defaultArea('https://map.example.com/api/v1/map-layers', undefined)).toBe('oil_gas');
+    expect(defaultArea(api, 'not a web address')).toBe('grain');
     expect(db.listMapLayers).not.toHaveBeenCalled();
   });
 });

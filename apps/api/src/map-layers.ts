@@ -886,15 +886,31 @@ function serviceFailed(c: ApiContext, error: unknown, what: string) {
 }
 
 /** /api/v1/map-layers. Mounted after requireUser. */
+/**
+ * The area of a map layer list asked for without ?area= (F-240): oil and gas when the request
+ * comes to the map. address or from the full-page map at /map, grain otherwise.
+ */
+export function defaultArea(url: string, referer: string | undefined): 'grain' | 'oil_gas' {
+  if (new URL(url).hostname.startsWith('map.')) return 'oil_gas';
+  if (referer === undefined) return 'grain';
+  try {
+    const from = new URL(referer);
+    const path = from.pathname.replace(/\/+$/, '') || '/';
+    return from.hostname.startsWith('map.') || path === '/map' ? 'oil_gas' : 'grain';
+  } catch {
+    return 'grain';
+  }
+}
+
 export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   const routes = new Hono<ApiEnv>();
 
   routes.get('/', (c) => {
     c.header('Cache-Control', 'no-store');
     // One area's layers, or every layer (Team). Without ?area= (an app from before F-240), the
-    // site's own area: oil and gas on the map. address, grain elsewhere (Codex's review of 07d45b7).
-    const asked =
-      c.req.query('area') ?? (new URL(c.req.url).hostname.startsWith('map.') ? 'oil_gas' : 'grain');
+    // area of the page asking: oil and gas from the full-page map (the map. address, or /map on
+    // any address, as its Referer says), grain elsewhere (Codex's reviews of 07d45b7 and 6b9cc0b).
+    const asked = c.req.query('area') ?? defaultArea(c.req.url, c.req.header('Referer'));
     const area = (MAP_LAYER_LIST_AREAS as readonly string[]).includes(asked)
       ? (asked as MapLayerListArea)
       : null;
