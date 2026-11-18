@@ -161,9 +161,9 @@ describe('Team → Map layers', () => {
       .map((button) => button.closest('li') as HTMLElement)
       .find((li) => within(li).queryByText('Oil and gas') !== null);
     expect(oilGroup).toBeDefined();
-    await user.click(within(oilGroup as HTMLElement).getByRole('button', { name: 'Remove map' }));
+    await user.click(within(oilGroup!).getByRole('button', { name: 'Remove map' }));
     await user.click(
-      within(oilGroup as HTMLElement).getByRole('button', { name: /Remove all 1 layer/ }),
+      within(oilGroup!).getByRole('button', { name: /Remove all 1 layer/ }),
     );
     await waitFor(() => {
       expect(calls.some((c) => c.path === `/map-layers/${fields.id}/remove`)).toBe(true);
