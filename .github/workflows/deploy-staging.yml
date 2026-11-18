@@ -130,6 +130,7 @@ jobs:
       - name: Smoke test
         env:
           URL: ${{ steps.deploy.outputs.url }}
+          PETROLEUM_REQUIRED: ${{ steps.petroleum.outputs.apply == 'true' }}
         run: |
           if [ -z "$URL" ]; then
             echo "::error::No workers.dev URL found in the wrangler output."
@@ -155,14 +156,21 @@ jobs:
           done
 
           # The oil and gas database's readiness (F-247-1-D1-03): the route must exist and answer
-          # either "ok" (reachable and migrated) or, until the Worker has its PETROLEUM binding,
-          # "not set up". A missing route (401), an unreachable or unmigrated database (503
-          # DATABASE_UNAVAILABLE) or anything else fails the deploy's check.
+          # "ok" (reachable and migrated) or, until the Worker has its PETROLEUM binding, "not set
+          # up". The database being unavailable fails the check only when this release applied
+          # oil and gas migrations or the run was started by hand (PETROLEUM_REQUIRED); on other
+          # releases it is a warning, so grain never waits on it (F-247-1-D1-02). A missing route
+          # (401) or anything else always fails.
           ready=$(curl --silent --show-error --write-out '\n%{http_code}' "$URL/api/v1/petroleum/ready")
           echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ }"
           case "$ready" in
             *'"status":"ok"'*$'\n'200) ;;
             *'"code":"PETROLEUM_NOT_SET_UP"'*$'\n'503)
               echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
+            *'"code":"DATABASE_UNAVAILABLE"'*$'\n'503)
+              if [ "$PETROLEUM_REQUIRED" = true ]; then
+                echo "::error::The oil and gas database is unavailable after its migrations."; exit 1
+              fi
+              echo "::warning::The oil and gas database is unavailable (paused?); grain deployed." ;;
             *) echo "::error::/api/v1/petroleum/ready did not answer as expected."; exit 1 ;;
           esac

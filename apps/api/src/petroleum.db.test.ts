@@ -1,6 +1,8 @@
+import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 
-import { postgresPetroleum } from './petroleum-db';
+import { connectionOptions } from './db';
+import { createPetroleumDatabase, postgresPetroleum } from './petroleum-db';
 
 // Integration test (F-247-1): the oil and gas database's queries as the real `petro_api` role,
 // against its real migration. CI creates that database in the local Supabase and gives
@@ -54,6 +56,34 @@ describe('the oil and gas database as petro_api', () => {
       ).rejects.toMatchObject({
         code: '22P02',
       });
+    } finally {
+      await db.close();
+    }
+  });
+
+  // F-247-1-R1-02: who is asking lasts for one transaction only, so a pooled connection never
+  // carries a person's identity on, after a commit or after a failure.
+  it('leaves no one on the connection after a transaction, committed or failed', async () => {
+    const sql = postgres(PETRO_URL, connectionOptions(PETRO_URL));
+    const db = createPetroleumDatabase(sql);
+    const leftOver = async () => {
+      const [row] = await sql<
+        { user_id: string | null; org: string | null; role: string | null }[]
+      >`
+        select petro.current_user_id()::text as user_id,
+               petro.current_organization_id()::text as org,
+               petro.current_member_role() as role`;
+      return row;
+    };
+    try {
+      const asking = ctx('org_admin');
+      expect(await db.organizationSeen(asking)).toBe(asking.organizationId);
+      expect(await leftOver()).toEqual({ user_id: null, org: null, role: null });
+
+      await expect(
+        db.organizationSeen({ ...ctx('trader'), organizationId: 'org-a' }),
+      ).rejects.toMatchObject({ code: '22P02' });
+      expect(await leftOver()).toEqual({ user_id: null, org: null, role: null });
     } finally {
       await db.close();
     }
