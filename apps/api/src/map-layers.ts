@@ -891,8 +891,10 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
 
   routes.get('/', (c) => {
     c.header('Cache-Control', 'no-store');
-    // One area's layers, or every layer (Team); grain without ?area= (F-240).
-    const asked = c.req.query('area') ?? 'grain';
+    // One area's layers, or every layer (Team). Without ?area= (an app from before F-240), the
+    // site's own area: oil and gas on the map. address, grain elsewhere (Codex's review of 07d45b7).
+    const asked =
+      c.req.query('area') ?? (new URL(c.req.url).hostname.startsWith('map.') ? 'oil_gas' : 'grain');
     const area = (MAP_LAYER_LIST_AREAS as readonly string[]).includes(asked)
       ? (asked as MapLayerListArea)
       : null;

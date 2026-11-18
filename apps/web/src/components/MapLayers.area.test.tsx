@@ -113,6 +113,22 @@ describe('a map’s layers', () => {
       expect(screen.queryByRole('switch', { name: 'Synthetic rail lines' })).toBeNull();
     });
   });
+
+  it('drops it too when a window left in view gets the focus back (Codex’s review of 07d45b7)', async () => {
+    let layers = [rail];
+    mockApi({ [GRAIN]: () => Response.json({ layers }) });
+    const user = userEvent.setup();
+    render(<Map />);
+    await user.click(await screen.findByRole('button', { name: 'Layers' }));
+    expect(await screen.findByRole('switch', { name: 'Synthetic rail lines' })).toBeVisible();
+    layers = [];
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('switch', { name: 'Synthetic rail lines' })).toBeNull();
+    });
+  });
 });
 
 describe('Team → Map layers', () => {

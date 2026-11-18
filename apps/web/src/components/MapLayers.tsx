@@ -64,8 +64,9 @@ export interface MapLayersState {
 /**
  * The organization's map layers of one area (F-240: grain maps grain, the oil and gas map oil
  * and gas), the ones this person has on, and their features in view. The list is asked for again
- * whenever the window comes back into view, so a layer an admin moved or removed meanwhile (in
- * another tab, or on the other address) leaves this map (Codex's design review of F-240).
+ * whenever the window comes back into view or into focus (a map left open on another screen), so
+ * a layer an admin moved or removed meanwhile, in another tab or window or on the other address,
+ * leaves this map (Codex's reviews of F-240).
  */
 export function useMapLayers(
   session: { token: string; organization: { id: string } } | null,
@@ -82,8 +83,10 @@ export function useMapLayers(
       if (document.visibilityState === 'visible') reload();
     };
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', reload);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', reload);
     };
   }, [reload]);
   const layers = useMemo(

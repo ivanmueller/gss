@@ -188,6 +188,15 @@ describe('GET /api/v1/map-layers', () => {
       expect((await send(query, 'GET')).status).toBe(200);
       expect(db.listMapLayers.mock.calls[0]?.[2]).toBe(area);
     }
+    // Without ?area= on the oil and gas address, its own layers (Codex's review of 07d45b7).
+    db.listMapLayers.mockClear();
+    const onMap = await app.request(
+      'https://map.example.com/api/v1/map-layers',
+      { method: 'GET', headers: AUTH },
+      ENV,
+    );
+    expect(onMap.status).toBe(200);
+    expect(db.listMapLayers.mock.calls[0]?.[2]).toBe('oil_gas');
     db.listMapLayers.mockClear();
     expect((await send('?area=steel', 'GET')).status).toBe(400);
     expect(db.listMapLayers).not.toHaveBeenCalled();
