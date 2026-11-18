@@ -322,10 +322,15 @@ test('adds a seller by hand, edits it, and archives and restores it', async ({ p
   await page.getByRole('button', { name: 'Restore' }).click();
   await expect(page.getByRole('button', { name: 'More actions' })).toBeVisible();
 
-  // The old map address opens the map view.
-  await page.goto('/map');
-  await expect(page).toHaveURL(/\/counterparties\?view=map$/);
+  // The map view of Counterparties.
+  await page.goto('/counterparties?view=map');
   await expect(page.getByRole('tab', { name: 'Map', selected: true })).toBeVisible();
+
+  // The map on its own page (F-238): /map, without the menu.
+  await page.goto('/map');
+  await expect(page).toHaveURL(/\/map$/);
+  await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+  await expect(page.getByRole('main')).toBeVisible();
 
   expect(errors).toEqual([]);
 });
