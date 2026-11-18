@@ -195,7 +195,7 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 #### 1e. F-238 — The map on its own page, at map.torvenco.com
 
-**Status:** In progress (`feat/f-238-map-page`). Normal risk (screens only: no database, money or sign-in change). **Asked:** 2026-11-18: "build a mapping tool or part of the platform on its own page … map.torvenco.com"; the owner will describe what the page should hold later; to start, a full-page map shown at that address.
+**Status:** Live (merged as ivanmueller/gss#259 on 2026-11-18; register `docs/reviews/F-238.md`); the owner's Cloudflare and Mapbox steps done 2026-11-18. Emptied for the oil and gas side by F-239 (`docs/FEATURES_OIL_GAS.md`). Normal risk (screens only: no database, money or sign-in change). **Asked:** 2026-11-18: "build a mapping tool or part of the platform on its own page … map.torvenco.com"; the owner will describe what the page should hold later; to start, a full-page map shown at that address.
 
 **Plan (an agent, 2026-11-18):**
 - The same app and Worker, no new service (as `app.torvenco.com`, F-153): opened at an address starting with `map.`, the app shows only the full-page map, without the menu; the same page at `/map` on any address (which until now led to Counterparties → map view), so it can be tried on the workers.dev address.
@@ -205,6 +205,10 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 **Owner steps once merged:** (1) Cloudflare → Workers & Pages → `grain-trading-api-staging` → Settings → Domains & Routes → Add → Custom domain → `map.torvenco.com`; (2) Mapbox → Tokens → the app's public token → URL restrictions: add `https://map.torvenco.com`.
 
 **Open (for the owner's detailed description):** what the page adds beyond the map (tools, filters, lists, drawing), who may open it, and whether `/map` should keep leading to Counterparties instead.
+
+#### 1f. F-239 to F-246 — The oil and gas side
+
+The oil and gas features (the map page emptied of companies, then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's questions. Asked 2026-11-18.
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
