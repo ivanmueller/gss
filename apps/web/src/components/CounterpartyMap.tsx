@@ -136,13 +136,6 @@ export function CounterpartyMap({
               : 'relative h-[60vh] min-h-80 overflow-hidden rounded-card border bg-muted shadow-xs lg:h-[65vh]'
           }
         >
-          {fullPage && data !== null && result.status === 'ok' && (
-            // Over the map, top left, once it is loaded (so it never hides the loading or error
-            // message); the zoom buttons and layers panel are top right.
-            <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
-              {controls}
-            </div>
-          )}
           {result.status === 'error' ? (
             <p role="alert" className="p-4 text-sm text-danger">
               The locations could not be loaded: {result.error.message}
@@ -168,6 +161,13 @@ export function CounterpartyMap({
                   setRefused(true);
                 }}
               />
+              {fullPage && (
+                // Over the map, top left, shown with the map itself (inside its Suspense), so it
+                // never hides a loading or error message; zoom buttons and layers are top right.
+                <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
+                  {controls}
+                </div>
+              )}
             </Suspense>
           )}
           {/* Below the zoom buttons, top right (F-139). */}
