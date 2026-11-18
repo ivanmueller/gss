@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Membership } from './db';
 import {
@@ -81,13 +82,29 @@ async function withPetroleum(
  * GET /petroleum/ready, public: whether the oil and gas database is reachable and at the schema
  * version this code needs (withPetroleum checks it), for the deploy's smoke test
  * (F-247-1-D1-03). It reads nothing and returns no tenant data.
+ *
+ * Being public, it must not let anonymous traffic load the database (F-247-1-R7-02): each Worker
+ * instance checks the database at most once per `cacheMs` and gives every request in that window
+ * the same answer (concurrent requests share the one check in flight). A deploy starts new
+ * instances, so the deploy's smoke test still gets a fresh check.
  */
-export function petroleumReadyRoute(openPetroleum: PetroleumFactory) {
+export const READY_CACHE_MS = 15_000;
+
+export function petroleumReadyRoute(openPetroleum: PetroleumFactory, cacheMs = READY_CACHE_MS) {
+  let cached: { until: number; answer: Promise<{ status: number; body: unknown }> } | null = null;
   return async (c: ApiContext) => {
+    const now = Date.now();
+    if (cached === null || now >= cached.until) {
+      cached = {
+        until: now + cacheMs,
+        answer: withPetroleum(c, openPetroleum, () =>
+          Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
+        ).then(async (res) => ({ status: res.status, body: await res.json<unknown>() })),
+      };
+    }
+    const { status, body } = await cached.answer;
     c.header('Cache-Control', 'no-store');
-    return withPetroleum(c, openPetroleum, () =>
-      Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
-    );
+    return c.json(body, status as ContentfulStatusCode);
   };
 }
 

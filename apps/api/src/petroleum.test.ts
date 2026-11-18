@@ -28,7 +28,7 @@ let db = fakeDatabase();
 let petroleum = fakePetroleum();
 const openDatabase = vi.fn<(url: string) => Database>(() => db);
 const openPetroleum = vi.fn<PetroleumFactory>(() => petroleum);
-const app = createApp(openDatabase, { petroleum: openPetroleum });
+const app = createApp(openDatabase, { petroleum: openPetroleum, petroleumReadyCacheMs: 0 });
 
 const PETRO_URL = 'postgresql://petro_api.ref:secret@db.example.test:5432/postgres';
 const WITH_PETROLEUM = { ...ENV, PETROLEUM_DATABASE_URL: PETRO_URL };
@@ -104,6 +104,36 @@ describe('GET /api/v1/petroleum/ready', () => {
     expect(health.status).toBe(503);
     expect(await health.json()).toMatchObject({ error: { code: 'PETROLEUM_NOT_READY' } });
     expect(petroleum.organizationSeen).not.toHaveBeenCalled();
+  });
+
+  // F-247-1-R7-02: anonymous traffic cannot load the database: one check per instance per window,
+  // shared by concurrent requests.
+  it('checks the database at most once per 15 seconds, sharing the answer', async () => {
+    const cachingApp = createApp(openDatabase, { petroleum: openPetroleum });
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const burst = await Promise.all(
+      Array.from({ length: 20 }, async () =>
+        cachingApp.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM),
+      ),
+    );
+    expect(burst.map((res) => res.status)).toEqual(Array.from({ length: 20 }, () => 200));
+    expect(await burst[19]?.json()).toEqual({ status: 'ok', service: 'petroleum' });
+    expect(burst[19]?.headers.get('Cache-Control')).toBe('no-store');
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(1_000_000 + 14_999);
+    petroleum.schemaVersion.mockRejectedValueOnce(new Error('down'));
+    expect((await cachingApp.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM)).status).toBe(
+      200,
+    );
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(1);
+
+    now.mockReturnValue(1_000_000 + 15_000);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const later = await cachingApp.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM);
+    expect(later.status).toBe(503);
+    expect(await later.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(2);
   });
 
   it('accepts a database ahead of the code (a newer migration applied first)', async () => {
