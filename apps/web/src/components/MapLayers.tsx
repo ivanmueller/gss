@@ -262,11 +262,13 @@ function LayerValues({
 
 type PanelEntry =
   | { kind: 'layer'; layer: MapLayerView }
-  | { kind: 'map'; itemId: string; title: string; layers: MapLayerView[] };
+  | { kind: 'map'; itemId: string; area: MapLayerArea; title: string; layers: MapLayerView[] };
 
 /**
  * The panel's entries in the list's order: a layer alone, or an ArcGIS map's layers together
- * where its first one is, top-most first as ArcGIS lists them (F-138).
+ * where its first one is, top-most first as ArcGIS lists them (F-138). A map's layers moved to
+ * the other area form a group of their own, so removing one group never removes the other area's
+ * layers (Codex's final review of F-240).
  */
 export function panelEntries(layers: readonly MapLayerView[]): PanelEntry[] {
   const entries: PanelEntry[] = [];
@@ -276,14 +278,16 @@ export function panelEntries(layers: readonly MapLayerView[]): PanelEntry[] {
       entries.push({ kind: 'layer', layer });
       continue;
     }
-    const group = maps.get(layer.map.itemId);
+    const key = `${layer.area}:${layer.map.itemId}`;
+    const group = maps.get(key);
     if (group) group.unshift(layer);
     else {
       const first = [layer];
-      maps.set(layer.map.itemId, first);
+      maps.set(key, first);
       entries.push({
         kind: 'map',
         itemId: layer.map.itemId,
+        area: layer.area,
         title: layer.map.title,
         layers: first,
       });

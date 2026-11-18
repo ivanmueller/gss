@@ -142,6 +142,35 @@ describe('Team → Map layers', () => {
     expect(within(railRow as HTMLElement).queryByText('Oil and gas')).toBeNull();
   });
 
+  it('keeps an ArcGIS map’s layers of each area in groups of their own, removed apart (Codex’s final review of F-240)', async () => {
+    const map = { itemId: 'a'.repeat(32), title: 'Synthetic basin map' };
+    const wells = { ...rail, id: '00000000-0000-4000-8000-0000000a4b03', name: 'Wells', map };
+    const fields = { ...grid, id: '00000000-0000-4000-8000-0000000a4b04', name: 'Fields', map };
+    const calls = mockApi({
+      [ALL]: () => Response.json({ layers: [wells, fields] }),
+      [`POST /map-layers/${fields.id}/remove`]: () => Response.json({ id: fields.id }),
+      [`POST /map-layers/${wells.id}/remove`]: () => Response.json({ id: wells.id }),
+    });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    const groups = await screen.findAllByRole('button', {
+      name: 'Show the layers of Synthetic basin map',
+    });
+    expect(groups).toHaveLength(2);
+    const oilGroup = groups
+      .map((button) => button.closest('li') as HTMLElement)
+      .find((li) => within(li).queryByText('Oil and gas') !== null);
+    expect(oilGroup).toBeDefined();
+    await user.click(within(oilGroup as HTMLElement).getByRole('button', { name: 'Remove map' }));
+    await user.click(
+      within(oilGroup as HTMLElement).getByRole('button', { name: /Remove all 1 layer/ }),
+    );
+    await waitFor(() => {
+      expect(calls.some((c) => c.path === `/map-layers/${fields.id}/remove`)).toBe(true);
+    });
+    expect(calls.some((c) => c.path === `/map-layers/${wells.id}/remove`)).toBe(false);
+  });
+
   it('moves a layer to oil and gas from Edit', async () => {
     const calls = mockApi({
       [ALL]: () => Response.json({ layers: [rail] }),

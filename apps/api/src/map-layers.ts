@@ -887,19 +887,27 @@ function serviceFailed(c: ApiContext, error: unknown, what: string) {
 
 /** /api/v1/map-layers. Mounted after requireUser. */
 /**
- * The area of a map layer list asked for without ?area= (F-240): oil and gas when the request
- * comes to the map. address or from the full-page map at /map, grain otherwise.
+ * The area of a map layer list asked for without ?area= (F-240, the app from before it): oil and
+ * gas for the full-page map (/ on the map. address, or /map on any), grain for any other page;
+ * without a usable Referer, oil and gas on the map. address, grain elsewhere.
  */
 export function defaultArea(url: string, referer: string | undefined): 'grain' | 'oil_gas' {
-  if (new URL(url).hostname.startsWith('map.')) return 'oil_gas';
-  if (referer === undefined) return 'grain';
-  try {
-    const from = new URL(referer);
-    const path = from.pathname.replace(/\/+$/, '') || '/';
-    return from.hostname.startsWith('map.') || path === '/map' ? 'oil_gas' : 'grain';
-  } catch {
-    return 'grain';
+  const api = new URL(url);
+  // The page asking, when the browser says (same address only): its own address and path decide,
+  // so a grain page opened on the map. address stays grain (Codex's final review of F-240).
+  if (referer !== undefined) {
+    try {
+      const from = new URL(referer);
+      if (from.host === api.host) {
+        const path = from.pathname.replace(/\/+$/, '') || '/';
+        const fullPageMap = path === '/map' || (path === '/' && from.hostname.startsWith('map.'));
+        return fullPageMap ? 'oil_gas' : 'grain';
+      }
+    } catch {
+      // Not a web address: decided by the address below.
+    }
   }
+  return api.hostname.startsWith('map.') ? 'oil_gas' : 'grain';
 }
 
 export function mapLayerRoutes(openDatabase: DatabaseFactory) {

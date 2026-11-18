@@ -216,8 +216,15 @@ describe('GET /api/v1/map-layers', () => {
     expect(defaultArea(api, 'https://app.example.com/map')).toBe('oil_gas');
     expect(defaultArea(api, 'https://app.example.com/map/')).toBe('oil_gas');
     expect(defaultArea(api, 'https://app.example.com/mapping')).toBe('grain');
-    expect(defaultArea(api, 'https://map.example.com/')).toBe('oil_gas');
-    expect(defaultArea('https://map.example.com/api/v1/map-layers', undefined)).toBe('oil_gas');
+    const onMap = 'https://map.example.com/api/v1/map-layers';
+    expect(defaultArea(onMap, 'https://map.example.com/')).toBe('oil_gas');
+    expect(defaultArea(onMap, 'https://map.example.com/map')).toBe('oil_gas');
+    expect(defaultArea(onMap, undefined)).toBe('oil_gas');
+    // A grain page opened on the map. address stays grain (Codex's final review of F-240).
+    expect(defaultArea(onMap, 'https://map.example.com/counterparties?view=map')).toBe('grain');
+    // Another site's Referer is not trusted: the address decides.
+    expect(defaultArea(onMap, 'https://elsewhere.example.com/counterparties')).toBe('oil_gas');
+    expect(defaultArea(api, 'https://elsewhere.example.com/map')).toBe('grain');
     expect(defaultArea(api, 'not a web address')).toBe('grain');
     expect(db.listMapLayers).not.toHaveBeenCalled();
   });

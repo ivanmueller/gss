@@ -1193,12 +1193,15 @@ function LayerRow({
  */
 function MapLayerGroup({
   itemId,
+  area,
   title,
   layers,
   session,
   onChanged,
 }: {
   itemId: string;
+  /** Its layers' area (F-240): a map's layers in two areas are two groups. */
+  area: MapLayerArea;
   title: string;
   layers: MapLayerView[];
   session: DirectorySession;
@@ -1257,6 +1260,9 @@ function MapLayerGroup({
           <span className="shrink-0 text-xs font-normal text-muted-foreground">
             · {count(layers.length)}
           </span>
+          {area !== 'grain' && (
+            <Badge className="shrink-0 font-normal">{MAP_LAYER_AREA_LABELS[area]}</Badge>
+          )}
         </span>
         {confirming === 'all' ? (
           <span className="flex gap-2">
@@ -1486,8 +1492,9 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
                   />
                 ) : (
                   <MapLayerGroup
-                    key={`map-${entry.itemId}`}
+                    key={`map-${entry.area}-${entry.itemId}`}
                     itemId={entry.itemId}
+                    area={entry.area}
                     title={entry.title}
                     layers={entry.layers}
                     session={session}
