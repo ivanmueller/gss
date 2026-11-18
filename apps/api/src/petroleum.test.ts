@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import type { PetroleumDatabase, PetroleumFactory } from './petroleum-db';
+import {
+  PETROLEUM_SCHEMA_VERSION,
+  type PetroleumDatabase,
+  type PetroleumFactory,
+} from './petroleum-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
 
 // The oil and gas database's routes (F-247-1): its readiness check, and the signed-in health
@@ -10,7 +14,9 @@ import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testi
 
 function fakePetroleum() {
   return {
-    ready: vi.fn<PetroleumDatabase['ready']>(() => Promise.resolve(true)),
+    schemaVersion: vi.fn<PetroleumDatabase['schemaVersion']>(() =>
+      Promise.resolve(PETROLEUM_SCHEMA_VERSION),
+    ),
     organizationSeen: vi.fn<PetroleumDatabase['organizationSeen']>((ctx) =>
       Promise.resolve(ctx.organizationId),
     ),
@@ -70,7 +76,7 @@ describe('GET /api/v1/petroleum/ready', () => {
 
   it('answers 503 and logs no message when the database is unreachable', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    petroleum.ready.mockRejectedValueOnce(
+    petroleum.schemaVersion.mockRejectedValueOnce(
       Object.assign(new Error('connect to secret-host failed: timeout'), {
         code: 'CONNECT_TIMEOUT',
       }),
@@ -83,9 +89,26 @@ describe('GET /api/v1/petroleum/ready', () => {
     expect(line).not.toMatch(/secret-host/);
   });
 
-  it('answers 503 when the migration has not run', async () => {
-    petroleum.ready.mockResolvedValueOnce(false);
-    expect((await app.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM)).status).toBe(503);
+  // F-247-1-R3-01: a database behind the schema version this code needs is "not ready", on every
+  // oil and gas route, so new code never runs against an old schema after a failed migration.
+  it('answers "not ready" while the database is behind the schema version the code needs', async () => {
+    petroleum.schemaVersion.mockResolvedValue(PETROLEUM_SCHEMA_VERSION - 1);
+    const res = await app.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { code: 'PETROLEUM_NOT_READY' } });
+    const health = await app.request(
+      '/api/v1/petroleum/health',
+      { headers: { Authorization: `Bearer ${VALID_TOKEN}` } },
+      WITH_PETROLEUM,
+    );
+    expect(health.status).toBe(503);
+    expect(await health.json()).toMatchObject({ error: { code: 'PETROLEUM_NOT_READY' } });
+    expect(petroleum.organizationSeen).not.toHaveBeenCalled();
+  });
+
+  it('accepts a database ahead of the code (a newer migration applied first)', async () => {
+    petroleum.schemaVersion.mockResolvedValue(PETROLEUM_SCHEMA_VERSION + 1);
+    expect((await app.request('/api/v1/petroleum/ready', {}, WITH_PETROLEUM)).status).toBe(200);
   });
 });
 

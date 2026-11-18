@@ -16,9 +16,17 @@ export interface PetroleumContext {
   requestId: string;
 }
 
+/**
+ * The oil and gas database's schema version this code needs (petro.schema_version()). Raised with
+ * each migration the Worker's code depends on; until the database has it, the oil and gas routes
+ * answer "not ready" (F-247-1-R3-01), so a deploy whose migration failed never runs new code
+ * against an old schema.
+ */
+export const PETROLEUM_SCHEMA_VERSION = 1;
+
 export interface PetroleumDatabase {
-  /** True once the oil and gas database's first migration has run. Reads no data. */
-  ready(): Promise<boolean>;
+  /** The database's schema version (petro.schema_version()). Reads no data. */
+  schemaVersion(): Promise<number>;
   /** The organization the database sees for this person: the health check. */
   organizationSeen(ctx: PetroleumContext): Promise<string | null>;
   close(): Promise<void>;
@@ -50,9 +58,9 @@ async function asMember<T>(
 /** The oil and gas database over an existing connection; tests use it directly. */
 export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
   return {
-    async ready() {
-      const [row] = await sql<{ ready: boolean }[]>`select petro.ready() as ready`;
-      return row?.ready === true;
+    async schemaVersion() {
+      const [row] = await sql<{ version: number }[]>`select petro.schema_version() as version`;
+      return row?.version ?? 0;
     },
     organizationSeen(ctx) {
       return asMember(sql, ctx, async (tx) => {

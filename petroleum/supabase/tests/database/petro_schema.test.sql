@@ -40,7 +40,8 @@ select is(
 );
 select ok(has_function_privilege('petro_api', 'petro.current_organization_id()', 'execute'),
   'petro_api runs petro.current_organization_id()');
-select ok(has_function_privilege('petro_api', 'petro.ready()', 'execute'), 'petro_api runs petro.ready()');
+select ok(has_function_privilege('petro_api', 'petro.schema_version()', 'execute'),
+  'petro_api runs petro.schema_version()');
 
 -- A function created after the migration, by the migration role, is not executable by public
 -- (the default privilege), even outside the petro schema.
@@ -76,7 +77,7 @@ select is(pg_temp.as_petro('select petro.current_user_id()::text'), null, 'no us
 select is(pg_temp.as_petro('select petro.current_organization_id()::text'), null,
   'no organization without the setting');
 select is(pg_temp.as_petro('select petro.current_member_role()'), null, 'no role without the setting');
-select is(pg_temp.as_petro('select petro.ready()::text'), 'true', 'ready');
+select is(pg_temp.as_petro('select petro.schema_version()::text'), '1', 'schema version 1');
 
 select set_config('petro.user_id', '00000000-0000-4000-8000-0000000000a1', true),
        set_config('petro.organization_id', '00000000-0000-4000-8000-0000000000b1', true),

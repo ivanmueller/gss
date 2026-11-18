@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: read
-  # Reads this workflow's earlier runs, to know which oil and gas migrations are new (F-247).
-  actions: read
 
 concurrency:
   group: deploy-staging
@@ -59,9 +57,6 @@ jobs:
       url: ${{ steps.deploy.outputs.url }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          # The history since the last successful deploy, to find new oil and gas migrations.
-          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -88,35 +83,28 @@ jobs:
         env:
           SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
         run: supabase db push --db-url "$SUPABASE_STAGING_DB_URL"
-      # The oil and gas database (petroleum-staging, F-247-1-D1-02): its migrations are applied only
-      # when this release brings new ones since the last successful deploy (or on a run started by
-      # hand), and then must succeed. A release without them deploys even if that database is
-      # paused or unreachable, so grain never waits on it.
-      - name: New oil and gas migrations?
+      # The oil and gas database (petroleum-staging, F-247-1-D1-02, R3-01, R3-02): every deploy
+      # applies whatever of its migrations it has not run yet (nothing when it is up to date), so
+      # no migration is ever skipped. On a release from a push, a failure (that database paused or
+      # unreachable) is a warning and grain still deploys: the Worker's oil and gas routes check
+      # that database's schema version themselves and answer "not ready" until it catches up, and
+      # the next deploy tries again. On a run started by hand (Actions → Deploy staging → Run
+      # workflow), the oil and gas database must be reachable, migrated and ready, or the run fails.
+      - name: Apply oil and gas database migrations
         id: petroleum
         if: needs.preflight.outputs.petroleum == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # A deploy that succeeded while PETROLEUM_STAGING_DB_URL was missing applied nothing here:
-          # after adding that secret, run this workflow by hand once (Actions → Deploy staging).
-          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy-staging.yml --branch main \
-            --status success --limit 1 --json headSha --jq '.[0].headSha // ""')
-          if [ "$GITHUB_EVENT_NAME" != push ] || [ -z "$last" ] || ! git cat-file -e "$last^{commit}"; then
-            echo "Applying oil and gas migrations (run by hand, or no earlier successful deploy found)."
-            echo "apply=true" >> "$GITHUB_OUTPUT"
-          elif [ -n "$(git diff --name-only "$last" HEAD -- petroleum/supabase/migrations)" ]; then
-            echo "New oil and gas migrations since $last."
-            echo "apply=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No new oil and gas migrations since $last."
-            echo "apply=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Apply oil and gas database migrations
-        if: steps.petroleum.outputs.apply == 'true'
-        env:
           PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
-        run: supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes
+        run: |
+          if supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes; then
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "::warning::The oil and gas database's migrations could not be applied (paused or unreachable?); grain deploys, the next deploy tries again."
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The oil and gas database's migrations could not be applied."
+            exit 1
+          fi
       - name: Deploy Worker
         id: deploy
         env:
@@ -130,7 +118,6 @@ jobs:
       - name: Smoke test
         env:
           URL: ${{ steps.deploy.outputs.url }}
-          PETROLEUM_REQUIRED: ${{ steps.petroleum.outputs.apply == 'true' }}
         run: |
           if [ -z "$URL" ]; then
             echo "::error::No workers.dev URL found in the wrangler output."
@@ -155,22 +142,28 @@ jobs:
             test "$status" = 401
           done
 
-          # The oil and gas database's readiness (F-247-1-D1-03): the route must exist and answer
-          # "ok" (reachable and migrated) or, until the Worker has its PETROLEUM binding, "not set
-          # up". The database being unavailable fails the check only when this release applied
-          # oil and gas migrations or the run was started by hand (PETROLEUM_REQUIRED); on other
-          # releases it is a warning, so grain never waits on it (F-247-1-D1-02). A missing route
-          # (401) or anything else always fails.
+          # The oil and gas database's readiness (F-247-1-D1-03, R3-03). The route must exist (a
+          # missing one answers 401) and answer:
+          # - "ok": reachable, migrated to the schema version the Worker needs;
+          # - "not set up": only while apps/api/wrangler.jsonc gives the Worker no PETROLEUM binding;
+          # - unavailable or not ready: a failure on a run started by hand, a warning on a release
+          #   from a push, so a paused oil and gas database never holds grain up.
+          # After a release that changes the oil and gas side (its migrations or its binding), Claude
+          # runs this workflow by hand to prove the connection (README, "The oil and gas database").
+          if grep -q '"binding": *"PETROLEUM"' apps/api/wrangler.jsonc; then bound=true; else bound=false; fi
           ready=$(curl --silent --show-error --write-out '\n%{http_code}' "$URL/api/v1/petroleum/ready")
-          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ }"
+          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding configured: $bound)"
           case "$ready" in
             *'"status":"ok"'*$'\n'200) ;;
             *'"code":"PETROLEUM_NOT_SET_UP"'*$'\n'503)
-              echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
-            *'"code":"DATABASE_UNAVAILABLE"'*$'\n'503)
-              if [ "$PETROLEUM_REQUIRED" = true ]; then
-                echo "::error::The oil and gas database is unavailable after its migrations."; exit 1
+              if [ "$bound" = true ]; then
+                echo "::error::The Worker has a PETROLEUM binding but answers that it is not set up."; exit 1
               fi
-              echo "::warning::The oil and gas database is unavailable (paused?); grain deployed." ;;
+              echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
+            *'"code":"DATABASE_UNAVAILABLE"'*$'\n'503 | *'"code":"PETROLEUM_NOT_READY"'*$'\n'503)
+              if [ "$GITHUB_EVENT_NAME" != push ]; then
+                echo "::error::The oil and gas database is unavailable or not migrated."; exit 1
+              fi
+              echo "::warning::The oil and gas database is unavailable or not migrated (paused?); grain deployed." ;;
             *) echo "::error::/api/v1/petroleum/ready did not answer as expected."; exit 1 ;;
           esac

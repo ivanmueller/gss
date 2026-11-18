@@ -131,7 +131,7 @@ Migrations in `supabase/migrations/` are authoritative for what exists; this lis
 
 | Migration | Adds |
 |---|---|
-| `20261118230000_petro_schema_and_api_role.sql` | Private `petro` schema; `petro_api` role (no login, no RLS bypass); `petro.current_user_id()`, `petro.current_organization_id()`, `petro.current_member_role()` reading the transaction's settings set by the Worker (a role outside the five member roles reads as null); `petro.ready()` for the Worker's readiness check; new functions not executable by `public` by default. |
+| `20261118230000_petro_schema_and_api_role.sql` | Private `petro` schema; `petro_api` role (no login, no RLS bypass); `petro.current_user_id()`, `petro.current_organization_id()`, `petro.current_member_role()` reading the transaction's settings set by the Worker (a role outside the five member roles reads as null); `petro.schema_version()` (1), which the Worker checks before its oil and gas routes; new functions not executable by `public` by default. |
 
 Not yet implemented from this model: role capabilities beyond the directory, team, quotes, freight and the CRM (§2.1 table; analysts' proposed quotes), invitations by email, `risk_flags`, contacts' confidential scope, an `updated_by` column (who changed a record is in the audit trail), grades as a table of their own (a revision records the grade as text), and every scenario and trade table.
 

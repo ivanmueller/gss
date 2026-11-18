@@ -80,20 +80,21 @@ as $$
   where r in ('viewer', 'analyst', 'trader', 'operations', 'org_admin')
 $$;
 
--- For the Worker's readiness check (GET /api/v1/petroleum/ready): true once this migration
--- has run. Reads nothing.
-create function petro.ready()
-returns boolean
+-- The schema's version: each later migration that the Worker's code depends on replaces this
+-- function with the next number, and the Worker refuses its oil and gas routes ("not ready")
+-- while the database is behind the version its code needs (F-247-1-R3-01). Reads nothing.
+create function petro.schema_version()
+returns integer
 language sql
 immutable
 set search_path = ''
 as $$
-  select true
+  select 1
 $$;
 
 revoke all on function petro.current_user_id(), petro.current_organization_id(),
-  petro.current_member_role(), petro.ready()
+  petro.current_member_role(), petro.schema_version()
   from public, anon, authenticated, service_role;
 grant execute on function petro.current_user_id(), petro.current_organization_id(),
-  petro.current_member_role(), petro.ready()
+  petro.current_member_role(), petro.schema_version()
   to petro_api;

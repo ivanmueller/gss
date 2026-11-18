@@ -2,7 +2,11 @@ import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 
 import { connectionOptions } from './db';
-import { createPetroleumDatabase, postgresPetroleum } from './petroleum-db';
+import {
+  createPetroleumDatabase,
+  PETROLEUM_SCHEMA_VERSION,
+  postgresPetroleum,
+} from './petroleum-db';
 
 // Integration test (F-247-1): the oil and gas database's queries as the real `petro_api` role,
 // against its real migration. CI creates that database in the local Supabase and gives
@@ -22,10 +26,10 @@ const ctx = (role: string) => ({
 });
 
 describe('the oil and gas database as petro_api', () => {
-  it('is ready once migrated', async () => {
+  it('has the schema version this code needs once migrated', async () => {
     const db = postgresPetroleum(PETRO_URL);
     try {
-      expect(await db.ready()).toBe(true);
+      expect(await db.schemaVersion()).toBe(PETROLEUM_SCHEMA_VERSION);
     } finally {
       await db.close();
     }

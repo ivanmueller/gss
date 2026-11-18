@@ -1,7 +1,11 @@
 import { Hono } from 'hono';
 
 import type { Membership } from './db';
-import type { PetroleumDatabase, PetroleumFactory } from './petroleum-db';
+import {
+  PETROLEUM_SCHEMA_VERSION,
+  type PetroleumDatabase,
+  type PetroleumFactory,
+} from './petroleum-db';
 import {
   apiError,
   closeLater,
@@ -30,7 +34,10 @@ function notSetUp(c: ApiContext) {
   return apiError(c, 503, 'PETROLEUM_NOT_SET_UP', 'The oil and gas database is not set up yet.');
 }
 
-/** Opens the oil and gas database, runs `handle`, and answers 503 (logged) if it is unreachable. */
+/**
+ * Opens the oil and gas database, checks it has the schema version this code needs (503
+ * PETROLEUM_NOT_READY if not), runs `handle`, and answers 503 (logged) if it is unreachable.
+ */
 async function withPetroleum(
   c: ApiContext,
   openPetroleum: PetroleumFactory,
@@ -51,6 +58,14 @@ async function withPetroleum(
     );
   }
   try {
+    if ((await db.schemaVersion()) < PETROLEUM_SCHEMA_VERSION) {
+      return apiError(
+        c,
+        503,
+        'PETROLEUM_NOT_READY',
+        'The oil and gas database is being updated. Try again in a few minutes.',
+      );
+    }
     return await handle(db);
   } catch (error) {
     console.error(
@@ -63,16 +78,15 @@ async function withPetroleum(
 }
 
 /**
- * GET /petroleum/ready, public: whether the oil and gas database is reachable and migrated, for
- * the deploy's smoke test (F-247-1-D1-03). It reads nothing and returns no tenant data.
+ * GET /petroleum/ready, public: whether the oil and gas database is reachable and at the schema
+ * version this code needs (withPetroleum checks it), for the deploy's smoke test
+ * (F-247-1-D1-03). It reads nothing and returns no tenant data.
  */
 export function petroleumReadyRoute(openPetroleum: PetroleumFactory) {
   return async (c: ApiContext) => {
     c.header('Cache-Control', 'no-store');
-    return withPetroleum(c, openPetroleum, async (db) =>
-      (await db.ready())
-        ? c.json({ status: 'ok', service: 'petroleum' })
-        : apiError(c, 503, 'DATABASE_UNAVAILABLE', 'The oil and gas database is unavailable.'),
+    return withPetroleum(c, openPetroleum, () =>
+      Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
     );
   };
 }
