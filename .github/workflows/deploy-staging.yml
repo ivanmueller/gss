@@ -166,13 +166,16 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" != push ]; then
             required=true
           elif [ "$bound" = true ]; then
-            # The PETROLEUM binding changed in this push, or the commit before it is unknown.
+            # This push changed the Worker's configuration (which holds the PETROLEUM binding and
+            # its Hyperdrive id), or the commit before it is unknown (F-247-1-R5-01).
             if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
-              || git diff "$BEFORE" HEAD -- apps/api/wrangler.jsonc | grep -q PETROLEUM; then
+              || ! git diff --quiet "$BEFORE" HEAD -- apps/api/wrangler.jsonc; then
               required=true
             fi
           fi
-          ready=$(curl --silent --show-error --write-out '\n%{http_code}' "$URL/api/v1/petroleum/ready")
+          # At most 60 seconds; a timeout reads as status 000 (F-247-1-R5-02).
+          ready=$(curl --silent --show-error --max-time 60 --write-out '\n%{http_code}' \
+            "$URL/api/v1/petroleum/ready" || true)
           echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding configured: $bound, connection required: $required)"
           case "$ready" in
             *'"status":"ok"'*$'\n'200) ;;
@@ -181,10 +184,13 @@ jobs:
                 echo "::error::The Worker has a PETROLEUM binding but answers that it is not set up."; exit 1
               fi
               echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
-            *'"code":"DATABASE_UNAVAILABLE"'*$'\n'503 | *'"code":"PETROLEUM_NOT_READY"'*$'\n'503)
+            # Unavailable, not migrated, timed out (000) or a gateway error (5xx): the oil and gas
+            # side only. A definite routing answer (a 401 for a missing route, any other status)
+            # falls to the last case and always fails.
+            *$'\n'5[0-9][0-9] | *$'\n'000)
               if [ "$required" = true ]; then
-                echo "::error::The oil and gas database is unavailable or not migrated."; exit 1
+                echo "::error::The oil and gas database is unavailable, not migrated or not answering."; exit 1
               fi
-              echo "::warning::The oil and gas database is unavailable or not migrated (paused?); grain deployed." ;;
+              echo "::warning::The oil and gas database is unavailable, not migrated or not answering (paused?); grain deployed." ;;
             *) echo "::error::/api/v1/petroleum/ready did not answer as expected."; exit 1 ;;
           esac

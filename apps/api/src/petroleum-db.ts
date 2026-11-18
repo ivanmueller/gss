@@ -38,6 +38,12 @@ export type PetroleumFactory = (
 ) => PetroleumDatabase;
 
 /**
+ * The longest any oil and gas query may run, so a stalled database answers "unavailable" within
+ * a request instead of holding it (F-247-1-R5-02). Set for each transaction only.
+ */
+const STATEMENT_TIMEOUT = '10s';
+
+/**
  * Runs `fn` in a transaction that first sets the person, organization, role and request for that
  * transaction only (set_config(..., true)), so a pooled connection never carries them on.
  */
@@ -47,6 +53,7 @@ async function asMember<T>(
   fn: (tx: postgres.TransactionSql) => Promise<T>,
 ): Promise<T> {
   return (await sql.begin(async (tx) => {
+    await tx`select set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;
     await tx`select set_config('petro.user_id', ${ctx.userId}, true),
                     set_config('petro.organization_id', ${ctx.organizationId}, true),
                     set_config('petro.member_role', ${ctx.role}, true),
@@ -59,7 +66,10 @@ async function asMember<T>(
 export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
   return {
     async schemaVersion() {
-      const [row] = await sql<{ version: number }[]>`select petro.schema_version() as version`;
+      const [row] = await sql.begin(async (tx) => {
+        await tx`select set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;
+        return tx<{ version: number }[]>`select petro.schema_version() as version`;
+      });
       return row?.version ?? 0;
     },
     organizationSeen(ctx) {

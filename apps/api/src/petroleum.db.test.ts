@@ -92,4 +92,31 @@ describe('the oil and gas database as petro_api', () => {
       await db.close();
     }
   });
+
+  // F-247-1-R5-02: each oil and gas query has a time limit, for its own transaction only.
+  it('limits each query to 10 seconds without changing the connection', async () => {
+    const sql = postgres(PETRO_URL, connectionOptions(PETRO_URL));
+    const db = createPetroleumDatabase(sql);
+    const timeout = async () =>
+      (await sql<{ t: string }[]>`select current_setting('statement_timeout') as t`)[0]?.t;
+    try {
+      const before = await timeout();
+      expect(before).not.toBe('10s');
+      expect(await db.schemaVersion()).toBe(PETROLEUM_SCHEMA_VERSION);
+      expect(await timeout()).toBe(before);
+      const inside = await sql.begin(async (tx) => {
+        await tx`select set_config('statement_timeout', '10s', true)`;
+        return (await tx<{ t: string }[]>`select current_setting('statement_timeout') as t`)[0]?.t;
+      });
+      expect(inside).toBe('10s');
+      await expect(
+        sql.begin(async (tx) => {
+          await tx`select set_config('statement_timeout', '50ms', true)`;
+          await tx`select pg_sleep(1)`;
+        }),
+      ).rejects.toMatchObject({ code: '57014' });
+    } finally {
+      await db.close();
+    }
+  });
 });
