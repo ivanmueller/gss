@@ -153,15 +153,19 @@ jobs:
           # The oil and gas database's readiness (F-247-1-D1-03, R3-03). The route must exist (a
           # missing one answers 401) and answer:
           # - "ok": reachable, migrated to the schema version the Worker needs;
-          # - "not set up": only while apps/api/wrangler.jsonc gives the Worker no PETROLEUM binding;
-          # - unavailable or not ready: a failure on a run started by hand and on the release whose
-          #   push changes the PETROLEUM binding (F-247-1-R4-01); a warning on other releases, so a
-          #   paused oil and gas database never holds grain up.
+          # - "not set up": only while the deployed Worker has no PETROLEUM binding;
+          # - unavailable, not ready, a gateway error or no complete answer within 60 seconds: a
+          #   failure on a run started by hand and on a push that changes the Worker's
+          #   configuration while it has the binding (F-247-1-R4-01); a warning on other releases,
+          #   so a paused oil and gas database never holds grain up.
           # After a release that changes the oil and gas side (its migrations or its binding), Claude
           # also runs this workflow by hand to prove the connection (README, "The oil and gas
           # database"): two pushes merged during one deploy can leave the second run's range
           # without the first push's change.
-          if grep -q '"binding": *"PETROLEUM"' apps/api/wrangler.jsonc; then bound=true; else bound=false; fi
+          # Whether the Worker has the binding is read from Wrangler's own list of the bindings it
+          # just deployed ("env.PETROLEUM (<id>)  Hyperdrive Config"), not from the file's text
+          # (F-247-1-R6-01).
+          if grep -Eq '^env\.PETROLEUM \(.*Hyperdrive' "$RUNNER_TEMP/deploy.log"; then bound=true; else bound=false; fi
           required=false
           if [ "$GITHUB_EVENT_NAME" != push ]; then
             required=true
@@ -173,10 +177,17 @@ jobs:
               required=true
             fi
           fi
-          # At most 60 seconds; a timeout reads as status 000 (F-247-1-R5-02).
-          ready=$(curl --silent --show-error --max-time 60 --write-out '\n%{http_code}' \
-            "$URL/api/v1/petroleum/ready" || true)
-          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding configured: $bound, connection required: $required)"
+          # At most 60 seconds. Any transfer failure (a timeout even after headers arrived, a reset)
+          # is classed by curl's own exit status as "no answer" before the status or body is read
+          # (F-247-1-R5-02, R6-02).
+          if ready=$(curl --silent --show-error --max-time 60 --write-out '\n%{http_code}' \
+            "$URL/api/v1/petroleum/ready"); then
+            :
+          else
+            echo "curl stopped with exit status $? (no complete answer)."
+            ready=$'\n000'
+          fi
+          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding deployed: $bound, connection required: $required)"
           case "$ready" in
             *'"status":"ok"'*$'\n'200) ;;
             *'"code":"PETROLEUM_NOT_SET_UP"'*$'\n'503)
@@ -184,7 +195,7 @@ jobs:
                 echo "::error::The Worker has a PETROLEUM binding but answers that it is not set up."; exit 1
               fi
               echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
-            # Unavailable, not migrated, timed out (000) or a gateway error (5xx): the oil and gas
+            # Unavailable, not migrated, no complete answer (000) or a gateway error (5xx): the oil and gas
             # side only. A definite routing answer (a 401 for a missing route, any other status)
             # falls to the last case and always fails.
             *$'\n'5[0-9][0-9] | *$'\n'000)
