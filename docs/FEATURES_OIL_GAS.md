@@ -9,8 +9,8 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | ID | Feature | Status |
 |---|---|---|
 | F-239 | The oil and gas map page: empty, with map styles and layers | In progress (`feat/f-239-oil-gas-map`) |
-| F-240 | Alberta reference layers: township grid and formation outlines | Needs owner input |
-| F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Needs owner input |
+| F-240 | Alberta reference layers: township grid and formation outlines; oil and gas layers kept apart from grain's | Planned (next) |
+| F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
 | F-243 | Wells, new licences and rig activity (AER) | Needs owner input |
 | F-244 | Companies across sources: buyers, holders and licensees | Needs owner input |
@@ -28,7 +28,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 **Built:** the full-page map at `map.torvenco.com` and `/map` shows no companies; it starts on Canada, with the map styles (street map, satellite) and the team's map layers (Layers button), as before. Signed-in members only.
 
-**Open:** whether the grain map layers (rail lines, crop areas) stay offered on this page or the oil and gas page gets its own list of layers.
+**Owner's answer (2026-11-18):** oil and gas has its own layers; until F-240 separates them, the Layers button still offers the team's grain layers.
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 
@@ -85,7 +85,16 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 **Status:** Needs owner input. The study covers Alberta only; "across Canada" needs each province's regulator and mineral-tenure data (British Columbia, Saskatchewan, Manitoba, and offshore Newfoundland and Labrador and Nova Scotia), each found and checked from its own pages, with its terms, before anything is built. Not started.
 
-## Questions for the owner (before F-240 onward)
+## Owner's answers (2026-11-18)
+
+1. **Purpose:** land and market analysis and intelligence (not trading oil or gas). So the companies here stay a reference list, not GSS's counterparties, unless the owner later says otherwise (F-244).
+2. **Alberta first.** Other provinces later (F-246).
+3. **Live layers first:** "if you think it's smartest; we can continue exploring the best way forward." The agent's recommendation: yes, F-240 then F-241, free and quick, while the stored data is planned.
+4. **Storage:** open to a paid database plan; the owner's wish is to load as much as the free plan holds, build with it, and buy the Pro plan once it is full. **Caution (agent):** the oil and gas tables would share the staging database that holds GSS's real grain records; a full database on the free plan is restricted by Supabase, which could stop saving bids, calls and email. Proposed instead: a size budget well under the free plan's limit (the limit and Supabase's behaviour read from its own pages first), each load measured, and the paid plan bought before the budget is reached. To confirm with the owner when F-242 is planned.
+5. **Who may open the page:** everyone on the team.
+6. **Layers:** oil and gas has its own layers, apart from grain's (F-240: a migration marking each map layer grain or oil and gas, the Layers button on each page offering only its own; high risk, Codex design review first).
+
+## Questions as first asked (2026-11-18)
 
 1. **What the desk does with it:** trading crude or natural gas physically, selling to producers, or market and land intelligence? It decides what to build first and whether these companies become counterparties (F-244).
 2. **Alberta first?** The study's sources are Alberta's; other provinces need their own study (F-246).
