@@ -23,7 +23,11 @@ import { SegmentedControl } from './ui/segmented-control';
 // Mapbox GL JS is large, so it is fetched only when a map is shown.
 const FacilityMap = lazy(() => import('./FacilityMap'));
 
-/** The starting view: Canada, from the Pacific to the Atlantic. */
+/**
+ * The starting view: Canada from the Pacific to the Atlantic, up to 70°N. The Arctic islands
+ * (to 83°N) are left out on purpose: on a Mercator map they would take most of the window and
+ * shrink the provinces where oil and gas is produced to half their height (F-239-R1-01).
+ */
 export const CANADA: MapBounds = [-141, 41.7, -52.6, 70];
 
 const NO_PINS = [] as const;

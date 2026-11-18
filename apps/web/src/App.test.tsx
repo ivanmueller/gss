@@ -343,7 +343,7 @@ describe('navigation', () => {
     render(<App />);
     expect(window.location.pathname).toBe('/map');
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument();
-    expect(screen.getByText('Sign in to see the counterparties.')).toBeInTheDocument();
+    expect(screen.getByText('Sign in to see the map.')).toBeInTheDocument();
   });
 
   it('sends the old map coordinates address to the counterparties page', async () => {

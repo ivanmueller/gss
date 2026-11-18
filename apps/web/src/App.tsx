@@ -83,8 +83,11 @@ export function App({ account }: { account?: Account }) {
   }, [redirectTo]);
 
   // Pages with GSS's records need a signed-in, active member.
-  function directory(render: (session: DirectorySession) => ReactNode): ReactNode {
-    if (!account) return <Notice>Sign in to see the counterparties.</Notice>;
+  function directory(
+    render: (session: DirectorySession) => ReactNode,
+    signedOut = 'Sign in to see the counterparties.',
+  ): ReactNode {
+    if (!account) return <Notice>{signedOut}</Notice>;
     if (me.status === 'error')
       return <Notice>The records appear once the server confirms your session.</Notice>;
     if (organization === undefined) return <Notice>Loading…</Notice>;
@@ -205,9 +208,12 @@ export function App({ account }: { account?: Account }) {
   if (route.page === 'map') {
     return (
       <main className="h-dvh w-full bg-background">
-        {directory((session) => (
-          <FullPageMap session={session} />
-        ))}
+        {directory(
+          (session) => (
+            <FullPageMap session={session} />
+          ),
+          'Sign in to see the map.',
+        )}
         {incomingCalls}
       </main>
     );

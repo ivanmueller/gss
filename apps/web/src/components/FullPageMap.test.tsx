@@ -37,6 +37,25 @@ describe('FullPageMap', () => {
     expect(screen.queryByRole('list', { name: 'Map legend' })).not.toBeInTheDocument();
   });
 
+  it('starts on the provinces where oil and gas is produced, coast to coast', () => {
+    const [west, south, east, north] = CANADA;
+    const places = {
+      'Fort McMurray': [-111.38, 56.73],
+      'Fort St. John': [-120.85, 56.25],
+      Estevan: [-102.99, 49.14],
+      Vancouver: [-123.12, 49.28],
+      "St. John's": [-52.71, 47.56],
+      'Point Pelee': [-82.51, 41.91],
+      Inuvik: [-133.72, 68.36],
+    } as const;
+    for (const [name, [lng, lat]] of Object.entries(places)) {
+      expect({ name, inside: lng >= west && lng <= east && lat >= south && lat <= north }).toEqual({
+        name,
+        inside: true,
+      });
+    }
+  });
+
   it('says what is wrong when there is no Mapbox token, or Mapbox refuses it', async () => {
     mockApi({});
     const { unmount } = render(<FullPageMap session={SESSION} mapbox={{ status: 'missing' }} />);
