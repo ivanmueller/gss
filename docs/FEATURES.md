@@ -181,7 +181,7 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 #### 1d. F-237 — Map pins as Google Maps draws saved places
 
-**Status:** In progress (`feat/f-237-google-style-pins`). Normal risk (screens only). **Asked:** 2026-11-16, after seeing F-101 on staging: the owner does not like the black count bubbles or the teardrop icons, and wants the pins to look like the saved places on Google Maps (three screenshots shown: Calgary close up, southern Alberta, and British Columbia to Montana zoomed out).
+**Status:** Live, check pending (merged as ivanmueller/gss#255 on 2026-11-16 and #256 on 2026-11-17; registers `docs/reviews/F-237.md` and `F-237-2.md`; the badge colours are an agent's choice for the owner to confirm). Normal risk (screens only). **Asked:** 2026-11-16, after seeing F-101 on staging: the owner does not like the black count bubbles or the teardrop icons, and wants the pins to look like the saved places on Google Maps (three screenshots shown: Calgary close up, southern Alberta, and British Columbia to Montana zoomed out).
 
 **Owner's answers (2026-11-16):**
 1. **Zoomed out:** no bubbles or numbers: "when they zoom out it's still the same dots". Every place keeps its own pin at every zoom, overlapping where crowded, as on Google Maps.
@@ -232,7 +232,7 @@ All of this is done: see `docs/FEATURES_DONE.md`.
 | ID | Feature | Status | What it needs before work starts |
 |---|---|---|---|
 | F-101 | **Change map markers** | Live, check pending (ivanmueller/gss#253, 2026-11-16) | See "Next up", 1c, for the answers and the plan. |
-| F-237 | **Map pins as Google Maps draws saved places** | In progress (`feat/f-237-google-style-pins`) | See "Next up", 1d. Follows F-101 on staging. |
+| F-237 | **Map pins as Google Maps draws saved places** | Live, check pending (ivanmueller/gss#255, 2026-11-16; #256, 2026-11-17) | See "Next up", 1d. Follows F-101 on staging. |
 | F-102 | **CSV template for importing buyers and sellers** | Planned | A **Download template** link in the + window's Import spreadsheet step: a CSV with the column headers the import recognizes, the required ones marked (today **Company name** and **Country**), and one made-up example row. One template for buyers and sellers, or one each (sellers have Grain type, Seller kind, Tonnes a year, Organic certificate; buyers have Market)? The carrier sheet could get its own. |
 | F-103 | **Buying frequency and contracts** | Needs owner input | What to record: how often each buyer buys (e.g. monthly, by season), its usual tonnes, standing contracts (start, end, tonnes, commodity)? Entered by hand, or counted from bids, offers and the contact log? Shown where (buyer's page, a filter on Counterparties)? Contract documents themselves are Phase 6 (GT-061). |
 | F-104 | **Backload strategy** | Needs owner input | Our reading: when a carrier delivers to a buyer, find a load for the trip back (or the reverse), from carriers' lanes and freight rates and sellers near the drop-off. To confirm: which direction, how near is "near", and whether it should suggest loads or only show them on the map. Relates to candidate matching (GT-053). |
@@ -273,7 +273,8 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 | ID | What to check | Pull requests |
 |---|---|---|
 | F-231 | **Reminder after an unanswered email** (F-114 step 5c part 2; its thread context was checked 2026-11-12): from a made-up test company's page, email your personal address a question and do not answer; from 2026-11-18 at the earliest (three business days later; reminders only for mail sent from 2026-11-13), "Reminder: no answer to …" on its **Emails** card and **Follow-ups → Emails to send**, for you; **Open** (To your address, "Re: …"), **Send**: the same thread in your mail program; a thanks-only email, or one answered in time, gets no reminder. | #236 |
-| F-101 | **Map markers:** on the Workspace and Counterparties maps, the four symbols (building, wheat ear, truck, handshake) in the usual colours, hollow when approximate, as in the legend; count bubbles when zoomed out (a click zooms in); names when zoomed in; a click on a pin opens a box beside it (name as a link, type, location; ✕, Escape or a click away closes it), on a phone a panel from the bottom; a company's own map and a freight route map alike. Confirm the main type of a company of several types: buyer, then seller, broker, carrier. | #253 |
+| F-101 | **Map markers:** on the Workspace and Counterparties maps, the four symbols (building, wheat ear, truck, handshake) in the usual colours, hollow when approximate, as in the legend; names when zoomed in; a click on a pin opens a box beside it (name as a link, type, location; ✕, Escape or a click away closes it), on a phone a panel from the bottom; a company's own map and a freight route map alike. Confirm the main type of a company of several types: buyer, then seller, broker, carrier. | #253 |
+| F-237 | **Map pins as Google Maps draws saved places:** zoomed all the way out and in on the Workspace and Counterparties maps, round badges with a white edge and a bold white symbol (building, wheat ear, truck, arrows), never black bubbles or numbers; the same pins at every zoom, crowded places overlapping; a click on a pin still opens its box. Confirm the colours: buyers green, sellers pink-red, carriers, brokers and both-ways companies blue. | #255, #256 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
