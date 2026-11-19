@@ -342,12 +342,21 @@ export function mapRequestRefusal(error: unknown): 'mapbox-token' | 'sign-in' | 
  * Worker answered "not a member" (403) or "no such layer" (404) for a layer's picture. The list of
  * layers is then read again (F-247-2-R9-02). A lapsed sign-in (401) is renewed, not this.
  */
-export function layerPictureStale(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
+export function layerPictureStale(error: unknown): StaleReason | null {
+  if (typeof error !== 'object' || error === null) return null;
   const status: unknown = 'status' in error ? error.status : undefined;
   const url: unknown = 'url' in error ? error.url : undefined;
-  return (status === 403 || status === 404) && typeof url === 'string' && isLayerPictureUrl(url);
+  if (typeof url !== 'string' || !isLayerPictureUrl(url)) return null;
+  return status === 403 ? 'refused' : status === 404 ? 'missing' : null;
 }
+
+/**
+ * Why the list of layers is read again: the Worker refused the person ("refused": signed out or
+ * not a member), or no longer has the layer ("missing"). After a refusal, a list read well again
+ * means access is back, and what the refusal let go is asked for again (F-247-2-R12-02); a
+ * missing layer is not asked for again by itself: the list says whether it is there.
+ */
+export type StaleReason = 'refused' | 'missing';
 
 /** The most picture addresses whose sign-in is remembered (a map asks for a few hundred). */
 const MAX_SENT_PICTURES = 1000;
@@ -669,7 +678,12 @@ export function useLayerOverlays(
    * Called when the server refuses a layer's data or no longer has the layer: the list of layers
    * is then read again, and only what it holds is drawn (F-247-2-R9-01).
    */
-  onStale?: () => void,
+  onStale?: (reason: StaleReason) => void,
+  /**
+   * Bumped when the list was read again, successfully, after a refusal: what the refusal let go
+   * is asked for again, the map standing still (F-247-2-R12-02).
+   */
+  retry = 0,
 ): { overlays: MapOverlay[]; notes: Map<string, string> } {
   const [files, setFiles] = useState<Map<string, GeoJSON.FeatureCollection | 'failed'>>(
     () => new Map(),
@@ -763,7 +777,8 @@ export function useLayerOverlays(
           }
           if (refused(error)) letGo([...wasOn.current]);
           else if (missing(error)) letGo([layerId]);
-          if (refused(error) || missing(error)) stale.current?.();
+          if (refused(error)) stale.current?.('refused');
+          else if (missing(error)) stale.current?.('missing');
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
     };
@@ -853,13 +868,14 @@ export function useLayerOverlays(
                 letGo([layer.id]);
               }
               // Either way the list of layers is read again: it says what is still there.
-              if (refused(error) || missing(error)) stale.current?.();
+              if (refused(error)) stale.current?.('refused');
+              else if (missing(error)) stale.current?.('missing');
               setSquares((current) => trimmed(new Map(current).set(key, 'failed')));
             });
         }
       }
     }
-  }, [layers, tiles, zoom, token, api, renewed]);
+  }, [layers, tiles, zoom, token, api, renewed, retry]);
 
   return useMemo(() => {
     const overlays: MapOverlay[] = [];

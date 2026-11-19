@@ -165,7 +165,7 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     });
     expect(shapes()).toBe(0);
     // The list of layers is asked to be read again: it says what is still there.
-    expect(onStale).toHaveBeenCalled();
+    expect(onStale).toHaveBeenCalledWith('missing');
 
     // F-247-2-R9-01: the layer is there again (a member suspended, then restored): asked for and
     // drawn as any other, without reloading the page.
@@ -346,28 +346,40 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     );
     const one = LAYERS.slice(0, 1);
     const onStale = vi.fn();
+    const later = { ...VIEW, zoom: 8 };
     const { result, rerender } = renderHook(
-      ({ view }: { view: typeof VIEW }) =>
-        useLayerOverlays(one, view, 'token', NO_CHOICES, onStale),
-      { initialProps: { view: VIEW } },
+      ({ view, retry }: { view: typeof VIEW; retry: number }) =>
+        useLayerOverlays(one, view, 'token', NO_CHOICES, onStale, retry),
+      { initialProps: { view: VIEW, retry: 0 } },
     );
     await waitFor(() => {
       expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
     });
     slow = true;
     refuse = true;
-    rerender({ view: { ...VIEW, zoom: 8 } });
+    rerender({ view: later, retry: 0 });
     await waitFor(() => {
       expect(result.current.notes.size).toBe(1);
     });
     expect(shapesOf(result.current.overlays)).toBe(0);
-    // Once for the view's refusals, not once per square (the first lets everything go).
+    // Once for the view's refusals, not once per square (the first lets everything go), and
+    // as a refusal of the person, not a missing layer.
     expect(onStale).toHaveBeenCalledTimes(1);
+    expect(onStale).toHaveBeenCalledWith('refused');
     await act(async () => {
       release();
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(shapesOf(result.current.overlays)).toBe(0);
+
+    // F-247-2-R12-02: access is back and the list read well again, the very same layers: told
+    // to ask again, the map draws its squares without being moved.
+    refuse = false;
+    rerender({ view: later, retry: 1 });
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+    expect(result.current.notes.size).toBe(0);
   });
 
   // F-247-2-R7-02: a refusal to a request sent under an expired sign-in says nothing about the

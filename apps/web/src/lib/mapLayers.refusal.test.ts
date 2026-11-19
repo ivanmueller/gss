@@ -13,13 +13,13 @@ const MAPBOX_STYLE = 'https://api.mapbox.com/styles/v1/mapbox/light-v11?access_t
 // about layers.
 describe('layerPictureStale', () => {
   it('is a layer picture refused for good, or of a layer no longer there', () => {
-    expect(layerPictureStale(failed(404, PICTURES))).toBe(true);
-    expect(layerPictureStale(failed(403, PICTURES))).toBe(true);
-    expect(layerPictureStale(failed(401, PICTURES))).toBe(false);
-    expect(layerPictureStale(failed(502, PICTURES))).toBe(false);
-    expect(layerPictureStale(failed(404, MAPBOX_STYLE))).toBe(false);
-    expect(layerPictureStale({ status: 404 })).toBe(false);
-    expect(layerPictureStale(null)).toBe(false);
+    expect(layerPictureStale(failed(404, PICTURES))).toBe('missing');
+    expect(layerPictureStale(failed(403, PICTURES))).toBe('refused');
+    expect(layerPictureStale(failed(401, PICTURES))).toBeNull();
+    expect(layerPictureStale(failed(502, PICTURES))).toBeNull();
+    expect(layerPictureStale(failed(404, MAPBOX_STYLE))).toBeNull();
+    expect(layerPictureStale({ status: 404 })).toBeNull();
+    expect(layerPictureStale(null)).toBeNull();
   });
 });
 

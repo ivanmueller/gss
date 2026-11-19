@@ -1277,7 +1277,15 @@ export function layerRoutes(backend: LayerBackend) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Only a WMS layer names WMS layers.');
       }
       const onlyValues = changes.onlyField === null ? [] : changes.onlyValues;
-      if (changes.alsoFields.length > 0 || changes.onlyField !== null) {
+      // A live layer's new colour field is checked against the service like its other fields:
+      // one it does not have would be asked for with every square, and a service that refuses
+      // unknown fields would leave the layer blank (F-247-2-R12-01). A layer whose colour field
+      // stays as it is saves without asking the service.
+      const colourChanged =
+        current.kind === 'arcgis_features' &&
+        changes.colourField !== null &&
+        changes.colourField !== current.colourField;
+      if (changes.alsoFields.length > 0 || changes.onlyField !== null || colourChanged) {
         if (current.kind !== 'arcgis_features' || current.url === null) {
           return apiError(
             c,
@@ -1292,6 +1300,9 @@ export function layerRoutes(backend: LayerBackend) {
         }
         try {
           const { fields } = await describeArcgis(current.url);
+          if (colourChanged && !fields.includes(changes.colourField ?? '')) {
+            return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
+          }
           const problem = sharedProblem(fields, changes);
           if (problem !== null) return apiError(c, 422, 'VALIDATION_FAILED', problem);
         } catch (error) {

@@ -27,6 +27,7 @@ import {
   type MapOverlay,
   type OverlayLook,
   type PickedFeature,
+  type StaleReason,
 } from '../lib/mapLayers';
 import type { Theme } from '../lib/theme';
 import { PinDetailsBox, type PinAnchor } from './PinDetailsBox';
@@ -101,7 +102,12 @@ export interface FacilityMapProps {
    * A map layer's picture was refused or its layer is no longer there: the list of layers is
    * read again, and a layer it no longer holds leaves the map (F-247-2-R9-02).
    */
-  onLayersStale?: (() => void) | undefined;
+  onLayersStale?: ((reason: StaleReason) => void) | undefined;
+  /**
+   * Bumped when access is back after a refusal: the layers' pictures are asked for again, the
+   * map standing still (F-247-2-R12-02).
+   */
+  layersRetry?: number | undefined;
 }
 
 function selectedData(pins: readonly MapPin[], selectedId: string | null): PinFeatureCollection {
@@ -580,7 +586,8 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('error', (event: { error?: unknown }) => {
       const refusal = mapRequestRefusal(event.error);
       if (refusal === 'mapbox-token') latest.current.onTokenRefused();
-      if (layerPictureStale(event.error)) latest.current.onLayersStale?.();
+      const stale = layerPictureStale(event.error);
+      if (stale) latest.current.onLayersStale?.(stale);
       // The person's sign-in lapsed: the pictures load again once it renews (below), or at
       // once if it renewed while this answer was on its way.
       const url = (event.error as { url?: unknown }).url;
@@ -605,6 +612,12 @@ export default function FacilityMap(props: FacilityMapProps) {
     const instance = map.current;
     if (instance && pictureSignIns.current.renewed(authToken)) reloadPictures(instance);
   }, [authToken]);
+
+  const { layersRetry } = props;
+  useEffect(() => {
+    const instance = map.current;
+    if (instance && styleReady.current && layersRetry) reloadPictures(instance);
+  }, [layersRetry]);
 
   useEffect(() => {
     const instance = map.current;

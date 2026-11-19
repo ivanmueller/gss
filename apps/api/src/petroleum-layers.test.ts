@@ -421,6 +421,47 @@ describe('adding, changing and removing as an admin', () => {
     );
   });
 
+  // F-247-2-R12-01: a new colour field is checked against the service, with no other field or
+  // limit sent; one the service does not have is not saved.
+  it('refuses a new colour field the service does not have, and takes one it has', async () => {
+    petroleum.layerSource.mockResolvedValue(source);
+    const body = { ...details, version: VERSION, wmsLayers: null, mapVisible: true };
+    const missing = await send(`/${LAYER}`, 'PATCH', {
+      ...body,
+      colourField: 'RETIRED_FIELD',
+      colours: [['Active', '#e6194b']],
+    });
+    expect(missing.status).toBe(422);
+    expect(await code(missing)).toBe('VALIDATION_FAILED');
+    expect(petroleum.updateLayer).not.toHaveBeenCalled();
+    expect(serviceCalls.filter((url) => url.startsWith(`${SERVICE}?f=json`))).toHaveLength(1);
+
+    const there = await send(`/${LAYER}`, 'PATCH', {
+      ...body,
+      colourField: 'STATUS',
+      colours: [['Active', '#e6194b']],
+    });
+    expect(there.status).toBe(200);
+    expect(petroleum.updateLayer).toHaveBeenCalledWith(
+      expect.anything(),
+      LAYER,
+      VERSION,
+      expect.objectContaining({ colourField: 'STATUS' }),
+    );
+
+    // The colour field as it already is: saved without asking the service.
+    serviceCalls = [];
+    petroleum.layerSource.mockResolvedValue({ ...source, colourField: 'STATUS' });
+    const same = await send(`/${LAYER}`, 'PATCH', {
+      ...body,
+      name: 'Agreements, renamed',
+      colourField: 'STATUS',
+      colours: [['Active', '#e6194b']],
+    });
+    expect(same.status).toBe(200);
+    expect(serviceCalls).toEqual([]);
+  });
+
   it('answers 409 for a version someone else changed, 404 for a removed layer', async () => {
     petroleum.layerSource.mockResolvedValue(source);
     petroleum.updateLayer.mockResolvedValue({ status: 'stale' });

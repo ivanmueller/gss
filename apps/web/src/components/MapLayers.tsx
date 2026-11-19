@@ -16,6 +16,7 @@ import {
   type MapOverlay,
   type MapView,
   type PickedFeature,
+  type StaleReason,
   type ValueChoice,
 } from '../lib/mapLayers';
 import { useApiResource } from '../lib/useApiResource';
@@ -60,7 +61,12 @@ export interface MapLayersState {
    * shape's details): the list is read again, at most once every few seconds, and the map draws
    * only what it holds (F-247-2-R9-01, R9-02).
    */
-  onStale?: () => void;
+  onStale?: (reason?: StaleReason) => void;
+  /**
+   * Bumped when the list is read well again after a refusal: the map asks again for the squares
+   * and pictures the refusal let go (F-247-2-R12-02).
+   */
+  retry?: number;
 }
 
 /** The list of layers is read again at most this often on the server's refusals. */
@@ -97,22 +103,28 @@ export function useMapLayers(
   const [view, setView] = useState<MapView | null>(null);
   const lastStale = useRef(0);
   const laterStale = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onStale = useCallback(() => {
-    // Not on every refused square of one view: once at once, and, for a refusal that comes
-    // during the pause after it, once more when the pause ends, so a later change (a second
-    // layer removed) is never missed (F-247-2-R10-01).
-    const wait = lastStale.current + STALE_RELOAD_MS - Date.now();
-    if (wait <= 0) {
-      lastStale.current = Date.now();
-      reload();
-      return;
-    }
-    laterStale.current ??= setTimeout(() => {
-      laterStale.current = null;
-      lastStale.current = Date.now();
-      reload();
-    }, wait);
-  }, [reload]);
+  const retryAfter = useRef(false);
+  const [retry, setRetry] = useState(0);
+  const onStale = useCallback(
+    (reason?: StaleReason) => {
+      if (reason === 'refused') retryAfter.current = true;
+      // Not on every refused square of one view: once at once, and, for a refusal that comes
+      // during the pause after it, once more when the pause ends, so a later change (a second
+      // layer removed) is never missed (F-247-2-R10-01).
+      const wait = lastStale.current + STALE_RELOAD_MS - Date.now();
+      if (wait <= 0) {
+        lastStale.current = Date.now();
+        reload();
+        return;
+      }
+      laterStale.current ??= setTimeout(() => {
+        laterStale.current = null;
+        lastStale.current = Date.now();
+        reload();
+      }, wait);
+    },
+    [reload],
+  );
   useEffect(
     () => () => {
       if (laterStale.current) clearTimeout(laterStale.current);
@@ -120,7 +132,14 @@ export function useMapLayers(
     [],
   );
   const listRefused = list.status === 'error';
-  const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale);
+  // The list read well again after a refusal (access is back, perhaps with the very same
+  // layers): what the refusal let go is asked for again, the map standing still.
+  useEffect(() => {
+    if (list.status !== 'ok' || !retryAfter.current) return;
+    retryAfter.current = false;
+    setRetry((n) => n + 1);
+  }, [list]);
+  const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale, retry);
   const [picked, setPicked] = useState<PickedFeature | null>(null);
   // A clicked shape's details go with its layer: switched off or no longer in the list, they are
   // forgotten, not hidden, so nothing of them shows when the layer is switched back on
@@ -151,6 +170,7 @@ export function useMapLayers(
     error: list.status === 'error' ? list.error.message : null,
     reload,
     onStale,
+    retry,
   };
 }
 
@@ -676,7 +696,9 @@ export function PickedFeatureCard({
         if (controller.signal.aborted) return;
         setDetails({ key, fields: 'failed' });
         // Refused, or the layer is no longer there: the list says what is (F-247-2-R9-01).
-        if (error instanceof ApiError && [401, 403, 404].includes(error.status)) onStale?.();
+        if (!(error instanceof ApiError)) return;
+        if (error.status === 404) onStale?.('missing');
+        else if (error.status === 401 || error.status === 403) onStale?.('refused');
       });
     return () => {
       controller.abort();

@@ -26,8 +26,12 @@ vi.mock('./FacilityMap', () => ({
       >
         Click a shape
       </button>
-      <button type="button" onClick={props.onLayersStale}>
+      <p>{`Asked again: ${String(props.layersRetry ?? 0)}`}</p>
+      <button type="button" onClick={() => props.onLayersStale?.('missing')}>
         A picture is refused
+      </button>
+      <button type="button" onClick={() => props.onLayersStale?.('refused')}>
+        The person is refused
       </button>
       <button
         type="button"
@@ -376,6 +380,34 @@ describe('FullPageMap', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // F-247-2-R12-02: a square or picture refused ("not a member"), and access back before the
+  // list is read again: the list comes back the same, so nothing else would ask again. The map
+  // is told to, standing still. A layer merely missing is not asked for again by itself.
+  it('asks the map again for what a refusal let go once the list is read well', async () => {
+    const calls = mockApi({ [LIST]: listOf(pictures), ...noLegend });
+    const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    expect(await screen.findByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
+    expect(screen.getByText('Asked again: 0')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'The person is refused' }));
+    expect(await screen.findByText('Asked again: 1')).toBeInTheDocument();
+    expect(lists()).toBe(2);
+    expect(screen.getByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
+  });
+
+  it('does not ask the map again by itself for a layer that is only missing', async () => {
+    const calls = mockApi({ [LIST]: listOf(pictures), ...noLegend });
+    const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    expect(await screen.findByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
+    await waitFor(() => {
+      expect(lists()).toBe(2);
+    });
+    expect(screen.getByText('Asked again: 0')).toBeInTheDocument();
   });
 
   // F-247-2-R9-01: a member suspended, then restored, with the map open. While the list is
