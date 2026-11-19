@@ -21,8 +21,14 @@ concurrency:
 
 jobs:
   # Lets the workflow pass with a notice until the owner adds the secrets.
+  # In the staging environment like the deploy itself (F-247-1-R16-01): every job that receives a
+  # staging credential (Cloudflare's token included, which deploys the Worker and manages its
+  # Hyperdrive connections) is one GitHub allows from main only, whatever a branch's copy of this
+  # file says. Secrets of the environment take precedence over repository secrets of the same
+  # name; the credentials belong in the environment only (README, "The oil and gas database").
   preflight:
     runs-on: ubuntu-latest
+    environment: staging
     outputs:
       ready: ${{ steps.check.outputs.ready }}
       database: ${{ steps.check.outputs.database }}
