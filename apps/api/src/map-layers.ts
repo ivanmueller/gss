@@ -436,6 +436,16 @@ const MAX_DESCRIPTION_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
 /** Pictures and squares of a live layer are kept by the browser for an hour. */
 const LIVE_CACHE = 'private, max-age=3600';
+
+/**
+ * A live layer's answer is kept by the person's own browser for an hour, and only for the
+ * sign-in it was given to: with Vary, another account signing in on the same browser is never
+ * served it from the browser's cache without its own membership check (F-247-2-R1-01).
+ */
+function keptForAnHour(c: ApiContext) {
+  c.header('Cache-Control', LIVE_CACHE);
+  c.header('Vary', 'Authorization', { append: true });
+}
 const NOT_MEMBER = 'You are not an active member.';
 const ADMINS_ONLY = 'Only admins add, change and remove map layers.';
 const USER_AGENT = 'GSS map layers (Cloudflare Worker)';
@@ -1322,7 +1332,7 @@ export function layerRoutes(backend: LayerBackend) {
       if (!/^\s*\{\s*"(type|crs|features|properties)"/.test(start)) {
         return serviceFailed(c, new LayerServiceError(422), 'square');
       }
-      c.header('Cache-Control', LIVE_CACHE);
+      keptForAnHour(c);
       c.header('Content-Type', 'application/json');
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);
@@ -1537,7 +1547,7 @@ export function layerRoutes(backend: LayerBackend) {
       } catch (error) {
         return serviceFailed(c, error, 'legend');
       }
-      c.header('Cache-Control', LIVE_CACHE);
+      keptForAnHour(c);
       return c.json({ entries: await legendEntries(body) } satisfies LayerLegend);
     });
   });
@@ -1581,14 +1591,14 @@ export function layerRoutes(backend: LayerBackend) {
           error instanceof LayerServiceError &&
           error.status === 404
         ) {
-          c.header('Cache-Control', LIVE_CACHE);
+          keptForAnHour(c);
           return c.body(null, 204);
         }
         return serviceFailed(c, error, 'picture');
       }
       const type = await pictureType(answer.body);
       if (type === null) return serviceFailed(c, new LayerServiceError(415), 'picture');
-      c.header('Cache-Control', LIVE_CACHE);
+      keptForAnHour(c);
       c.header('Content-Type', type);
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);

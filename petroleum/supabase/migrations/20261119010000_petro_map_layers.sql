@@ -83,8 +83,9 @@ create table petro.map_layers (
     source_name = btrim(source_name) and length(source_name) between 1 and 200
     and source_name !~ '[[:cntrl:]]'
   ),
+  -- Letters of either case, as the API takes them (F-247-2-R1-02).
   terms_url text not null check (
-    terms_url ~ '^https?://[a-z0-9.-]+\.[a-z]{2,63}(/[^[:space:][:cntrl:]]*)?$'
+    terms_url ~* '^https?://[a-z0-9.-]+\.[a-z]{2,63}(/[^[:space:][:cntrl:]]*)?$'
     and length(terms_url) <= 2000
   ),
   terms_note text not null check (

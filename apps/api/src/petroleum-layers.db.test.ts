@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { connectionOptions } from './db';
 import type { MapLayerChanges, NewMapLayer } from './map-layers-db';
-import { createPetroleumDatabase, type PetroleumContext } from './petroleum-db';
+import { createPetroleumDatabase, LayerRefusedError, type PetroleumContext } from './petroleum-db';
 
 // Integration test (F-247 part 2): the oil and gas map layer queries as the real `petro_api`
 // role, against the real migration. Each test uses its own made-up organization, so the rows it
@@ -193,6 +193,38 @@ describe('oil and gas map layers as petro_api', () => {
     const changes: MapLayerChanges = { ...layer({ name: 'Renamed' }), mapVisible: undefined };
     expect(await db.updateLayer(admin, id, version, changes)).toEqual({ status: 'saved', id });
     expect((await db.listLayers(admin))[0]).toMatchObject({ name: 'Renamed', mapVisible: true });
+  });
+
+  // F-247-2-R1-02: the API takes a terms link in either case; so does the table.
+  it('keeps a terms link with capital letters, added or changed', async () => {
+    const admin = member('org_admin');
+    const termsUrl = 'HTTPS://Example.COM/Terms';
+    const id = await added(admin, { termsUrl });
+    const [kept] = await db.listLayers(admin);
+    expect(kept?.termsUrl).toBe(termsUrl);
+    const other = 'https://EXAMPLE.com/Licence';
+    expect(
+      await db.updateLayer(admin, id, kept?.version ?? '', layer({ termsUrl: other })),
+    ).toEqual({ status: 'saved', id });
+    expect((await db.listLayers(admin))[0]?.termsUrl).toBe(other);
+  });
+
+  it('names a value the table’s checks refuse, and keeps nothing of it', async () => {
+    const admin = member('org_admin');
+    // A control character in the link: the API's own check lets it through.
+    await expect(
+      db.createLayer(admin, layer({ termsUrl: 'https://example.com/a\u0001b' })),
+    ).rejects.toBeInstanceOf(LayerRefusedError);
+    expect(await db.listLayers(admin)).toEqual([]);
+    const id = await added(admin);
+    const version = (await db.listLayers(admin))[0]?.version ?? '';
+    await expect(
+      db.updateLayer(admin, id, version, layer({ termsUrl: 'https://example.com/a\u0001b' })),
+    ).rejects.toBeInstanceOf(LayerRefusedError);
+    expect((await db.listLayers(admin))[0]).toMatchObject({
+      termsUrl: 'https://example.com/terms',
+      version,
+    });
   });
 
   it('removes a layer for good: gone from the list, never changed again', async () => {

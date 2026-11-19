@@ -5,7 +5,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public;
 
-select plan(65);
+select plan(66);
 
 -- Privileges.
 select ok(
@@ -300,6 +300,15 @@ language sql as $fn$
     col, val)
 $fn$;
 select lives_ok(pg_temp.row_with('opacity', '0.5'), 'a well-formed layer passes the checks');
+select lives_ok(
+  $$insert into petro.map_layers (organization_id, name, kind, source_url, source_name,
+      terms_url, terms_note, colour, created_by, updated_by)
+    values ('00000000-0000-4000-8000-0000000000b2', 'Capitals', 'arcgis_features',
+      'https://services.example.com/rest/services/Land/MapServer/8', 'Synthetic publisher',
+      'HTTPS://Example.COM/Terms', 'Open licence.', '#2f6baa',
+      '00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a1')$$,
+  'a terms link may have capital letters, as the API takes it (F-247-2-R1-02)'
+);
 select throws_ok(
   $$insert into petro.map_layers (organization_id, name, kind, source_url, source_name,
       terms_url, terms_note, colour, created_by, updated_by)

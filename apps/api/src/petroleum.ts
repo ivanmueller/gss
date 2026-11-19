@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { Membership } from './db';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import {
+  LayerRefusedError,
   PETROLEUM_SCHEMA_VERSION,
   TooManyLayersError,
   type PetroleumContext,
@@ -161,7 +162,8 @@ async function withPetroleumCalls(
       work.catch(() => undefined);
       return await Promise.race([work, deadline]);
     } catch (error) {
-      if (error instanceof TooManyLayersError) throw error;
+      // The database's own refusals of a layer are answers, not outages.
+      if (error instanceof TooManyLayersError || error instanceof LayerRefusedError) throw error;
       throw new PetroleumFailure(error);
     } finally {
       clearTimeout(timer);
@@ -184,6 +186,14 @@ async function withPetroleumCalls(
         422,
         'TOO_MANY_LAYERS',
         'The map has the most layers it can keep. Remove one before adding another.',
+      );
+    }
+    if (error instanceof LayerRefusedError) {
+      return apiError(
+        c,
+        422,
+        'VALIDATION_FAILED',
+        'The map layer was not saved: check its name, source, terms and colours.',
       );
     }
     if (!(error instanceof PetroleumFailure)) throw error;

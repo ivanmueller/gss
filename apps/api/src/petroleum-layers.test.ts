@@ -4,6 +4,7 @@ import type { Database } from './db';
 import { createApp } from './index';
 import type { MapLayerSource } from './map-layers-db';
 import {
+  LayerRefusedError,
   PETROLEUM_SCHEMA_VERSION,
   TooManyLayersError,
   type PetroleumFactory,
@@ -39,6 +40,13 @@ const DESCRIPTION = {
   ],
 };
 const SQUARE = { type: 'FeatureCollection', features: [] };
+/** A real 1-pixel PNG. */
+const ONE_PIXEL_BYTES = Uint8Array.from(
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  ),
+  (ch) => ch.charCodeAt(0),
+);
 
 const source: MapLayerSource = {
   id: LAYER,
@@ -292,6 +300,49 @@ describe('adding, changing and removing as an admin', () => {
     expect(await code(res)).toBe('TOO_MANY_LAYERS');
   });
 
+  // F-247-2-R1-02: a value the database's checks refuse is the person's to correct (422), never
+  // reported as the database being unavailable.
+  it('answers 422, not "unavailable", when the database refuses a layer’s values', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    petroleum.createLayer.mockRejectedValue(new LayerRefusedError());
+    const added = await send('', 'POST', {
+      ...details,
+      source: 'web',
+      url: SERVICE,
+      wmsLayers: null,
+    });
+    expect(added.status).toBe(422);
+    expect(await code(added)).toBe('VALIDATION_FAILED');
+    petroleum.layerSource.mockResolvedValue(source);
+    petroleum.updateLayer.mockRejectedValue(new LayerRefusedError());
+    const changed = await send(`/${LAYER}`, 'PATCH', {
+      ...details,
+      version: VERSION,
+      wmsLayers: null,
+      mapVisible: true,
+    });
+    expect(changed.status).toBe(422);
+    expect(await code(changed)).toBe('VALIDATION_FAILED');
+    expect(logged).not.toHaveBeenCalled();
+    expect(petroleum.abort).not.toHaveBeenCalled();
+  });
+
+  it('passes a terms link with capital letters on as typed', async () => {
+    const termsUrl = 'HTTPS://Example.COM/Terms';
+    const res = await send('', 'POST', {
+      ...details,
+      termsUrl,
+      source: 'web',
+      url: SERVICE,
+      wmsLayers: null,
+    });
+    expect(res.status).toBe(201);
+    expect(petroleum.createLayer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ termsUrl }),
+    );
+  });
+
   it('changes a layer, its default included, and needs the default sent', async () => {
     petroleum.layerSource.mockResolvedValue(source);
     const body = { ...details, version: VERSION, wmsLayers: null };
@@ -386,6 +437,9 @@ describe('squares, pictures and details', () => {
     const res = await send(`/${LAYER}/features/5/5/10`);
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('private, max-age=3600');
+    // Kept by the browser for this sign-in only: another account on the same browser is not
+    // served it from the cache, so its own membership is checked (F-247-2-R1-01).
+    expect(res.headers.get('Vary')).toMatch(/\bAuthorization\b/);
     expect(serviceCalls).toHaveLength(1);
     expect(serviceCalls[0]?.startsWith(`${SERVICE}/query?`)).toBe(true);
   });
@@ -408,7 +462,13 @@ describe('squares, pictures and details', () => {
     service = () => Response.json({ layers: [] });
     const res = await send(`/${LAYER}/legend`);
     expect(res.status).toBe(200);
+    expect(res.headers.get('Vary')).toMatch(/\bAuthorization\b/);
     expect(await res.json()).toEqual({ entries: [] });
+    service = () => new Response(ONE_PIXEL_BYTES, { headers: { 'Content-Type': 'image/png' } });
+    const picture = await send(`/${LAYER}/tiles/5/5/10.png`);
+    expect(picture.status).toBe(200);
+    expect(picture.headers.get('Cache-Control')).toBe('private, max-age=3600');
+    expect(picture.headers.get('Vary')).toMatch(/\bAuthorization\b/);
   });
 });
 

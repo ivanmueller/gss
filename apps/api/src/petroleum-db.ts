@@ -139,6 +139,35 @@ async function layerWritable(
   return null;
 }
 
+/**
+ * The database refused a layer's values (a check, SQLSTATE 23514): something the API's own
+ * checks let through. The person is told to correct it; it is not a database outage
+ * (F-247-2-R1-02).
+ */
+export class LayerRefusedError extends Error {
+  constructor() {
+    super('map layer refused by a check');
+    this.name = 'LayerRefusedError';
+  }
+}
+
+/** Turns the database's own refusals of a layer into the errors the routes answer for. */
+function layerRefusal(error: unknown): unknown {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    if (error.code === 'PT001') return new TooManyLayersError();
+    if (error.code === '23514') return new LayerRefusedError();
+  }
+  return error;
+}
+
+async function refusalsNamed<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work;
+  } catch (error) {
+    throw layerRefusal(error);
+  }
+}
+
 /** The oil and gas database over an existing connection; tests use it directly. */
 export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
   return {
@@ -246,22 +275,15 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
           return { status: 'saved', id: saved.id };
         });
       } catch (error) {
-        if (
-          typeof error === 'object' &&
-          error !== null &&
-          'code' in error &&
-          error.code === 'PT001'
-        ) {
-          throw new TooManyLayersError();
-        }
-        throw error;
+        throw layerRefusal(error);
       }
     },
     updateLayer(ctx, id, version, changes) {
-      return asMember(sql, ctx, async (tx): Promise<MapLayerWrite> => {
-        const refused = await layerWritable(tx, id, version);
-        if (refused) return refused;
-        const updated = await tx`
+      return refusalsNamed(
+        asMember(sql, ctx, async (tx): Promise<MapLayerWrite> => {
+          const refused = await layerWritable(tx, id, version);
+          if (refused) return refused;
+          const updated = await tx`
           update petro.map_layers set
             name = ${changes.name}, source_name = ${changes.sourceName},
             terms_url = ${changes.termsUrl}, terms_note = ${changes.termsNote},
@@ -273,8 +295,9 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
             shown_by_default = coalesce(${changes.mapVisible ?? null}::boolean, shown_by_default),
             updated_by = petro.current_user_id()
           where id = ${id} and updated_at::text = ${version} and removed_at is null`;
-        return updated.count === 1 ? { status: 'saved', id } : { status: 'stale' };
-      });
+          return updated.count === 1 ? { status: 'saved', id } : { status: 'stale' };
+        }),
+      );
     },
     removeLayer(ctx, id, version) {
       return asMember(sql, ctx, async (tx): Promise<MapLayerWrite> => {
