@@ -17,6 +17,7 @@ import type { ExpressionSpecification, FilterSpecification } from 'mapbox-gl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from './api';
+import { LAYER_PICTURE_BASES, useLayerApi, type LayerApi } from './layerApi';
 import { signedInAs } from './useApiResource';
 
 // Map layers in the browser (F-107): reading a file an admin adds, the colours a layer is
@@ -268,6 +269,39 @@ export function useLayerChoice(
   return [useMemo(() => new Set(ids), [ids]), toggle, setMany];
 }
 
+/**
+ * The layers that are on where an admin chooses which are on when the map opens (the oil and gas
+ * map, F-247; the owner, 2026-11-19): every visit starts from the admin's choice, and a person's
+ * own switching lasts until they close or reload the page. Nothing is kept in the browser.
+ */
+export function useDefaultLayerChoice(
+  layers: readonly Pick<MapLayerView, 'id' | 'mapVisible'>[],
+): [ReadonlySet<string>, (id: string) => void, (ids: readonly string[], on: boolean) => void] {
+  // The person's own switches this visit: true on, false off; a layer not here follows the admin.
+  const [own, setOwn] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const chosen = useMemo(
+    () =>
+      new Set(
+        layers.filter((layer) => own.get(layer.id) ?? layer.mapVisible).map((layer) => layer.id),
+      ),
+    [layers, own],
+  );
+  const setMany = useCallback((ids: readonly string[], on: boolean) => {
+    setOwn((current) => {
+      const next = new Map(current);
+      for (const id of ids) next.set(id, on);
+      return next;
+    });
+  }, []);
+  const toggle = useCallback(
+    (id: string) => {
+      setMany([id], !chosen.has(id));
+    },
+    [chosen, setMany],
+  );
+  return [chosen, toggle, setMany];
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fetching the features of the layers that are on
 
@@ -281,13 +315,13 @@ type Square = { features: GeoJSON.Feature[]; exceeded: boolean } | 'failed';
 /** The most map squares kept in memory, across layers and zooms. */
 const MAX_KEPT_SQUARES = 600;
 
-function picturesUrl(id: string): string {
-  return `${window.location.origin}/api/v1/map-layers/${id}/tiles/{z}/{x}/{y}.png`;
+function picturesUrl(api: LayerApi, id: string): string {
+  return `${window.location.origin}/api/v1${api.path(`/${id}/tiles/{z}/{x}/{y}.png`)}`;
 }
 
 /** Whether a request to this address carries the person's sign-in (FacilityMap's pictures). */
 export function isLayerPictureUrl(url: string): boolean {
-  return url.startsWith(`${window.location.origin}/api/v1/map-layers/`);
+  return LAYER_PICTURE_BASES.some((base) => url.startsWith(`${window.location.origin}${base}`));
 }
 
 /**
@@ -442,20 +476,27 @@ function readValues(key: string): Record<string, ValueChoice> {
  */
 export function useValueChoices(
   token: string,
+  /** False where a person's own switching lasts for the visit only (F-247). */
+  remembered = true,
 ): [
   Readonly<Record<string, ValueChoice>>,
   (id: string, choice: ValueChoice, layerDefault?: ValueChoice) => void,
 ] {
-  const key = `${VALUES_PREFIX}${signedInAs(token)}`;
+  // Not remembered: kept under a key the browser's storage never sees.
+  const key = remembered ? `${VALUES_PREFIX}${signedInAs(token)}` : `visit:${signedInAs(token)}`;
+  const stored = useCallback(
+    (k: string): Record<string, ValueChoice> => (remembered ? readValues(k) : {}),
+    [remembered],
+  );
   const [state, setState] = useState<{ key: string; choices: Record<string, ValueChoice> }>(() => ({
     key,
-    choices: readValues(key),
+    choices: stored(key),
   }));
-  const choices = state.key === key ? state.choices : readValues(key);
+  const choices = state.key === key ? state.choices : stored(key);
   const set = useCallback(
     (id: string, choice: ValueChoice, layerDefault: ValueChoice = ALL_VALUES) => {
       setState((current) => {
-        const before = current.key === key ? current.choices : readValues(key);
+        const before = current.key === key ? current.choices : stored(key);
         // Forgotten only when it is the layer's own choice: "every value and other values" is
         // kept for a layer that hides other values by default (Codex's review of 1f328f9).
         const all =
@@ -466,15 +507,17 @@ export function useValueChoices(
           Object.entries(before).filter(([layer]) => layer !== id || !all),
         );
         if (!all) next[id] = choice;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          // Storage refused (private window): the choice lasts until the page is closed.
+        if (remembered) {
+          try {
+            window.localStorage.setItem(key, JSON.stringify(next));
+          } catch {
+            // Storage refused (private window): the choice lasts until the page is closed.
+          }
         }
         return { key, choices: next };
       });
     },
-    [key],
+    [key, remembered, stored],
   );
   return [choices, set];
 }
@@ -616,6 +659,7 @@ export function useLayerOverlays(
   );
   const [squares, setSquares] = useState<Map<string, Square>>(() => new Map());
   const asked = useRef(new Set<string>());
+  const api = useLayerApi();
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
   const zoom = view?.zoom ?? null;
@@ -645,7 +689,7 @@ export function useLayerOverlays(
       // Nothing is fetched for a layer out of its zoom range (F-138).
       if (!shownAtZoom(layer, zoom)) continue;
       if (layer.kind === 'file') {
-        fetchWhole(layer.id, `${layer.id}@${layer.version}`, `/map-layers/${layer.id}/file`);
+        fetchWhole(layer.id, `${layer.id}@${layer.version}`, api.path(`/${layer.id}/file`));
       } else if (layer.kind === 'arcgis_features') {
         // The zoomed-out view is fetched once, at any zoom, so it is ready to fill in while
         // squares load and when zooming out (F-140: no blank map between zooms).
@@ -653,7 +697,7 @@ export function useLayerOverlays(
           fetchWhole(
             `${layer.id}#overview`,
             `${layer.id}#overview@${layer.overview?.version ?? ''}`,
-            `/map-layers/${layer.id}/overview`,
+            api.path(`/${layer.id}/overview`),
           );
         }
         if (usesOverview(layer, zoom)) continue;
@@ -663,7 +707,9 @@ export function useLayerOverlays(
           asked.current.add(key);
           // The settings in the address too, so the browser's cached square (an hour) is not
           // reused after they change (Codex's review of bb488a9).
-          const path = `/map-layers/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`;
+          const path = api.path(
+            `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
+          );
           apiFetch(path, token)
             .then((res) => res.json())
             .then((body: unknown) => {
@@ -688,7 +734,7 @@ export function useLayerOverlays(
         }
       }
     }
-  }, [layers, tiles, zoom, token]);
+  }, [layers, tiles, zoom, token, api]);
 
   return useMemo(() => {
     const overlays: MapOverlay[] = [];
@@ -698,7 +744,7 @@ export function useLayerOverlays(
         overlays.push({
           id: layer.id,
           kind: 'pictures',
-          tiles: picturesUrl(layer.id),
+          tiles: picturesUrl(api, layer.id),
           look: lookOf(layer),
           levels: layer.tileLevels,
         });
@@ -817,12 +863,12 @@ export function useLayerOverlays(
       else if (exceeded) {
         notes.set(
           layer.id,
-          layer.overview === null
+          layer.overview === null && api.overviews
             ? 'Zoom in to see every line here. An admin can prepare its zoomed-out view on Team → Map layers.'
             : 'Zoom in to see every line here.',
         );
       }
     }
     return { overlays, notes };
-  }, [layers, files, squares, tiles, zoom, choices]);
+  }, [layers, files, squares, tiles, zoom, choices, api]);
 }

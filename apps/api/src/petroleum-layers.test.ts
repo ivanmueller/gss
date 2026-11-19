@@ -112,7 +112,8 @@ function send(path: string, method = 'GET', body?: unknown, env: object = WITH_P
 }
 
 async function code(res: Response): Promise<unknown> {
-  return ((await res.json()) as { error?: { code?: unknown } }).error?.code;
+  const body = await res.json<{ error?: { code?: unknown } }>();
+  return body.error?.code;
 }
 
 describe('who may use the oil and gas layers', () => {

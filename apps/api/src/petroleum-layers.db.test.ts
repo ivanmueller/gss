@@ -2,7 +2,7 @@ import postgres from 'postgres';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { connectionOptions } from './db';
-import type { NewMapLayer } from './map-layers-db';
+import type { MapLayerChanges, NewMapLayer } from './map-layers-db';
 import { createPetroleumDatabase, type PetroleumContext } from './petroleum-db';
 
 // Integration test (F-247 part 2): the oil and gas map layer queries as the real `petro_api`
@@ -190,7 +190,7 @@ describe('oil and gas map layers as petro_api', () => {
     const admin = member('org_admin');
     const id = await added(admin, { mapVisible: true });
     const version = (await db.listLayers(admin))[0]?.version ?? '';
-    const { mapVisible: _unset, ...changes } = layer({ name: 'Renamed' });
+    const changes: MapLayerChanges = { ...layer({ name: 'Renamed' }), mapVisible: undefined };
     expect(await db.updateLayer(admin, id, version, changes)).toEqual({ status: 'saved', id });
     expect((await db.listLayers(admin))[0]).toMatchObject({ name: 'Renamed', mapVisible: true });
   });

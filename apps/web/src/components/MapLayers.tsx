@@ -3,10 +3,12 @@ import { ChevronDown, ChevronRight, Layers, Search, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
+import { useLayerApi } from '../lib/layerApi';
 import {
   ALL_VALUES,
   choiceOf,
   OBJECT_ID,
+  useDefaultLayerChoice,
   useLayerChoice,
   useLayerOverlays,
   useValueChoices,
@@ -51,6 +53,8 @@ export interface MapLayersState {
   picked: PickedFeature | null;
   setPicked: (picked: PickedFeature | null) => void;
   error: string | null;
+  /** Reads the list again, after an admin changed it elsewhere on the page (F-247-2-D1-03). */
+  reload?: () => void;
 }
 
 /** The organization's map layers, the ones this person has on, and their features in view. */
@@ -58,17 +62,21 @@ export function useMapLayers(
   session: { token: string; organization: { id: string } } | null,
 ): MapLayersState {
   const token = session?.token ?? '';
-  const [list] = useApiResource<MapLayerList>(
-    session ? `/map-layers?organization_id=${session.organization.id}` : null,
+  const api = useLayerApi();
+  const [list, reload] = useApiResource<MapLayerList>(
+    session ? api.path(`?organization_id=${session.organization.id}`) : null,
     token,
   );
   const layers = useMemo(
     () => (list.status === 'ok' && Array.isArray(list.data.layers) ? list.data.layers : []),
     [list],
   );
-  const [chosen, toggle, setMany] = useLayerChoice(token);
+  // Both are kept (hooks run always); which one counts depends on the list (F-247).
+  const remembered = useLayerChoice(token);
+  const fromDefault = useDefaultLayerChoice(layers);
+  const [chosen, toggle, setMany] = api.adminDefault ? fromDefault : remembered;
   const on = useMemo(() => layers.filter((layer) => chosen.has(layer.id)), [layers, chosen]);
-  const [values, setValues] = useValueChoices(token);
+  const [values, setValues] = useValueChoices(token, !api.adminDefault);
   const [view, setView] = useState<MapView | null>(null);
   const { overlays, notes } = useLayerOverlays(on, view, token, values);
   const [picked, setPicked] = useState<PickedFeature | null>(null);
@@ -91,6 +99,7 @@ export function useMapLayers(
     picked: picked && chosen.has(picked.layerId) ? picked : null,
     setPicked,
     error: list.status === 'error' ? list.error.message : null,
+    reload,
   };
 }
 
@@ -422,6 +431,7 @@ export function MapLayersPanel({
   side: 'left' | 'right';
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const api = useLayerApi();
   if (!state.panelOpen) return null;
   return (
     <section
@@ -450,7 +460,7 @@ export function MapLayersPanel({
           <p className="text-danger">Could not load: {state.error}</p>
         ) : state.layers.length === 0 ? (
           <p className="text-muted-foreground">
-            No map layers yet. Admins add them on Team → Map layers.
+            No map layers yet. Admins add them {api.managedIn}.
           </p>
         ) : (
           <ul className="flex flex-col divide-y">
@@ -488,7 +498,8 @@ export function MapLayersPanel({
  * gives none.
  */
 function PictureLegend({ layerId, token }: { layerId: string; token: string }) {
-  const [legend] = useApiResource<LayerLegend>(`/map-layers/${layerId}/legend`, token);
+  const api = useLayerApi();
+  const [legend] = useApiResource<LayerLegend>(api.path(`/${layerId}/legend`), token);
   if (legend.status !== 'ok') return null;
   return (
     <>
@@ -584,6 +595,7 @@ export function PickedFeatureCard({
   /** Where it sits along the map's bottom; at the left by default. */
   className?: string;
 }) {
+  const api = useLayerApi();
   const { picked, setPicked } = state;
   const layer = picked ? state.layers.find((l) => l.id === picked.layerId) : undefined;
   const objectId = picked?.properties[OBJECT_ID];
@@ -599,7 +611,7 @@ export function PickedFeatureCard({
     if (!live || (typeof objectId !== 'number' && typeof objectId !== 'string')) return;
     const controller = new AbortController();
     apiJson<{ fields: Fields }>(
-      `/map-layers/${layer.id}/details/${encodeURIComponent(String(objectId))}`,
+      api.path(`/${layer.id}/details/${encodeURIComponent(String(objectId))}`),
       token,
       { signal: controller.signal },
     )
@@ -612,7 +624,7 @@ export function PickedFeatureCard({
     return () => {
       controller.abort();
     };
-  }, [live, layer, objectId, key, token]);
+  }, [live, layer, objectId, key, token, api]);
 
   if (!picked || !layer) return null;
   const fields: Fields | 'failed' | null = live

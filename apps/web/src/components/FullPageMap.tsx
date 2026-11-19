@@ -1,6 +1,7 @@
-import { TriangleAlert } from 'lucide-react';
-import { lazy, Suspense, useState } from 'react';
+import { Settings, TriangleAlert } from 'lucide-react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 
+import { LayerApiContext, petroleumLayers } from '../lib/layerApi';
 import {
   BASEMAPS,
   mapboxToken,
@@ -10,7 +11,17 @@ import {
 } from '../lib/mapbox';
 import { useTheme } from '../lib/theme';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import {
+  MapLayersButton,
+  MapLayersLegend,
+  MapLayersPanel,
+  PickedFeatureCard,
+  useMapLayers,
+} from './MapLayers';
+import { MapLayerSettings } from './MapLayerSettings';
+import { Button } from './ui/button';
 import { Callout } from './ui/callout';
+import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
 
 // Mapbox GL JS is large, so it is fetched only when a map is shown.
@@ -27,20 +38,33 @@ const NO_PINS = [] as const;
 
 /**
  * The map on its own page (F-238, map.torvenco.com), for the oil and gas side of the platform
- * (F-239): the map filling the window, with map styles, and no records of its own yet (owner's
- * request, 2026-11-18: "no data on the map yet"). Grain's map layers are not offered here: oil
- * and gas gets its own, from its own database (F-247).
+ * (F-239): the map filling the window, with map styles and the oil and gas map layers (F-247
+ * part 2), which are its own, kept in the oil and gas database: grain's map layers are neither
+ * asked for nor offered here. Everyone switches layers on and off under Layers; admins add and
+ * manage them under Settings, and choose which are on when the map opens.
  */
 export function FullPageMap({
+  session,
   mapbox = mapboxToken(),
 }: {
-  /** The signed-in member: not used until the oil and gas layers are read (F-247 part 2). */
   session: DirectorySession;
   mapbox?: MapboxToken;
 }) {
+  const organizationId = session.organization.id;
+  const api = useMemo(() => petroleumLayers(organizationId), [organizationId]);
+  return (
+    <LayerApiContext value={api}>
+      <OilAndGasMap session={session} mapbox={mapbox} />
+    </LayerApiContext>
+  );
+}
+
+function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: MapboxToken }) {
   const [refused, setRefused] = useState(false);
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
+  const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
+  const admin = session.organization.role === 'org_admin';
 
   if (mapbox.status !== 'ok' || refused) {
     const text = refused
@@ -66,12 +90,17 @@ export function FullPageMap({
           selectedId={null}
           start={CANADA}
           onSelect={() => undefined}
+          overlays={layers.overlays}
+          authToken={session.token}
+          onViewChange={layers.onViewChange}
+          onOverlayClick={layers.setPicked}
           onTokenRefused={() => {
             setRefused(true);
           }}
         />
         {/* Shown with the map itself, so it never covers the loading message (F-238-R1-02). */}
         <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
+          <MapLayersButton state={layers} />
           <SegmentedControl
             label="Map style"
             options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
@@ -81,8 +110,33 @@ export function FullPageMap({
             value={basemap}
             onChange={setBasemap}
           />
+          {/* Admins only; the API refuses everyone else whatever the page shows. */}
+          {admin && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline">
+                  <Settings aria-hidden="true" />
+                  Settings
+                </Button>
+              </DialogTrigger>
+              <DialogContent
+                title="Map settings"
+                description="The layers of the oil and gas map. Only admins see this."
+                className="max-w-2xl"
+              >
+                {/* The map reads its list again after each change (F-247-2-D1-03). */}
+                <MapLayerSettings session={session} onChanged={layers.reload} />
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       </Suspense>
+      {/* Below the zoom buttons, top right (F-139). */}
+      <MapLayersPanel state={layers} side="right" />
+      <PickedFeatureCard state={layers} token={session.token} className="left-3" />
+      <div className="absolute bottom-8 left-3 z-10 max-w-[calc(100%-1.5rem)]">
+        <MapLayersLegend state={layers} />
+      </div>
     </div>
   );
 }
