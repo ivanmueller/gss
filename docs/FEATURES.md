@@ -208,7 +208,7 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 #### 1f. F-239 to F-247 — The oil and gas side
 
-The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; next its own layer system with a Settings button, F-247; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
+The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; its own database, `petroleum-staging`, connected as ivanmueller/gss#263 and #264; next its own layer system with a Settings button, F-247 part 2; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
