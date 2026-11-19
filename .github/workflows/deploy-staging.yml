@@ -35,6 +35,14 @@ jobs:
           SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
           PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
         run: |
+          # Staging is only ever deployed from main, by hand too (F-247-1-D2-01): a run started on
+          # another branch would apply that branch's unreviewed migrations. (The staging
+          # environment's own branch rule, set by the owner in GitHub, guards against a branch
+          # that edits this file.)
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Deploy staging runs from main only; this run was started on $GITHUB_REF_NAME."
+            exit 1
+          fi
           if [ -n "$PETROLEUM_STAGING_DB_URL" ]; then
             echo "petroleum=true" >> "$GITHUB_OUTPUT"
           elif [ "$GITHUB_EVENT_NAME" != push ]; then
