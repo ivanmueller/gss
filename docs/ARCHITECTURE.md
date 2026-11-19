@@ -41,6 +41,8 @@ The frontend calls one documented application API for sensitive operations. Avoi
 
 Use one documented strategy for v1: **server-side API for all private domain reads/writes**. Supabase Auth handles sign-in, storage is accessed via short-lived signed URLs under server authorization, and server API database access uses a minimum-privilege role. Staging connects through Cloudflare Hyperdrive (`docs/DECISIONS.md`), which is a connection pool for PostgreSQL clients, not an automatic way to apply end-user RLS. The API must explicitly filter and authorize `organization_id`, including on nested joins and updates. Set RLS and minimal grants on any exposed tables as defense in depth, with user-context policies where Data API access is allowed. Never use a service-role credential in the browser.
 
+**Oil and gas database (F-247, 2026-11-18):** the oil and gas side keeps its data in a second Supabase project, `petroleum-staging`, with no users of its own. The Worker verifies the session and loads the person's active membership and role in grain's project, then opens a transaction on the oil and gas database through its own Hyperdrive configuration (`gss-petroleum-staging`) as `petro_api` and sets `petro.user_id`, `petro.organization_id` and `petro.member_role` for that transaction only, from those server-side values. That database trusts the Worker for identity and role (membership cannot be checked there in SQL); its row level security and write functions key on those settings, and refuse when they are absent. Migrations and pgTAP tests: `petroleum/supabase/`.
+
 ## 4.4 Environment separation
 
 - **Local:** seeded fictional/synthetic data, local Supabase or disposable remote dev project.

@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      allow_unconnected:
+        # A run by hand proves the oil and gas connection; tick this only while the Worker is not
+        # meant to have its PETROLEUM binding yet (F-247-1-R7-01).
+        description: The Worker is not connected to the oil and gas database yet
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,8 +21,14 @@ concurrency:
 
 jobs:
   # Lets the workflow pass with a notice until the owner adds the secrets.
+  # In the staging environment like the deploy itself (F-247-1-R16-01): every job that receives a
+  # staging credential (Cloudflare's token included, which deploys the Worker and manages its
+  # Hyperdrive connections) is one GitHub allows from main only, whatever a branch's copy of this
+  # file says. Secrets of the environment take precedence over repository secrets of the same
+  # name; the credentials belong in the environment only (README, "The oil and gas database").
   preflight:
     runs-on: ubuntu-latest
+    environment: staging
     outputs:
       ready: ${{ steps.check.outputs.ready }}
       database: ${{ steps.check.outputs.database }}
@@ -26,8 +39,20 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
         run: |
+          # Staging is only ever deployed from main, by hand too (F-247-1-D2-01): a run started on
+          # another branch would apply that branch's unreviewed migrations. A branch
+          # that edits this file is stopped by GitHub itself: the staging environment allows main
+          # only, and the oil and gas credentials are secrets of that environment.
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Deploy staging runs from main only; this run was started on $GITHUB_REF_NAME."
+            exit 1
+          fi
           if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" != push ]; then
+            # A run by hand is a check, so it never ends green without deploying (F-247-1-R8-01).
+            echo "::error::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; nothing can be deployed or checked."
+            exit 1
           else
             echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set; staging deploy skipped."
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -47,8 +72,27 @@ jobs:
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.url }}
+    env:
+      # The oil and gas database's migration login is a secret of the staging environment only
+      # (never a repository secret), so only this job, which GitHub allows from main alone, can
+      # read it (F-247-1-R15-01). Whether it exists, for the steps' conditions.
+      HAS_PETROLEUM: ${{ secrets.PETROLEUM_STAGING_DB_URL != '' }}
     steps:
+      - name: Oil and gas migration login present?
+        run: |
+          if [ "$HAS_PETROLEUM" = true ]; then
+            exit 0
+          elif [ "$GITHUB_EVENT_NAME" != push ]; then
+            # A run by hand proves the oil and gas side, migrations included; the box "not
+            # connected yet" waives only the Worker's binding (F-247-1-R13-02).
+            echo "::error::PETROLEUM_STAGING_DB_URL is not set in the staging environment; the oil and gas migrations cannot be applied or checked."
+            exit 1
+          fi
+          echo "::notice::PETROLEUM_STAGING_DB_URL is not set in the staging environment; oil and gas database migrations skipped."
       - uses: actions/checkout@v7
+        with:
+          # The commit before this push, to see whether it changes the PETROLEUM binding.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -67,7 +111,7 @@ jobs:
           VITE_MAPBOX_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
       # Migrations go first so the Worker never runs against an older schema.
       - uses: supabase/setup-cli@v1
-        if: needs.preflight.outputs.database == 'true'
+        if: needs.preflight.outputs.database == 'true' || env.HAS_PETROLEUM == 'true'
         with:
           version: 2.122.0
       - name: Apply database migrations
@@ -75,6 +119,49 @@ jobs:
         env:
           SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
         run: supabase db push --db-url "$SUPABASE_STAGING_DB_URL"
+      # The oil and gas database (petroleum-staging, F-247-1-D1-02, R3-01, R3-02): every deploy
+      # applies whatever of its migrations it has not run yet (nothing when it is up to date), so
+      # no migration is ever skipped. On a release from a push, a failure (that database paused or
+      # unreachable) is a warning and grain still deploys: the Worker's oil and gas routes check
+      # that database's schema version themselves and answer "not ready" until it catches up, and
+      # the next deploy tries again. On a run started by hand (Actions → Deploy staging → Run
+      # workflow), the oil and gas database must be reachable, migrated and ready, or the run fails.
+      - name: Apply oil and gas database migrations
+        id: petroleum
+        if: env.HAS_PETROLEUM == 'true'
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        # At most 5 minutes (a lock held on that database must not run the job into its
+        # 15-minute limit before grain's Worker deploys, F-247-1-R4-02); running out counts as a
+        # failure below.
+        run: |
+          # Only ever petroleum-staging (F-247-1-R10-02, R11-01): the whole URL must be one of its
+          # two forms, exactly, with nothing after the database name (no options) and a
+          # percent-encoded password (no @ : / ? #): the session pooler as postgres.<ref>, or the
+          # direct host db.<ref>.supabase.co as postgres. Never prints the URL. A URL that is not
+          # one of these is applied nowhere: a warning on a push, so grain still deploys
+          # (F-247-1-R11-02), a failure on a run by hand.
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "::warning::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; no oil and gas migration was applied, grain deploys."
+              echo "applied=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was applied."
+            exit 1
+          fi
+          if timeout 300 supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes; then
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "::warning::The oil and gas database's migrations could not be applied (paused or unreachable?); grain deploys, the next deploy tries again."
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::The oil and gas database's migrations could not be applied."
+            exit 1
+          fi
       - name: Deploy Worker
         id: deploy
         env:
@@ -88,6 +175,11 @@ jobs:
       - name: Smoke test
         env:
           URL: ${{ steps.deploy.outputs.url }}
+          # The commit before this push (empty on a run started by hand).
+          BEFORE: ${{ github.event.before }}
+          # Only on a run started by hand: "the Worker is not connected to the oil and gas
+          # database yet" (empty otherwise).
+          ALLOW_UNCONNECTED: ${{ inputs.allow_unconnected }}
         run: |
           if [ -z "$URL" ]; then
             echo "::error::No workers.dev URL found in the wrangler output."
@@ -111,3 +203,65 @@ jobs:
             echo "$path (no sign-in) -> $status"
             test "$status" = 401
           done
+
+          # The oil and gas database's readiness (F-247-1-D1-03, R3-03). The route must exist (a
+          # missing one answers 401) and answer:
+          # - "ok": reachable, migrated to the schema version the Worker needs;
+          # - "not set up": only while the deployed Worker has no PETROLEUM binding;
+          # - unavailable, not ready, a gateway error or no complete answer within 60 seconds: a
+          #   failure on a run started by hand and on a push that changes the Worker's
+          #   configuration while it has the binding (F-247-1-R4-01); a warning on other releases,
+          #   so a paused oil and gas database never holds grain up.
+          # After a release that changes the oil and gas side (its migrations or its binding), the
+          # owner also runs this workflow by hand to prove the connection, at Claude's request
+          # (agents may not start workflows; README, "The oil and gas database"): two pushes merged
+          # during one deploy can leave the second run's range without the first push's change
+          # (F-247-1-R13-01).
+          # Whether the Worker has the binding is read from Wrangler's own list of the bindings it
+          # just deployed ("env.PETROLEUM (<id>)  Hyperdrive Config"), not from the file's text
+          # (F-247-1-R6-01).
+          if grep -Eq '^env\.PETROLEUM \(.*Hyperdrive' "$RUNNER_TEMP/deploy.log"; then bound=true; else bound=false; fi
+          required=false
+          if [ "$GITHUB_EVENT_NAME" != push ]; then
+            required=true
+          elif [ "$bound" = true ]; then
+            # This push changed the Worker's configuration (which holds the PETROLEUM binding and
+            # its Hyperdrive id), or the commit before it is unknown (F-247-1-R5-01).
+            if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
+              || ! git diff --quiet "$BEFORE" HEAD -- apps/api/wrangler.jsonc; then
+              required=true
+            fi
+          fi
+          # At most 60 seconds. Any transfer failure (a timeout even after headers arrived, a reset)
+          # is classed by curl's own exit status as "no answer" before the status or body is read
+          # (F-247-1-R5-02, R6-02).
+          if ready=$(curl --silent --show-error --max-time 60 --write-out '\n%{http_code}' \
+            "$URL/api/v1/petroleum/ready"); then
+            :
+          else
+            echo "curl stopped with exit status $? (no complete answer)."
+            ready=$'\n000'
+          fi
+          echo "/api/v1/petroleum/ready -> ${ready//$'\n'/ } (binding deployed: $bound, connection required: $required)"
+          case "$ready" in
+            *'"status":"ok"'*$'\n'200) ;;
+            *'"code":"PETROLEUM_NOT_SET_UP"'*$'\n'503)
+              if [ "$bound" = true ]; then
+                echo "::error::The Worker has a PETROLEUM binding but answers that it is not set up."; exit 1
+              fi
+              # A run by hand proves the connection, so "not set up" fails it unless the person
+              # starting it said the Worker is not connected yet (F-247-1-R7-01).
+              if [ "$GITHUB_EVENT_NAME" != push ] && [ "$ALLOW_UNCONNECTED" != true ]; then
+                echo "::error::The Worker has no oil and gas connection (no PETROLEUM binding)."; exit 1
+              fi
+              echo "::notice::The oil and gas database is not connected to the Worker yet." ;;
+            # Unavailable, not migrated, no complete answer (000) or a gateway error (5xx): the oil and gas
+            # side only. A definite routing answer (a 401 for a missing route, any other status)
+            # falls to the last case and always fails.
+            *$'\n'5[0-9][0-9] | *$'\n'000)
+              if [ "$required" = true ]; then
+                echo "::error::The oil and gas database is unavailable, not migrated or not answering."; exit 1
+              fi
+              echo "::warning::The oil and gas database is unavailable, not migrated or not answering (paused?); grain deployed." ;;
+            *) echo "::error::/api/v1/petroleum/ready did not answer as expected."; exit 1 ;;
+          esac

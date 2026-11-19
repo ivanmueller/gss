@@ -127,5 +127,11 @@ Migrations in `supabase/migrations/` are authoritative for what exists; this lis
 | `20261030050000_follow_up_removal.sql` | `follow_ups.removed_at`, `removed_by`, `removed_by_name` (all set or all empty); `app_api` updates `removed_by` only; `app.check_follow_up()` replaced: removing is only by an org_admin of the follow-up's organization in their own name, open or done, archived counterparty or not, and changes nothing else; the time is the database's clock and the name comes from the login; a removed follow-up does not change; the update policy's check also lets through a row removed in one's own name (a done one keeps someone else's `done_by`). Still never deleted; audited (owner's request, 2026-10-30). |
 | `20261030030000_main_contact_index_by_organization.sql` | `counterparty_contacts_one_main` keyed by organization and counterparty, so another organization's contact naming this counterparty is refused by the tenant-matching key (23503) instead of the index (23505), which had told it whether the counterparty has a main contact (Codex's review of ivanmueller/gss#78). |
 
+**Oil and gas database** (`petroleum-staging`, F-247): migrations in `petroleum/supabase/migrations/`.
+
+| Migration | Adds |
+|---|---|
+| `20261118230000_petro_schema_and_api_role.sql` | Private `petro` schema; `petro_api` role (no login, no RLS bypass); `petro.current_user_id()`, `petro.current_organization_id()`, `petro.current_member_role()` reading the transaction's settings set by the Worker (a role outside the five member roles reads as null); `petro.schema_version()` (1), which the Worker checks before its oil and gas routes; new functions not executable by `public` by default. |
+
 Not yet implemented from this model: role capabilities beyond the directory, team, quotes, freight and the CRM (§2.1 table; analysts' proposed quotes), invitations by email, `risk_flags`, contacts' confidential scope, an `updated_by` column (who changed a record is in the audit trail), grades as a table of their own (a revision records the grade as text), and every scenario and trade table.
 

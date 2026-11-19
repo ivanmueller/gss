@@ -3,10 +3,25 @@
 // verified. Run by .github/workflows/hyperdrive-staging.yml; prints no secrets.
 //
 // Env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, SUPABASE_HYPERDRIVE_URL
-// (postgresql://app_api.<project-ref>:<password>@<pooler-host>:5432/postgres).
+// (postgresql://<role>.<project-ref>:<password>@<pooler-host>:5432/postgres), and
+// HYPERDRIVE_TARGET: "staging" (grain's database, gss-staging, as app_api; the default) or
+// "petroleum" (the oil and gas database, petroleum-staging, as petro_api; F-247).
 import { appendFileSync, readFileSync } from 'node:fs';
 
-const CONFIG_NAME = 'gss-staging';
+// Each configuration reaches one Supabase project only, by its exact pooler login (the project
+// ref is part of it); the oil and gas one also by its exact host and database (F-247-1-R12-01).
+const TARGETS = {
+  staging: { config: 'gss-staging', user: 'app_api.nfwizbcpjpqxdoojfbdr' },
+  petroleum: {
+    config: 'gss-petroleum-staging',
+    user: 'petro_api.ubgyatbzjctsgzcsvwgc',
+    host: 'aws-1-us-east-2.pooler.supabase.com',
+    database: 'postgres',
+  },
+};
+const TARGET = TARGETS[process.env.HYPERDRIVE_TARGET || 'staging'];
+if (!TARGET) throw new Error('HYPERDRIVE_TARGET must be "staging" or "petroleum".');
+const CONFIG_NAME = TARGET.config;
 // Hyperdrive keeps its own pool; a few origin connections are plenty for this app and stay
 // well inside the Supabase free plan's session pool.
 const ORIGIN_CONNECTION_LIMIT = 5;
@@ -60,11 +75,20 @@ function origin() {
   // host and login. Hyperdrive already pools in transaction mode, and stacking a second
   // transaction pooler behind it drops connections, so always use session mode.
   const supabasePooler = url.hostname.endsWith('.pooler.supabase.com');
+  // A secret for another database or project is refused before anything is changed.
+  const user = decodeURIComponent(url.username);
+  const database = decodeURIComponent(url.pathname.slice(1)) || 'postgres';
+  if (user !== TARGET.user)
+    throw new Error(`The database login for ${CONFIG_NAME} must be ${TARGET.user}.`);
+  if (TARGET.host !== undefined && (url.hostname !== TARGET.host || database !== TARGET.database))
+    throw new Error(
+      `The database for ${CONFIG_NAME} must be ${TARGET.database} at ${TARGET.host}.`,
+    );
   return {
     scheme: 'postgres',
     host: url.hostname,
     port: supabasePooler ? 5432 : Number(url.port || 5432),
-    database: decodeURIComponent(url.pathname.slice(1)) || 'postgres',
+    database,
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
   };
@@ -114,7 +138,7 @@ async function main() {
   }
 
   const summary = [
-    '### Hyperdrive for staging',
+    `### Hyperdrive ${CONFIG_NAME}`,
     '',
     `- Configuration: \`${CONFIG_NAME}\``,
     `- ID: \`${config.id}\``,

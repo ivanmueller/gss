@@ -20,6 +20,10 @@ export interface ApiEnv {
       HYPERDRIVE?: { connectionString: string };
       /** Postgres URL for the `app_api` role, used when there is no Hyperdrive binding. */
       DATABASE_URL?: string;
+      /** Hyperdrive in front of the oil and gas database, petroleum-staging (F-247). */
+      PETROLEUM?: { connectionString: string };
+      /** Postgres URL for the `petro_api` role, used when there is no PETROLEUM binding (local, CI). */
+      PETROLEUM_DATABASE_URL?: string;
       /** Geocodio API key (Worker secret) for looking facility addresses up. */
       GEOCODIO_API_KEY?: string;
       /** Supabase secret key (Worker secret), only for creating logins and setting passwords. */
@@ -201,7 +205,7 @@ function connectionLost(error: unknown): boolean {
 }
 
 /** Disconnects after the response is sent where the runtime allows it, so a slow close never delays an answer. */
-export function closeLater(c: ApiContext, db: Database) {
+export function closeLater(c: ApiContext, db: { close(): Promise<void> }) {
   const closing = db.close().catch(() => undefined);
   try {
     c.executionCtx.waitUntil(closing);

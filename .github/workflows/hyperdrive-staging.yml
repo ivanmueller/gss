@@ -1,9 +1,16 @@
 name: Set up Hyperdrive (staging)
 
 # Run by hand from the Actions tab. Creates or updates the Cloudflare Hyperdrive
-# configuration the staging Worker uses to reach Supabase (docs/DECISIONS.md).
+# configuration the staging Worker uses to reach Supabase (docs/DECISIONS.md): grain's database
+# (gss-staging) or the oil and gas one (petroleum-staging, F-247).
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Which database
+        type: choice
+        options: [staging, petroleum]
+        default: staging
 
 permissions:
   contents: read
@@ -22,5 +29,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          SUPABASE_HYPERDRIVE_URL: ${{ secrets.SUPABASE_HYPERDRIVE_URL }}
+          HYPERDRIVE_TARGET: ${{ inputs.target }}
+          # The chosen database's login. Were PETROLEUM_HYPERDRIVE_URL missing, the expression would
+          # give grain's, which the script refuses for petroleum (its login is not petro_api).
+          SUPABASE_HYPERDRIVE_URL: ${{ inputs.target == 'petroleum' && secrets.PETROLEUM_HYPERDRIVE_URL || secrets.SUPABASE_HYPERDRIVE_URL }}
         run: node scripts/setup-hyperdrive.js

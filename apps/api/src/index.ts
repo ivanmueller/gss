@@ -24,6 +24,8 @@ import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { mapLayerRoutes } from './map-layers';
 import { memberRoutes } from './members';
+import { petroleumReadyRoute, petroleumRoutes } from './petroleum';
+import { postgresPetroleum, type PetroleumFactory } from './petroleum-db';
 import { commodityRoutes, quoteRoutes } from './quotes';
 import { callReadingRoutes, readNewTranscripts } from './readings';
 import { readNewEmails } from './email-readings';
@@ -36,11 +38,21 @@ export type { ApiEnv, DatabaseFactory } from './respond';
 
 export function createApp(
   openDatabase: DatabaseFactory,
-  options: { telnyx?: TelnyxFactory; mailer?: MailerFactory; claude?: ClaudeFactory } = {},
+  options: {
+    telnyx?: TelnyxFactory;
+    mailer?: MailerFactory;
+    claude?: ClaudeFactory;
+    petroleum?: PetroleumFactory;
+    /** How long /petroleum/ready reuses its answer (tests set 0). */
+    petroleumReadyCacheMs?: number;
+    /** How long /petroleum/ready waits for the database (tests set it short). */
+    petroleumReadyDeadlineMs?: number;
+  } = {},
 ) {
   const telnyx = options.telnyx ?? telnyxClient;
   const mailer = options.mailer ?? cloudflareMailer;
   const claude = options.claude ?? claudeClient;
+  const openPetroleum = options.petroleum ?? postgresPetroleum;
   const app = new Hono<ApiEnv>().basePath('/api/v1');
 
   // Every response carries a request id; writes record it in the audit trail.
@@ -64,6 +76,17 @@ export function createApp(
     c.header('Cache-Control', 'no-store');
     return c.json({ status: 'ok', service: 'api' });
   });
+
+  // Public readiness of the oil and gas database (F-247), for the deploy's smoke test: reachable
+  // and migrated, or not. It reads no data and returns no tenant or environment data.
+  app.get(
+    '/petroleum/ready',
+    petroleumReadyRoute(
+      openPetroleum,
+      options.petroleumReadyCacheMs,
+      options.petroleumReadyDeadlineMs,
+    ),
+  );
 
   // Telnyx's call events carry no signed-in user; each is checked by its Ed25519 signature.
   app.route('/telnyx', telnyxWebhookRoutes(openDatabase, telnyx));
@@ -152,6 +175,7 @@ export function createApp(
   app.route('/map-layers', mapLayerRoutes(openDatabase));
   app.route('/emails', emailRoutes(openDatabase, mailer, claude));
   app.route('/email-auto-drafts', emailAutoDraftRoutes(openDatabase));
+  app.route('/petroleum', petroleumRoutes(openDatabase, openPetroleum));
 
   return app;
 }
