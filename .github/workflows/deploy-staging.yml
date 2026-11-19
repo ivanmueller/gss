@@ -113,14 +113,22 @@ jobs:
         # 15-minute limit before grain's Worker deploys, F-247-1-R4-02); running out counts as a
         # failure below.
         run: |
-          # Only ever petroleum-staging (F-247-1-R10-02): the login (postgres.<ref>, pooler) or the
-          # host (db.<ref>.supabase.co, direct) must name its project. Never prints the URL.
-          rest="${PETROLEUM_STAGING_DB_URL#*://}"
-          login="${rest%%[:@]*}"
-          host="${rest##*@}"
-          host="${host%%[:/?]*}"
-          if [ "$login" != "postgres.ubgyatbzjctsgzcsvwgc" ] && [ "$host" != "db.ubgyatbzjctsgzcsvwgc.supabase.co" ]; then
-            echo "::error::PETROLEUM_STAGING_DB_URL is not a postgres login for petroleum-staging (ubgyatbzjctsgzcsvwgc); nothing was applied."
+          # Only ever petroleum-staging (F-247-1-R10-02, R11-01): the whole URL must be one of its
+          # two forms, exactly, with nothing after the database name (no options) and a
+          # percent-encoded password (no @ : / ? #): the session pooler as postgres.<ref>, or the
+          # direct host db.<ref>.supabase.co as postgres. Never prints the URL. A URL that is not
+          # one of these is applied nowhere: a warning on a push, so grain still deploys
+          # (F-247-1-R11-02), a failure on a run by hand.
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "::warning::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; no oil and gas migration was applied, grain deploys."
+              echo "applied=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was applied."
             exit 1
           fi
           if timeout 300 supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes; then
