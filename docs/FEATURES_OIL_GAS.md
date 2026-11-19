@@ -13,12 +13,12 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260 and #266, 2026-11-18) |
 | F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | Live, check pending: its database (parts 1a and 1b, ivanmueller/gss#263 and #264, 2026-11-18) and Settings and layers (part 2, ivanmueller/gss#268, 2026-11-19, merged by the owner without Codex's approval: see F-248) |
 | F-248 | What was left open when F-247 part 2 was merged, to fix or review again | To do (2 open findings, 5 things to look at again; item 8, the review rules, done: F-251) |
-| F-240 | Alberta reference layers: township grid and all 26 formation outlines | Planned, next (owner's answers 2026-11-19; the review-rule change it waited for is merged: F-251, ivanmueller/gss#271) |
-| F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
-| F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
-| F-243 | Wells, new licences and rig activity (AER) | Needs owner input |
-| F-244 | Companies across sources: buyers, holders and licensees | Needs owner input |
-| F-245 | Company, formation and weekly summaries | Needs owner input |
+| F-240 | Alberta reference layers: township grid and all 26 formation outlines | Planned (owner's answers 2026-11-19). Live layers added by admins in Settings meanwhile; the stored grid with step 5 of the build order, the outlines with step 7 |
+| F-241 | Crown agreements, offset notices and freehold minerals: live layers added in Settings now, stored weekly later | Planned (step 4 of the build order) |
+| F-242 | Crown land sales: upcoming parcels and results | Planned (step 5 of the build order; how far back: since 2003, as Offset Signal shows) |
+| F-243 | Wells, new licences and rig activity (AER) | Planned, next: part 1, keeping the daily files (steps 1 to 3 of the build order) |
+| F-244 | Companies across sources: buyers, holders and licensees | Planned (step 6 of the build order) |
+| F-245 | Company, formation and weekly summaries | Planned (steps 6 and 7 of the build order) |
 | F-246 | Other provinces: British Columbia, Saskatchewan, Manitoba and beyond | Needs owner input |
 | F-249 | Pipelines on the map | Needs owner input |
 | F-250 | Search by legal land description | Later (owner, 2026-11-19) |
@@ -28,6 +28,29 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 1. **Showing is cheap; storing is not.** The province publishes several of these datasets as live ArcGIS map services, and the platform already shows live ArcGIS layers, fetched by the Worker by map square (F-107, F-141). Those can appear on the map with no database work (F-240, F-241). Searching, history, totals and joins (who bought what, which wells sit on which land) need the data stored, and at Alberta's size (hundreds of thousands of wells, every agreement tract, sales since 2003) that will not fit the Supabase free plan's database (a cost: the owner's decision).
 2. **Some files are too large for the Worker.** The AER's full well list (ST37) is a 1.23 GB geodatabase or a 170 MB Excel package, monthly; the Worker has 128 MB of memory. Loading it needs another kind of job (for example a scheduled GitHub Actions run), an architecture decision (`AGENTS.md` rule 9) before building F-243.
 
+## Build order (2026-11-19)
+
+**Asked:** the owner, 2026-11-19, with his data source study given again: the aim is to have what Offset Signal has (a dashboard of Alberta: every well location, land sales and land held today, with the pages built on them), as the foundation for what comes after; "whatever is the best way to get to what Offset Signal has, that is the course of action I want to take". The order below is an agent's, at that request; it replaces "F-240 first". As the direction above says: the same public data, pages and functions, from the government sources; our own wording and look; nothing fetched from Offset Signal's site.
+
+**What Offset Signal's site is made of (read from its pages by an agent, 2026-11-19):** a map with three groups, each with its own switch and filters: **land sales** (parcels by commodity, region and status; bonus by quarter), **land today** (current agreements by rights, holder and status; freehold minerals; offset notices) and **wells and licences** (wells coloured by status, operator or formation; new licences); and pages built on the same stored data: this week, sale results, upcoming sales, new licences, operators, formations, oil sands, data downloads. How its map is fed (its files or services) could not be read from its pages.
+
+**Why the order changes:** almost everything there is stored data, joined (the study: "Most of the value comes from joining the datasets"). A live layer shows the province's shapes, but cannot be filtered, counted, coloured by operator or joined to anything. So live layers stop being build steps: admins add them in Settings today (F-247) for a first picture, while the stored data is built. The grid's numbers and "add a whole ArcGIS map from its link" (F-240, plan step 1) become polish, later.
+
+**Order (each step several small pull requests; the stored ones high risk, with a Codex design review first):**
+1. **Save what disappears (F-243, part 1).** The AER's daily licence and rig files (ST1, ST49) are replaced a week later: a small daily job keeps every file as published, from the first day. First because each day not kept is lost or must be bought. Before it: the AER's terms of use read and recorded.
+2. **The foundation, built once with the first stored data:** how public data is loaded and kept (as published, with its source and date, then in tables), the job for files too large for the Worker (the second point of "Two things that shape the order"), and how stored data reaches the map by map square, so that hundreds of thousands of points draw quickly. Every later step reuses it.
+3. **Wells and licences (F-243).** New licences and rigs from the kept daily files (small; the first page and the first stored layer), then every well (ST37, monthly) with the code lists (ST103, ST104): on the map, coloured by status, operator or formation, filtered, a click showing the well; multi-leg wells with their legs.
+4. **Land today (F-241, stored).** Crown agreements (petroleum and natural gas, oil sands), offset notices and freehold minerals, copied weekly from the province's services and each copy kept, so that transfers, surrenders and expiries can be seen later. Filters by holder, rights and status; agreements expiring within 12 months.
+5. **Land sales (F-242), with the township grid stored (F-240).** Upcoming parcels, corrections and results since 2003; land descriptions turned into shapes on the grid, rights wording into formations. The most reading of text, so after the foundation is proven. Search by land description (F-250) comes with the stored grid.
+6. **Companies (F-244),** then the operator pages (F-245): they need steps 3 to 5.
+7. **Formations** (the 26 outlines, F-240; their pages, F-245), **this week**, **townships** and **downloads**: all computed from what is stored by then.
+
+**Alongside, with no code:** an agent gives the owner the addresses of the province's live layers (grid, agreements, offset notices, freehold; the formation layers the AGS publishes live) with their terms, and admins add them in Settings.
+
+**The owner's decisions, when their step comes (none needed for step 1):**
+- **Storage (step 3, the full well list):** the owner's answer 4 of 2026-11-18 stands: start on the free plan, each load measured, the paid plan bought before it fills. The caution written with that answer no longer applies: since F-247 the oil and gas data has its own Supabase project, apart from grain's records. The plan's limit and price are read from Supabase's own pages when the well list is planned; the well list is expected to be the load that reaches the limit.
+- **The job for large files (step 2):** an architecture decision (`AGENTS.md` rule 9) to approve, proposed with its plan: a scheduled GitHub Actions run that loads the AER's monthly well list into the oil and gas database.
+- **Where the files are kept as published (step 1):** proposed with its plan (a private Cloudflare bucket, as for received mail, would be one owner step).
 ## F-239 — The oil and gas map page
 
 **Status:** Live, check pending (merged as ivanmueller/gss#260 on 2026-11-18, register `docs/reviews/F-239.md`; grain's layers removed from the page in ivanmueller/gss#266 the same day, register `docs/reviews/F-239-2.md`). Normal risk (screens only). **Asked:** 2026-11-18, after seeing F-238 on staging: "clean everything in this map. I did not ask you to put counterparties. We can potentially leave map layers … Let's clear the map so that it's still the same structure, but there's no data on the map yet."
@@ -93,7 +116,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 
-**Status:** Planned, next: the review-rule change it waited for (F-248 item 8; the owner, 2026-11-19: "rule change first") is merged (F-251, ivanmueller/gss#271, 2026-11-19). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
+**Status:** Planned; no longer the first step (build order of 2026-11-19 above): the live grid and live formation layers are added by admins in Settings, the stored grid comes with land sales (step 5), the 26 outlines with the formation pages (step 7), and plan step 1 below (whole ArcGIS maps, labels) is polish for later. The review-rule change it waited for (F-248 item 8) is merged (F-251, ivanmueller/gss#271, 2026-11-19). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
 - the **Alberta Township System** grid (township, section, quarter section, legal subdivision), from the province's ATS map service (also AltaLIS's ATS product);
 - **formation outlines**: the Alberta Geological Survey's shale plays (Digital Dataset 2013-0024: Duvernay, Muskwa, Montney, Basal Banff/Exshaw, North Nordegg, Wilrich) and its Geological Framework of Alberta, version 3 (about 90 geological units, among them Cardium, Mannville, Wabamun, Leduc).
 
@@ -115,7 +138,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-241 — Crown agreements, offset notices and freehold minerals as live layers
 
-**Status:** Needs owner input. **What:** on the map, from the province's public map services, read live:
+**Status:** Planned (build order of 2026-11-19: live layers added in Settings now, all three; stored weekly at step 4, which is where filters, totals and expiring agreements come from). **What:** on the map, from the province's public map services, read live:
 - **Crown agreements** (petroleum and natural gas; oil sands): each tract's holder (designated representative), partners, zones, term, continuation and expiry, area;
 - **offset notices** (all, or open only): deadline, holder, oil or gas, zone, status and how each ended;
 - **freehold (non-Crown) mineral land**, with national parks and reserves.
@@ -126,7 +149,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-242 — Crown land sales: upcoming parcels and results
 
-**Status:** Needs owner input. **What:** Alberta Energy and Minerals' public offerings: each sale's posted parcels (notice), corrections and withdrawals, and results (bonus, price per hectare, buyer), for petroleum and natural gas and oil sands, from January 2003 (older years only as PDFs). Per parcel: sale date, contract number, commodity, legal land description, hectares, rights wording, lease or licence, region, bonus, buyer.
+**Status:** Planned (step 5 of the build order of 2026-11-19; since January 2003, as Offset Signal shows; sale dates as reminders: not part of the replica, open). **What:** Alberta Energy and Minerals' public offerings: each sale's posted parcels (notice), corrections and withdrawals, and results (bonus, price per hectare, buyer), for petroleum and natural gas and oil sands, from January 2003 (older years only as PDFs). Per parcel: sale date, contract number, commodity, legal land description, hectares, rights wording, lease or licence, region, bonus, buyer.
 
 **How:** a scheduled Worker job fetching the province's notice, correction and result files (XML and CSV) by sale date, twice a day; history loaded once; land matched to the township grid (F-240) and rights wording to formations. Stored: a migration, row level security and pgTAP tests, as every table. **Buyers are often land brokers**: the company that ends up holding the land comes from the agreements (F-241, F-244).
 
@@ -134,7 +157,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-243 — Wells, new licences and rig activity (AER)
 
-**Status:** Needs owner input. **What:** from the Alberta Energy Regulator's free reports:
+**Status:** Planned, next (steps 1 to 3 of the build order of 2026-11-19): part 1 keeps every daily file; then licences and rigs; then the full well list, once the owner has decided the storage and the large-file job. **What:** from the Alberta Energy Regulator's free reports:
 - **new well licences** (ST1, daily): licensee, target zone, horizontal or vertical, projected depth, surface location, cancellations;
 - **rig activity** (ST49, daily): rigs moving onto licences, activity, contractor and rig number;
 - **every well** (ST37, monthly): status, licensee, field and pool, spud date, and each well's drilled paths, so that **multi-leg (multilateral) wells** show every leg (asked by the owner, 2026-11-19);
@@ -146,13 +169,13 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-244 — Companies across sources
 
-**Status:** Needs owner input. **What:** one company list linking the names each source uses: sale buyers (name only), agreement holders and partners (names), well licensees and drilling contractors (AER business associate codes, ST104). Aliases with the dates they apply (agreements and licences change hands), known land brokers flagged, a person able to correct a match.
+**Status:** Planned (step 6 of the build order of 2026-11-19). **What:** one company list linking the names each source uses: sale buyers (name only), agreement holders and partners (names), well licensees and drilling contractors (AER business associate codes, ST104). Aliases with the dates they apply (agreements and licences change hands), known land brokers flagged, a person able to correct a match.
 
 **Owner's answer (2026-11-19):** a separate reference list on the oil and gas side, never GSS's counterparties: the oil and gas side is not a CRM.
 
 ## F-245 — Company, formation and weekly summaries
 
-**Status:** Needs owner input. Built from F-241 to F-244 once stored: per company (land held, expiring agreements, partners, wells by formation, licences in the last 90 days, land won by a broker and later transferred); per formation (parcels sold, bonus by year, largest holders, new licences); per week (bonus at sales, parcels sold, new licences, wells spudded). Computed by the Worker from stored public data, never predicted.
+**Status:** Planned (steps 6 and 7 of the build order of 2026-11-19). Built from F-241 to F-244 once stored: per company (land held, expiring agreements, partners, wells by formation, licences in the last 90 days, land won by a broker and later transferred); per formation (parcels sold, bonus by year, largest holders, new licences); per week (bonus at sales, parcels sold, new licences, wells spudded). Computed by the Worker from stored public data, never predicted.
 
 ## F-246 — Other provinces
 
