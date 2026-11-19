@@ -61,7 +61,10 @@ export type MapLayerChanges = Omit<
   | 'map'
   | 'mapVisible'
   | 'tileLevels'
->;
+> & {
+  /** Whether it is on when the map opens: only where an admin chooses it (F-247). */
+  mapVisible?: boolean | undefined;
+};
 
 /** What the Worker needs to fetch a live layer for the map. */
 export interface MapLayerSource {

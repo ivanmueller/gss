@@ -49,7 +49,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 **Owner's answers (2026-11-18, third round, for part 2):**
 7. **First layers:** from the owner's document of Alberta's public data sources: the Alberta Township System service, the mineral agreement service (petroleum and natural gas, oil sands), the offset notice layers and the non-Crown mineral ownership service, all live ArcGIS services of the Government of Alberta under the Open Government Licence – Alberta. Admins add them in Settings; none is built in.
-8. **On or off at first:** an admin chooses, per layer in Settings, whether it is on when the map opens; the choice applies to everyone who opens the page. (An agent's reading, to confirm: a person's own switch is remembered in their browser and wins; the admin's choice applies to every layer the person has not switched.)
+8. **On or off at first:** an admin chooses, per layer in Settings, whether it is on when the map opens; the choice applies to everyone who opens the page. The owner, 2026-11-19: always the admin's setting. Every time anyone opens the map, layers start as the admin set them; a person's own switching lasts only until they close or reload the page.
 
 **Plan (draft for Codex's design review).** Two pull requests.
 

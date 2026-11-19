@@ -344,6 +344,11 @@ export const updateMapLayerSchema = z.strictObject({
   version: z.string().min(1).max(100),
   ...layerDetails,
   wmsLayers: z.string().regex(WMS_LAYERS).nullable(),
+  /**
+   * Whether the layer is on when the map opens, where an admin chooses it (the oil and gas map,
+   * F-247); grain's layers do not take it.
+   */
+  mapVisible: z.boolean().optional(),
 });
 export type UpdateMapLayer = z.infer<typeof updateMapLayerSchema>;
 
@@ -394,7 +399,8 @@ export interface MapLayerView {
   /** A file's name and number of features; null for a web service. */
   fileName: string | null;
   featureCount: number | null;
-  createdByName: string;
+  /** Null where names are not kept with the layers (the oil and gas map, F-247). */
+  createdByName: string | null;
   /** UTC instant. */
   createdAt: string;
   /** Sent back with a change; a change to a layer changed since is refused. */
@@ -416,7 +422,10 @@ export interface MapLayerView {
   othersShown: boolean;
   /** The ArcGIS map it was added from. */
   map: { itemId: string; title: string } | null;
-  /** Whether its ArcGIS map shows it at first (F-141). */
+  /**
+   * Whether its ArcGIS map shows it at first (F-141); on the oil and gas map, whether it is on
+   * when the map opens, an admin's choice (F-247).
+   */
   mapVisible: boolean;
   /** A pre-drawn layer's levels of squares (F-141); null for any other kind. */
   tileLevels: { min: number; max: number } | null;

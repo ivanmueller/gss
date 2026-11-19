@@ -2,28 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import {
-  PETROLEUM_SCHEMA_VERSION,
-  type PetroleumDatabase,
-  type PetroleumFactory,
-} from './petroleum-db';
+import { PETROLEUM_SCHEMA_VERSION, type PetroleumFactory } from './petroleum-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
+import { fakePetroleum } from './testing/petroleum';
 
 // The oil and gas database's routes (F-247-1): its readiness check, and the signed-in health
 // check that loads the membership from grain's database before opening the oil and gas one.
-
-function fakePetroleum() {
-  return {
-    schemaVersion: vi.fn<PetroleumDatabase['schemaVersion']>(() =>
-      Promise.resolve(PETROLEUM_SCHEMA_VERSION),
-    ),
-    organizationSeen: vi.fn<PetroleumDatabase['organizationSeen']>((ctx) =>
-      Promise.resolve(ctx.organizationId),
-    ),
-    close: vi.fn<PetroleumDatabase['close']>(() => Promise.resolve()),
-    abort: vi.fn<PetroleumDatabase['abort']>(() => Promise.resolve()),
-  };
-}
 
 let db = fakeDatabase();
 let petroleum = fakePetroleum();

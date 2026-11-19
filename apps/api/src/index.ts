@@ -47,6 +47,8 @@ export function createApp(
     petroleumReadyCacheMs?: number;
     /** How long /petroleum/ready waits for the database (tests set it short). */
     petroleumReadyDeadlineMs?: number;
+    /** How long each oil and gas layer query may take (tests set it short). */
+    petroleumLayersDeadlineMs?: number;
   } = {},
 ) {
   const telnyx = options.telnyx ?? telnyxClient;
@@ -175,7 +177,10 @@ export function createApp(
   app.route('/map-layers', mapLayerRoutes(openDatabase));
   app.route('/emails', emailRoutes(openDatabase, mailer, claude));
   app.route('/email-auto-drafts', emailAutoDraftRoutes(openDatabase));
-  app.route('/petroleum', petroleumRoutes(openDatabase, openPetroleum));
+  app.route(
+    '/petroleum',
+    petroleumRoutes(openDatabase, openPetroleum, options.petroleumLayersDeadlineMs),
+  );
 
   return app;
 }
