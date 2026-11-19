@@ -244,7 +244,15 @@ All of this is done: see `docs/FEATURES_DONE.md`.
 4. **Notices:** one message per side merge, or one summary at the end of the session?
 5. **Part B:** try it with the trading engine (F-106) when that starts, or earlier on another high-risk feature?
 
-### Owner's list (2026-11-06)
+#### F-251 — Review rules: a final review blocks only on the pull request's own changes; round 5 the last
+
+**Status:** In progress (governance: Codex design and final reviews, then the owner's approval of the exact commit). **Asked:** agreed with the owner on 2026-11-19, after ivanmueller/gss#261 (15 rounds, closed) and #268 (23 rounds, merged by the owner without approval), where each final review re-read the whole pull request and kept finding problems, several in code the pull request had not changed (F-248 item 8 in `docs/FEATURES_OIL_GAS.md`). **Owner's answers (2026-11-19):** "rule change first", before F-240; review rounds stop at **5**: after round 5 without approval, Claude stops and brings the owner the cause and the options (fix with a cap, split the pull request, or the owner merges); more rounds only with the owner's approval (no automatic rounds 6 to 8).
+
+**What changes:**
+1. **Problems in old code go to the list.** A finding in lines the pull request did not change, which exists on `main` as well, is recorded with the new status **pre-existing** and a tracker ID (`F-###`, `T-##` or `D-##` in `docs/FEATURES.md`) instead of blocking the merge. The Merge policy check verifies its place is outside the lines the pull request changed. A last or final review whose only findings are pre-existing (or, for normal risk, P3) no longer blocks.
+2. **Round 5 is the last automatic round** (was: 6 to 8 while the issues fall).
+3. **Working habits** written into the review procedure: smaller pull requests; for any screen that keeps data from the server, one stated rule in the plan before the first review.
+
 
 | ID | Feature | Status | What it needs before work starts |
 |---|---|---|---|
