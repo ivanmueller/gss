@@ -37,6 +37,11 @@ jobs:
         run: |
           if [ -n "$PETROLEUM_STAGING_DB_URL" ]; then
             echo "petroleum=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" != push ]; then
+            # A run by hand proves the oil and gas side, migrations included; the box "not
+            # connected yet" waives only the Worker's binding (F-247-1-R13-02).
+            echo "::error::PETROLEUM_STAGING_DB_URL is not set; the oil and gas migrations cannot be applied or checked."
+            exit 1
           else
             echo "::notice::PETROLEUM_STAGING_DB_URL is not set; oil and gas database migrations skipped."
             echo "petroleum=false" >> "$GITHUB_OUTPUT"
@@ -190,10 +195,11 @@ jobs:
           #   failure on a run started by hand and on a push that changes the Worker's
           #   configuration while it has the binding (F-247-1-R4-01); a warning on other releases,
           #   so a paused oil and gas database never holds grain up.
-          # After a release that changes the oil and gas side (its migrations or its binding), Claude
-          # also runs this workflow by hand to prove the connection (README, "The oil and gas
-          # database"): two pushes merged during one deploy can leave the second run's range
-          # without the first push's change.
+          # After a release that changes the oil and gas side (its migrations or its binding), the
+          # owner also runs this workflow by hand to prove the connection, at Claude's request
+          # (agents may not start workflows; README, "The oil and gas database"): two pushes merged
+          # during one deploy can leave the second run's range without the first push's change
+          # (F-247-1-R13-01).
           # Whether the Worker has the binding is read from Wrangler's own list of the bindings it
           # just deployed ("env.PETROLEUM (<id>)  Hyperdrive Config"), not from the file's text
           # (F-247-1-R6-01).
