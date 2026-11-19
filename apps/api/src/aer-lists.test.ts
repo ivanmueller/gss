@@ -72,6 +72,7 @@ const ST49 = [
     .map((cell, k) => cell.padEnd(WIDTHS[k] ?? 0))
     .join(' '),
   '',
+  '            TOTAL NUMBER OF WELLS LISTED = 1',
   '        *** END OF REPORT ***',
 ].join('\n');
 

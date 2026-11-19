@@ -329,6 +329,8 @@ function isRule(line: string): boolean {
 }
 /** ST49's page header, repeated at the top of each page. */
 const ST49_PAGE = 'Report Number:';
+/** The report's own count of its rows. */
+const ST49_TOTAL = /TOTAL NUMBER OF WELLS LISTED = *(\d{1,6})\b/;
 /** The report's last line. */
 const ST49_END_LINE = '*** END OF REPORT ***';
 /** The totals after the last row, or the report's end line. */
@@ -406,7 +408,11 @@ export function parseSt49(text: string): AerListRead<St49Activity> {
   }
   // A copy cut short, even between two pages, has no end line (F-243-1-R1-01).
   const ended = lines.some((line) => line.includes(ST49_END_LINE));
-  if (!sawPage || awaitingRule || listDate === null || !ended) {
+  // The report's own total must match the rows it holds, so a missing page never passes for a
+  // whole list (F-243-1-R5-02).
+  const total = lines.map((line) => ST49_TOTAL.exec(line)).find((match) => match !== null);
+  const counted = total ? Number(total[1]) === rows.length + skipped : false;
+  if (!sawPage || awaitingRule || listDate === null || !ended || !counted) {
     return { listDate, structure: false, rows: [], skipped: 0 };
   }
   return { listDate, structure: true, rows, skipped };

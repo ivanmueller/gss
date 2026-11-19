@@ -90,7 +90,13 @@ function st49Page(rows: string[][]): string[] {
 
 /** A whole ST49 list: its pages, then the end line. */
 function st49(...pages: string[][]): string {
-  return [...pages.flat(), '', '        *** END OF REPORT ***'].join('\n');
+  const rows = pages.flat().filter((line) => /^[0-9A-Z]{2}\/\d{2}-/.test(line)).length;
+  return [
+    ...pages.flat(),
+    '',
+    `            TOTAL NUMBER OF WELLS LISTED = ${String(rows)}`,
+    '        *** END OF REPORT ***',
+  ].join('\n');
 }
 
 const RIG_A = [
@@ -270,6 +276,7 @@ describe('parseSt49', () => {
       ...st49Page([rigB]),
       '',
       '        TOTAL  - Drill to LD - Drilling to Licensed Depth   = 2',
+      '            TOTAL NUMBER OF WELLS LISTED = 2',
       '        *** END OF REPORT ***',
     ].join('\n');
     expect(looksLikeSt49(text)).toBe(true);
@@ -324,6 +331,14 @@ describe('parseSt49', () => {
       structure: false,
       rows: [],
     });
+  });
+
+  it('is unreadable when its own total does not match its rows (F-243-1-R5-02)', () => {
+    const whole = st49(st49Page([RIG_A]), st49Page([RIG_A]));
+    expect(parseSt49(whole)).toMatchObject({ structure: true });
+    // A page missing, the total and the end line intact.
+    const missing = whole.replace(st49Page([RIG_A]).join('\n') + '\n', '');
+    expect(parseSt49(missing)).toMatchObject({ structure: false, rows: [] });
   });
 
   it('has no structure when cut short, even between two pages (F-243-1-R1-01)', () => {
