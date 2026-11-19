@@ -38,6 +38,36 @@ describe('useApiResource', () => {
     expect(calls).toHaveLength(2);
   });
 
+  // F-247-2-R17-01: an answer kept from before is not shown again once the server refused.
+  it('forgets a kept answer once the server refuses, not when it is only away', async () => {
+    let answer: () => Response = () => Response.json({ name: 'Synthetic First' });
+    mockApi({ 'GET /thing': () => answer() });
+    const first = render(<Show path="/thing" />);
+    expect(await screen.findByText('Synthetic First')).toBeInTheDocument();
+    first.unmount();
+
+    // The server away: the kept answer still shows when the page opens again.
+    answer = () => Response.json({ error: { code: 'DOWN', message: 'Away.' } }, { status: 503 });
+    const second = render(<Show path="/thing" />);
+    expect(screen.getByText('Synthetic First')).toBeInTheDocument();
+    expect(await screen.findByText('error')).toBeInTheDocument();
+    second.unmount();
+    const third = render(<Show path="/thing" />);
+    expect(screen.getByText('Synthetic First')).toBeInTheDocument();
+
+    // Refused: shown this once while it is checked, then forgotten for good.
+    answer = () =>
+      Response.json({ error: { code: 'FORBIDDEN', message: 'Not a member.' } }, { status: 403 });
+    third.unmount();
+    const fourth = render(<Show path="/thing" />);
+    expect(await screen.findByText('error')).toBeInTheDocument();
+    fourth.unmount();
+    render(<Show path="/thing" />);
+    expect(screen.queryByText('Synthetic First')).not.toBeInTheDocument();
+    expect(screen.getByText('loading')).toBeInTheDocument();
+    expect(await screen.findByText('error')).toBeInTheDocument();
+  });
+
   it('forgets every answer on sign-out', async () => {
     mockApi({ 'GET /thing': () => Response.json({ name: 'Synthetic Kept' }) });
     const first = render(<Show path="/thing" />);

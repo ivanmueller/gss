@@ -1,12 +1,14 @@
 import type { LayerLegend, MapLayerList, MapLayerView } from '@grain/domain';
 import { ChevronDown, ChevronRight, Layers, Search, X } from 'lucide-react';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import { apiJson } from '../lib/api';
+import { ApiError, apiJson } from '../lib/api';
+import { livePath, useLayerApi } from '../lib/layerApi';
 import {
   ALL_VALUES,
   choiceOf,
   OBJECT_ID,
+  useDefaultLayerChoice,
   useLayerChoice,
   useLayerOverlays,
   useValueChoices,
@@ -14,9 +16,10 @@ import {
   type MapOverlay,
   type MapView,
   type PickedFeature,
+  type StaleReason,
   type ValueChoice,
 } from '../lib/mapLayers';
-import { useApiResource } from '../lib/useApiResource';
+import { signedInAs, useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -51,27 +54,123 @@ export interface MapLayersState {
   picked: PickedFeature | null;
   setPicked: (picked: PickedFeature | null) => void;
   error: string | null;
+  /** Reads the list again, after an admin changed it elsewhere on the page (F-247-2-D1-03). */
+  reload?: () => void;
+  /**
+   * The server refused a layer's data or no longer has the layer (a square, a picture, a
+   * shape's details): the list is read again, at most once every few seconds, and the map draws
+   * only what it holds (F-247-2-R9-01, R9-02).
+   */
+  onStale?: (reason?: StaleReason) => void;
+  /**
+   * Bumped when the list is read well again after a refusal: the map asks again for the squares
+   * and pictures the refusal let go (F-247-2-R12-02).
+   */
+  retry?: number;
 }
+
+/** The list of layers is read again at most this often on the server's refusals. */
+const STALE_RELOAD_MS = 10_000;
+/**
+ * After a refusal or a "not found", a list read well again has the map ask again for what it let
+ * go, at most this often: a layer that is listed yet keeps answering "not found" is asked for
+ * once a minute at most, not in a tight circle. A request to ask again that comes sooner is
+ * kept and done when the minute ends (F-247-2-R14-01).
+ */
+const ASK_AGAIN_MS = 60_000;
 
 /** The organization's map layers, the ones this person has on, and their features in view. */
 export function useMapLayers(
   session: { token: string; organization: { id: string } } | null,
 ): MapLayersState {
   const token = session?.token ?? '';
-  const [list] = useApiResource<MapLayerList>(
-    session ? `/map-layers?organization_id=${session.organization.id}` : null,
+  const api = useLayerApi();
+  const [list, reload] = useApiResource<MapLayerList>(
+    session ? api.path(`?organization_id=${session.organization.id}`) : null,
     token,
   );
-  const layers = useMemo(
+  const listed = useMemo(
     () => (list.status === 'ok' && Array.isArray(list.data.layers) ? list.data.layers : []),
     [list],
   );
-  const [chosen, toggle, setMany] = useLayerChoice(token);
+  // The same list read again is the same layers to the map: nothing is asked for or drawn again
+  // unless something in it changed (so a re-read after a refusal cannot set off another).
+  const [layers, setLayers] = useState(listed);
+  const changed = useMemo(
+    () => layers !== listed && JSON.stringify(layers) !== JSON.stringify(listed),
+    [layers, listed],
+  );
+  if (changed) setLayers(listed);
+  // Both are kept (hooks run always); which one counts depends on the list (F-247).
+  const remembered = useLayerChoice(token);
+  const fromDefault = useDefaultLayerChoice(layers);
+  const [chosen, toggle, setMany] = api.adminDefault ? fromDefault : remembered;
   const on = useMemo(() => layers.filter((layer) => chosen.has(layer.id)), [layers, chosen]);
-  const [values, setValues] = useValueChoices(token);
+  const [values, setValues] = useValueChoices(token, !api.adminDefault);
   const [view, setView] = useState<MapView | null>(null);
-  const { overlays, notes } = useLayerOverlays(on, view, token, values);
+  const lastStale = useRef(0);
+  const laterStale = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryAfter = useRef(false);
+  const lastRetry = useRef(0);
+  const laterRetry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retry, setRetry] = useState(0);
+  const onStale = useCallback(
+    (reason?: StaleReason) => {
+      // Refused, or "not found" (how grain's database answers a suspended member for a layer's
+      // squares): either way, if the list is then read well, the map asks again
+      // (F-247-2-R12-02). Not when it is only the map moving after a refused list.
+      if (reason !== undefined) retryAfter.current = true;
+      // Not on every refused square of one view: once at once, and, for a refusal that comes
+      // during the pause after it, once more when the pause ends, so a later change (a second
+      // layer removed) is never missed (F-247-2-R10-01).
+      const wait = lastStale.current + STALE_RELOAD_MS - Date.now();
+      if (wait <= 0) {
+        lastStale.current = Date.now();
+        reload();
+        return;
+      }
+      laterStale.current ??= setTimeout(() => {
+        laterStale.current = null;
+        lastStale.current = Date.now();
+        reload();
+      }, wait);
+    },
+    [reload],
+  );
+  useEffect(
+    () => () => {
+      if (laterStale.current) clearTimeout(laterStale.current);
+      if (laterRetry.current) clearTimeout(laterRetry.current);
+    },
+    [],
+  );
+  const listRefused = list.status === 'error';
+  // The list read well again after a refusal or a "not found" (access is back, perhaps with the
+  // very same layers): what was let go is asked for again, the map standing still. At most once
+  // a minute; a second time within the minute waits for its end, and is not lost.
+  useEffect(() => {
+    if (list.status !== 'ok' || !retryAfter.current) return;
+    retryAfter.current = false;
+    const askAgain = () => {
+      lastRetry.current = Date.now();
+      setRetry((n) => n + 1);
+    };
+    const wait = lastRetry.current + ASK_AGAIN_MS - Date.now();
+    if (wait <= 0) {
+      askAgain();
+      return;
+    }
+    laterRetry.current ??= setTimeout(() => {
+      laterRetry.current = null;
+      askAgain();
+    }, wait);
+  }, [list]);
+  const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale, retry);
   const [picked, setPicked] = useState<PickedFeature | null>(null);
+  // A clicked shape's details go with its layer: switched off or no longer in the list, they are
+  // forgotten, not hidden, so nothing of them shows when the layer is switched back on
+  // (F-247-2-R9-03).
+  if (picked && !on.some((layer) => layer.id === picked.layerId)) setPicked(null);
   const [panelOpen, setPanelOpen] = useState(false);
   return {
     token,
@@ -87,10 +186,17 @@ export function useMapLayers(
     notes,
     onViewChange: (bbox, zoom) => {
       setView(bbox ? { bbox, zoom } : null);
+      // The list could not be read (not a member, signed out, the server away): with no layers
+      // nothing else would ask again, so moving the map does, and a member whose access is back
+      // sees their layers without reloading the page (F-247-2-R9-01).
+      if (listRefused) onStale();
     },
-    picked: picked && chosen.has(picked.layerId) ? picked : null,
+    picked: picked && on.some((layer) => layer.id === picked.layerId) ? picked : null,
     setPicked,
     error: list.status === 'error' ? list.error.message : null,
+    reload,
+    onStale,
+    retry,
   };
 }
 
@@ -422,6 +528,7 @@ export function MapLayersPanel({
   side: 'left' | 'right';
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const api = useLayerApi();
   if (!state.panelOpen) return null;
   return (
     <section
@@ -450,7 +557,7 @@ export function MapLayersPanel({
           <p className="text-danger">Could not load: {state.error}</p>
         ) : state.layers.length === 0 ? (
           <p className="text-muted-foreground">
-            No map layers yet. Admins add them on Team → Map layers.
+            No map layers yet. Admins add them {api.managedIn}.
           </p>
         ) : (
           <ul className="flex flex-col divide-y">
@@ -487,12 +594,51 @@ export function MapLayersPanel({
  * shows it (a heat map's scale from most to least dense). Nothing while it loads or if ArcGIS
  * gives none.
  */
-function PictureLegend({ layerId, token }: { layerId: string; token: string }) {
-  const [legend] = useApiResource<LayerLegend>(`/map-layers/${layerId}/legend`, token);
-  if (legend.status !== 'ok') return null;
+function PictureLegend({
+  layerId,
+  token,
+  onStale,
+  retry,
+}: {
+  layerId: string;
+  token: string;
+  onStale: MapLayersState['onStale'];
+  retry: number;
+}) {
+  const api = useLayerApi();
+  const path = api.path(livePath(`/${layerId}/legend`));
+  // Kept only while it is shown, and never from the page's memory of earlier answers: a layer
+  // switched back on shows its legend once the Worker has answered again, which it does only
+  // for a member (F-247-2-R17-01; the same rule as its squares, R5-02). The browser's own copy
+  // makes that quick: the Worker answers "not modified" after its check.
+  const [legend, setLegend] = useState<{
+    path: string;
+    who: string;
+    entries: LayerLegend['entries'];
+  } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    apiJson<LayerLegend>(path, token, { signal: controller.signal })
+      .then((answer) => {
+        if (controller.signal.aborted) return;
+        setLegend({ path, who: signedInAs(token), entries: answer.entries });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setLegend(null);
+        // Refused, or the layer is no longer there: the list says what is (F-247-2-R9-01).
+        if (!(error instanceof ApiError)) return;
+        if (error.status === 404) onStale?.('missing');
+        else if (error.status === 401 || error.status === 403) onStale?.('refused');
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [path, token, onStale, retry]);
+  if (legend?.path !== path || legend.who !== signedInAs(token)) return null;
   return (
     <>
-      {legend.data.entries.map((entry, i) => (
+      {legend.entries.map((entry, i) => (
         <span key={`${String(i)}-${entry.label}`} className="flex items-center gap-1">
           {entry.image && <img src={entry.image} alt="" className="h-4 max-w-16 object-contain" />}
           {entry.label}
@@ -541,7 +687,12 @@ export function MapLayersLegend({ state }: { state: MapLayersState }) {
                 {hidden > 0 && <span>({hidden.toLocaleString('en-CA')} hidden in Layers)</span>}
               </>
             ) : layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' ? (
-              <PictureLegend layerId={layer.id} token={state.token} />
+              <PictureLegend
+                layerId={layer.id}
+                token={state.token}
+                onStale={state.onStale}
+                retry={state.retry ?? 0}
+              />
             ) : (
               <span
                 aria-hidden="true"
@@ -584,6 +735,7 @@ export function PickedFeatureCard({
   /** Where it sits along the map's bottom; at the left by default. */
   className?: string;
 }) {
+  const api = useLayerApi();
   const { picked, setPicked } = state;
   const layer = picked ? state.layers.find((l) => l.id === picked.layerId) : undefined;
   const objectId = picked?.properties[OBJECT_ID];
@@ -594,25 +746,33 @@ export function PickedFeatureCard({
     (typeof objectId === 'number' || typeof objectId === 'string');
   const [details, setDetails] = useState<{ key: string; fields: Fields | 'failed' } | null>(null);
   const key = `${picked?.layerId ?? ''}/${String(objectId)}`;
+  // Nothing is kept of a shape no longer picked (its layer switched off, F-247-2-R9-03).
+  if (!picked && details) setDetails(null);
+  const { onStale } = state;
 
   useEffect(() => {
     if (!live || (typeof objectId !== 'number' && typeof objectId !== 'string')) return;
     const controller = new AbortController();
     apiJson<{ fields: Fields }>(
-      `/map-layers/${layer.id}/details/${encodeURIComponent(String(objectId))}`,
+      api.path(`/${layer.id}/details/${encodeURIComponent(String(objectId))}`),
       token,
       { signal: controller.signal },
     )
       .then((body) => {
         setDetails({ key, fields: body.fields });
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setDetails({ key, fields: 'failed' });
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setDetails({ key, fields: 'failed' });
+        // Refused, or the layer is no longer there: the list says what is (F-247-2-R9-01).
+        if (!(error instanceof ApiError)) return;
+        if (error.status === 404) onStale?.('missing');
+        else if (error.status === 401 || error.status === 403) onStale?.('refused');
       });
     return () => {
       controller.abort();
     };
-  }, [live, layer, objectId, key, token]);
+  }, [live, layer, objectId, key, token, api, onStale]);
 
   if (!picked || !layer) return null;
   const fields: Fields | 'failed' | null = live

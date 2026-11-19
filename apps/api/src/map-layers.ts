@@ -29,7 +29,12 @@ import {
 import { Hono } from 'hono';
 
 import type { Database, RequestContext } from './db';
-import type { MapLayerSource, MapLayerWrite } from './map-layers-db';
+import type {
+  MapLayerSource,
+  MapLayersDatabase,
+  MapLayerWrite,
+  NewMapLayer,
+} from './map-layers-db';
 import {
   apiError,
   isUuid,
@@ -429,8 +434,48 @@ const MAX_FEATURES_BYTES = 8 * 1024 * 1024;
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
 const MAX_DESCRIPTION_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
-/** Pictures and squares of a live layer are kept by the browser for an hour. */
-const LIVE_CACHE = 'private, max-age=3600';
+/** A live layer's answer is fetched from its web service again at most once an hour. */
+const LIVE_HOUR_MS = 3_600_000;
+
+/**
+ * A live layer's square, picture or legend is kept by the person's own browser, only for the
+ * sign-in it was given to (Vary: another account signing in on the same browser is never served
+ * it, F-247-2-R1-01), and reused only after asking the Worker (no-cache): every reuse passes the
+ * membership check, so a person whose access is removed is refused at once (F-247-2-R4-01).
+ * The tag names what the answer was fetched from and the hour: within the hour an unchanged layer
+ * is answered "not modified" without asking the web service again; after it, it is fetched anew.
+ */
+async function liveTag(c: ApiContext, source: MapLayerSource) {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(source)),
+  );
+  const hex = [...new Uint8Array(digest).slice(0, 16)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const tag = `"${hex}-${String(Math.floor(Date.now() / LIVE_HOUR_MS))}"`;
+  const asked = c.req.header('if-none-match') ?? '';
+  const fresh = asked.split(',').some((one) => one.trim().replace(/^W\//, '') === tag);
+  return { tag, fresh };
+}
+
+/** The headers of a live layer's answer the browser may keep (see `liveTag`). */
+function keptUntilChanged(c: ApiContext, tag: string) {
+  c.header('Cache-Control', 'private, no-cache');
+  c.header('Vary', 'Authorization', { append: true });
+  c.header('ETag', tag);
+}
+
+/** Whether a request's JSON body has the field at all, before defaults are filled in. */
+function sent(body: unknown, field: string): boolean {
+  return typeof body === 'object' && body !== null && Object.hasOwn(body, field);
+}
+
+/** The browser's copy is still good: nothing is fetched from the web service. */
+function notModified(c: ApiContext, tag: string) {
+  keptUntilChanged(c, tag);
+  return c.body(null, 304);
+}
 const NOT_MEMBER = 'You are not an active member.';
 const ADMINS_ONLY = 'Only admins add, change and remove map layers.';
 const USER_AGENT = 'GSS map layers (Cloudflare Worker)';
@@ -813,7 +858,7 @@ export function overviewPageUrl(source: MapLayerSource, offset: number): string 
 /** A live lines layer an admin may prepare a zoomed-out view of, or the answer refusing it. */
 async function overviewSource(
   c: ApiContext,
-  db: Database,
+  db: LayerDatabase,
   ctx: RequestContext,
   id: string,
 ): Promise<MapLayerSource | Response> {
@@ -883,14 +928,67 @@ function serviceFailed(c: ApiContext, error: unknown, what: string) {
   );
 }
 
-/** /api/v1/map-layers. Mounted after requireUser. */
+/** What a list of layers offers beyond live ArcGIS layers; a part that is off has no routes. */
+export interface LayerFeatures {
+  /** Layers from files. */
+  files: boolean;
+  /** WMS services. */
+  wms: boolean;
+  /** A whole ArcGIS map's layers from its link (F-138). */
+  arcgisMaps: boolean;
+  /** Zoomed-out views prepared by an admin's browser (F-134). */
+  overviews: boolean;
+  /** An admin chooses whether a layer is on when the map opens, and may change it (F-247). */
+  defaultChangeable: boolean;
+}
+
+/** The layer queries the routes use, as the request's verified person. */
+export type LayerDatabase = MapLayersDatabase & Pick<Database, 'isOrgAdmin'>;
+
+/**
+ * Where a list of layers is kept and who may use it: grain's database, or the oil and gas
+ * database behind grain's membership check (F-247). `run` opens what it needs and answers for
+ * its own failures; `organization` is the person's organization for this request (the one they
+ * belong to, or the one named when they have several), or null.
+ */
+export interface LayerBackend {
+  features: LayerFeatures;
+  run: (
+    c: ApiContext,
+    handle: (
+      db: LayerDatabase,
+      ctx: RequestContext,
+      organization: () => Promise<string | null>,
+    ) => Promise<Response>,
+  ) => Promise<Response>;
+}
+
+const NOT_OFFERED = 'Only live ArcGIS layers can be added here for now.';
+
+/** /api/v1/map-layers: grain's layers, everything on. Mounted after requireUser. */
 export function mapLayerRoutes(openDatabase: DatabaseFactory) {
+  return layerRoutes({
+    features: {
+      files: true,
+      wms: true,
+      arcgisMaps: true,
+      overviews: true,
+      defaultChangeable: false,
+    },
+    run: (c, handle) =>
+      withDatabase(c, openDatabase, (db, ctx) => handle(db, ctx, () => organizationOf(c, db))),
+  });
+}
+
+/** The layer routes over a backend. Mounted after requireUser. */
+export function layerRoutes(backend: LayerBackend) {
+  const { features } = backend;
   const routes = new Hono<ApiEnv>();
 
   routes.get('/', (c) => {
     c.header('Cache-Control', 'no-store');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const org = await organizationOf(c, db);
+    return backend.run(c, async (db, ctx, organization) => {
+      const org = await organization();
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       const layers = await db.listMapLayers(ctx, org);
       if (layers === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
@@ -908,8 +1006,11 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
     const source = parseLayerSource(parsed.data.url);
     if (!source.ok) return apiError(c, 422, 'NOT_A_LAYER', source.message);
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const org = await organizationOf(c, db);
+    if (source.kind === 'wms' && !features.wms) {
+      return apiError(c, 422, 'NOT_A_LAYER', NOT_OFFERED);
+    }
+    return backend.run(c, async (db, ctx, organization) => {
+      const org = await organization();
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       if (!(await db.isOrgAdmin(ctx, org))) return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
       const answer: LayerInspection = {
@@ -971,32 +1072,34 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   // An ArcGIS map's item, for an admin adding its layers (F-138): its description or its data,
   // read from www.arcgis.com by the Worker and passed on as ArcGIS gives it. Only the item's id
   // comes from the browser; the address is always ArcGIS Online's own.
-  routes.post('/arcgis-item', async (c) => {
-    c.header('Cache-Control', 'no-store');
-    const body = await readJson(c, MAX_BODY_BYTES);
-    if (!body.ok) return body.response;
-    const parsed = arcgisItemSchema.safeParse(body.value);
-    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
-    const { itemId, part } = parsed.data;
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const org = await organizationOf(c, db);
-      if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
-      if (!(await db.isOrgAdmin(ctx, org))) return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
-      try {
-        const { body: json } = await fetchService(
-          `${ARCGIS_ITEMS}/${itemId}${part === 'data' ? '/data' : ''}?f=json`,
-          /^(application|text)\/(json|plain)$/,
-          MAX_ITEM_BYTES,
-        );
-        return c.body(json, 200, {
-          'Content-Type': 'application/json; charset=utf-8',
-          'X-Content-Type-Options': 'nosniff',
-        });
-      } catch (error) {
-        return serviceFailed(c, error, 'ArcGIS item');
-      }
+  if (features.arcgisMaps)
+    routes.post('/arcgis-item', async (c) => {
+      c.header('Cache-Control', 'no-store');
+      const body = await readJson(c, MAX_BODY_BYTES);
+      if (!body.ok) return body.response;
+      const parsed = arcgisItemSchema.safeParse(body.value);
+      if (!parsed.success)
+        return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+      const { itemId, part } = parsed.data;
+      return backend.run(c, async (db, ctx, organization) => {
+        const org = await organization();
+        if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
+        if (!(await db.isOrgAdmin(ctx, org))) return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
+        try {
+          const { body: json } = await fetchService(
+            `${ARCGIS_ITEMS}/${itemId}${part === 'data' ? '/data' : ''}?f=json`,
+            /^(application|text)\/(json|plain)$/,
+            MAX_ITEM_BYTES,
+          );
+          return c.body(json, 200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          });
+        } catch (error) {
+          return serviceFailed(c, error, 'ArcGIS item');
+        }
+      });
     });
-  });
 
   routes.post('/', async (c) => {
     c.header('Cache-Control', 'no-store');
@@ -1007,6 +1110,12 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'Fill in the name, source, terms and colours.');
     }
     const input = parsed.data;
+    if (
+      (input.source === 'file' && !features.files) ||
+      (input.map !== null && !features.arcgisMaps)
+    ) {
+      return apiError(c, 422, 'NOT_A_LAYER', NOT_OFFERED);
+    }
     const details = {
       name: input.name,
       sourceName: input.sourceName,
@@ -1025,7 +1134,11 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       maxZoom: input.maxZoom,
       othersShown: input.othersShown,
       map: input.map,
-      mapVisible: input.mapVisible,
+      // Where an admin chooses whether a layer is on when the map opens (the oil and gas map),
+      // a layer is off unless they say so; grain's layers keep their map's own setting, on by
+      // default (F-247-2-R5-03).
+      mapVisible:
+        features.defaultChangeable && !sent(body.value, 'mapVisible') ? false : input.mapVisible,
     };
     if (
       details.minZoom !== null &&
@@ -1035,10 +1148,13 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'The zoom range is out of order.');
     }
     const shared = details.alsoFields.length > 0 || details.onlyField !== null;
-    let layer: Parameters<Database['createMapLayer']>[2];
+    let layer: NewMapLayer;
     if (input.source === 'web') {
       const source = parseLayerSource(input.url);
       if (!source.ok) return apiError(c, 422, 'NOT_A_LAYER', source.message);
+      if (source.kind === 'wms' && !features.wms) {
+        return apiError(c, 422, 'NOT_A_LAYER', NOT_OFFERED);
+      }
       const wmsLayers = source.kind === 'wms' ? (input.wmsLayers ?? source.wmsLayers) : null;
       if (source.kind === 'wms' && wmsLayers === null) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Name the WMS layers to show.');
@@ -1099,10 +1215,10 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
         },
       };
     }
-    return withDatabase(c, openDatabase, async (db, ctx) => {
+    return backend.run(c, async (db, ctx, organization) => {
       // Who may add layers is checked before any web service is fetched (Codex's review of
       // 11c467e); the database checks it again when the layer is written.
-      const org = await organizationOf(c, db);
+      const org = await organization();
       if (org === null) return apiError(c, 403, 'FORBIDDEN', NOT_MEMBER);
       if (!(await db.isOrgAdmin(ctx, org))) return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
       // An ArcGIS layer is read once now: it must answer, have the field it is coloured by,
@@ -1149,13 +1265,26 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'Fill in the name, source, terms and colours.');
     }
     const { version, ...changes } = parsed.data;
-    return withDatabase(c, openDatabase, async (db, ctx) => {
+    // Whether the layer is on when the map opens is changed only where an admin chooses it
+    // (F-247): there it is always sent, elsewhere never.
+    if ((changes.mapVisible !== undefined) !== features.defaultChangeable) {
+      return apiError(c, 422, 'VALIDATION_FAILED', 'Fill in the name, source, terms and colours.');
+    }
+    return backend.run(c, async (db, ctx) => {
       const current = await db.getMapLayerSource(ctx, id);
       if (current === null) return written(c, { status: 'not_found' });
       if ((current.kind === 'wms') !== (changes.wmsLayers !== null)) {
         return apiError(c, 422, 'VALIDATION_FAILED', 'Only a WMS layer names WMS layers.');
       }
       const onlyValues = changes.onlyField === null ? [] : changes.onlyValues;
+      // A live layer's new colour field is checked against the service like its other fields:
+      // one it does not have would be asked for with every square, and a service that refuses
+      // unknown fields would leave the layer blank (F-247-2-R12-01). A layer whose colour field
+      // stays as it is saves without asking the service.
+      const colourChanged =
+        current.kind === 'arcgis_features' &&
+        changes.colourField !== null &&
+        changes.colourField !== current.colourField;
       if (changes.alsoFields.length > 0 || changes.onlyField !== null) {
         if (current.kind !== 'arcgis_features' || current.url === null) {
           return apiError(
@@ -1165,14 +1294,36 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
             'Only a live ArcGIS layer takes these settings.',
           );
         }
+      }
+      if (changes.alsoFields.length > 0 && changes.colourField === null) {
+        return apiError(
+          c,
+          422,
+          'VALIDATION_FAILED',
+          'Choose the field it is coloured by before fields that also count.',
+        );
+      }
+      // Only the fields this change names anew are checked against the service. Fields the layer
+      // already has are saved as they are, without asking it: a change of something else (the
+      // name, whether it is on when the map opens) must go through while the service is away,
+      // which is just when an admin switches a layer off (F-247-2-R19-01).
+      const newFields = [
+        ...(colourChanged ? [changes.colourField ?? ''] : []),
+        ...changes.alsoFields.filter((field) => !current.alsoFields.includes(field)),
+        ...(changes.onlyField !== null && changes.onlyField !== current.onlyField
+          ? [changes.onlyField]
+          : []),
+      ];
+      if (newFields.length > 0 && current.url !== null) {
         // The service is read only for an admin (Codex's review of 11c467e).
         if (!(await db.isOrgAdmin(ctx, current.organizationId))) {
           return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
         }
         try {
           const { fields } = await describeArcgis(current.url);
-          const problem = sharedProblem(fields, changes);
-          if (problem !== null) return apiError(c, 422, 'VALIDATION_FAILED', problem);
+          if (newFields.some((field) => !fields.includes(field))) {
+            return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
+          }
         } catch (error) {
           return serviceFailed(c, error, 'description');
         }
@@ -1199,38 +1350,39 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     if (typeof version !== 'string' || version === '' || version.length > 100) {
       return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
     }
-    return withDatabase(c, openDatabase, async (db, ctx) =>
-      written(c, await db.removeMapLayer(ctx, id, version)),
-    );
+    return backend.run(c, async (db, ctx) => written(c, await db.removeMapLayer(ctx, id, version)));
   });
 
   // A file layer's features, as kept.
-  routes.get('/:id/file', (c) => {
-    const id = c.req.param('id');
-    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const file = await db.getMapLayerFile(ctx, id);
-      if (file === null) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
-      const etag = `"${file.sha256}"`;
-      c.header('Cache-Control', 'private, no-cache');
-      c.header('ETag', etag);
-      c.header('X-Content-Type-Options', 'nosniff');
-      if (c.req.header('if-none-match') === etag) return c.body(null, 304);
-      c.header('Content-Type', 'application/json');
-      return c.body(file.geojson as Uint8Array<ArrayBuffer>, 200);
+  if (features.files)
+    routes.get('/:id/file', (c) => {
+      const id = c.req.param('id');
+      if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      return backend.run(c, async (db, ctx) => {
+        const file = await db.getMapLayerFile(ctx, id);
+        if (file === null) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+        const etag = `"${file.sha256}"`;
+        c.header('Cache-Control', 'private, no-cache');
+        c.header('ETag', etag);
+        c.header('X-Content-Type-Options', 'nosniff');
+        if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+        c.header('Content-Type', 'application/json');
+        return c.body(file.geojson as Uint8Array<ArrayBuffer>, 200);
+      });
     });
-  });
 
   // One map square of a live ArcGIS layer's lines, areas or points, simplified to its zoom.
   routes.get('/:id/features/:z/:x/:y', (c) => {
     const id = c.req.param('id');
     const tile = tileOf(c);
     if (!isUuid(id) || tile === null) return apiError(c, 404, 'NOT_FOUND', 'No such map square.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
+    return backend.run(c, async (db, ctx) => {
       const source = await db.getMapLayerSource(ctx, id);
       if (source?.kind !== 'arcgis_features' || source.url === null) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
       }
+      const { tag, fresh } = await liveTag(c, source);
+      if (fresh) return notModified(c, tag);
       let answer: { body: ArrayBuffer };
       try {
         answer = await fetchService(
@@ -1246,7 +1398,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       if (!/^\s*\{\s*"(type|crs|features|properties)"/.test(start)) {
         return serviceFailed(c, new LayerServiceError(422), 'square');
       }
-      c.header('Cache-Control', LIVE_CACHE);
+      keptUntilChanged(c, tag);
       c.header('Content-Type', 'application/json');
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);
@@ -1261,7 +1413,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     if (!isUuid(id) || !/^\d{1,12}$/.test(objectId)) {
       return apiError(c, 404, 'NOT_FOUND', 'No such feature.');
     }
-    return withDatabase(c, openDatabase, async (db, ctx) => {
+    return backend.run(c, async (db, ctx) => {
       const source = await db.getMapLayerSource(ctx, id);
       if (source?.kind !== 'arcgis_features' || source.url === null) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
@@ -1295,138 +1447,151 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   });
 
   // A zoomed-out view (F-134): how many pieces the layer has, for an admin preparing one.
-  routes.get('/:id/count', (c) => {
-    c.header('Cache-Control', 'no-store');
-    const id = c.req.param('id');
-    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const source = await overviewSource(c, db, ctx, id);
-      if (source instanceof Response) return source;
-      let count: number;
-      try {
-        count = await arcgisCount(source.url ?? '', whereOf(source));
-      } catch (error) {
-        return serviceFailed(c, error, 'count');
-      }
-      if (count > MAX_OVERVIEW_SOURCE) {
-        return apiError(
-          c,
-          422,
-          'TOO_LARGE_FOR_OVERVIEW',
-          `This layer has ${count.toLocaleString('en-CA')} pieces; a zoomed-out view takes at most ${MAX_OVERVIEW_SOURCE.toLocaleString('en-CA')}.`,
-        );
-      }
-      return c.json({ count, pageSize: OVERVIEW_PAGE_SIZE });
+  if (features.overviews)
+    routes.get('/:id/count', (c) => {
+      c.header('Cache-Control', 'no-store');
+      const id = c.req.param('id');
+      if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      return backend.run(c, async (db, ctx) => {
+        const source = await overviewSource(c, db, ctx, id);
+        if (source instanceof Response) return source;
+        let count: number;
+        try {
+          count = await arcgisCount(source.url ?? '', whereOf(source));
+        } catch (error) {
+          return serviceFailed(c, error, 'count');
+        }
+        if (count > MAX_OVERVIEW_SOURCE) {
+          return apiError(
+            c,
+            422,
+            'TOO_LARGE_FOR_OVERVIEW',
+            `This layer has ${count.toLocaleString('en-CA')} pieces; a zoomed-out view takes at most ${MAX_OVERVIEW_SOURCE.toLocaleString('en-CA')}.`,
+          );
+        }
+        return c.json({ count, pageSize: OVERVIEW_PAGE_SIZE });
+      });
     });
-  });
 
   // One page of the whole layer in ArcGIS's compact format, for an admin's browser to read.
-  routes.get('/:id/pages/:offset', (c) => {
-    c.header('Cache-Control', 'no-store');
-    const id = c.req.param('id');
-    const offset = Number(c.req.param('offset'));
-    if (!isUuid(id) || !Number.isInteger(offset) || offset < 0 || offset > MAX_OVERVIEW_SOURCE) {
-      return apiError(c, 404, 'NOT_FOUND', 'No such page.');
-    }
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const source = await overviewSource(c, db, ctx, id);
-      if (source instanceof Response) return source;
-      let answer: { body: ArrayBuffer };
-      try {
-        answer = await fetchService(overviewPageUrl(source, offset), PBF, MAX_PAGE_BYTES);
-      } catch (error) {
-        return serviceFailed(c, error, 'page');
+  if (features.overviews)
+    routes.get('/:id/pages/:offset', (c) => {
+      c.header('Cache-Control', 'no-store');
+      const id = c.req.param('id');
+      const offset = Number(c.req.param('offset'));
+      if (!isUuid(id) || !Number.isInteger(offset) || offset < 0 || offset > MAX_OVERVIEW_SOURCE) {
+        return apiError(c, 404, 'NOT_FOUND', 'No such page.');
       }
-      c.header('Content-Type', 'application/x-protobuf');
-      c.header('X-Content-Type-Options', 'nosniff');
-      return c.body(answer.body, 200);
+      return backend.run(c, async (db, ctx) => {
+        const source = await overviewSource(c, db, ctx, id);
+        if (source instanceof Response) return source;
+        let answer: { body: ArrayBuffer };
+        try {
+          answer = await fetchService(overviewPageUrl(source, offset), PBF, MAX_PAGE_BYTES);
+        } catch (error) {
+          return serviceFailed(c, error, 'page');
+        }
+        c.header('Content-Type', 'application/x-protobuf');
+        c.header('X-Content-Type-Options', 'nosniff');
+        return c.body(answer.body, 200);
+      });
     });
-  });
 
   // One part of the zoomed-out view an admin's browser prepared, checked again here. The view
   // comes in parts of about 192 KB (F-146), each kept at most 256 KB, and is published only once
   // every part has arrived.
-  routes.put('/:id/overview/:version/:part', async (c) => {
-    c.header('Cache-Control', 'no-store');
-    const id = c.req.param('id');
-    const version = c.req.param('version');
-    const partNo = Number(c.req.param('part'));
-    if (!isUuid(id) || !isUuid(version) || !Number.isInteger(partNo) || partNo < 0 || partNo > 63) {
-      return apiError(c, 404, 'NOT_FOUND', 'No such part.');
-    }
-    const body = await readJson(c, MAX_PART_BYTES);
-    if (!body.ok) return body.response;
-    const parsed = overviewPartSchema.safeParse(body.value);
-    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
-    const checked = normalizeFeatureCollection({
-      type: 'FeatureCollection',
-      features: parsed.data.features,
-    });
-    if (!checked.ok) return apiError(c, 422, 'NOT_A_LAYER', checked.message);
-    const features = new TextEncoder().encode(JSON.stringify(checked.collection.features));
-    if (features.byteLength > MAX_STORED_PART_BYTES) {
-      return apiError(c, 413, 'PART_TOO_LARGE', 'This part of the zoomed-out view is too large.');
-    }
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.saveMapLayerOverviewPart(ctx, id, {
-        version,
-        partNo,
-        features,
-        featureCount: checked.collection.features.length,
-      });
-      if (result.status === 'sealed') {
-        return apiError(
-          c,
-          409,
-          'SEALED',
-          'This zoomed-out view is already published. Prepare it again to change it.',
-        );
+  if (features.overviews)
+    routes.put('/:id/overview/:version/:part', async (c) => {
+      c.header('Cache-Control', 'no-store');
+      const id = c.req.param('id');
+      const version = c.req.param('version');
+      const partNo = Number(c.req.param('part'));
+      if (
+        !isUuid(id) ||
+        !isUuid(version) ||
+        !Number.isInteger(partNo) ||
+        partNo < 0 ||
+        partNo > 63
+      ) {
+        return apiError(c, 404, 'NOT_FOUND', 'No such part.');
       }
-      return written(c, result);
+      const body = await readJson(c, MAX_PART_BYTES);
+      if (!body.ok) return body.response;
+      const parsed = overviewPartSchema.safeParse(body.value);
+      if (!parsed.success)
+        return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+      const checked = normalizeFeatureCollection({
+        type: 'FeatureCollection',
+        features: parsed.data.features,
+      });
+      if (!checked.ok) return apiError(c, 422, 'NOT_A_LAYER', checked.message);
+      const features = new TextEncoder().encode(JSON.stringify(checked.collection.features));
+      if (features.byteLength > MAX_STORED_PART_BYTES) {
+        return apiError(c, 413, 'PART_TOO_LARGE', 'This part of the zoomed-out view is too large.');
+      }
+      return backend.run(c, async (db, ctx) => {
+        const result = await db.saveMapLayerOverviewPart(ctx, id, {
+          version,
+          partNo,
+          features,
+          featureCount: checked.collection.features.length,
+        });
+        if (result.status === 'sealed') {
+          return apiError(
+            c,
+            409,
+            'SEALED',
+            'This zoomed-out view is already published. Prepare it again to change it.',
+          );
+        }
+        return written(c, result);
+      });
     });
-  });
 
   // Publishes a view once every part has arrived. The layer's colour field is checked again in
   // the same transaction as the publishing (Codex's review of 8e0fd95).
-  routes.post('/:id/overview/:version/publish', async (c) => {
-    c.header('Cache-Control', 'no-store');
-    const id = c.req.param('id');
-    const version = c.req.param('version');
-    if (!isUuid(id) || !isUuid(version)) return apiError(c, 404, 'NOT_FOUND', 'No such view.');
-    const body = await readJson(c, MAX_BODY_BYTES);
-    if (!body.ok) return body.response;
-    const parsed = publishOverviewSchema.safeParse(body.value);
-    if (!parsed.success) return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const result = await db.publishMapLayerOverview(ctx, id, { version, ...parsed.data });
-      if (result.status === 'incomplete') {
-        return apiError(
-          c,
-          409,
-          'INCOMPLETE',
-          'Parts of the zoomed-out view did not arrive. Prepare it again.',
-        );
-      }
-      return written(c, result);
+  if (features.overviews)
+    routes.post('/:id/overview/:version/publish', async (c) => {
+      c.header('Cache-Control', 'no-store');
+      const id = c.req.param('id');
+      const version = c.req.param('version');
+      if (!isUuid(id) || !isUuid(version)) return apiError(c, 404, 'NOT_FOUND', 'No such view.');
+      const body = await readJson(c, MAX_BODY_BYTES);
+      if (!body.ok) return body.response;
+      const parsed = publishOverviewSchema.safeParse(body.value);
+      if (!parsed.success)
+        return apiError(c, 422, 'VALIDATION_FAILED', 'The request is malformed.');
+      return backend.run(c, async (db, ctx) => {
+        const result = await db.publishMapLayerOverview(ctx, id, { version, ...parsed.data });
+        if (result.status === 'incomplete') {
+          return apiError(
+            c,
+            409,
+            'INCOMPLETE',
+            'Parts of the zoomed-out view did not arrive. Prepare it again.',
+          );
+        }
+        return written(c, result);
+      });
     });
-  });
 
   // A layer's published zoomed-out view, its parts put together as one GeoJSON document.
-  routes.get('/:id/overview', (c) => {
-    const id = c.req.param('id');
-    if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
-      const overview = await db.getMapLayerOverview(ctx, id);
-      if (overview === null) return apiError(c, 404, 'NOT_FOUND', 'No zoomed-out view.');
-      const etag = `"${overview.version}"`;
-      c.header('Cache-Control', 'private, no-cache');
-      c.header('ETag', etag);
-      c.header('X-Content-Type-Options', 'nosniff');
-      if (c.req.header('if-none-match') === etag) return c.body(null, 304);
-      c.header('Content-Type', 'application/json');
-      return c.body(joinParts(overview.parts), 200);
+  if (features.overviews)
+    routes.get('/:id/overview', (c) => {
+      const id = c.req.param('id');
+      if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
+      return backend.run(c, async (db, ctx) => {
+        const overview = await db.getMapLayerOverview(ctx, id);
+        if (overview === null) return apiError(c, 404, 'NOT_FOUND', 'No zoomed-out view.');
+        const etag = `"${overview.version}"`;
+        c.header('Cache-Control', 'private, no-cache');
+        c.header('ETag', etag);
+        c.header('X-Content-Type-Options', 'nosniff');
+        if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+        c.header('Content-Type', 'application/json');
+        return c.body(joinParts(overview.parts), 200);
+      });
     });
-  });
 
   // One map square's picture of an ArcGIS map or a WMS service.
   // A picture layer's legend from ArcGIS (F-141): each entry's words and its small picture, so
@@ -1434,7 +1599,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
   routes.get('/:id/legend', (c) => {
     const id = c.req.param('id');
     if (!isUuid(id)) return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
+    return backend.run(c, async (db, ctx) => {
       const source = await db.getMapLayerSource(ctx, id);
       if (
         (source?.kind !== 'arcgis_image' && source?.kind !== 'arcgis_tiles') ||
@@ -1442,13 +1607,15 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       ) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
       }
+      const { tag, fresh } = await liveTag(c, source);
+      if (fresh) return notModified(c, tag);
       let body: unknown;
       try {
         body = await fetchJson(`${source.url}/legend?f=json`, MAX_LEGEND_BYTES);
       } catch (error) {
         return serviceFailed(c, error, 'legend');
       }
-      c.header('Cache-Control', LIVE_CACHE);
+      keptUntilChanged(c, tag);
       return c.json({ entries: await legendEntries(body) } satisfies LayerLegend);
     });
   });
@@ -1457,7 +1624,7 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
     const id = c.req.param('id');
     const tile = tileOf(c);
     if (!isUuid(id) || tile === null) return apiError(c, 404, 'NOT_FOUND', 'No such map square.');
-    return withDatabase(c, openDatabase, async (db, ctx) => {
+    return backend.run(c, async (db, ctx) => {
       const source = await db.getMapLayerSource(ctx, id);
       if (
         (source?.kind !== 'arcgis_image' &&
@@ -1475,6 +1642,8 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
       ) {
         return apiError(c, 404, 'NOT_FOUND', 'This layer has no square at this zoom.');
       }
+      const { tag, fresh } = await liveTag(c, source);
+      if (fresh) return notModified(c, tag);
       let answer: { body: ArrayBuffer; type: string };
       try {
         answer = await fetchService(
@@ -1492,14 +1661,14 @@ export function mapLayerRoutes(openDatabase: DatabaseFactory) {
           error instanceof LayerServiceError &&
           error.status === 404
         ) {
-          c.header('Cache-Control', LIVE_CACHE);
+          keptUntilChanged(c, tag);
           return c.body(null, 204);
         }
         return serviceFailed(c, error, 'picture');
       }
       const type = await pictureType(answer.body);
       if (type === null) return serviceFailed(c, new LayerServiceError(415), 'picture');
-      c.header('Cache-Control', LIVE_CACHE);
+      keptUntilChanged(c, tag);
       c.header('Content-Type', type);
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);

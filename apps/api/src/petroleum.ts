@@ -2,8 +2,13 @@ import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Membership } from './db';
+import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
+import type { MapLayerWrite } from './map-layers-db';
 import {
+  LayerRefusedError,
   PETROLEUM_SCHEMA_VERSION,
+  TooManyLayersError,
+  type PetroleumContext,
   type PetroleumDatabase,
   type PetroleumFactory,
 } from './petroleum-db';
@@ -106,6 +111,102 @@ async function withPetroleum(
   }
 }
 
+/** A call to the oil and gas database that failed or passed its deadline. */
+class PetroleumFailure extends Error {
+  constructor(readonly reason: unknown) {
+    super('oil and gas database call failed');
+    this.name = 'PetroleumFailure';
+  }
+}
+
+/** Runs one piece of work on the oil and gas database, within the deadline. */
+type PetroleumCall = <T>(run: (db: PetroleumDatabase) => Promise<T>) => Promise<T>;
+
+/**
+ * As withPetroleum, for a request that also waits on something else between its database calls
+ * (a map service, F-247 part 2): the deadline applies to each database call, not to the whole
+ * request, so a slow map service is never taken for a database failure and no transaction is
+ * held while it answers. A call past its deadline drops the connection; the request then answers
+ * "unavailable". Any other error `handle` throws is the caller's to answer.
+ */
+async function withPetroleumCalls(
+  c: ApiContext,
+  openPetroleum: PetroleumFactory,
+  handle: (call: PetroleumCall) => Promise<Response>,
+  deadlineMs = PETROLEUM_DEADLINE_MS,
+): Promise<Response> {
+  const target = petroleumUrl(c);
+  if (target === null) return notSetUp(c);
+  let db: PetroleumDatabase;
+  try {
+    db = openPetroleum(target.url, { viaHyperdrive: target.viaHyperdrive });
+  } catch {
+    // The error can carry the whole URL, password included, so it is neither logged nor returned.
+    return apiError(
+      c,
+      500,
+      'MISCONFIGURED',
+      'The oil and gas database is not configured correctly.',
+    );
+  }
+  const call: PetroleumCall = async (run) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const work = run(db);
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          void db.abort().catch(() => undefined);
+          reject(new DeadlineError());
+        }, deadlineMs);
+      });
+      // The abandoned work fails once its connection is dropped; nothing waits for it.
+      work.catch(() => undefined);
+      return await Promise.race([work, deadline]);
+    } catch (error) {
+      // The database's own refusals of a layer are answers, not outages.
+      if (error instanceof TooManyLayersError || error instanceof LayerRefusedError) throw error;
+      throw new PetroleumFailure(error);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    if ((await call((d) => d.schemaVersion())) < PETROLEUM_SCHEMA_VERSION) {
+      return apiError(
+        c,
+        503,
+        'PETROLEUM_NOT_READY',
+        'The oil and gas database is being updated. Try again in a few minutes.',
+      );
+    }
+    return await handle(call);
+  } catch (error) {
+    if (error instanceof TooManyLayersError) {
+      return apiError(
+        c,
+        422,
+        'TOO_MANY_LAYERS',
+        'The map has the most layers it can keep. Remove one before adding another.',
+      );
+    }
+    if (error instanceof LayerRefusedError) {
+      return apiError(
+        c,
+        422,
+        'VALIDATION_FAILED',
+        'The map layer was not saved: check its name, source, terms and colours.',
+      );
+    }
+    if (!(error instanceof PetroleumFailure)) throw error;
+    console.error(
+      `Database unavailable in request ${c.get('requestId')}: database=petroleum ${failureSummary(error.reason)}`,
+    );
+    return apiError(c, 503, 'DATABASE_UNAVAILABLE', 'The oil and gas database is unavailable.');
+  } finally {
+    closeLater(c, { close: () => db.close() });
+  }
+}
+
 /**
  * GET /petroleum/ready, public: whether the oil and gas database is reachable and at the schema
  * version this code needs (withPetroleum checks it), for the deploy's smoke test
@@ -188,9 +289,97 @@ function membershipOf(c: ApiContext, memberships: Membership[]): Membership | nu
   return memberships.length === 1 ? (memberships[0] ?? null) : null;
 }
 
+const NOT_A_MEMBER = 'You are not a member of this organization.';
+
+/**
+ * The oil and gas map layers (F-247 part 2) behind the shared layer routes: live ArcGIS layers
+ * only, kept in the oil and gas database. The person's active membership and role are read from
+ * grain's database first, in this same request; without one the oil and gas database is never
+ * opened. The database checks the organization and role again on every read and write.
+ */
+export function petroleumLayerBackend(
+  openDatabase: DatabaseFactory,
+  openPetroleum: PetroleumFactory,
+  deadlineMs = PETROLEUM_DEADLINE_MS,
+): LayerBackend {
+  return {
+    features: {
+      files: false,
+      wms: false,
+      arcgisMaps: false,
+      overviews: false,
+      defaultChangeable: true,
+    },
+    run: (c, handle) =>
+      withDatabase(c, openDatabase, async (grain, ctx) => {
+        const membership = membershipOf(c, await grain.memberships(ctx.userId));
+        if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+        const organizationId = membership.organizationId;
+        const who: PetroleumContext = {
+          userId: ctx.userId,
+          organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        };
+        /**
+         * A write waits on the map service first (adding a layer reads its description): the
+         * person's admin role is read again from grain's database just before it, so a role
+         * removed meanwhile writes nothing (F-247-2-R5-01).
+         */
+        const asAdmin = async (write: () => Promise<MapLayerWrite>): Promise<MapLayerWrite> => {
+          const now = await grain.memberships(ctx.userId);
+          const still = now.some(
+            (m) => m.organizationId === organizationId && m.role === 'org_admin',
+          );
+          return still ? write() : { status: 'forbidden' };
+        };
+        return withPetroleumCalls(
+          c,
+          openPetroleum,
+          (call) => {
+            const layers: LayerDatabase = {
+              isOrgAdmin: (_ctx, organization) =>
+                Promise.resolve(organization === organizationId && membership.role === 'org_admin'),
+              listMapLayers: (_ctx, organization) =>
+                organization === organizationId
+                  ? call((db) => db.listLayers(who))
+                  : Promise.resolve(null),
+              getMapLayerSource: (_ctx, id) => call((db) => db.layerSource(who, id)),
+              createMapLayer: (_ctx, organization, layer) =>
+                organization === organizationId
+                  ? asAdmin(() => call((db) => db.createLayer(who, layer)))
+                  : Promise.resolve({ status: 'forbidden' }),
+              updateMapLayer: (_ctx, id, version, changes) =>
+                asAdmin(() => call((db) => db.updateLayer(who, id, version, changes))),
+              removeMapLayer: (_ctx, id, version) =>
+                asAdmin(() => call((db) => db.removeLayer(who, id, version))),
+              // Files and zoomed-out views are not offered here; their routes are not registered.
+              getMapLayerFile: () => Promise.resolve(null),
+              getMapLayerOverview: () => Promise.resolve(null),
+              saveMapLayerOverviewPart: () => Promise.resolve({ status: 'not_found' }),
+              publishMapLayerOverview: () => Promise.resolve({ status: 'not_found' }),
+            };
+            return handle(layers, ctx, () => Promise.resolve(organizationId));
+          },
+          deadlineMs,
+        );
+      }),
+  };
+}
+
 /** Signed-in oil and gas routes (registered after sign-in is required). */
-export function petroleumRoutes(openDatabase: DatabaseFactory, openPetroleum: PetroleumFactory) {
+export function petroleumRoutes(
+  openDatabase: DatabaseFactory,
+  openPetroleum: PetroleumFactory,
+  layersDeadlineMs = PETROLEUM_DEADLINE_MS,
+) {
   const routes = new Hono<ApiEnv>();
+
+  // /petroleum/layers: the oil and gas map's layers (F-247 part 2).
+  routes.route(
+    '/layers',
+    layerRoutes(petroleumLayerBackend(openDatabase, openPetroleum, layersDeadlineMs)),
+  );
 
   // The person's active membership is loaded from grain's database before the oil and gas
   // database is opened; without one, it is never opened.
@@ -199,7 +388,7 @@ export function petroleumRoutes(openDatabase: DatabaseFactory, openPetroleum: Pe
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const membership = membershipOf(c, await db.memberships(ctx.userId));
       if (membership === null) {
-        return apiError(c, 403, 'FORBIDDEN', 'You are not a member of this organization.');
+        return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
       }
       return withPetroleum(c, openPetroleum, async (petroleum) => {
         const seen = await petroleum.organizationSeen({

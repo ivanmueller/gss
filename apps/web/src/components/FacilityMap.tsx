@@ -20,12 +20,14 @@ import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
 import {
   isLayerPictureUrl,
+  layerPictureStale,
   mapRequestRefusal,
   PictureSignIns,
   USUAL_LOOK,
   type MapOverlay,
   type OverlayLook,
   type PickedFeature,
+  type StaleReason,
 } from '../lib/mapLayers';
 import type { Theme } from '../lib/theme';
 import { PinDetailsBox, type PinAnchor } from './PinDetailsBox';
@@ -96,6 +98,16 @@ export interface FacilityMapProps {
   onSelect: (pinId: string) => void;
   /** Mapbox refused the token (wrong token or not allowed on this address). */
   onTokenRefused: () => void;
+  /**
+   * A map layer's picture was refused or its layer is no longer there: the list of layers is
+   * read again, and a layer it no longer holds leaves the map (F-247-2-R9-02).
+   */
+  onLayersStale?: ((reason: StaleReason) => void) | undefined;
+  /**
+   * Bumped when access is back after a refusal: the layers' pictures are asked for again, the
+   * map standing still (F-247-2-R12-02).
+   */
+  layersRetry?: number | undefined;
 }
 
 function selectedData(pins: readonly MapPin[], selectedId: string | null): PinFeatureCollection {
@@ -402,6 +414,13 @@ export default function FacilityMap(props: FacilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const shownStyle = useRef(basemapStyle(basemap, theme));
+  /**
+   * Whether the map's style can take sources and layers now: from its 'style.load' until another
+   * style is set. Not Mapbox's isStyleLoaded(), which is also false while any picture or tile is
+   * still loading: a layer switched off at such a moment was skipped and stayed drawn while the
+   * map stood still (F-247-2-R11-01).
+   */
+  const styleReady = useRef(false);
   // The sign-in sent with each map layer picture, for pictures refused when it lapsed.
   const pictureSignIns = useRef(new PictureSignIns());
   // The latest props, read by map event handlers that are registered once.
@@ -502,6 +521,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('moveend', report);
     // Also after a basemap or theme change, which replaces the whole style.
     instance.on('style.load', () => {
+      styleReady.current = true;
       if (latest.current.simple) hideClutter(instance);
       if (latest.current.areas) addAreaLayers(instance, latest.current.areas);
       paintTheme(instance, latest.current.basemap);
@@ -566,6 +586,8 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('error', (event: { error?: unknown }) => {
       const refusal = mapRequestRefusal(event.error);
       if (refusal === 'mapbox-token') latest.current.onTokenRefused();
+      const stale = layerPictureStale(event.error);
+      if (stale) latest.current.onLayersStale?.(stale);
       // The person's sign-in lapsed: the pictures load again once it renews (below), or at
       // once if it renewed while this answer was on its way.
       const url = (event.error as { url?: unknown }).url;
@@ -579,6 +601,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     map.current = instance;
     return () => {
+      styleReady.current = false;
       instance.remove();
       map.current = null;
     };
@@ -590,6 +613,12 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && pictureSignIns.current.renewed(authToken)) reloadPictures(instance);
   }, [authToken]);
 
+  const { layersRetry } = props;
+  useEffect(() => {
+    const instance = map.current;
+    if (instance && styleReady.current && layersRetry) reloadPictures(instance);
+  }, [layersRetry]);
+
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
@@ -599,8 +628,9 @@ export default function FacilityMap(props: FacilityMapProps) {
       // Without diffing, the whole style reloads, so 'style.load' repaints and adds the pins.
       // (Mapbox's types also demand its font options, which setStyle otherwise keeps.)
       const reload = { diff: false } as Parameters<mapboxgl.Map['setStyle']>[1];
+      styleReady.current = false;
       instance.setStyle(style, reload);
-    } else if (instance.isStyleLoaded()) {
+    } else if (styleReady.current) {
       // Same imagery (satellite), new theme: only the pins change colour.
       paintTheme(instance, basemap);
     }
@@ -614,7 +644,7 @@ export default function FacilityMap(props: FacilityMapProps) {
 
   useEffect(() => {
     const instance = map.current;
-    if (!instance?.isStyleLoaded()) return;
+    if (!instance || !styleReady.current) return;
     if (props.areas && !instance.getSource(AREAS)) {
       addAreaLayers(instance, props.areas);
       return;
@@ -625,7 +655,8 @@ export default function FacilityMap(props: FacilityMapProps) {
 
   useEffect(() => {
     const instance = map.current;
-    if (instance?.isStyleLoaded()) syncOverlays(instance, props.overlays ?? []);
+    // Before the style is ready, its 'style.load' draws the overlays as they are then.
+    if (instance && styleReady.current) syncOverlays(instance, props.overlays ?? []);
   }, [props.overlays]);
 
   // Compared as text, so a new array with the same bounds does not move the map.

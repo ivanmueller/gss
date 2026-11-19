@@ -55,4 +55,16 @@ test('the oil and gas database answers through the Worker', async ({ page, reque
   });
   expect(health.status()).toBe(200);
   expect(await health.json()).toEqual({ status: 'ok' });
+
+  // F-247 part 2: the oil and gas map's layers come from that database, through the Worker and
+  // its migrated table, as the signed-in member. Without a Mapbox token the suite never draws
+  // the map (T-03), so the list is read from the API. Nothing is added here: adding needs a
+  // live map service.
+  const layers = await request.get('/api/v1/petroleum/layers', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(layers.status()).toBe(200);
+  expect(await layers.json()).toEqual({ layers: [] });
+  const signedOut = await request.get('/api/v1/petroleum/layers');
+  expect(signedOut.status()).toBe(401);
 });

@@ -16,7 +16,8 @@ import {
 import type { ExpressionSpecification, FilterSpecification } from 'mapbox-gl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { apiFetch } from './api';
+import { ApiError, apiFetch } from './api';
+import { LAYER_PICTURE_BASES, livePath, useLayerApi, type LayerApi } from './layerApi';
 import { signedInAs } from './useApiResource';
 
 // Map layers in the browser (F-107): reading a file an admin adds, the colours a layer is
@@ -268,6 +269,39 @@ export function useLayerChoice(
   return [useMemo(() => new Set(ids), [ids]), toggle, setMany];
 }
 
+/**
+ * The layers that are on where an admin chooses which are on when the map opens (the oil and gas
+ * map, F-247; the owner, 2026-11-19): every visit starts from the admin's choice, and a person's
+ * own switching lasts until they close or reload the page. Nothing is kept in the browser.
+ */
+export function useDefaultLayerChoice(
+  layers: readonly Pick<MapLayerView, 'id' | 'mapVisible'>[],
+): [ReadonlySet<string>, (id: string) => void, (ids: readonly string[], on: boolean) => void] {
+  // The person's own switches this visit: true on, false off; a layer not here follows the admin.
+  const [own, setOwn] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const chosen = useMemo(
+    () =>
+      new Set(
+        layers.filter((layer) => own.get(layer.id) ?? layer.mapVisible).map((layer) => layer.id),
+      ),
+    [layers, own],
+  );
+  const setMany = useCallback((ids: readonly string[], on: boolean) => {
+    setOwn((current) => {
+      const next = new Map(current);
+      for (const id of ids) next.set(id, on);
+      return next;
+    });
+  }, []);
+  const toggle = useCallback(
+    (id: string) => {
+      setMany([id], !chosen.has(id));
+    },
+    [chosen, setMany],
+  );
+  return [chosen, toggle, setMany];
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fetching the features of the layers that are on
 
@@ -278,16 +312,53 @@ export interface MapView {
 
 type Square = { features: GeoJSON.Feature[]; exceeded: boolean } | 'failed';
 
-/** The most map squares kept in memory, across layers and zooms. */
+/**
+ * The most map squares kept in memory, across layers and zooms, and so the most one view loads:
+ * the layers that are on take their squares in the list's order, and a layer the view has no
+ * room left for is not loaded there (F-247-2-R20-01).
+ */
 const MAX_KEPT_SQUARES = 600;
 
-function picturesUrl(id: string): string {
-  return `${window.location.origin}/api/v1/map-layers/${id}/tiles/{z}/{x}/{y}.png`;
+/** Said of a layer the view has no room left for. */
+export const TOO_MANY_LAYERS_NOTE =
+  'Too many layers are on to load this one here: zoom in, or switch some layers off.';
+
+/** The squares a layer is counted for before the map has said what is in view. */
+const SQUARES_BEFORE_VIEW = 12;
+
+/**
+ * The live layers one view has no room left for, by id: in the list's order, each layer loaded
+ * by map square at this zoom (lines and areas by squares, pictures by picture squares) takes
+ * one square per map square in view, until the most kept is reached. The first always fits (a
+ * view has far fewer squares than that). So what a view loads is bounded whatever the number of
+ * layers switched on, pictures included, from the moment the map opens, and a layer left out
+ * says so instead of showing holes (F-247-2-R3-01, R20-01, R22-01). A layer from a file or
+ * drawn from its zoomed-out view is fetched whole, once, and takes no squares.
+ */
+export function layersLeftOut(
+  layers: readonly MapLayerView[],
+  squaresInView: number,
+  zoom: number | null,
+): ReadonlySet<string> {
+  const perLayer = squaresInView > 0 ? squaresInView : SQUARES_BEFORE_VIEW;
+  const leftOut = new Set<string>();
+  let taken = 0;
+  for (const layer of layers) {
+    if (layer.kind === 'file' || !shownAtZoom(layer, zoom)) continue;
+    if (layer.kind === 'arcgis_features' && usesOverview(layer, zoom)) continue;
+    if (taken > 0 && taken + perLayer > MAX_KEPT_SQUARES) leftOut.add(layer.id);
+    else taken += perLayer;
+  }
+  return leftOut;
+}
+
+function picturesUrl(api: LayerApi, id: string): string {
+  return `${window.location.origin}/api/v1${api.path(livePath(`/${id}/tiles/{z}/{x}/{y}.png`))}`;
 }
 
 /** Whether a request to this address carries the person's sign-in (FacilityMap's pictures). */
 export function isLayerPictureUrl(url: string): boolean {
-  return url.startsWith(`${window.location.origin}/api/v1/map-layers/`);
+  return LAYER_PICTURE_BASES.some((base) => url.startsWith(`${window.location.origin}${base}`));
 }
 
 /**
@@ -302,6 +373,27 @@ export function mapRequestRefusal(error: unknown): 'mapbox-token' | 'sign-in' | 
   const url: unknown = 'url' in error ? error.url : undefined;
   return typeof url === 'string' && isLayerPictureUrl(url) ? 'sign-in' : 'mapbox-token';
 }
+
+/**
+ * Whether a failed map request says a layer's pictures are no longer this person's to see: the
+ * Worker answered "not a member" (403) or "no such layer" (404) for a layer's picture. The list of
+ * layers is then read again (F-247-2-R9-02). A lapsed sign-in (401) is renewed, not this.
+ */
+export function layerPictureStale(error: unknown): StaleReason | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const status: unknown = 'status' in error ? error.status : undefined;
+  const url: unknown = 'url' in error ? error.url : undefined;
+  if (typeof url !== 'string' || !isLayerPictureUrl(url)) return null;
+  return status === 403 ? 'refused' : status === 404 ? 'missing' : null;
+}
+
+/**
+ * Why the list of layers is read again: the Worker refused the person ("refused": signed out or
+ * not a member), or does not have the layer for them ("missing": removed, or, on grain's side,
+ * hidden from a suspended member). If the list is then read well and still holds the layer,
+ * what was let go is asked for again (F-247-2-R12-02).
+ */
+export type StaleReason = 'refused' | 'missing';
 
 /** The most picture addresses whose sign-in is remembered (a map asks for a few hundred). */
 const MAX_SENT_PICTURES = 1000;
@@ -442,20 +534,27 @@ function readValues(key: string): Record<string, ValueChoice> {
  */
 export function useValueChoices(
   token: string,
+  /** False where a person's own switching lasts for the visit only (F-247). */
+  remembered = true,
 ): [
   Readonly<Record<string, ValueChoice>>,
   (id: string, choice: ValueChoice, layerDefault?: ValueChoice) => void,
 ] {
-  const key = `${VALUES_PREFIX}${signedInAs(token)}`;
+  // Not remembered: kept under a key the browser's storage never sees.
+  const key = remembered ? `${VALUES_PREFIX}${signedInAs(token)}` : `visit:${signedInAs(token)}`;
+  const stored = useCallback(
+    (k: string): Record<string, ValueChoice> => (remembered ? readValues(k) : {}),
+    [remembered],
+  );
   const [state, setState] = useState<{ key: string; choices: Record<string, ValueChoice> }>(() => ({
     key,
-    choices: readValues(key),
+    choices: stored(key),
   }));
-  const choices = state.key === key ? state.choices : readValues(key);
+  const choices = state.key === key ? state.choices : stored(key);
   const set = useCallback(
     (id: string, choice: ValueChoice, layerDefault: ValueChoice = ALL_VALUES) => {
       setState((current) => {
-        const before = current.key === key ? current.choices : readValues(key);
+        const before = current.key === key ? current.choices : stored(key);
         // Forgotten only when it is the layer's own choice: "every value and other values" is
         // kept for a layer that hides other values by default (Codex's review of 1f328f9).
         const all =
@@ -466,15 +565,17 @@ export function useValueChoices(
           Object.entries(before).filter(([layer]) => layer !== id || !all),
         );
         if (!all) next[id] = choice;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          // Storage refused (private window): the choice lasts until the page is closed.
+        if (remembered) {
+          try {
+            window.localStorage.setItem(key, JSON.stringify(next));
+          } catch {
+            // Storage refused (private window): the choice lasts until the page is closed.
+          }
         }
         return { key, choices: next };
       });
     },
-    [key],
+    [key, remembered, stored],
   );
   return [choices, set];
 }
@@ -610,24 +711,118 @@ export function useLayerOverlays(
   view: MapView | null,
   token: string,
   choices: Readonly<Record<string, ValueChoice>> = {},
+  /**
+   * Called when the server refuses a layer's data or no longer has the layer: the list of layers
+   * is then read again, and only what it holds is drawn (F-247-2-R9-01).
+   */
+  onStale?: (reason: StaleReason) => void,
+  /**
+   * Bumped when the list was read again, successfully, after a refusal: what the refusal let go
+   * is asked for again, the map standing still (F-247-2-R12-02).
+   */
+  retry = 0,
 ): { overlays: MapOverlay[]; notes: Map<string, string> } {
   const [files, setFiles] = useState<Map<string, GeoJSON.FeatureCollection | 'failed'>>(
     () => new Map(),
   );
   const [squares, setSquares] = useState<Map<string, Square>>(() => new Map());
   const asked = useRef(new Set<string>());
+  /** The squares the map is showing now: never dropped to make room (F-247-2-R3-01). */
+  const inView = useRef<ReadonlySet<string>>(new Set());
+  /** The sign-in now, and a count bumped to ask again for what failed under an older one. */
+  const tokenNow = useRef(token);
+  const [renewed, setRenewed] = useState(0);
+  /** The layers on at the last look, to tell one switched off. */
+  const wasOn = useRef<ReadonlySet<string>>(new Set());
+  /**
+   * How many times each layer's kept data was let go (switched off, removed, refused). An answer
+   * to a request sent before the last time is not kept (F-247-2-R5-02).
+   */
+  const eras = useRef(new Map<string, number>());
+  /**
+   * The squares asked for and not yet answered, each with the means to call its request off. A
+   * square that leaves the view, or whose layer is let go, is called off: its request stops
+   * competing with the view the person is looking at, and no more than one view's squares are
+   * ever on their way (F-247-2-R21-01).
+   */
+  const flying = useRef(new Map<string, AbortController>());
+  const api = useLayerApi();
+
+  // Nothing is left running when the map goes away. What was called off is forgotten as asked
+  // for, so it is asked for again if the map comes back (as React does once in development).
+  useEffect(() => {
+    const requests = flying.current;
+    const wanted = asked.current;
+    return () => {
+      for (const [key, request] of requests) {
+        request.abort();
+        wanted.delete(key);
+      }
+      requests.clear();
+    };
+  }, []);
+
+  const stale = useRef(onStale);
+
+  useEffect(() => {
+    tokenNow.current = token;
+    stale.current = onStale;
+  }, [token, onStale]);
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
   const zoom = view?.zoom ?? null;
+  const leftOut = useMemo(() => layersLeftOut(layers, tiles.length, zoom), [layers, tiles, zoom]);
 
   useEffect(() => {
+    const eraOf = (layerId: string) => eras.current.get(layerId) ?? 0;
+    /**
+     * Nothing is kept of a layer that is off, removed or refused (F-247-2-R5-02): its squares,
+     * file and zoomed-out view go, what was asked for is forgotten, and answers still on their
+     * way are not kept. Switched back on, everything is asked for again, so each square passes
+     * the Worker's membership check before it is drawn (the browser's own copy answers "not
+     * modified" while the person is still a member).
+     */
+    const letGo = (layerIds: readonly string[]) => {
+      if (layerIds.length === 0) return;
+      const ofThese = (key: string) =>
+        layerIds.some((id) => key.startsWith(`${id}@`) || key.startsWith(`${id}#`));
+      for (const id of layerIds) eras.current.set(id, eraOf(id) + 1);
+      for (const key of [...asked.current]) if (ofThese(key)) asked.current.delete(key);
+      for (const [key, request] of [...flying.current]) {
+        if (!ofThese(key)) continue;
+        request.abort();
+        flying.current.delete(key);
+      }
+      setSquares((current) => {
+        const next = new Map([...current].filter(([key]) => !ofThese(key)));
+        return next.size === current.size ? current : next;
+      });
+      setFiles((current) => {
+        const next = new Map(
+          [...current].filter(([id]) => !layerIds.includes(id.replace(/#overview$/, ''))),
+        );
+        return next.size === current.size ? current : next;
+      });
+    };
+    /** Signed out or no longer a member, under the sign-in as it is now. */
+    const refused = (error: unknown) =>
+      error instanceof ApiError && (error.status === 401 || error.status === 403);
+    /** The server no longer has the layer (removed, or no longer this person's to see). */
+    const missing = (error: unknown) => error instanceof ApiError && error.status === 404;
+    const nowOn = new Set(layers.map((layer) => layer.id));
+    letGo([...wasOn.current].filter((id) => !nowOn.has(id)));
+    wasOn.current = nowOn;
+
     /** A whole GeoJSON document, fetched once per version and kept under `id`. */
     const fetchWhole = (id: string, key: string, path: string) => {
       if (asked.current.has(key)) return;
       asked.current.add(key);
+      const layerId = id.replace(/#overview$/, '');
+      const era = eraOf(layerId);
       apiFetch(path, token)
         .then((res) => res.json())
         .then((body: unknown) => {
+          if (era !== eraOf(layerId)) return;
           const collection = asCollection(body);
           // Numbered afresh: a view sent in parts repeats its parts' numbers, and the map tells
           // lines apart by them.
@@ -636,16 +831,62 @@ export function useLayerOverlays(
             new Map(current).set(id, features ? { type: 'FeatureCollection', features } : 'failed'),
           );
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          if (era !== eraOf(layerId)) return;
           asked.current.delete(key);
+          if (token !== tokenNow.current) {
+            // Asked under a sign-in renewed since: asked again under the new one (F-247-2-R8-02).
+            setRenewed((n) => n + 1);
+            return;
+          }
+          if (refused(error)) letGo([...wasOn.current]);
+          else if (missing(error)) letGo([layerId]);
+          if (refused(error)) stale.current?.('refused');
+          else if (missing(error)) stale.current?.('missing');
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
     };
+    const showing = new Set<string>();
+    for (const layer of layers) {
+      if (layer.kind !== 'arcgis_features' || !shownAtZoom(layer, zoom)) continue;
+      if (usesOverview(layer, zoom) || leftOut.has(layer.id)) continue;
+      for (const tile of tiles) showing.add(squareKey(layer, tile));
+    }
+    inView.current = showing;
+    // Squares asked for in a view the map has left are called off, and may be asked for again
+    // if it comes back to them (F-247-2-R21-01).
+    for (const [key, request] of [...flying.current]) {
+      if (showing.has(key)) continue;
+      request.abort();
+      flying.current.delete(key);
+      asked.current.delete(key);
+    }
+    /**
+     * Keeps memory in check: the oldest squares go first, but never one the map is showing now.
+     * With many layers on, a view can need more squares than are kept from earlier views;
+     * dropping one of those left a hole that nothing asked for again while the map stood still
+     * (F-247-2-R3-01). Unchanged when nothing needs to go, so the map is not drawn again.
+     */
+    const trimmed = (current: Map<string, Square>) => {
+      if (current.size <= MAX_KEPT_SQUARES) return current;
+      const next = new Map(current);
+      for (const old of current.keys()) {
+        if (next.size <= MAX_KEPT_SQUARES) break;
+        // The view as it is now, even for a square that arrives after the map moved again.
+        if (inView.current.has(old)) continue;
+        next.delete(old);
+        asked.current.delete(old);
+      }
+      return next.size === current.size ? current : next;
+    };
+    // Layers switched off or the map moved: squares no longer shown are let go at once, not only
+    // when the next square arrives (F-247-2-R4-02).
+    setSquares(trimmed);
     for (const layer of layers) {
       // Nothing is fetched for a layer out of its zoom range (F-138).
       if (!shownAtZoom(layer, zoom)) continue;
       if (layer.kind === 'file') {
-        fetchWhole(layer.id, `${layer.id}@${layer.version}`, `/map-layers/${layer.id}/file`);
+        fetchWhole(layer.id, `${layer.id}@${layer.version}`, api.path(`/${layer.id}/file`));
       } else if (layer.kind === 'arcgis_features') {
         // The zoomed-out view is fetched once, at any zoom, so it is ready to fill in while
         // squares load and when zooming out (F-140: no blank map between zooms).
@@ -653,52 +894,89 @@ export function useLayerOverlays(
           fetchWhole(
             `${layer.id}#overview`,
             `${layer.id}#overview@${layer.overview?.version ?? ''}`,
-            `/map-layers/${layer.id}/overview`,
+            api.path(`/${layer.id}/overview`),
           );
         }
         if (usesOverview(layer, zoom)) continue;
+        // No room left in this view: nothing is asked for; the layer says so (below).
+        if (leftOut.has(layer.id)) continue;
         for (const tile of tiles) {
           const key = squareKey(layer, tile);
           if (asked.current.has(key)) continue;
           asked.current.add(key);
-          // The settings in the address too, so the browser's cached square (an hour) is not
-          // reused after they change (Codex's review of bb488a9).
-          const path = `/map-layers/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`;
-          apiFetch(path, token)
+          // The settings in the address too, so the browser's kept square is not reused after
+          // they change (Codex's review of bb488a9).
+          const path = api.path(
+            livePath(
+              `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
+            ),
+          );
+          const era = eraOf(layer.id);
+          const request = new AbortController();
+          flying.current.set(key, request);
+          const landed = () => {
+            if (flying.current.get(key) === request) flying.current.delete(key);
+          };
+          apiFetch(path, token, { signal: request.signal })
             .then((res) => res.json())
             .then((body: unknown) => {
+              landed();
+              // Called off, or asked for before the layer was switched off, removed or refused:
+              // not kept (F-247-2-R5-02, R8-01, R21-01).
+              if (request.signal.aborted || era !== eraOf(layer.id)) return;
               const collection = asCollection(body);
-              setSquares((current) => {
-                const next = new Map(current).set(key, collection ?? 'failed');
-                // Keeps memory in check: the oldest squares go first.
-                while (next.size > MAX_KEPT_SQUARES) {
-                  const oldest = next.keys().next().value;
-                  if (oldest === undefined) break;
-                  next.delete(oldest);
-                  asked.current.delete(oldest);
-                }
-                return next;
-              });
+              setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
-            .catch(() => {
+            .catch((error: unknown) => {
+              landed();
+              // Called off: nothing to say or keep; what it had asked for was already forgotten.
+              if (request.signal.aborted) return;
+              if (era !== eraOf(layer.id)) return;
               // Asked again at the next move of the map.
               asked.current.delete(key);
-              setSquares((current) => new Map(current).set(key, 'failed'));
+              if (token !== tokenNow.current) {
+                // Asked under a sign-in renewed since (its refusal says nothing about the person
+                // now): asked again at once under the new one, not left blank (F-247-2-R8-02).
+                setRenewed((n) => n + 1);
+                return;
+              }
+              if (refused(error)) {
+                // Nothing kept in the page is drawn again, of any layer, from this zoom or
+                // another (F-247-2-R5-02).
+                letGo([...wasOn.current]);
+              } else if (missing(error)) {
+                // The layer was removed: nothing kept of it is drawn in its place, from this zoom
+                // or another, nor its zoomed-out view, and answers sent before are not kept
+                // (F-247-2-R7-03, R8-01). A passing failure keeps the filling in from other
+                // zooms. If the layer is there again later (a member suspended, then restored),
+                // it is asked for and drawn as any other (F-247-2-R9-01).
+                letGo([layer.id]);
+              }
+              // Either way the list of layers is read again: it says what is still there.
+              if (refused(error)) stale.current?.('refused');
+              else if (missing(error)) stale.current?.('missing');
+              setSquares((current) => trimmed(new Map(current).set(key, 'failed')));
             });
         }
       }
     }
-  }, [layers, tiles, zoom, token]);
+  }, [layers, tiles, zoom, token, api, renewed, retry, leftOut]);
 
   return useMemo(() => {
     const overlays: MapOverlay[] = [];
     const notes = new Map<string, string>();
     for (const layer of layers) {
       if (layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' || layer.kind === 'wms') {
+        if (leftOut.has(layer.id)) {
+          // No room left in this view: the map is not handed it, so none of its pictures are
+          // asked for (F-247-2-R22-01).
+          notes.set(layer.id, TOO_MANY_LAYERS_NOTE);
+          continue;
+        }
         overlays.push({
           id: layer.id,
           kind: 'pictures',
-          tiles: picturesUrl(layer.id),
+          tiles: picturesUrl(api, layer.id),
           look: lookOf(layer),
           levels: layer.tileLevels,
         });
@@ -727,6 +1005,12 @@ export function useLayerOverlays(
       const overviewReady = overview !== undefined && overview !== 'failed';
       if (overviewReady && usesOverview(layer, zoom)) {
         whole(overview);
+        continue;
+      }
+      if (leftOut.has(layer.id)) {
+        // Not loaded in this view; its zoomed-out view is drawn if it has one.
+        notes.set(layer.id, TOO_MANY_LAYERS_NOTE);
+        if (overviewReady) whole(overview);
         continue;
       }
       const prefix = `${layer.id}@${settingsTag(layer)}/`;
@@ -817,12 +1101,12 @@ export function useLayerOverlays(
       else if (exceeded) {
         notes.set(
           layer.id,
-          layer.overview === null
+          layer.overview === null && api.overviews
             ? 'Zoom in to see every line here. An admin can prepare its zoomed-out view on Team → Map layers.'
             : 'Zoom in to see every line here.',
         );
       }
     }
     return { overlays, notes };
-  }, [layers, files, squares, tiles, zoom, choices]);
+  }, [layers, files, squares, tiles, zoom, choices, api, leftOut]);
 }

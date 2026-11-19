@@ -19,6 +19,7 @@ import { useId, useState, type ChangeEvent, type SubmitEvent } from 'react';
 
 import { apiJson, sendJson } from '../lib/api';
 import { hasFileColours, readLayerFile } from '../lib/mapLayers';
+import { useLayerApi } from '../lib/layerApi';
 import { message, prepareWithProgress, takesOverview } from '../lib/mapLayerPrepare';
 import { forgetApiAnswers, useApiResource } from '../lib/useApiResource';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
@@ -99,6 +100,15 @@ interface Shared {
 }
 
 const NO_SHARED: Shared = { alsoFields: [], onlyField: null, onlyValues: [] };
+
+/**
+ * A layer's shared settings as they are saved. Fields that also count need the field it is
+ * coloured by; its limit ("Only where") does not: a layer in one colour keeps its limit when it
+ * is added, edited or changed to one colour (F-247-2-R14-02: editing such a layer cleared it).
+ */
+function sharedFor(colourField: string | null, shared: Shared): Shared {
+  return colourField === null ? { ...shared, alsoFields: [] } : shared;
+}
 
 /** The limit's values as typed ("M, I"), tidied. */
 function parseOnlyValues(text: string): string[] {
@@ -281,6 +291,8 @@ function EditMapLayerForm({
   const [file, setFile] = useState<LayerFeatureCollection | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [shownAtOpen, setShownAtOpen] = useState(layer.mapVisible);
+  const api = useLayerApi();
   const colourable = layer.kind === 'arcgis_features' || layer.kind === 'file';
 
   // The fields it can be coloured by: from the service, or from the kept file.
@@ -289,13 +301,13 @@ function EditMapLayerForm({
     setBusy('Reading its fields…');
     const load =
       layer.kind === 'file'
-        ? apiJson<unknown>(`/map-layers/${layer.id}/file`, token).then((body) => {
+        ? apiJson<unknown>(api.path(`/${layer.id}/file`), token).then((body) => {
             const checked = normalizeFeatureCollection(body);
             if (!checked.ok) throw new Error(checked.message);
             setFile(checked.collection);
             return featureFields(checked.collection);
           })
-        : sendJson<LayerInspection>(`/map-layers/inspect${query}`, token, 'POST', {
+        : sendJson<LayerInspection>(api.path(`/inspect${query}`), token, 'POST', {
             url: layer.url,
             field: null,
           }).then((answer) => answer.fields);
@@ -318,7 +330,7 @@ function EditMapLayerForm({
       return;
     }
     setBusy('Counting its values…');
-    sendJson<LayerInspection>(`/map-layers/inspect${query}`, token, 'POST', {
+    sendJson<LayerInspection>(api.path(`/inspect${query}`), token, 'POST', {
       url: layer.url,
       field: value,
       ...settings,
@@ -336,7 +348,7 @@ function EditMapLayerForm({
 
   function chooseField(value: string) {
     setColourField(value);
-    const settings = value === NO_FIELD ? NO_SHARED : shared;
+    const settings = sharedFor(value === NO_FIELD ? null : value, shared);
     setShared(settings);
     recount(value, settings);
   }
@@ -351,7 +363,7 @@ function EditMapLayerForm({
     const chosen = colourField === NO_FIELD ? null : colourField;
     setBusy('Saving…');
     setProblem(null);
-    sendJson(`/map-layers/${layer.id}`, token, 'PATCH', {
+    sendJson(api.path(`/${layer.id}`), token, 'PATCH', {
       version: layer.version,
       name: name.trim(),
       sourceName: sourceName.trim(),
@@ -361,17 +373,22 @@ function EditMapLayerForm({
       colour: chosen === null ? colour : OTHER_VALUES_COLOUR,
       colourField: chosen,
       colours: chosen === null ? [] : colours,
-      ...(chosen === null ? NO_SHARED : shared),
+      ...sharedFor(chosen, shared),
+      ...(api.adminDefault && { mapVisible: shownAtOpen }),
     })
       .then(async () => {
-        forgetApiAnswers('/map-layers');
+        forgetApiAnswers(api.base);
         // Its zoomed-out view is built under its settings: prepared again when they change.
         const saved = {
           id: layer.id,
           colourField: chosen,
-          ...(chosen === null ? NO_SHARED : shared),
+          ...sharedFor(chosen, shared),
         };
-        if (takesOverview(layer.kind) && layer.overview?.grouping !== groupingOf(saved)) {
+        if (
+          api.overviews &&
+          takesOverview(layer.kind) &&
+          layer.overview?.grouping !== groupingOf(saved)
+        ) {
           const failed = await prepareWithProgress(saved, token, setBusy);
           if (failed !== null) {
             setProblem(
@@ -508,6 +525,9 @@ function EditMapLayerForm({
       {colourField === NO_FIELD && (
         <ColourPicker id={field('colour')} colour={colour} onChange={setColour} />
       )}
+      {api.adminDefault && (
+        <ShownAtOpen id={field('at-open')} checked={shownAtOpen} onChange={setShownAtOpen} />
+      )}
       {busy && (
         <p role="status" className="text-muted-foreground">
           {busy}
@@ -527,7 +547,11 @@ function EditMapLayerForm({
             sourceName.trim() === '' ||
             termsUrl.trim() === '' ||
             termsNote.trim() === '' ||
-            (colourField !== NO_FIELD && colours.length === 0)
+            // A colour field needs its colours, unless the layer was kept that way and its
+            // colouring is not being changed (F-247-2-R20-02).
+            (colourField !== NO_FIELD &&
+              colours.length === 0 &&
+              !(colourField === layer.colourField && layer.colours.length === 0))
           }
         >
           Save
@@ -538,6 +562,37 @@ function EditMapLayerForm({
 }
 
 type Source = 'web' | 'map' | 'file';
+
+/** Whether the layer is on when the map opens, for everyone (the oil and gas map, F-247). */
+function ShownAtOpen({
+  id,
+  checked,
+  onChange,
+}: {
+  id: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="flex items-center gap-2 font-medium">
+        <input
+          id={id}
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => {
+            onChange(event.target.checked);
+          }}
+        />
+        On when the map opens
+      </label>
+      <p className="text-xs text-muted-foreground">
+        For everyone, each time they open the map. People can still switch it on or off for their
+        visit.
+      </p>
+    </div>
+  );
+}
 
 function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAdded: () => void }) {
   const { token, organization } = session;
@@ -565,35 +620,48 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [addedWithProblem, setAddedWithProblem] = useState<string | null>(null);
+  const [shownAtOpen, setShownAtOpen] = useState(false);
+  const api = useLayerApi();
 
   const fields =
     source === 'web' ? (inspection?.fields ?? []) : file ? featureFields(file.collection) : [];
   const ready = source === 'web' ? inspection !== null : file !== null;
 
-  function inspect(chosenField: string | null, settings: Shared = NO_SHARED) {
-    setBusy(chosenField === null ? 'Checking the address…' : 'Counting its values…');
+  /**
+   * Asks the Worker what the address offers. `fresh` is the first check of an address (the
+   * Check button): the form starts over from what it finds. Anything after it (a colour field,
+   * fields that also count, a limit) counts again under the settings as they are, and resets
+   * nothing: a limit chosen on a layer in one colour stays (F-247-2-R15-01).
+   */
+  function inspect(chosenField: string | null, settings: Shared = NO_SHARED, fresh = false) {
+    setBusy(fresh ? 'Checking the address…' : 'Counting its values…');
     setProblem(null);
-    return sendJson<LayerInspection>(`/map-layers/inspect${query}`, token, 'POST', {
+    return sendJson<LayerInspection>(api.path(`/inspect${query}`), token, 'POST', {
       url,
       field: chosenField,
       ...settings,
     })
       .then((answer) => {
         setInspection(answer);
-        if (chosenField === null) {
+        if (fresh) {
           if (name === '' && answer.title) setName(answer.title.slice(0, 200));
           if (termsNote === '' && answer.copyright) setTermsNote(answer.copyright);
           if (answer.wmsLayers) setWmsLayers(answer.wmsLayers);
           setColourField(NO_FIELD);
           setColours([]);
           setShared(NO_SHARED);
-        } else {
+        } else if (chosenField !== null) {
           setColours(assignColours(answer.values ?? []));
         }
       })
       .catch((reason: unknown) => {
-        setProblem(message(reason, 'The address could not be checked.'));
-        if (chosenField === null) setInspection(null);
+        setProblem(
+          message(
+            reason,
+            fresh ? 'The address could not be checked.' : 'Its values could not be counted.',
+          ),
+        );
+        if (fresh) setInspection(null);
       })
       .finally(() => {
         setBusy(null);
@@ -603,7 +671,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   function chooseField(value: string) {
     setColourField(value);
     setColours([]);
-    const settings = value === NO_FIELD ? NO_SHARED : shared;
+    const settings = sharedFor(value === NO_FIELD ? null : value, shared);
     setShared(settings);
     if (value === NO_FIELD) return;
     if (source === 'web') void inspect(value, settings);
@@ -656,7 +724,12 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
       colour: colourField === NO_FIELD ? colour : OTHER_VALUES_COLOUR,
       colourField: colourField === NO_FIELD ? null : colourField,
       colours: colourField === NO_FIELD ? [] : colours,
-      ...(colourField === NO_FIELD && shared.onlyField === null ? NO_SHARED : shared),
+      // Shared fields and a limit are a live ArcGIS layer's; a file or a picture layer is saved
+      // without, whatever was chosen before (the API refuses them there, F-247-2-R16-01).
+      ...(source === 'web' && inspection?.kind === 'arcgis_features'
+        ? sharedFor(colourField === NO_FIELD ? null : colourField, shared)
+        : NO_SHARED),
+      ...(api.adminDefault && { mapVisible: shownAtOpen }),
     };
     const body =
       source === 'web'
@@ -669,11 +742,11 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
         : { ...details, source: 'file', fileName: file?.name ?? '', geojson: file?.collection };
     setBusy('Saving…');
     setProblem(null);
-    sendJson<{ id: string }>(`/map-layers${query}`, token, 'POST', body)
+    sendJson<{ id: string }>(api.path(query), token, 'POST', body)
       .then(async ({ id: added }) => {
-        forgetApiAnswers('/map-layers');
-        // A live lines layer gets its zoomed-out view straight away (F-134).
-        if (source === 'web' && inspection && takesOverview(inspection.kind)) {
+        forgetApiAnswers(api.base);
+        // A live lines layer gets its zoomed-out view straight away (F-134), where views are kept.
+        if (api.overviews && source === 'web' && inspection && takesOverview(inspection.kind)) {
           const failed = await prepareWithProgress(
             {
               id: added,
@@ -715,20 +788,25 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     );
   }
 
-  const sourceControl = (
+  const sources: { value: Source; label: string }[] = [
+    { value: 'web', label: 'Web address' },
+    ...(api.arcgisMaps ? [{ value: 'map' as const, label: 'ArcGIS map' }] : []),
+    ...(api.files ? [{ value: 'file' as const, label: 'File' }] : []),
+  ];
+  // Nothing to choose between where only web addresses are taken (the oil and gas map, F-247).
+  const sourceControl = sources.length > 1 && (
     <SegmentedControl
       label="Where the layer comes from"
-      options={[
-        { value: 'web', label: 'Web address' },
-        { value: 'map', label: 'ArcGIS map' },
-        { value: 'file', label: 'File' },
-      ]}
+      options={sources}
       value={source}
       onChange={(value) => {
         setSource(value);
         setProblem(null);
         setColourField(NO_FIELD);
         setColours([]);
+        // A limit or shared fields chosen for a web layer do not follow to a file, whose form
+        // does not show them (F-247-2-R16-01).
+        setShared(NO_SHARED);
       }}
     />
   );
@@ -766,15 +844,12 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
               type="button"
               variant="outline"
               disabled={busy !== null || url.trim() === ''}
-              onClick={() => void inspect(null)}
+              onClick={() => void inspect(null, NO_SHARED, true)}
             >
               Check
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            An ArcGIS layer (ends in /FeatureServer, /MapServer or /ImageServer, often followed by a
-            number) or a WMS map service, such as those on open.canada.ca.
-          </p>
+          <p className="text-xs text-muted-foreground">{api.addressHelp}</p>
           {inspection && (
             <p role="status" className="text-xs">
               Found: {MAP_LAYER_KIND_LABELS[inspection.kind]}
@@ -937,6 +1012,9 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
           {colourField === NO_FIELD && (
             <ColourPicker id={field('colour')} colour={colour} onChange={setColour} />
           )}
+          {api.adminDefault && (
+            <ShownAtOpen id={field('at-open')} checked={shownAtOpen} onChange={setShownAtOpen} />
+          )}
         </>
       )}
 
@@ -990,6 +1068,7 @@ function LayerRow({
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const api = useLayerApi();
   const overview = layer.overview?.grouping === groupingOf(layer) ? layer.overview : null;
 
   function prepare() {
@@ -998,7 +1077,7 @@ function LayerRow({
       setPreparing(null);
       if (failed !== null) setProblem(failed);
       else {
-        forgetApiAnswers('/map-layers');
+        forgetApiAnswers(api.base);
         onChanged();
       }
     });
@@ -1007,9 +1086,9 @@ function LayerRow({
   function remove() {
     setBusy(true);
     setProblem(null);
-    sendJson(`/map-layers/${layer.id}/remove`, session.token, 'POST', { version: layer.version })
+    sendJson(api.path(`/${layer.id}/remove`), session.token, 'POST', { version: layer.version })
       .then(() => {
-        forgetApiAnswers('/map-layers');
+        forgetApiAnswers(api.base);
         onChanged();
       })
       .catch((reason: unknown) => {
@@ -1135,11 +1214,14 @@ function LayerRow({
             · {layer.termsNote}
           </span>
           <span className="text-xs text-muted-foreground">
-            Added by {layer.createdByName}, {formatAlberta(layer.createdAt)}.
+            {layer.createdByName === null ? 'Added' : `Added by ${layer.createdByName},`}{' '}
+            {formatAlberta(layer.createdAt)}.
+            {api.adminDefault &&
+              (layer.mapVisible ? ' On when the map opens.' : ' Off when the map opens.')}
           </span>
         </>
       )}
-      {takesOverview(layer.kind) && (
+      {api.overviews && takesOverview(layer.kind) && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
             {overview
@@ -1195,6 +1277,7 @@ function MapLayerGroup({
   const [confirming, setConfirming] = useState<'all' | 'selected' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const api = useLayerApi();
   const first = layers[0];
   const chosen = layers.filter((layer) => selected.has(layer.id));
   const count = (n: number) => `${n.toLocaleString('en-CA')} ${n === 1 ? 'layer' : 'layers'}`;
@@ -1206,7 +1289,7 @@ function MapLayerGroup({
       for (const [i, layer] of which.entries()) {
         setBusy(`Removing ${String(i + 1)} of ${String(which.length)}: ${layer.name}…`);
         try {
-          await sendJson(`/map-layers/${layer.id}/remove`, session.token, 'POST', {
+          await sendJson(api.path(`/${layer.id}/remove`), session.token, 'POST', {
             version: layer.version,
           });
         } catch (reason) {
@@ -1216,7 +1299,7 @@ function MapLayerGroup({
       setBusy(null);
       setConfirming(null);
       setSelected(new Set());
-      forgetApiAnswers('/map-layers');
+      forgetApiAnswers(api.base);
       if (failed.length > 0) setProblem(`Not all were removed. ${failed.join(' ')}`);
       onChanged();
     })();
@@ -1305,7 +1388,8 @@ function MapLayerGroup({
         · {first.termsNote}
       </span>
       <span className="pl-9 text-xs text-muted-foreground">
-        Added by {first.createdByName}, {formatAlberta(first.createdAt)}.
+        {first.createdByName === null ? 'Added' : `Added by ${first.createdByName},`}{' '}
+        {formatAlberta(first.createdAt)}.
       </span>
       {open && (
         <div className="flex flex-col gap-2 pl-9">
@@ -1409,14 +1493,29 @@ function MapLayerGroup({
   );
 }
 
-export function MapLayerSettings({ session }: { session: DirectorySession }) {
+export function MapLayerSettings({
+  session,
+  onChanged,
+}: {
+  session: DirectorySession;
+  /** A layer was added, changed or removed: a map on the same page reads its list again. */
+  onChanged?: (() => void) | undefined;
+}) {
   const { token, organization } = session;
   const id = useId();
   const [open, setOpen] = useState(false);
-  const [list, reload] = useApiResource<MapLayerList>(
-    `/map-layers?organization_id=${organization.id}`,
+  const api = useLayerApi();
+  const [list, reloadList] = useApiResource<MapLayerList>(
+    api.path(`?organization_id=${organization.id}`),
     token,
   );
+  const reload = () => {
+    reloadList();
+    onChanged?.();
+  };
+  const sources = api.files
+    ? 'From a web address (ArcGIS or a WMS map service) or a file.'
+    : 'From the web address of a live ArcGIS layer.';
 
   return (
     <Card asChild>
@@ -1435,7 +1534,7 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
             </DialogTrigger>
             <DialogContent
               title="Add map layer"
-              description="From a web address (ArcGIS or a WMS map service) or a file. Everyone can switch it on under Layers on the Workspace map and Counterparties → map view."
+              description={`${sources} Everyone can switch it on under Layers on ${api.shownOn}.`}
             >
               <AddMapLayerForm
                 session={session}
@@ -1456,8 +1555,8 @@ export function MapLayerSettings({ session }: { session: DirectorySession }) {
             <p className="text-muted-foreground">Loading…</p>
           ) : list.data.layers.length === 0 ? (
             <p className="text-muted-foreground">
-              No map layers yet. Add one from a web address or a file; everyone can then switch it
-              on under Layers on the Workspace map and Counterparties → map view.
+              No map layers yet. Add one from a web address{api.files ? ' or a file' : ''}; everyone
+              can then switch it on under Layers on {api.shownOn}.
             </p>
           ) : (
             <ul>

@@ -108,6 +108,10 @@ export function useApiResource<T>(
           error instanceof ApiError
             ? error
             : new ApiError(0, 'NETWORK', 'The server could not be reached.', null);
+        // Refused, or no longer there: the answer kept from before is forgotten, so opening the
+        // page or view again shows nothing of it (F-247-2-R17-01). A passing failure (the
+        // server away) keeps it.
+        if ([401, 403, 404].includes(apiError.status)) answers.delete(cacheKey(path, token));
         setState({
           path,
           who: signedInAs(token),

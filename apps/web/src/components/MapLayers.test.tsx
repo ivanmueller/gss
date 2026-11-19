@@ -28,6 +28,10 @@ import {
 // Map layers (F-107, F-133 to F-135). Every layer, address and value is synthetic.
 const prepare = vi.hoisted(() => vi.fn());
 vi.mock('../lib/mapOverview', () => ({ prepareOverview: prepare }));
+
+// The form tests type whole addresses and notes: slow when the whole suite runs at once.
+vi.setConfig({ testTimeout: 20_000 });
+
 const RAIL = '00000000-0000-4000-8000-0000000a1a01';
 const FILE = '00000000-0000-4000-8000-0000000a1a02';
 const SERVICE = 'https://services.example.com/rest/services/Rail/FeatureServer/0';
@@ -239,7 +243,7 @@ describe('fetching what is on', () => {
     expect(result.current.overlays[1]).toEqual({
       id: RAIL,
       kind: 'pictures',
-      tiles: `${window.location.origin}/api/v1/map-layers/${RAIL}/tiles/{z}/{x}/{y}.png`,
+      tiles: `${window.location.origin}/api/v1/map-layers/${RAIL}/tiles/{z}/{x}/{y}.png?c=2`,
       look: USUAL_LOOK,
       levels: null,
     });
@@ -548,6 +552,81 @@ describe('Team → Map layers', () => {
       SESSION.token,
       expect.any(Function),
     );
+  });
+
+  // F-247-2-R16-01: a limit chosen for a live layer does not follow to a file. The file's form
+  // does not show it, and the API refuses a file with one.
+  it('adds a file without the limit chosen for a web layer before', async () => {
+    const calls = mockApi({
+      [LIST]: () => Response.json({ layers: [] }),
+      [`POST /map-layers/inspect?organization_id=${ORG.id}`]: () => Response.json(inspection),
+      [`POST /map-layers?organization_id=${ORG.id}`]: () =>
+        Response.json({ id: FILE }, { status: 201 }),
+    });
+    const user = userEvent.setup();
+    render(<MapLayerSettings session={SESSION} />);
+    await user.click(await screen.findByRole('button', { name: 'Add map layer' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add map layer' });
+    await user.type(within(dialog).getByLabelText('Web address'), SERVICE);
+    await user.click(within(dialog).getByRole('button', { name: 'Check' }));
+    expect(await within(dialog).findByText(/Found: ArcGIS layer/)).toBeVisible();
+    // One colour, with a limit.
+    await user.click(within(dialog).getByText('Shared track and limits (optional)'));
+    await choose(within(dialog).getByLabelText('Only where'), 'OWNER');
+    await user.type(await within(dialog).findByLabelText('is one of'), 'AAA');
+    await user.tab();
+    await waitFor(() => {
+      const counts = calls.filter((c) => c.path.startsWith('/map-layers/inspect'));
+      expect(counts.at(-1)?.body).toMatchObject({ onlyField: 'OWNER', onlyValues: ['AAA'] });
+    });
+
+    // Then a file instead.
+    const sources = within(dialog).getByRole('group', { name: 'Where the layer comes from' });
+    await user.click(within(sources).getByRole('button', { name: 'File' }));
+    await user.upload(
+      within(dialog).getByLabelText('Choose file'),
+      new File(
+        [
+          JSON.stringify({
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-105, 50] },
+                properties: { OWNER: 'AAA' },
+              },
+            ],
+          }),
+        ],
+        'points.geojson',
+      ),
+    );
+    await user.type(within(dialog).getByLabelText('Published by'), 'Synthetic publisher');
+    await user.type(
+      within(dialog).getByLabelText('Link to its terms of use'),
+      'https://example.com/terms',
+    );
+    const note = within(dialog).getByLabelText('What the terms allow');
+    await user.clear(note);
+    await user.type(note, 'Open licence.');
+    await user.click(within(dialog).getByRole('button', { name: 'Add layer' }));
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (c) => c.method === 'POST' && c.path === `/map-layers?organization_id=${ORG.id}`,
+        ),
+      ).toBe(true);
+    });
+    const create = calls.find(
+      (c) => c.method === 'POST' && c.path === `/map-layers?organization_id=${ORG.id}`,
+    );
+    expect(create?.body).toMatchObject({
+      source: 'file',
+      fileName: 'points.geojson',
+      alsoFields: [],
+      onlyField: null,
+      onlyValues: [],
+    });
   });
 
   it('says when the layer was added but its zoomed-out view could not be prepared', async () => {

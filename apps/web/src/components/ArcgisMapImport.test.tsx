@@ -559,7 +559,7 @@ describe('a map of pre-drawn pictures, such as a heat map (F-141)', () => {
       tileLevels: { min: 3, max: 10 },
     };
     mockApi({
-      'GET /map-layers/tiles-1/legend': () =>
+      'GET /map-layers/tiles-1/legend?c=2': () =>
         Response.json({
           entries: [
             { label: 'Most Dense - Least Dense', image: 'data:image/png;base64,iVBORw0KGgo=' },

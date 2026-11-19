@@ -248,6 +248,8 @@ export function Workspace({
             authToken={token}
             onViewChange={layers.onViewChange}
             onOverlayClick={layers.setPicked}
+            onLayersStale={layers.onStale}
+            layersRetry={layers.retry}
             onTokenRefused={() => {
               setRefused(true);
             }}
