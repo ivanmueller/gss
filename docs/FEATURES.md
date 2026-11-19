@@ -286,7 +286,7 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 
 | ID | What to check | Pull requests |
 |---|---|---|
-| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch top left, and no Layers button (grain's layers are not offered there; oil and gas layers come with F-247 part 2). | ivanmueller/gss#260 |
+| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch top left, and no Layers button (grain's layers are not offered there; oil and gas layers come with F-247 part 2). | ivanmueller/gss#260, #266 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
