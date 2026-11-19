@@ -1,5 +1,5 @@
 import { tilesForView, type MapLayerView } from '@grain/domain';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useLayerOverlays } from './mapLayers';
@@ -165,5 +165,57 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     await waitFor(() => {
       expect(shapes(result.current.overlays)).toBe(0);
     });
+  });
+
+  // F-247-2-R6-01: a square asked for before the refusal, answered after it, is not kept.
+  it('keeps no answer that arrives after a refusal', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const square = () =>
+      Response.json({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: 1,
+            geometry: { type: 'Point', coordinates: [-105, 50] },
+            properties: {},
+          },
+        ],
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        // The first square passed the check before access was removed, and answers slowly.
+        if (calls === 1) {
+          await held;
+          return square();
+        }
+        return Response.json(
+          { error: { code: 'FORBIDDEN', message: 'You are not a member.' } },
+          { status: 403 },
+        );
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result } = renderHook(() => useLayerOverlays(one, VIEW, 'token'));
+    await waitFor(() => {
+      expect(calls).toBe(SQUARES_PER_LAYER);
+    });
+    // The refusals have arrived; now the slow one (inside act, so React draws what it keeps).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const drawn = result.current.overlays.reduce(
+      (sum, overlay) => sum + (overlay.kind === 'features' ? overlay.data.features.length : 0),
+      0,
+    );
+    expect(drawn).toBe(0);
   });
 });
