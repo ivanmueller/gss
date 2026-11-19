@@ -45,6 +45,7 @@ const ST1 = [
   at([4, 'HORIZONTAL'], [41, 'NEW'], [51, 'PRODUCTION'], [72, 'CRUDE OIL']),
   at([4, 'EXAMPLE ENERGY LTD.'], [72, '10-12-095-05W4']),
   '',
+  '    -------------------- END OF WELL LICENCES DAILY LIST  -------------------- ',
 ].join('\n');
 
 const WIDTHS = [19, 34, 7, 6, 30, 6, 23, 14, 5, 34, 13, 11];
@@ -281,6 +282,17 @@ describe('refreshAerLists', () => {
     expect(logs).toContain(
       'AER ST1: 1 fetched, 1 new edition(s), 0 unchanged, 0 refused, 6 failed',
     );
+  });
+
+  it('leaves a file to be read again after a timeout or a lost connection (F-243-1-R1-02)', async () => {
+    petroleum.aerFilesToRead.mockResolvedValue([{ id: 'file-1', report: 'st1', body: ST1 }]);
+    for (const code of ['57014', '08006', undefined]) {
+      petroleum.aerStoreReading.mockReset();
+      petroleum.aerStoreReading.mockRejectedValueOnce(Object.assign(new Error('x'), { code }));
+      expect(await refreshAerLists(env, open, fetchFor({}))).toEqual({ status: 'done' });
+      // No second write marking it unreadable: the next run reads it again.
+      expect(petroleum.aerStoreReading).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('records a reading the database refuses as unreadable, keeping the file', async () => {

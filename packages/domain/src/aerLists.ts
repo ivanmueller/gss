@@ -140,8 +140,9 @@ export interface AerListRead<Row> {
   /** The list's date from its contents; null when it cannot be read. */
   listDate: string | null;
   /**
-   * Whether the list's structure was found (its date line and its column header). Without it the
-   * file is unreadable; with it and no records, it is a valid empty list.
+   * Whether the list's structure was found whole: its date line, its column header and its end
+   * line. Without it the file is unreadable, so a copy cut short never passes for a complete list
+   * (F-243-1-R1-01); with it and no records, it is a valid empty list.
    */
   structure: boolean;
   rows: Row[];
@@ -253,6 +254,10 @@ export function parseSt1(text: string): AerListRead<St1Licence> {
       location,
     });
   }
+  // A copy cut short, even between two records, has no end line (F-243-1-R1-01).
+  if (!lines.some((line) => line.includes(ST1_END))) {
+    return { listDate, structure: false, rows: [], skipped: 0 };
+  }
   return { listDate, structure: true, rows, skipped };
 }
 
@@ -304,6 +309,8 @@ export function st49WallTime(text: string): string | null {
 
 /** ST49's page header, repeated at the top of each page. */
 const ST49_PAGE = 'Report Number:';
+/** The report's last line. */
+const ST49_END_LINE = '*** END OF REPORT ***';
 /** The totals after the last row, or the report's end line. */
 const ST49_END = /^\s+TOTAL\b|\*\*\* END OF REPORT \*\*\*/;
 
@@ -369,6 +376,10 @@ export function parseSt49(text: string): AerListRead<St49Activity> {
       bottomHole,
     });
   }
-  if (!sawPage || listDate === null) return { listDate, structure: false, rows: [], skipped: 0 };
+  // A copy cut short, even between two pages, has no end line (F-243-1-R1-01).
+  const ended = lines.some((line) => line.includes(ST49_END_LINE));
+  if (!sawPage || listDate === null || !ended) {
+    return { listDate, structure: false, rows: [], skipped: 0 };
+  }
   return { listDate, structure: true, rows, skipped };
 }

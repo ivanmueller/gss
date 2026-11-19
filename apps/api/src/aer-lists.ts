@@ -303,6 +303,16 @@ async function locateBatch(batch: AtsLsd[], fetchImpl: typeof fetch): Promise<Ae
   }
 }
 
+/**
+ * Whether the database refused a reading's rows themselves: SQLSTATE class 22 (data exception) or
+ * 23 (integrity constraint violation). The same rows would be refused again.
+ */
+export function refusedRows(error: unknown): boolean {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  return typeof code === 'string' && /^2[23][0-9A-Z]{3}$/.test(code);
+}
+
 export interface AerRefreshSummary {
   status: 'done' | 'not_configured' | 'not_ready' | 'database_failed';
 }
@@ -393,12 +403,17 @@ export async function refreshAerLists(
           );
         }
       } catch (error) {
-        // The database refused the rows: recorded unreadable at this version, so it is not
-        // tried again until the reader changes; the file itself stays.
-        console.error(`AER ${file.report.toUpperCase()} reading refused: ${failureSummary(error)}`);
-        await db
-          .aerStoreReading(file.id, AER_READER_VERSION, { status: 'unreadable' })
-          .catch(() => undefined);
+        console.error(
+          `AER ${file.report.toUpperCase()} reading not stored: ${failureSummary(error)}`,
+        );
+        // Only the database refusing the rows themselves (a data or constraint error) is recorded
+        // unreadable at this version; anything else (a timeout, a lost connection) leaves the file
+        // to be read again next run (F-243-1-R1-02). The file itself always stays.
+        if (refusedRows(error)) {
+          await db
+            .aerStoreReading(file.id, AER_READER_VERSION, { status: 'unreadable' })
+            .catch(() => undefined);
+        }
       }
     }
 

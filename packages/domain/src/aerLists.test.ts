@@ -62,9 +62,9 @@ function st1(records: string[][], { date = '09 November 2026', tail = true } = {
           '',
           at([4, 'EXAMPLE 2-2-2-2'], [43, '0500001'], [53, 'WELL NAME:']),
           '',
-          '    -------------------- END OF WELL LICENCES DAILY LIST  -------------------- ',
         ]
       : []),
+    '    -------------------- END OF WELL LICENCES DAILY LIST  -------------------- ',
   ].join('\r\n');
 }
 
@@ -86,6 +86,11 @@ function st49Page(rows: string[][]): string[] {
     RULE,
     ...rows.map(st49Row),
   ];
+}
+
+/** A whole ST49 list: its pages, then the end line. */
+function st49(...pages: string[][]): string {
+  return [...pages.flat(), '', '        *** END OF REPORT ***'].join('\n');
 }
 
 const RIG_A = [
@@ -203,6 +208,16 @@ describe('parseSt1', () => {
     expect(read.skipped).toBe(1);
   });
 
+  it('has no structure when cut short, even between two records (F-243-1-R1-01)', () => {
+    const whole = st1([
+      st1Record('0526001', '10-12-095-05W4'),
+      st1Record('0526002', '01-05-062-26W4'),
+    ]);
+    expect(parseSt1(whole).rows).toHaveLength(2);
+    const cut = whole.slice(0, whole.indexOf('0526002') - 50);
+    expect(parseSt1(cut)).toMatchObject({ structure: false, rows: [] });
+  });
+
   it('has no structure without its date or its column header', () => {
     expect(parseSt1(st1([], { date: 'unknown' })).structure).toBe(false);
     expect(
@@ -258,22 +273,29 @@ describe('parseSt49', () => {
     bad[2] = '';
     const late = [...RIG_A];
     late[6] = '31 Nov 2026 08:30:00 PM';
-    const read = parseSt49(st49Page([RIG_A, bad, late]).join('\n'));
+    const read = parseSt49(st49(st49Page([RIG_A, bad, late])));
     expect(read.rows).toHaveLength(1);
     expect(read.skipped).toBe(2);
   });
 
   it('is unreadable when a page has another number of columns', () => {
-    const text = [...st49Page([RIG_A]), '', '-'.repeat(19) + ' ' + '-'.repeat(10)].join('\n');
-    expect(parseSt49(text).structure).toBe(true);
+    expect(parseSt49(st49(st49Page([RIG_A]))).structure).toBe(true);
     const changed = st49Page([RIG_A]);
     changed[6] = RULE + ' ------';
-    expect(parseSt49(changed.join('\n'))).toMatchObject({ structure: false, rows: [] });
+    expect(parseSt49(st49(changed))).toMatchObject({ structure: false, rows: [] });
+  });
+
+  it('has no structure when cut short, even between two pages (F-243-1-R1-01)', () => {
+    expect(parseSt49(st49Page([RIG_A]).join('\n'))).toMatchObject({ structure: false, rows: [] });
+    const whole = st49(st49Page([RIG_A]), st49Page([RIG_A]));
+    expect(parseSt49(whole)).toMatchObject({ structure: true });
+    const cut = whole.slice(0, whole.lastIndexOf('Report Number'));
+    expect(parseSt49(cut)).toMatchObject({ structure: false, rows: [] });
   });
 
   it('has no structure without its period line', () => {
     const page = st49Page([RIG_A]);
     page[2] = '';
-    expect(parseSt49(page.join('\n'))).toMatchObject({ listDate: null, structure: false });
+    expect(parseSt49(st49(page))).toMatchObject({ listDate: null, structure: false });
   });
 });
