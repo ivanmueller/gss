@@ -663,6 +663,58 @@ describe('review evidence check', () => {
       assert.deepEqual(blockers(b2, beside), []);
     });
 
+    // F-251-R3-01: a Commit that extends the round's abbreviated commit but resolves to nothing.
+    test('a Commit that does not resolve to the reviewed commit: blocks', () => {
+      const { onBase, c1 } = setup('pre-badsha');
+      const short = c1.slice(0, 7);
+      const wrong = `${short}${c1[7] === '0' ? '1' : '0'}`;
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: [
+              {
+                round: '1',
+                mode: 'checkpoint',
+                base: onBase,
+                reviewed: short,
+                result: 'needs-attention',
+                findings: 0,
+              },
+            ],
+            findings: [finding(c1, { commit: wrong })],
+          }),
+        },
+        'register',
+      );
+      assert.ok(
+        blockers(onBase, head).some((b) => new RegExp(`Commit ${wrong} is not in this`).test(b)),
+      );
+    });
+
+    // F-251-R3-02: blank lines count; a file starting with one has its last line where it is.
+    test('a cited last line in a file that starts with a blank line: passes', () => {
+      git('switch', '-q', 'main');
+      branch('pre-blank-base');
+      const onBase = commit(
+        { 'apps/web/src/blank.ts': '\nexport const b = 1;\n', 'apps/web/src/lib.ts': `${lib}\n` },
+        'base',
+      );
+      git('switch', '-q', '-c', 'pre-blank', onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'apps/web/src/blank.ts:2' })],
+          }),
+        },
+        'register',
+      );
+      assert.deepEqual(blockers(onBase, head), []);
+    });
+
     // F-251-R2-03: the cited lines must exist in the file the review saw.
     test('lines beyond the end of the file: blocks', () => {
       const { onBase, c1 } = setup('pre-beyond');

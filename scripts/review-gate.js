@@ -74,10 +74,14 @@ const overlaps = (ranges, { start, end }) =>
   ranges.some((r) =>
     'after' in r ? start <= r.after && r.after < end : r.start <= end && start <= r.end,
   );
-/** How many lines `path` has at `commit`. */
+/** How many lines `path` has at `commit`, blank lines included (no trimming, F-251-R3-02). */
 const lineCount = (commit, path) => {
-  const text = git(['show', `${commit}:${path}`]);
-  return text === '' ? 0 : text.split('\n').length;
+  const text = execFileSync('git', ['show', `${commit}:${path}`], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (text === '') return 0;
+  return text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
 };
 
 export function evaluate({ base, head, labels = [] }) {
@@ -243,8 +247,29 @@ export function evaluate({ base, head, labels = [] }) {
         `Finding ${finding.id} is pre-existing but ${TRACKER_FILES.join(' and ')} do not name it.`,
       );
     const place = whereLines(finding.where);
-    if (!place || !finding.commit || !known(finding.commit)) continue; // reported by the register
+    if (!place || !finding.commit) continue; // reported by the register
+    // The Commit cell must resolve to the very commit its round reviewed, never be skipped
+    // (F-251-R3-01: a prefix match alone let a mistyped hash through).
+    const review = register.reviews.find(
+      (r) => r.round === finding.round && r.mode !== 'design' && r.result !== 'failed',
+    );
+    if (!known(finding.commit)) {
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but its Commit ${finding.commit} is not in this repository.`,
+      );
+      continue;
+    }
     const commit = git(['rev-parse', `${finding.commit}^{commit}`]);
+    if (
+      !review?.reviewed ||
+      !known(review.reviewed) ||
+      git(['rev-parse', `${review.reviewed}^{commit}`]) !== commit
+    ) {
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but its Commit ${finding.commit} is not the commit its round reviewed.`,
+      );
+      continue;
+    }
     // The cited lines must exist in the file the review saw (F-251-R2-03).
     let lines;
     try {
