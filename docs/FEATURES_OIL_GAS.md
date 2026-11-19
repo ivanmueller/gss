@@ -85,7 +85,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 5. **No ceiling by size.** The 600 squares are a count; a square can be up to 8 MB from the Worker. Very dense layers could still be heavy for a browser.
 6. **Grain's terms-link check is still case-sensitive** (F-247-2-R1-02's follow-up): on Team → Map layers a terms link typed with capital letters in "HTTPS://" fails with a database error instead of being saved. Fixed on the oil and gas side only; grain needs its own small migration.
 7. **Not tried by hand on staging before merging:** adding, changing and removing a layer in Settings; a layer in one colour with an "Only where" limit; a picture layer with its legend. The automated tests cover them; the owner's check under F-247 above covers the first.
-8. **The review process itself (agreed with the owner, 2026-11-19, not yet done):** change the review rules so a final review blocks a merge only on problems in the lines a pull request changes, and problems it finds in older code go to this list instead; smaller pull requests; one stated rule in the plan for anything a page keeps from the server. A governance pull request, to be approved by the owner.
+8. **The review process itself (agreed with the owner, 2026-11-19, not yet done):** change the review rules so a final review blocks a merge only on problems in the lines a pull request changes, and problems it finds in older code go to this list instead; smaller pull requests; one stated rule in the plan for anything a page keeps from the server. A governance pull request, to be approved by the owner: F-251 in `docs/FEATURES.md` (round 5 the last, the owner's answer of 2026-11-19).
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 

@@ -11,13 +11,34 @@ export const STATUSES = [
   'rejected',
   'accepted-limitation',
   'requires-decision',
+  // F-251: real, but in code the pull request did not change and the same on the base branch;
+  // recorded in the tracker instead of blocking (checked against git by review-gate.js).
+  'pre-existing',
 ];
 export const BLOCKING_STATUSES = ['confirmed', 'requires-decision'];
 export const SEVERITIES = ['P1', 'P2', 'P3'];
-/** Code review rounds that run without condition (the owner's rule, 2026-11-09). */
+/**
+ * Code review rounds that run without the owner's approval (the owner's rule, 2026-11-19, F-251:
+ * round 5 is the last; it was 5, then 6 to 8 while the issues fell). Beyond it only with the
+ * owner's label.
+ */
 export const AUTO_ROUNDS = 5;
-/** Rounds 6 to 8 run only while the issues keep falling; beyond 8 only with the owner's approval. */
-export const MAX_ROUNDS = 8;
+export const MAX_ROUNDS = AUTO_ROUNDS;
+/** The documents that hold the tracker, where a pre-existing finding's ID must be recorded (F-251). */
+export const TRACKER_FILES = ['docs/FEATURES.md', 'docs/FEATURES_OIL_GAS.md'];
+
+/**
+ * A finding's Where cell as a place in a file: `path:line` or `path:start-end` (backticks allowed).
+ * Null for anything else (`PLAN`, a path without a line, several places).
+ */
+export function whereLines(where) {
+  const m = /^([^\s:`]+):(\d+)(?:-(\d+))?$/.exec((where ?? '').replace(/`/g, '').trim());
+  if (!m) return null;
+  const start = Number(m[2]);
+  const end = Number(m[3] ?? m[2]);
+  if (start < 1 || end < start) return null;
+  return { path: m[1], start, end };
+}
 /** The pull request label by which only the owner allows rounds beyond the limits. */
 export const OWNER_APPROVAL_LABEL = 'owner-approved-extra-review-round';
 /**
@@ -29,9 +50,9 @@ export const OWNER_MERGE_LABEL = 'owner-approved-merge';
 /**
  * Whether code review round `round` (1, 2, …) may run, given the issue count of every completed
  * round before it in order (each round's new findings plus fixes Codex found not fixed, counting
- * one problem once). Rounds 1 to 5 always; 6 to 8 only with measurable progress: the last round's
- * count lower than the one before it; beyond 8, or after an escalation, only with the owner's
- * approval. Reaching a limit is never approval: it stops the loop for the owner to decide.
+ * one problem once; kept for the register, no longer for the limit). Rounds 1 to 5; beyond 5, or
+ * after an escalation, only with the owner's approval (F-251). Reaching the limit is never
+ * approval: it stops the loop for the owner to decide.
  */
 export function roundAllowed(round, issues, { ownerApproved = false, escalated = false } = {}) {
   if (ownerApproved) return { allowed: true, reason: 'the owner approved more rounds' };
@@ -41,17 +62,9 @@ export function roundAllowed(round, issues, { ownerApproved = false, escalated =
       reason: 'the loop was escalated to the owner; only the owner can continue it',
     };
   if (round <= AUTO_ROUNDS) return { allowed: true, reason: `round ${round} of ${AUTO_ROUNDS}` };
-  if (round > MAX_ROUNDS)
-    return { allowed: false, reason: `${MAX_ROUNDS} rounds ran; more need the owner's approval` };
-  const [before, last] = issues.slice(-2);
-  if (last !== undefined && before !== undefined && last < before)
-    return {
-      allowed: true,
-      reason: `round ${round} of ${MAX_ROUNDS}: issues fell from ${before} to ${last}`,
-    };
   return {
     allowed: false,
-    reason: `round ${round} needs measurable progress (issues ${before ?? '?'} then ${last ?? '?'}: not falling); escalate to the owner`,
+    reason: `${AUTO_ROUNDS} rounds ran, the last without the owner's approval; bring the owner the cause and the options`,
   };
 }
 
@@ -216,6 +229,7 @@ export function parseRegister(text) {
     severity: row.sev,
     status: row.status,
     round: row.round,
+    commit: shaOf(row.commit ?? ''),
     where: row.where,
     summary: row.summary,
     evidence: row.evidence,
@@ -275,23 +289,21 @@ export function registerBlockers(register, { ownerApproved = false } = {}) {
   // Failed attempts are not rounds (the runner uses their number again; F-149-R1-03).
   const code = attempts.filter((review) => review.result !== 'failed');
   if (code.length === 0) blockers.push('No code review (checkpoint or rereview) is recorded.');
-  // Every round must have been allowed when it ran: 1 to 5 always, 6 to 8 only with progress,
-  // beyond 8 only with the owner's approval. The Findings column is the round's issue count.
-  const issues = code.map((review) => Number.parseInt(review.findings ?? '', 10));
+  // Every round must have been allowed when it ran: 1 to 5, beyond 5 only with the owner's
+  // approval (F-251).
   for (let n = AUTO_ROUNDS + 1; n <= code.length; n += 1) {
-    if (Number.isNaN(issues[n - 2]) || Number.isNaN(issues[n - 3]))
-      blockers.push(`Review ${n}: the Findings counts of the two rounds before it are needed.`);
-    const verdict = roundAllowed(n, issues.slice(0, n - 1), { ownerApproved });
+    const verdict = roundAllowed(n, [], { ownerApproved });
     if (!verdict.allowed) blockers.push(`Review ${n} should not have run: ${verdict.reason}.`);
   }
   if (attempts.at(-1)?.result === 'failed') blockers.push('The last code review failed.');
   // Reaching a limit is never approval: the last code review must approve, or have raised only
-  // P3 findings. A P1 or P2 Claude rejected in that round is a disagreement for the owner.
+  // P3 or pre-existing findings (F-251). A P1 or P2 Claude rejected in that round is a
+  // disagreement for the owner.
   const last = code.at(-1);
   if (last && last.result !== 'approve') {
     const raised = register.findings.filter((f) => new RegExp(`-R${last.round}-\\d+$`).test(f.id));
     // A P1 or P2 raised again as a duplicate is also a disagreement, not a pass.
-    const serious = raised.filter((f) => f.severity !== 'P3');
+    const serious = raised.filter((f) => f.severity !== 'P3' && f.status !== 'pre-existing');
     if (raised.length === 0 || serious.length > 0)
       blockers.push(
         `The last code review (round ${last.round}) did not approve` +
@@ -320,12 +332,42 @@ export function registerBlockers(register, { ownerApproved = false } = {}) {
         blockers.push(`Finding ${finding.id} is fixed without its fix commit.`);
     }
     if (
-      ['rejected', 'duplicate', 'accepted-limitation'].includes(finding.status) &&
+      ['rejected', 'duplicate', 'accepted-limitation', 'pre-existing'].includes(finding.status) &&
       blank(finding.evidence)
     )
       blockers.push(`Finding ${finding.id} is ${finding.status} without evidence.`);
+    if (finding.status === 'pre-existing') blockers.push(...preExistingProblems(register, finding));
   }
   return blockers;
+}
+
+/**
+ * The register's own conditions for a pre-existing finding (F-251; the git checks are in
+ * review-gate.js): raised by a completed code review (never a design review), its Commit that
+ * review's Reviewed commit, and its Where one place in a file.
+ */
+export function preExistingProblems(register, finding) {
+  const problems = [];
+  const review = register.reviews.find(
+    (r) => r.round === finding.round && r.mode !== 'design' && r.result !== 'failed',
+  );
+  if (!review)
+    problems.push(
+      `Finding ${finding.id} is pre-existing but its round "${finding.round}" is not a completed code review.`,
+    );
+  else if (
+    !finding.commit ||
+    !review.reviewed ||
+    !(review.reviewed.startsWith(finding.commit) || finding.commit.startsWith(review.reviewed))
+  )
+    problems.push(
+      `Finding ${finding.id} is pre-existing but its Commit is not the commit review ${review.round} saw (${review.reviewed}).`,
+    );
+  if (!whereLines(finding.where))
+    problems.push(
+      `Finding ${finding.id} is pre-existing but its Where "${finding.where}" is not one place in a file (path:line or path:start-end).`,
+    );
+  return problems;
 }
 
 /**
@@ -345,8 +387,18 @@ export function roundOutcome({ findings, verifiedFixes, previous, known }) {
   // (probable_duplicate_of) is a hint for Claude's triage, never grounds to stop the loop
   // (F-149-R4-01).
   const repeated = new Set(findings.map((f) => f.duplicate_of).filter(Boolean));
-  const issues = findings.length + notFixed.filter((id) => !repeated.has(id)).length;
-  if (previous === undefined) return { issues, notFixed, escalation: null };
+  // Problems Codex finds already on the base branch are not this pull request's (F-251).
+  const own = findings.filter((f) => f.pre_existing !== true);
+  const issues = own.length + notFixed.filter((id) => !repeated.has(id)).length;
+  // A finding Claude recorded as pre-existing that Codex now says this change introduces, exposes
+  // or worsens: Claude must triage it again (confirmed and fixed, or escalated), never keep it.
+  const retriage = findings
+    .filter((f) => {
+      const row = known.find((k) => k.id === f.duplicate_of);
+      return f.pre_existing !== true && row?.status === 'pre-existing';
+    })
+    .map((f) => f.duplicate_of);
+  if (previous === undefined) return { issues, notFixed, retriage, escalation: null };
   const reasons = [];
   const recurring = notFixed.filter((id) => previous?.notFixed?.includes(id));
   const before = previous?.issues ?? previous?.findings;
@@ -362,7 +414,7 @@ export function roundOutcome({ findings, verifiedFixes, previous, known }) {
     reasons.push(
       `disagreement: Codex raises again ${disputed.map((f) => `${f.duplicate_of} as ${f.severity}`).join(', ')}, which Claude rejected or accepted`,
     );
-  return { issues, notFixed, escalation: reasons.length ? reasons.join('; ') : null };
+  return { issues, notFixed, retriage, escalation: reasons.length ? reasons.join('; ') : null };
 }
 
 /**

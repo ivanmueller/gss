@@ -23,7 +23,8 @@
           "recommendation",
           "duplicate_of",
           "security_sensitive",
-          "needs_owner_decision"
+          "needs_owner_decision",
+          "pre_existing"
         ],
         "properties": {
           "severity": { "type": "string", "enum": ["P1", "P2", "P3"] },
@@ -49,7 +50,8 @@
           "recommendation": { "type": "string" },
           "duplicate_of": { "type": ["string", "null"] },
           "security_sensitive": { "type": "boolean" },
-          "needs_owner_decision": { "type": "boolean" }
+          "needs_owner_decision": { "type": "boolean" },
+          "pre_existing": { "type": "boolean" }
         }
       }
     },

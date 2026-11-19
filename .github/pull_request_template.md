@@ -20,7 +20,7 @@
 ## Codex review (docs/AI_WORKFLOW.md §11.5)
 - Register: `docs/reviews/<ID>.md` (none for documents only)
 - Risk tier (from `node scripts/review-gate.js --base origin/main --head HEAD`):
-- Rounds used (design / code; 5 automatic, 6 to 8 only with falling issue counts, more only with the owner's approval) and whether Codex's last review approved:
+- Rounds used (design / code; at most 5, more only with the owner's approval), whether Codex's last review approved, and any pre-existing findings moved to the tracker (F-251):
 - Findings: confirmed and fixed (verified by Codex) / rejected / duplicate / accepted / open:
 - Last reviewed commit, and what changed after it (only `docs/reviews/`):
 - **Needs owner decision** (plain language), if anything was escalated:

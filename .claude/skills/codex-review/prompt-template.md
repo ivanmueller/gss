@@ -43,4 +43,7 @@ it if you have new evidence that the earlier decision was wrong):
 
 {{VERIFY}}
 
-Return JSON matching the output schema. verdict is "approve" only when there are no P1 or P2 findings.
+Set pre_existing as the scope above defines it (false for a design review).
+
+Return JSON matching the output schema. verdict is "approve" only when there are no P1 or P2 findings
+with pre_existing false (a final review states its own, stricter rule above).
