@@ -2,9 +2,10 @@
 //   - its risk tier (low, normal, high) from the files it changes;
 //   - whether its review register (docs/reviews/<ID>.md) is complete for the exact head commit:
 //     every code review round chained from a commit on the base branch to a commit after which only
-//     docs/reviews/ changed, no blocking finding, fixes verified by Codex, the last review
-//     approving, not escalated, and every round within the limits (5; up to 8 with progress;
-//     more only with the owner's label);
+//     docs/reviews/ (and the tracker, F-251) changed, no blocking finding, fixes verified by Codex,
+//     pre-existing findings outside the pull request's changes and in the tracker, the last review
+//     approving, not escalated, and every round within the limit (5; more only with the owner's
+//     label);
 //   - whether it may merge (mergeDecision, F-150): low and normal risk with complete evidence; high
 //     risk only with the owner's label owner-approved-merge on this head. With --policy this is the
 //     exit code: the Merge policy check, which GitHub can require before any merge.
@@ -27,9 +28,11 @@ import {
   OWNER_APPROVAL_LABEL,
   OWNER_MERGE_LABEL,
   STRONG_TIERS,
+  TRACKER_FILES,
   parseRegister,
   registerBlockers,
   verifyingReview,
+  whereLines,
 } from './review-register.js';
 
 function git(args) {
@@ -47,6 +50,47 @@ const isAncestor = (a, b) => {
 // no tier rule (F-150-R4-01).
 const changedFiles = (from, to) =>
   git(['diff', '--name-only', '-z', '--no-renames', from, to]).split('\0').filter(Boolean);
+
+/**
+ * The line ranges of `path` that changed from `from` to `to`, as [start, end] on one side of the
+ * diff: `side` 'new' (lines of `to`) or 'old' (lines of `from`). A pure insertion or deletion
+ * (count 0) on that side is a boundary after line `start`, as { after: start }: it changes no
+ * line there, only what lies between two lines (F-251-R2-02). Null when the file was added or
+ * deleted, or is binary.
+ */
+function changedRanges(from, to, path, side) {
+  const out = git(['diff', '-U0', '--no-renames', '--no-color', from, to, '--', path]);
+  if (/^(new|deleted) file mode|^Binary files/m.test(out)) return null;
+  const ranges = [];
+  for (const m of out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const [start, count] =
+      side === 'new' ? [Number(m[3]), Number(m[4] ?? 1)] : [Number(m[1]), Number(m[2] ?? 1)];
+    ranges.push(count === 0 ? { after: start } : { start, end: start + count - 1 });
+  }
+  return ranges;
+}
+// A changed line inside the cited lines, or a boundary between two of them.
+const overlaps = (ranges, { start, end }) =>
+  ranges.some((r) =>
+    'after' in r ? start <= r.after && r.after < end : r.start <= end && start <= r.end,
+  );
+/** Whether `path` is a file (not a folder or a submodule) at `commit` (F-251-R4-02). */
+const isFile = (commit, path) => {
+  try {
+    return git(['cat-file', '-t', `${commit}:${path}`]) === 'blob';
+  } catch {
+    return false;
+  }
+};
+/** How many lines `path` has at `commit`, blank lines included (no trimming, F-251-R3-02). */
+const lineCount = (commit, path) => {
+  const text = execFileSync('git', ['show', `${commit}:${path}`], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (text === '') return 0;
+  return text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+};
 
 export function evaluate({ base, head, labels = [] }) {
   const mergeBase = git(['merge-base', base, head]);
@@ -184,13 +228,91 @@ export function evaluate({ base, head, labels = [] }) {
   }
   const last = chain.at(-1);
   if (last && isAncestor(last.reviewed, head)) {
+    // The tracker may also change, to record pre-existing findings (F-251-D1-01).
     const after = changedFiles(last.reviewed, head).filter(
-      (path) => !path.startsWith('docs/reviews/'),
+      (path) => !path.startsWith('docs/reviews/') && !TRACKER_FILES.includes(path),
     );
     if (after.length)
       result.blockers.push(
-        `Changed after the last review (${last.reviewed}), outside docs/reviews/: ${after.join(', ')}. A re-review must cover them.`,
+        `Changed after the last review (${last.reviewed}), outside docs/reviews/ and the tracker: ${after.join(', ')}. A re-review must cover them.`,
       );
+  }
+
+  // Pre-existing findings (F-251): in a file the base branch has, outside the lines the pull request
+  // changed as of the commit the finding's review saw, untouched since then up to the last review,
+  // and named by their own ID in the tracker.
+  const tracker = TRACKER_FILES.map((path) => {
+    try {
+      return git(['show', `${head}:${path}`]);
+    } catch {
+      return '';
+    }
+  }).join('\n');
+  for (const finding of register.findings.filter((f) => f.status === 'pre-existing')) {
+    const escaped = finding.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!new RegExp(`(^|[^\\w-])${escaped}(?![\\w-])`).test(tracker))
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but ${TRACKER_FILES.join(' and ')} do not name it.`,
+      );
+    const place = whereLines(finding.where);
+    if (!place || !finding.commit) continue; // reported by the register
+    // The Commit cell must resolve to the very commit its round reviewed, never be skipped
+    // (F-251-R3-01: a prefix match alone let a mistyped hash through).
+    const review = register.reviews.find(
+      (r) => r.round === finding.round && r.mode !== 'design' && r.result !== 'failed',
+    );
+    if (!known(finding.commit)) {
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but its Commit ${finding.commit} is not in this repository.`,
+      );
+      continue;
+    }
+    const commit = git(['rev-parse', `${finding.commit}^{commit}`]);
+    if (
+      !review?.reviewed ||
+      !known(review.reviewed) ||
+      git(['rev-parse', `${review.reviewed}^{commit}`]) !== commit
+    ) {
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but its Commit ${finding.commit} is not the commit its round reviewed.`,
+      );
+      continue;
+    }
+    // The cited lines must exist in the file the review saw (F-251-R2-03).
+    let lines = 0;
+    if (isFile(commit, place.path))
+      try {
+        lines = lineCount(commit, place.path);
+      } catch {
+        // counted as 0 lines: blocked below
+      }
+    if (place.end > lines) {
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but ${finding.where} is not in ${place.path} as of ${finding.commit} (${lines} lines).`,
+      );
+      continue;
+    }
+    // Against the pull request's current merge base (F-251-R1-01): if the base branch has since
+    // changed those lines (a fix, say) and the pull request keeps the old ones, they now differ.
+    const onBase = isFile(mergeBase, place.path);
+    const prChanges = onBase ? changedRanges(mergeBase, commit, place.path, 'new') : null;
+    if (!prChanges)
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but ${place.path} is not on the base branch as the same file: it cannot be pre-existing.`,
+      );
+    else if (overlaps(prChanges, place))
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but ${finding.where} is in lines this pull request changed: fix it here.`,
+      );
+    // Up to the head, so that a tracker edit after the last review cannot change them either
+    // (F-251-R1-02).
+    if (isAncestor(commit, head)) {
+      const since = changedRanges(commit, head, place.path, 'old');
+      if (!since || overlaps(since, place))
+        result.blockers.push(
+          `Finding ${finding.id} is pre-existing but ${finding.where} was edited after round ${finding.round}: triage it again.`,
+        );
+    }
   }
 
   // Stronger requirements for high risk and governance (the owner's decision, 2026-11-09).
@@ -199,11 +321,32 @@ export function evaluate({ base, head, labels = [] }) {
       result.blockers.push(
         `${tier} risk: the last code review must be a final review of the whole pull request from the base branch (run-review.js --mode final).`,
       );
-    // No P3-only exception here (F-150-R2-02).
-    else if (last.result !== 'approve')
-      result.blockers.push(
-        `${tier} risk: the final review (round ${last.round}) must approve; it says ${last.result}.`,
+    else {
+      // No P3-only exception here (F-150-R2-02), whatever the verdict (F-251-D1-04): every finding
+      // the final review raised is pre-existing, rejected or a duplicate; and the final approves,
+      // or raised only pre-existing findings.
+      const raised = register.findings.filter((f) =>
+        new RegExp(`-R${last.round}-\\d+$`).test(f.id),
       );
+      for (const f of raised)
+        if (!['pre-existing', 'rejected', 'duplicate'].includes(f.status))
+          result.blockers.push(
+            `${tier} risk: ${f.id} (${f.severity}, ${f.status}) was raised by the final review; a change after it needs a new final review.`,
+          );
+      // The exception needs the round's issue count at 0 (pre-existing findings are not counted):
+      // a higher count is an issue no row accounts for, such as a fix found not fixed (F-251-R2-01).
+      if (
+        last.result !== 'approve' &&
+        !(
+          raised.length > 0 &&
+          raised.every((f) => f.status === 'pre-existing') &&
+          Number.parseInt(last.findings ?? '', 10) === 0
+        )
+      )
+        result.blockers.push(
+          `${tier} risk: the final review (round ${last.round}) must approve, or raise only pre-existing findings; it says ${last.result}.`,
+        );
+    }
     const designs = register.reviews.filter(
       (review) => review.mode === 'design' && review.result !== 'failed',
     );

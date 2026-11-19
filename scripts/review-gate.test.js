@@ -51,7 +51,7 @@ function register({ reviews, findings = [], status = 'complete' }) {
     '|---|---|---|---|---|---|---|---|---|---|---|',
     ...findings.map(
       (f) =>
-        `| ${f.id} | ${f.sev} | ${f.status} | ${f.round ?? 1} | — | a.ts:1 | ${f.summary ?? 's'} | ${f.evidence ?? '—'} | ${f.fix ?? '—'} | ${f.test ?? '—'} | ${f.verified ?? '—'} |`,
+        `| ${f.id} | ${f.sev} | ${f.status} | ${f.round ?? 1} | ${f.commit ?? '—'} | ${f.where ?? 'a.ts:1'} | ${f.summary ?? 's'} | ${f.evidence ?? '—'} | ${f.fix ?? '—'} | ${f.test ?? '—'} | ${f.verified ?? '—'} |`,
     ),
     '',
   ].join('\n');
@@ -501,8 +501,8 @@ describe('review evidence check', () => {
     assert.equal(mergeDecision({ evidence: 'complete', tier: 'normal' }).merge, true);
   });
 
-  // The owner's rule of 2026-11-09: 5 rounds; 6 to 8 only while issues fall; more only with
-  // the owner's label. `counts` are each round's issue counts (the Findings column).
+  // The owner's rule of 2026-11-19 (F-251): 5 rounds; more only with the owner's label.
+  // `counts` are each round's issue counts (the Findings column).
   function chainOf(name, counts) {
     branch(name);
     const commits = [main];
@@ -524,28 +524,529 @@ describe('review evidence check', () => {
     assert.deepEqual(evaluate({ base: main, head }).blockers, []);
   });
 
-  test('rounds 6 to 8 need falling issue counts', () => {
-    const stuck = chainOf('stuck', [3, 3, 3, 3, 3, 0]);
-    assert.ok(
-      evaluate({ base: main, head: stuck }).blockers.some((b) =>
-        /Review 6 should not have run: .*measurable progress/.test(b),
-      ),
-    );
-    const falling = chainOf('falling', [6, 5, 5, 4, 3, 2, 1, 0]);
-    assert.deepEqual(evaluate({ base: main, head: falling }).blockers, []);
-  });
-
-  test("a ninth round needs the owner's label, even with progress", () => {
-    const head = chainOf('nine', [9, 8, 7, 6, 5, 4, 3, 2, 0]);
+  // F-251 (the owner, 2026-11-19): round 5 is the last; falling issue counts no longer allow more.
+  test("a sixth round needs the owner's label, even with falling issues", () => {
+    const head = chainOf('six', [6, 5, 4, 3, 2, 0]);
     assert.ok(
       evaluate({ base: main, head }).blockers.some((b) =>
-        /Review 9 should not have run: 8 rounds ran/.test(b),
+        /Review 6 should not have run: 5 rounds ran/.test(b),
       ),
     );
     assert.deepEqual(
       evaluate({ base: main, head, labels: ['owner-approved-extra-review-round'] }).blockers,
       [],
     );
+  });
+
+  // F-251: problems Codex finds in code the pull request did not change go to the tracker.
+  describe('pre-existing findings', () => {
+    const lib = Array.from({ length: 20 }, (_, i) => `export const l${i + 1} = ${i + 1};`).join(
+      '\n',
+    );
+    const edit = (line, text) =>
+      lib
+        .split('\n')
+        .map((l, i) => (i + 1 === line ? text : l))
+        .join('\n');
+    // A normal-risk pull request changing line 3 of apps/web/src/lib.ts, on a main that has it.
+    function setup(name) {
+      git('switch', '-q', 'main');
+      branch(`${name}-base`);
+      const onBase = commit({ 'apps/web/src/lib.ts': `${lib}\n` }, 'lib on base');
+      git('switch', '-q', '-c', name, onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      return { onBase, c1 };
+    }
+    // Pre-existing findings are left out of the round's issue count (F-251-R2-01).
+    const reviews = (onBase, c1, result = 'needs-attention', findings = 0) => [
+      { round: '1', mode: 'checkpoint', base: onBase, reviewed: c1, result, findings },
+    ];
+    const finding = (c1, extra = {}) => ({
+      id: 'F-900-R1-01',
+      sev: 'P2',
+      status: 'pre-existing',
+      round: '1',
+      commit: c1.slice(0, 7),
+      where: 'apps/web/src/lib.ts:10',
+      evidence: 'same on main; tracked',
+      ...extra,
+    });
+    const tracked = { 'docs/FEATURES.md': '| T-90 | F-900-R1-01: old problem |\n' };
+    const blockers = (onBase, head) => evaluate({ base: onBase, head }).blockers;
+
+    test('outside the changed lines and in the tracker: the last review need not approve', () => {
+      const { onBase, c1 } = setup('pre-ok');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1)],
+          }),
+        },
+        'register and tracker after the review',
+      );
+      assert.deepEqual(blockers(onBase, head), []);
+    });
+
+    test('not in the tracker by its own ID: blocks', () => {
+      const { onBase, c1 } = setup('pre-untracked');
+      const head = commit(
+        {
+          // The pull request's own item ID is not the finding's (F-251-D1-01).
+          'docs/FEATURES.md': '| F-900 | the feature |\n| F-900-R1-011 | another |\n',
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1)],
+          }),
+        },
+        'register',
+      );
+      assert.ok(
+        blockers(onBase, head).some((b) =>
+          /F-900-R1-01 is pre-existing but .* do not name it/.test(b),
+        ),
+      );
+    });
+
+    test('in lines the pull request changed, or next to them: blocks', () => {
+      const { onBase, c1 } = setup('pre-changed');
+      for (const where of ['apps/web/src/lib.ts:3', 'apps/web/src/lib.ts:1-4']) {
+        const head = commit(
+          {
+            ...tracked,
+            'docs/reviews/F-900.md': register({
+              reviews: reviews(onBase, c1),
+              findings: [finding(c1, { where })],
+            }),
+          },
+          `register ${where}`,
+        );
+        assert.ok(
+          blockers(onBase, head).some((b) => /in lines this pull request changed/.test(b)),
+          where,
+        );
+      }
+      // A pure deletion is a boundary between two lines: it changes cited lines only when it lies
+      // between two of them (F-251-R2-02).
+      const { onBase: b2 } = setup('pre-deleted');
+      const del = commit(
+        {
+          'apps/web/src/lib.ts': `${lib
+            .split('\n')
+            .filter((_, i) => i !== 6)
+            .join('\n')}\n`,
+        },
+        'delete line 7',
+      );
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(b2, del),
+            findings: [finding(del, { where: 'apps/web/src/lib.ts:6-7' })],
+          }),
+        },
+        'register',
+      );
+      assert.ok(blockers(b2, head).some((b) => /in lines this pull request changed/.test(b)));
+      const beside = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(b2, del),
+            findings: [finding(del, { where: 'apps/web/src/lib.ts:7' })],
+          }),
+        },
+        'register: the line after the deletion',
+      );
+      assert.deepEqual(blockers(b2, beside), []);
+    });
+
+    // F-251-R3-01: a Commit that extends the round's abbreviated commit but resolves to nothing.
+    test('a Commit that does not resolve to the reviewed commit: blocks', () => {
+      const { onBase, c1 } = setup('pre-badsha');
+      const short = c1.slice(0, 7);
+      const wrong = `${short}${c1[7] === '0' ? '1' : '0'}`;
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: [
+              {
+                round: '1',
+                mode: 'checkpoint',
+                base: onBase,
+                reviewed: short,
+                result: 'needs-attention',
+                findings: 0,
+              },
+            ],
+            findings: [finding(c1, { commit: wrong })],
+          }),
+        },
+        'register',
+      );
+      assert.ok(
+        blockers(onBase, head).some((b) => new RegExp(`Commit ${wrong} is not in this`).test(b)),
+      );
+    });
+
+    // F-251-R3-02: blank lines count; a file starting with one has its last line where it is.
+    test('a cited last line in a file that starts with a blank line: passes', () => {
+      git('switch', '-q', 'main');
+      branch('pre-blank-base');
+      const onBase = commit(
+        { 'apps/web/src/blank.ts': '\nexport const b = 1;\n', 'apps/web/src/lib.ts': `${lib}\n` },
+        'base',
+      );
+      git('switch', '-q', '-c', 'pre-blank', onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'apps/web/src/blank.ts:2' })],
+          }),
+        },
+        'register',
+      );
+      assert.deepEqual(blockers(onBase, head), []);
+    });
+
+    // F-251-R2-03: the cited lines must exist in the file the review saw.
+    test('lines beyond the end of the file: blocks', () => {
+      const { onBase, c1 } = setup('pre-beyond');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'apps/web/src/lib.ts:100' })],
+          }),
+        },
+        'register',
+      );
+      assert.ok(
+        blockers(onBase, head).some((b) => /is not in apps\/web\/src\/lib.ts as of/.test(b)),
+      );
+    });
+
+    // F-251-R2-02: appending the tracker row after a cited last line leaves that line as it was.
+    test('a tracker row appended after a cited last line: passes', () => {
+      git('switch', '-q', 'main');
+      branch('pre-append-base');
+      const features = 'line 1\nline 2\n';
+      const onBase = commit(
+        { 'docs/FEATURES.md': features, 'apps/web/src/lib.ts': `${lib}\n` },
+        'base',
+      );
+      git('switch', '-q', '-c', 'pre-append', onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      const head = commit(
+        {
+          'docs/FEATURES.md': `${features}F-900-R1-01 tracked\n`,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'docs/FEATURES.md:2' })],
+          }),
+        },
+        'tracker row appended',
+      );
+      assert.deepEqual(blockers(onBase, head), []);
+    });
+
+    // F-251-D1-02: judged against the base branch, not the previous checkpoint.
+    test('found in round 2 in lines round 1 changed: blocks', () => {
+      const { onBase, c1 } = setup('pre-round2');
+      const c2 = commit({ 'apps/web/src/other.ts': 'export const o = 1;\n' }, 'c2');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: [
+              { round: '1', mode: 'checkpoint', base: onBase, reviewed: c1, result: 'approve' },
+              { round: '2', mode: 'rereview', base: c1, reviewed: c2, result: 'needs-attention' },
+            ],
+            findings: [
+              finding(c2, { id: 'F-900-R2-01', round: '2', where: 'apps/web/src/lib.ts:3' }),
+            ],
+          }),
+        },
+        'register',
+      );
+      assert.ok(blockers(onBase, head).some((b) => /in lines this pull request changed/.test(b)));
+    });
+
+    // F-251-R1-01: the base branch fixed the line since; the pull request, updated from it, keeps
+    // the old line.
+    test('a line the base branch has since fixed and the pull request keeps: blocks', () => {
+      const { onBase, c1 } = setup('pre-upstream');
+      git('switch', '-q', 'pre-upstream-base');
+      const fixed = commit(
+        { 'apps/web/src/lib.ts': `${edit(10, 'export const l10 = 10; // fixed')}\n` },
+        'fix on base',
+      );
+      git('switch', '-q', 'pre-upstream');
+      git('merge', '-q', '-s', 'ours', '-m', 'update from base, keeping ours', fixed);
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1)],
+          }),
+        },
+        'register',
+      );
+      assert.ok(blockers(fixed, head).some((b) => /in lines this pull request changed/.test(b)));
+    });
+
+    // F-251-R1-02: the tracker may change after the last review, but not the lines a pre-existing
+    // finding in it cites.
+    test('a cited tracker line changed after the last review: blocks', () => {
+      git('switch', '-q', 'main');
+      branch('pre-trackerline-base');
+      const features = `${Array.from({ length: 5 }, (_, i) => `line ${i + 1}`).join('\n')}\n`;
+      const onBase = commit(
+        { 'docs/FEATURES.md': features, 'apps/web/src/lib.ts': `${lib}\n` },
+        'base',
+      );
+      git('switch', '-q', '-c', 'pre-trackerline', onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      const head = commit(
+        {
+          'docs/FEATURES.md':
+            features.replace('line 2', 'line 2 changed') + 'F-900-R1-01 tracked\n',
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'docs/FEATURES.md:2' })],
+          }),
+        },
+        'tracker row and an edit of the cited line',
+      );
+      assert.ok(blockers(onBase, head).some((b) => /was edited after round 1/.test(b)));
+    });
+
+    test('in a file the pull request added: blocks', () => {
+      const { onBase, c1 } = setup('pre-newfile');
+      const c2 = commit({ 'apps/web/src/new.ts': `${lib}\n` }, 'new file');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: [
+              {
+                round: '1',
+                mode: 'checkpoint',
+                base: onBase,
+                reviewed: c2,
+                result: 'needs-attention',
+              },
+            ],
+            findings: [finding(c2, { where: 'apps/web/src/new.ts:10' })],
+          }),
+        },
+        'register',
+      );
+      assert.ok(
+        blockers(onBase, head).some((b) => /not on the base branch as the same file/.test(b)),
+      );
+      void c1;
+    });
+
+    test('edited after the round that found it: blocks', () => {
+      const { onBase, c1 } = setup('pre-edited');
+      const c2 = commit(
+        {
+          'apps/web/src/lib.ts': `${edit(10, 'export const l10 = 100;').replace('export const l3 = 3;', 'export const l3 = 33;')}\n`,
+        },
+        'c2 edits line 10',
+      );
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: [
+              ...reviews(onBase, c1),
+              { round: '2', mode: 'rereview', base: c1, reviewed: c2, result: 'approve' },
+            ],
+            findings: [finding(c1)],
+          }),
+        },
+        'register',
+      );
+      assert.ok(blockers(onBase, head).some((b) => /was edited after round 1/.test(b)));
+    });
+
+    test('tied to its own review: another commit, a design round or no line: blocks', () => {
+      const { onBase, c1 } = setup('pre-tied');
+      const cases = [
+        [{ commit: onBase.slice(0, 7) }, /Commit is not the commit review 1 saw/],
+        [{ round: 'D1' }, /is not a completed code review/],
+        [{ where: 'PLAN' }, /is not one place in a file/],
+        [{ where: 'apps/web/src/lib.ts' }, /is not one place in a file/],
+        // F-251-R1-03: a design finding's ID with a code round in its Round cell.
+        [{ id: 'F-900-D1-01' }, /does not name its code review round "1"/],
+        // F-251-R4-02: a folder is not a file, whatever git prints for it.
+        [{ where: 'apps/web/src:1' }, /is not in apps\/web\/src as of/],
+      ];
+      for (const [extra, expected] of cases) {
+        const head = commit(
+          {
+            ...tracked,
+            'docs/reviews/F-900.md': register({
+              reviews: [
+                { round: 'D1', mode: 'design', reviewed: onBase, result: 'approve' },
+                ...reviews(onBase, c1),
+              ],
+              findings: [finding(c1, extra)],
+            }),
+          },
+          `register ${JSON.stringify(extra)}`,
+        );
+        assert.ok(
+          blockers(onBase, head).some((b) => expected.test(b)),
+          String(expected),
+        );
+      }
+    });
+
+    test('a last review raising a pre-existing and a confirmed finding still blocks', () => {
+      const { onBase, c1 } = setup('pre-mixed');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [
+              finding(c1),
+              { id: 'F-900-R1-02', sev: 'P2', status: 'confirmed', round: '1' },
+            ],
+          }),
+        },
+        'register',
+      );
+      const found = blockers(onBase, head);
+      assert.ok(found.some((b) => /did not approve and raised F-900-R1-02/.test(b)));
+    });
+
+    test('the tracker may change after the last review; code may not', () => {
+      const { onBase, c1 } = setup('pre-after');
+      commit({ 'docs/FEATURES_OIL_GAS.md': 'note\n' }, 'tracker');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1)],
+          }),
+        },
+        'register',
+      );
+      assert.deepEqual(blockers(onBase, head), []);
+      const code = commit({ 'apps/web/src/a.ts': 'export const a = 5;\n' }, 'code after');
+      assert.ok(
+        blockers(onBase, code).some((b) =>
+          /Changed after the last review .*apps\/web\/src\/a.ts/.test(b),
+        ),
+      );
+    });
+
+    // High risk and governance: the final review may raise only pre-existing findings, whatever
+    // its verdict (F-251-D1-04; no P3 exception, F-150-R2-02).
+    test('a final review that raised only pre-existing findings passes; one with a P3 does not', () => {
+      const { onBase } = setup('pre-final');
+      git('switch', '-q', '-c', 'pre-final-plan-first', onBase);
+      const plan = commit({ 'docs/plan.md': 'plan\n' }, 'plan');
+      const code = commit(
+        {
+          'supabase/migrations/1_x.sql': 'select 1;\n',
+          'supabase/tests/database/x.test.sql': 'select 1;\n',
+          'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n`,
+        },
+        'migration',
+      );
+      const strong = (result, findings) => [
+        { round: 'D1', mode: 'design', reviewed: plan, result: 'approve' },
+        {
+          round: '1',
+          mode: 'final',
+          base: onBase,
+          reviewed: code,
+          result,
+          findings: findings.filter((f) => f.status !== 'pre-existing').length,
+        },
+      ];
+      const pre = finding(code);
+      const ok = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: strong('needs-attention', [pre]),
+            findings: [pre],
+          }),
+        },
+        'register: only pre-existing',
+      );
+      const okOutcome = evaluate({ base: onBase, head: ok });
+      assert.equal(okOutcome.tier, 'high');
+      assert.deepEqual(okOutcome.blockers, []);
+      // F-251-R2-01: an issue count above the rows (a fix found not fixed, say) is not covered.
+      const counted = commit(
+        {
+          'docs/reviews/F-900.md': register({
+            reviews: strong('needs-attention', [pre]).map((r) =>
+              r.mode === 'final' ? { ...r, findings: 1 } : r,
+            ),
+            findings: [pre],
+          }),
+        },
+        'register: an issue no row accounts for',
+      );
+      const countedBlockers = evaluate({ base: onBase, head: counted }).blockers;
+      assert.ok(countedBlockers.some((b) => /must approve, or raise only pre-existing/.test(b)));
+      assert.ok(countedBlockers.some((b) => /did not approve/.test(b)));
+      // F-251-R5-01: the same when the final approves (a fix found not fixed beside it).
+      const approvedCounted = commit(
+        {
+          'docs/reviews/F-900.md': register({
+            reviews: strong('approve', [pre]).map((r) =>
+              r.mode === 'final' ? { ...r, findings: 1 } : r,
+            ),
+            findings: [pre],
+          }),
+        },
+        'register: an approving final with an issue no row accounts for',
+      );
+      assert.ok(
+        evaluate({ base: onBase, head: approvedCounted }).blockers.some((b) =>
+          /counts more issues than its rows/.test(b),
+        ),
+      );
+      const p3 = {
+        id: 'F-900-R1-02',
+        sev: 'P3',
+        status: 'accepted-limitation',
+        round: '1',
+        evidence: 'minor',
+      };
+      const withP3 = commit(
+        {
+          'docs/reviews/F-900.md': register({
+            reviews: strong('approve', [pre, p3]),
+            findings: [pre, p3],
+          }),
+        },
+        'register: an approving final with a P3',
+      );
+      assert.ok(
+        evaluate({ base: onBase, head: withP3 }).blockers.some((b) =>
+          /F-900-R1-02 \(P3, accepted-limitation\) was raised by the final review/.test(b),
+        ),
+      );
+    });
   });
 
   test('reaching a limit is never approval: an escalated register blocks', () => {
@@ -756,11 +1257,58 @@ describe('register rules', () => {
   test('which rounds may run', () => {
     assert.equal(roundAllowed(5, [9, 9, 9, 9]).allowed, true);
     assert.equal(roundAllowed(6, [9, 9, 9, 9, 9]).allowed, false);
-    assert.equal(roundAllowed(6, [9, 9, 9, 9, 4]).allowed, true);
-    assert.equal(roundAllowed(8, [7, 6, 5, 4, 3, 2, 1]).allowed, true);
-    assert.equal(roundAllowed(9, [8, 7, 6, 5, 4, 3, 2, 1]).allowed, false);
-    assert.equal(roundAllowed(9, [8, 7, 6, 5, 4, 3, 2, 1], { ownerApproved: true }).allowed, true);
+    // F-251: round 5 is the last, however the issues fall.
+    assert.equal(roundAllowed(6, [9, 8, 6, 4, 1]).allowed, false);
+    assert.equal(roundAllowed(6, [9, 9, 9, 9, 9], { ownerApproved: true }).allowed, true);
     assert.equal(roundAllowed(2, [1], { escalated: true }).allowed, false);
+  });
+
+  // F-251-D2-02: Codex reporting again, as caused by this change, a finding recorded as
+  // pre-existing; findings Codex itself calls pre-existing are not this pull request's issues.
+  test('pre-existing findings: left out of the count, re-triaged when Codex says this change caused them', () => {
+    const known = [{ id: 'X-R1-03', severity: 'P2', status: 'pre-existing' }];
+    const again = roundOutcome({
+      findings: [{ severity: 'P2', duplicate_of: 'X-R1-03', pre_existing: false }],
+      verifiedFixes: [],
+      previous: { issues: 1, notFixed: [] },
+      known,
+    });
+    assert.deepEqual(again.retriage, ['X-R1-03']);
+    assert.equal(again.issues, 1);
+    const still = roundOutcome({
+      findings: [
+        { severity: 'P2', duplicate_of: 'X-R1-03', pre_existing: true },
+        { severity: 'P2', duplicate_of: null, pre_existing: true },
+      ],
+      verifiedFixes: [],
+      previous: { issues: 1, notFixed: [] },
+      known,
+    });
+    assert.deepEqual(still.retriage, []);
+    assert.equal(still.issues, 0);
+    assert.equal(still.escalation, null);
+    // F-251-R4-01: a fix found not fixed is never hidden behind a pre-existing finding.
+    const hidden = roundOutcome({
+      findings: [{ severity: 'P2', duplicate_of: 'X-R1-01', pre_existing: true }],
+      verifiedFixes: [{ id: 'X-R1-01', status: 'not-fixed' }],
+      previous: { issues: 1, notFixed: ['X-R1-01'] },
+      known: [{ id: 'X-R1-01', severity: 'P2', status: 'fixed' }],
+    });
+    assert.equal(hidden.issues, 1);
+    assert.match(hidden.escalation ?? '', /recurring without progress/);
+    // F-251-R6-01: a security-sensitive finding is counted, even flagged pre-existing; and
+    // re-triaged when it names a row recorded as pre-existing.
+    const security = roundOutcome({
+      findings: [
+        { severity: 'P2', duplicate_of: null, pre_existing: true, security_sensitive: true },
+        { severity: 'P2', duplicate_of: 'X-R1-03', pre_existing: true, security_sensitive: true },
+      ],
+      verifiedFixes: [],
+      previous: { issues: 0, notFixed: [] },
+      known,
+    });
+    assert.equal(security.issues, 2);
+    assert.deepEqual(security.retriage, ['X-R1-03']);
   });
 
   test('a round counts each problem once, and stops on recurrence or disagreement', () => {

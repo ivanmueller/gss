@@ -6,14 +6,15 @@
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode design --plan <file> [--sha <ref>]
 //   node .claude/skills/codex-review/run-review.js --id F-149 --mode final [--sha HEAD]   (high risk: whole PR)
 //   options: --owner-approved (only when the owner allowed rounds beyond the limits),
+//            --target <ref> (the branch the pull request merges into, default origin/main: problems
+//            found are judged pre-existing against it, F-251),
 //            --dry-run (prompt only, no Codex)
 //
 // What it does:
 //   1. Allocates the next round under a lock, so two reviews never share a round or an output
-//      folder. Design reviews are D1, D2… and do not count. Code rounds 1 to 5 run; 6 to 8 only
-//      when the last round's issue count fell (measurable progress); beyond 8, or after an
-//      escalation, only with --owner-approved (the rule is roundAllowed in scripts/review-register.js,
-//      shared with the GitHub check).
+//      folder. Design reviews are D1, D2… and do not count. Code rounds 1 to 5 run; beyond 5, or
+//      after an escalation, only with --owner-approved (the owner's rule of 2026-11-19, F-251; the
+//      rule is roundAllowed in scripts/review-register.js, shared with the GitHub check).
 //   2. Adds a detached git worktree of the commit in ../gss-review/<unique>: Codex sees exactly that
 //      commit (tracked files only), never the working tree Claude keeps editing.
 //   3. Runs the Codex CLI (`codex exec`, installed by the official Codex plugin) with a read-only
@@ -50,7 +51,12 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { nextReviewBase, roundAllowed, roundOutcome } from '../../../scripts/review-register.js';
+import {
+  flaggedPreExisting,
+  nextReviewBase,
+  roundAllowed,
+  roundOutcome,
+} from '../../../scripts/review-register.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = join(HERE, 'review-output.schema.json');
@@ -170,13 +176,18 @@ const allocation = withLock((state) => {
     return {
       refused: 'No completed code review to re-review from; run a checkpoint review first.',
     };
-  if ((mode === 'checkpoint' || mode === 'final') && !base) {
-    try {
-      base = git('merge-base', 'origin/main', sha);
-    } catch {
-      base = git('merge-base', 'main', sha);
-    }
+  // The pull request's merge base with the branch it merges into: what "pre-existing" is judged
+  // against in every code review, whatever commit the review's own diff starts at (F-251-D1-02,
+  // D2-01).
+  let mergeBase = null;
+  try {
+    mergeBase = git('merge-base', option('target') ?? 'origin/main', sha);
+  } catch {
+    if (!option('target')) mergeBase = git('merge-base', 'main', sha);
   }
+  if (mode !== 'design' && !mergeBase)
+    return { refused: `No merge base of ${sha} with ${option('target') ?? 'origin/main'}.` };
+  if ((mode === 'checkpoint' || mode === 'final') && !base) base = mergeBase;
   if (base) base = git('rev-parse', `${base}^{commit}`);
   // A failed round (Codex error) does not count: its number is used again by the next attempt.
   const round = mode === 'design' ? `D${design.length + 1}` : String(code.length + 1);
@@ -190,7 +201,7 @@ const allocation = withLock((state) => {
     dir,
     startedAt: new Date().toISOString(),
   });
-  return { round, base, dir, allowedBecause };
+  return { round, base, mergeBase, dir, allowedBecause };
 });
 if (allocation.refused) {
   console.error(`${allocation.limit ? 'ROUND LIMIT' : 'REFUSED'}: ${allocation.refused}`);
@@ -201,7 +212,7 @@ if (allocation.refused) {
     );
   process.exit(allocation.limit ? 3 : 2);
 }
-const { round, base, dir, allowedBecause } = allocation;
+const { round, base, mergeBase, dir, allowedBecause } = allocation;
 if (allowedBecause) console.log(`Allowed: ${allowedBecause}.`);
 mkdirSync(dir, { recursive: true });
 
@@ -234,7 +245,7 @@ const known = [
   ...findingRows.map(
     ([fid, sev, status, , , where, summary, evidence]) =>
       `- ${fid} [${sev}, ${status}] ${where}: ${summary}` +
-      (['rejected', 'duplicate', 'accepted-limitation'].includes(status) && evidence
+      (['rejected', 'duplicate', 'accepted-limitation', 'pre-existing'].includes(status) && evidence
         ? ` (Claude's evidence: ${evidence})`
         : ''),
   ),
@@ -263,6 +274,22 @@ if (mode === 'design') {
   scope =
     `Targeted re-review. Review only what changed from ${base} (already reviewed) to ${sha}: run \`git diff ${base} ${sha}\`. ` +
     'Do not re-review unchanged code except to judge a fix, and then read only the lines around it. Open no documents.';
+}
+// What counts as pre-existing (F-251), for every code review: judged against the pull request's
+// merge base, never against the start of this review's diff.
+if (mode !== 'design') {
+  const preExisting = findingRows.filter(([, , status]) => status === 'pre-existing');
+  scope +=
+    `\n\nThe pull request's merge base with the branch it merges into is ${mergeBase}. Set pre_existing true on a finding only when the problem exists unchanged at ${mergeBase} (check with \`git show ${mergeBase}:<path>\`), lies outside the lines the pull request changes (\`git diff ${mergeBase} ${sha}\`), and the pull request neither introduces it, nor makes it reachable, nor makes it worse. Anything else, including a problem in unchanged code that a change of this pull request causes or exposes, is pre_existing false. Never set it on a security_sensitive finding.` +
+    (preExisting.length
+      ? '\nThese findings were recorded as pre-existing. If this commit introduces, exposes or worsens one of them, report it again with duplicate_of set to its ID and pre_existing false:\n' +
+        preExisting
+          .map(([fid, sev, , , , where, summary]) => `- ${fid} [${sev}] ${where}: ${summary}`)
+          .join('\n')
+      : '');
+  if (mode === 'final')
+    scope +=
+      '\nverdict is "approve" only when every finding you report (any severity) is pre_existing true.';
 }
 const verify =
   toVerify.length || reopened.length
@@ -385,7 +412,7 @@ try {
               .filter((r) => r.mode !== 'design' && r.status === 'completed' && r.dir !== dir)
               .at(-1),
           );
-    const { issues, notFixed, escalation } = roundOutcome({
+    const { issues, notFixed, retriage, escalation } = roundOutcome({
       findings: review.findings,
       verifiedFixes: review.verified_fixes,
       previous: mode === 'design' ? undefined : (previous ?? null),
@@ -406,7 +433,7 @@ try {
     console.log(review.summary);
     review.findings.forEach((f, i) => {
       console.log(
-        `\n${i + 1}. [${f.severity}/${f.category}${f.security_sensitive ? '/SECURITY' : ''}${f.needs_owner_decision ? '/OWNER' : ''}] ${f.title}`,
+        `\n${i + 1}. [${f.severity}/${f.category}${f.security_sensitive ? '/SECURITY' : ''}${f.needs_owner_decision ? '/OWNER' : ''}${flaggedPreExisting(f) ? '/PRE-EXISTING' : ''}] ${f.title}`,
       );
       console.log(
         `   ${f.file}:${f.line_start ?? '?'}${f.probable_duplicate_of ? `  (probable duplicate of ${f.probable_duplicate_of})` : ''}`,
@@ -415,6 +442,10 @@ try {
     });
     for (const v of review.verified_fixes)
       console.log(`\nVerified ${v.id}: ${v.status}. ${v.note}`);
+    if (retriage.length)
+      console.log(
+        `\nRE-TRIAGE: Codex says this change now introduces, exposes or worsens ${retriage.join(', ')}, recorded as pre-existing. Set each to confirmed and fix it, or escalate; it may not stay pre-existing (F-251).`,
+      );
     console.log(`\nIssues this round: ${issues} (the register's Findings column).`);
     console.log(
       `Codex usage: ${tokens === null ? 'not reported' : `${tokens.toLocaleString('en-US')} tokens`} at ${EFFORT[mode]} effort.`,
@@ -425,6 +456,11 @@ try {
         `\nESCALATE: ${escalation}. Stop the loop: record the findings, set the register's Status to escalated, and explain it to the owner in the pull request (docs/AI_WORKFLOW.md §11.5, step 7).`,
       );
       exitCode = 6;
+    } else if (review.verdict === 'approve' && mode !== 'design' && notFixed.length) {
+      // F-251-R5-01: an approval with a fix found not fixed is not the end of the loop.
+      console.log(
+        `\nCodex approved, but found ${notFixed.join(', ')} not fixed: set each back to confirmed and fix it; the loop is not over.`,
+      );
     } else if (review.verdict === 'approve' && mode !== 'design') {
       console.log(
         '\nCodex approved: stop the loop. Record the round, then run the evidence check (node scripts/review-gate.js) and let CI run.',
