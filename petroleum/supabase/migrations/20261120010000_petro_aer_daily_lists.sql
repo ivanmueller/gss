@@ -173,7 +173,10 @@ create table petro.ats_lsd_points (
   found boolean not null,
   tried_at timestamptz not null default now(),
   attempts integer not null default 1 check (attempts between 1 and 10000),
-  primary key (meridian, range, township, section, lsd),
+  -- The placing code's version (AER_PLACEMENT_VERSION): a correction raises it, and every
+  -- subdivision is placed again, its earlier points kept (F-243-1-R3-02).
+  placement_version integer not null default 1 check (placement_version between 1 and 1000),
+  primary key (meridian, range, township, section, lsd, placement_version),
   -- Found: a point inside Alberta's box; not found: no point.
   check (
     (found and longitude between -120.1 and -109.9 and latitude between 48.9 and 60.1)
@@ -277,6 +280,15 @@ create view petro.aer_served_reads with (security_invoker = true) as
   ) e on true
   order by f.report, u.list_date, e.seen_at desc, e.id desc;
 
+-- Each subdivision's current point: its highest-version found point (F-243-1-R3-02).
+create view petro.ats_lsd_current_points with (security_invoker = true) as
+  select distinct on (p.meridian, p.range, p.township, p.section, p.lsd)
+         p.meridian, p.range, p.township, p.section, p.lsd, p.longitude, p.latitude,
+         p.placement_version
+  from petro.ats_lsd_points p
+  where p.found
+  order by p.meridian, p.range, p.township, p.section, p.lsd, p.placement_version desc;
+
 -- Each licence once, from the served ST1 readings, its latest list date first: the licences
 -- route and the placing of rigs both read this, so they agree on a licence's location
 -- (F-243-1-D2-06).
@@ -327,11 +339,13 @@ create policy ats_lsd_points_retry on petro.ats_lsd_points
 -- result. Nothing is deleted.
 revoke all on petro.aer_list_files, petro.aer_list_editions, petro.aer_list_reads,
   petro.aer_licences, petro.aer_rig_activities, petro.ats_lsd_points,
-  petro.aer_usable_reads, petro.aer_served_reads, petro.aer_served_licences
+  petro.aer_usable_reads, petro.aer_served_reads, petro.aer_served_licences,
+  petro.ats_lsd_current_points
   from public, anon, authenticated, service_role, petro_api;
 grant select on petro.aer_list_files, petro.aer_list_editions, petro.aer_list_reads,
   petro.aer_licences, petro.aer_rig_activities, petro.ats_lsd_points,
-  petro.aer_usable_reads, petro.aer_served_reads, petro.aer_served_licences
+  petro.aer_usable_reads, petro.aer_served_reads, petro.aer_served_licences,
+  petro.ats_lsd_current_points
   to petro_api;
 grant insert (report, body, body_sha256) on petro.aer_list_files to petro_api;
 grant insert (file_id, source_url) on petro.aer_list_editions to petro_api;
@@ -347,7 +361,8 @@ grant insert (read_id, line_no, well_id, well_name, licence_number, contractor_b
   licensee_ba_id, licensee_name, new_projected_depth, activity_type, bottom_lsd, bottom_section,
   bottom_township, bottom_range, bottom_meridian)
   on petro.aer_rig_activities to petro_api;
-grant insert (meridian, range, township, section, lsd, longitude, latitude, found)
+grant insert (meridian, range, township, section, lsd, longitude, latitude, found,
+  placement_version)
   on petro.ats_lsd_points to petro_api;
 grant update (longitude, latitude, found, tried_at, attempts) on petro.ats_lsd_points to petro_api;
 

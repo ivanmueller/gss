@@ -52,6 +52,12 @@ export const AER_SOURCES: readonly { report: AerReport; url: string }[] = [
 export const ATS_LSD_QUERY =
   'https://geospatial.alberta.ca/titan/rest/services/base/alberta_township_system/MapServer/20/query';
 
+/**
+ * The placing code's version: raised when the way a point is placed in its subdivision changes,
+ * so every subdivision is placed again (F-243-1-R3-02). 1: a point inside the largest piece.
+ */
+export const AER_PLACEMENT_VERSION = 1;
+
 const FETCH_TIMEOUT_MS = 20_000;
 /** Files read (or read again after a reader change) in one run. */
 const READS_PER_RUN = 50;
@@ -483,7 +489,7 @@ export async function refreshAerLists(
 
     // Locating the served licences' surface locations on the township grid.
     const counts = { asked: 0, found: 0, notFound: 0, failed: 0 };
-    const pending = await db.aerSubdivisionsToLocate(LOCATE_PER_RUN);
+    const pending = await db.aerSubdivisionsToLocate(LOCATE_PER_RUN, AER_PLACEMENT_VERSION);
     for (let i = 0; i < pending.length; i += LOCATE_BATCH) {
       const batch = pending.slice(i, i + LOCATE_BATCH);
       counts.asked += batch.length;
@@ -493,7 +499,7 @@ export async function refreshAerLists(
         counts.failed += batch.length;
         continue;
       }
-      await db.aerStorePoints(points);
+      await db.aerStorePoints(points, AER_PLACEMENT_VERSION);
       for (const p of points) {
         if (p.point) counts.found += 1;
         else counts.notFound += 1;

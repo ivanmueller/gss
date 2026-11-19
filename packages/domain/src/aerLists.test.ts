@@ -208,6 +208,15 @@ describe('parseSt1', () => {
     expect(read.skipped).toBe(1);
   });
 
+  it('reads past an extra divider before the column header (F-243-1-R3-01)', () => {
+    const text = st1([st1Record('0526001', '10-12-095-05W4')]).replace(
+      '    WELL NAME',
+      '    ' + '-'.repeat(92) + '\r\n    WELL NAME',
+    );
+    expect(parseSt1(text)).toMatchObject({ structure: true, skipped: 0 });
+    expect(parseSt1(text).rows.map((row) => row.licenceNumber)).toEqual(['0526001']);
+  });
+
   it('has no structure when cut short, even between two records (F-243-1-R1-01)', () => {
     const whole = st1([
       st1Record('0526001', '10-12-095-05W4'),

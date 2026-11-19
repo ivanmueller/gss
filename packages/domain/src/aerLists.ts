@@ -185,18 +185,18 @@ const OFFSETS_START = 27;
 export function parseSt1(text: string): AerListRead<St1Licence> {
   const lines = linesOf(text);
   let listDate: string | null = null;
-  let dashes = 0;
+  // The records start after the first dashed line that follows the column header (the line
+  // naming WELL NAME and LICENCE NUMBER), however many dividers come before it (F-243-1-R3-01).
+  let header = -1;
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     const date = listDate === null ? ST1_DATE.exec(line) : null;
     if (date) listDate = aerDate(date[1] ?? '', date[2] ?? '', date[3] ?? '');
-    if (DASHES.test(line)) {
-      dashes += 1;
-      if (dashes === 2) {
-        start = i + 1;
-        break;
-      }
+    if (header < 0 && line.includes('WELL NAME') && line.includes('LICENCE NUMBER')) header = i;
+    if (header >= 0 && i > header && DASHES.test(line)) {
+      start = i + 1;
+      break;
     }
   }
   const rows: St1Licence[] = [];

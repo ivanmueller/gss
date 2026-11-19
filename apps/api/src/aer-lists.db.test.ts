@@ -217,10 +217,10 @@ describe('the AER lists as petro_api', () => {
       });
 
       // The corrected location is to be located; once found, both routes place there.
-      const pending = await db.aerSubdivisionsToLocate(100_000);
+      const pending = await db.aerSubdivisionsToLocate(100_000, 1);
       expect(pending).toContainEqual(after);
-      await db.aerStorePoints([{ ...after, point: { longitude: -113.5, latitude: 53.5 } }]);
-      expect(await db.aerSubdivisionsToLocate(100_000)).not.toContainEqual(after);
+      await db.aerStorePoints([{ ...after, point: { longitude: -113.5, latitude: 53.5 } }], 1);
+      expect(await db.aerSubdivisionsToLocate(100_000, 1)).not.toContainEqual(after);
 
       const who = member();
       const licences = await db.aerLicences(who, earlier);
@@ -248,6 +248,19 @@ describe('the AER lists as petro_api', () => {
         });
       }
       expect(licences.dates.latestListDate).not.toBeNull();
+
+      // A new placement version places the subdivision again, and both routes move with it
+      // (F-243-1-R3-02).
+      expect(await db.aerSubdivisionsToLocate(100_000, 2)).toContainEqual(after);
+      await db.aerStorePoints([{ ...after, point: { longitude: -113.4, latitude: 53.6 } }], 2);
+      expect(
+        (await db.aerLicences(who, earlier)).rows.find((row) => row.licenceNumber === n),
+      ).toMatchObject({ longitude: -113.4, latitude: 53.6 });
+      for (const row of (await db.aerRigs(who, earlier)).rows.filter(
+        (r) => r.licenceNumber === n,
+      )) {
+        expect(row).toMatchObject({ longitude: -113.4, latitude: 53.6 });
+      }
     }));
 
   it('leaves a rig unplaced when its licence is not in the stored ST1 lists', () =>
@@ -280,10 +293,10 @@ describe('the AER lists as petro_api', () => {
         licences: [licence(n, place)],
         rigs: [],
       });
-      await db.aerStorePoints([{ ...place, point: null }]);
-      expect(await db.aerSubdivisionsToLocate(100_000)).not.toContainEqual(place);
+      await db.aerStorePoints([{ ...place, point: null }], 1);
+      expect(await db.aerSubdivisionsToLocate(100_000, 1)).not.toContainEqual(place);
       // Asked again within the week: the stored answer stays.
-      await db.aerStorePoints([{ ...place, point: { longitude: -113, latitude: 53 } }]);
+      await db.aerStorePoints([{ ...place, point: { longitude: -113, latitude: 53 } }], 1);
       const row = (await db.aerLicences(member(), '2080-01-01')).rows.find(
         (r) => r.licenceNumber === n,
       );

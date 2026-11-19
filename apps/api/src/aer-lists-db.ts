@@ -144,10 +144,13 @@ export interface AerListsDatabase {
     readerVersion: number,
     reading: AerReading,
   ): Promise<'stored' | 'exists'>;
-  /** Job: the subdivisions of served licences without a point, or not found for a week. */
-  aerSubdivisionsToLocate(limit: number): Promise<AtsLsd[]>;
-  /** Job: stores the grid's answers (a not-found point is replaced only once a week old). */
-  aerStorePoints(points: AerPoint[]): Promise<void>;
+  /**
+   * Job: the subdivisions of served licences without a point at `version`, or not found at it
+   * for a week.
+   */
+  aerSubdivisionsToLocate(limit: number, version: number): Promise<AtsLsd[]>;
+  /** Job: stores the grid's answers at `version` (a not-found one replaced once a week old). */
+  aerStorePoints(points: AerPoint[], version: number): Promise<void>;
   /** Members: served licences on lists dated `since` or later, newest first. */
   aerLicences(
     ctx: PetroleumContext,
@@ -353,7 +356,7 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
       });
     },
 
-    aerSubdivisionsToLocate(limit) {
+    aerSubdivisionsToLocate(limit, version) {
       return asJob(sql, (tx) =>
         tx<AtsLsd[]>`
           select distinct l.lsd, l.section, l.township, l.range, l.meridian
@@ -361,6 +364,7 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
           left join petro.ats_lsd_points p
             on (p.meridian, p.range, p.township, p.section, p.lsd)
              = (l.meridian, l.range, l.township, l.section, l.lsd)
+            and p.placement_version = ${version}
           where p.meridian is null
              or (not p.found and p.tried_at < now() - interval '7 days')
           order by l.meridian, l.range, l.township, l.section, l.lsd
@@ -368,14 +372,14 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
       );
     },
 
-    async aerStorePoints(points) {
+    async aerStorePoints(points, version) {
       if (points.length === 0) return;
       await asJob(sql, async (tx) => {
         await tx`
           insert into petro.ats_lsd_points (meridian, range, township, section, lsd, longitude,
-            latitude, found)
+            latitude, found, placement_version)
           select x.meridian, x.range, x.township, x.section, x.lsd, x.longitude, x.latitude,
-            x.found
+            x.found, ${version}::int
           from jsonb_to_recordset(${tx.json(
             points.map((p) => ({
               meridian: p.meridian,
@@ -389,7 +393,7 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
             })),
           )}::jsonb) as x(meridian smallint, range smallint, township smallint,
             section smallint, lsd smallint, longitude numeric, latitude numeric, found boolean)
-          on conflict (meridian, range, township, section, lsd) do update
+          on conflict (meridian, range, township, section, lsd, placement_version) do update
             set longitude = excluded.longitude, latitude = excluded.latitude,
                 found = excluded.found, tried_at = now(),
                 attempts = petro.ats_lsd_points.attempts + 1
@@ -407,9 +411,9 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
                  l.projected_depth as "projectedDepth", l.surface_location as "surfaceLocation",
                  p.longitude::float8 as longitude, p.latitude::float8 as latitude
           from petro.aer_served_licences l
-          left join petro.ats_lsd_points p
+          left join petro.ats_lsd_current_points p
             on (p.meridian, p.range, p.township, p.section, p.lsd)
-             = (l.meridian, l.range, l.township, l.section, l.lsd) and p.found
+             = (l.meridian, l.range, l.township, l.section, l.lsd)
           where l.list_date >= ${since}::date
           order by l.list_date desc, l.licence_number
           limit ${AER_MAX_FEATURES + 1}`;
@@ -438,9 +442,9 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
                  p.longitude::float8 as longitude, p.latitude::float8 as latitude
           from acts a
           left join petro.aer_served_licences l on l.licence_number = a.licence_number
-          left join petro.ats_lsd_points p
+          left join petro.ats_lsd_current_points p
             on (p.meridian, p.range, p.township, p.section, p.lsd)
-             = (l.meridian, l.range, l.township, l.section, l.lsd) and p.found
+             = (l.meridian, l.range, l.township, l.section, l.lsd)
           order by a.activity_at desc, a.well_id, a.activity_type
           limit ${AER_MAX_FEATURES + 1}`;
         return {
