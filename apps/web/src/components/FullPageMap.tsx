@@ -11,6 +11,7 @@ import {
 } from '../lib/mapbox';
 import { useTheme } from '../lib/theme';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { AER_LICENCES, AER_RIGS, AerPickedCard, useAerLists } from './AerLists';
 import {
   MapLayersButton,
   MapLayersLegend,
@@ -64,7 +65,13 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
   const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
+  const aer = useAerLists(session.organization.id, session.token);
   const admin = session.organization.role === 'org_admin';
+
+  const allOverlays = useMemo(
+    () => [...layers.overlays, ...aer.overlays],
+    [layers.overlays, aer.overlays],
+  );
 
   if (mapbox.status !== 'ok' || refused) {
     const text = refused
@@ -90,10 +97,16 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           selectedId={null}
           start={CANADA}
           onSelect={() => undefined}
-          overlays={layers.overlays}
+          overlays={allOverlays}
           authToken={session.token}
           onViewChange={layers.onViewChange}
-          onOverlayClick={layers.setPicked}
+          onOverlayClick={(picked) => {
+            // A dot of the AER's lists has its own card; any other shape, the layers' (F-243-2).
+            const dot = picked.layerId === AER_LICENCES || picked.layerId === AER_RIGS;
+            if (dot) aer.pick(picked);
+            else aer.close();
+            layers.setPicked(dot ? null : picked);
+          }}
           onLayersStale={layers.onStale}
           layersRetry={layers.retry}
           onTokenRefused={() => {
@@ -135,6 +148,9 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       </Suspense>
       {/* Below the zoom buttons, top right (F-139). */}
       <MapLayersPanel state={layers} side="right" />
+      {/* The AER's new licences and rigs: under the controls, top left (F-243-2). */}
+      <div className="absolute top-16 left-3 z-10 max-w-[calc(100%-1.5rem)]">{aer.panel}</div>
+      <AerPickedCard state={aer} />
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />
       {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's
           details, so it never covers their fields or their close button (F-247-2-R3-02). */}
