@@ -9,7 +9,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | ID | Feature | Status |
 |---|---|---|
 | F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260, 2026-11-18) |
-| F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | In progress (branch `feat/f-247-petroleum-db`: plan, Codex design review) |
+| F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | In progress: its database connected (parts 1a and 1b, ivanmueller/gss#263 and #264, 2026-11-18); part 2 (Settings and layers) next |
 | F-240 | Alberta reference layers: township grid and formation outlines | Planned (after F-247) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
@@ -35,7 +35,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-247 — Oil and gas map layers: their own system
 
-**Status:** Planned (next). High risk (a database change): Codex design review before code. **Asked:** 2026-11-18, after the first attempt (F-240 part 1, ivanmueller/gss#261, closed unmerged): one list of layers shared by grain and oil and gas, marked by area. Codex's final reviews kept finding new edge cases of that sharing (browser tabs running the previous app, the shared Team list); the owner: "Why can't we just build our own map layer input system on the oil/gas side? That way we don't mix it up with the grain one … The oil/gas side can have its own settings etc?"
+**Status:** In progress. Part 1, the oil and gas database `petroleum-staging` wired to CI, deploy and the Worker, is live (1a ivanmueller/gss#263, 1b ivanmueller/gss#264, 2026-11-18; the owner's setup steps 1 to 5 done the same day; the deploy of #264 proved the connection). Part 2 (Settings button and layers) next: high risk, Codex design review before code. **Asked:** 2026-11-18, after the first attempt (F-240 part 1, ivanmueller/gss#261, closed unmerged): one list of layers shared by grain and oil and gas, marked by area. Codex's final reviews kept finding new edge cases of that sharing (browser tabs running the previous app, the shared Team list); the owner: "Why can't we just build our own map layer input system on the oil/gas side? That way we don't mix it up with the grain one … The oil/gas side can have its own settings etc?"
 
 **Owner's answers (2026-11-18):**
 1. **Where:** a **Settings** button on the oil and gas map (`map.torvenco.com`), where layers are added and managed; not on Team.
