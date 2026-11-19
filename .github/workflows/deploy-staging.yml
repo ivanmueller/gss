@@ -113,6 +113,16 @@ jobs:
         # 15-minute limit before grain's Worker deploys, F-247-1-R4-02); running out counts as a
         # failure below.
         run: |
+          # Only ever petroleum-staging (F-247-1-R10-02): the login (postgres.<ref>, pooler) or the
+          # host (db.<ref>.supabase.co, direct) must name its project. Never prints the URL.
+          rest="${PETROLEUM_STAGING_DB_URL#*://}"
+          login="${rest%%[:@]*}"
+          host="${rest##*@}"
+          host="${host%%[:/?]*}"
+          if [ "$login" != "postgres.ubgyatbzjctsgzcsvwgc" ] && [ "$host" != "db.ubgyatbzjctsgzcsvwgc.supabase.co" ]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not a postgres login for petroleum-staging (ubgyatbzjctsgzcsvwgc); nothing was applied."
+            exit 1
+          fi
           if timeout 300 supabase --workdir petroleum db push --db-url "$PETROLEUM_STAGING_DB_URL" --yes; then
             echo "applied=true" >> "$GITHUB_OUTPUT"
           elif [ "$GITHUB_EVENT_NAME" = push ]; then

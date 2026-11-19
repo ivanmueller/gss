@@ -119,4 +119,16 @@ describe('the oil and gas database as petro_api', () => {
       await db.close();
     }
   });
+
+  // F-247-1-R10-01: a request past its deadline drops its connection at once, even mid-query.
+  it('drops the connection at once when aborted, ending the query in progress', async () => {
+    const sql = postgres(PETRO_URL, connectionOptions(PETRO_URL));
+    const db = createPetroleumDatabase(sql);
+    const slow = sql`select pg_sleep(5)`.execute();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const started = Date.now();
+    await db.abort();
+    await expect(slow).rejects.toBeDefined();
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
 });

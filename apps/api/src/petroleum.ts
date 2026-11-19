@@ -36,13 +36,28 @@ function notSetUp(c: ApiContext) {
 }
 
 /**
+ * The longest an oil and gas request may spend on its database, end to end (connecting included):
+ * past it, the connection is dropped and the request answers "unavailable" (F-247-1-R10-01).
+ */
+export const PETROLEUM_DEADLINE_MS = 15_000;
+
+class DeadlineError extends Error {
+  constructor() {
+    super('timed out');
+    this.name = 'DeadlineError';
+  }
+}
+
+/**
  * Opens the oil and gas database, checks it has the schema version this code needs (503
- * PETROLEUM_NOT_READY if not), runs `handle`, and answers 503 (logged) if it is unreachable.
+ * PETROLEUM_NOT_READY if not), runs `handle`, and answers 503 (logged) if it is unreachable or
+ * takes longer than `deadlineMs`, in which case the connection is dropped.
  */
 async function withPetroleum(
   c: ApiContext,
   openPetroleum: PetroleumFactory,
   handle: (db: PetroleumDatabase) => Promise<Response>,
+  deadlineMs = PETROLEUM_DEADLINE_MS,
 ): Promise<Response> {
   const target = petroleumUrl(c);
   if (target === null) return notSetUp(c);
@@ -58,22 +73,35 @@ async function withPetroleum(
       'The oil and gas database is not configured correctly.',
     );
   }
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    if ((await db.schemaVersion()) < PETROLEUM_SCHEMA_VERSION) {
-      return apiError(
-        c,
-        503,
-        'PETROLEUM_NOT_READY',
-        'The oil and gas database is being updated. Try again in a few minutes.',
-      );
-    }
-    return await handle(db);
+    const work = (async () => {
+      if ((await db.schemaVersion()) < PETROLEUM_SCHEMA_VERSION) {
+        return apiError(
+          c,
+          503,
+          'PETROLEUM_NOT_READY',
+          'The oil and gas database is being updated. Try again in a few minutes.',
+        );
+      }
+      return handle(db);
+    })();
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        void db.abort().catch(() => undefined);
+        reject(new DeadlineError());
+      }, deadlineMs);
+    });
+    // The abandoned work fails once its connection is dropped; nothing waits for it.
+    work.catch(() => undefined);
+    return await Promise.race([work, deadline]);
   } catch (error) {
     console.error(
       `Database unavailable in request ${c.get('requestId')}: database=petroleum ${failureSummary(error)}`,
     );
     return apiError(c, 503, 'DATABASE_UNAVAILABLE', 'The oil and gas database is unavailable.');
   } finally {
+    clearTimeout(timer);
     closeLater(c, { close: () => db.close() });
   }
 }
@@ -91,12 +119,12 @@ async function withPetroleum(
  * One check at a time per instance (F-247-1-R9-01): a check in flight is shared by every request
  * until it finishes, however long it takes, and is kept running by the request that started it
  * (waitUntil) even if that client goes away (F-247-1-R8-02). Its answer, "ok" or not, is then
- * reused for `cacheMs`, so an outage cannot turn traffic into repeated database attempts. Each
- * request waits at most `deadlineMs` and is otherwise told the database is unavailable; the
- * database work itself is bounded by its connection and statement time limits.
+ * reused for `cacheMs`, so an outage cannot turn traffic into repeated database attempts. A check
+ * always ends within `deadlineMs`: past it, its connection is dropped and the answer is
+ * "unavailable" (F-247-1-R10-01), so a hung connection never keeps the slot.
  */
 export const READY_CACHE_MS = 15_000;
-export const READY_DEADLINE_MS = 20_000;
+export const READY_DEADLINE_MS = PETROLEUM_DEADLINE_MS;
 
 interface ReadyAnswer {
   status: number;
@@ -109,21 +137,6 @@ const UNAVAILABLE: ReadyAnswer = {
     error: { code: 'DATABASE_UNAVAILABLE', message: 'The oil and gas database is unavailable.' },
   },
 };
-
-/** `answer`, or UNAVAILABLE if it takes longer than `ms`. */
-async function withDeadline(answer: Promise<ReadyAnswer>, ms: number): Promise<ReadyAnswer> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<ReadyAnswer>((resolve) => {
-    timer = setTimeout(() => {
-      resolve(UNAVAILABLE);
-    }, ms);
-  });
-  try {
-    return await Promise.race([answer, deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 export function petroleumReadyRoute(
   openPetroleum: PetroleumFactory,
@@ -138,8 +151,11 @@ export function petroleumReadyRoute(
       answer = last.answer;
     } else {
       if (inFlight === null) {
-        const check = withPetroleum(c, openPetroleum, () =>
-          Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
+        const check = withPetroleum(
+          c,
+          openPetroleum,
+          () => Promise.resolve(c.json({ status: 'ok', service: 'petroleum' })),
+          deadlineMs,
         )
           .then(async (res): Promise<ReadyAnswer> => ({
             status: res.status,
@@ -158,7 +174,7 @@ export function petroleumReadyRoute(
           // No execution context (tests): the check still runs.
         }
       }
-      answer = await withDeadline(inFlight, deadlineMs);
+      answer = await inFlight;
     }
     c.header('Cache-Control', 'no-store');
     return c.json(answer.body, answer.status as ContentfulStatusCode);

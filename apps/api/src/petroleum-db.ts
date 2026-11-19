@@ -30,6 +30,8 @@ export interface PetroleumDatabase {
   /** The organization the database sees for this person: the health check. */
   organizationSeen(ctx: PetroleumContext): Promise<string | null>;
   close(): Promise<void>;
+  /** Drops the connection at once, whatever it is doing (a request past its deadline). */
+  abort(): Promise<void>;
 }
 
 export type PetroleumFactory = (
@@ -81,6 +83,9 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
     },
     async close() {
       await sql.end({ timeout: 5 });
+    },
+    async abort() {
+      await sql.end({ timeout: 0 });
     },
   };
 }

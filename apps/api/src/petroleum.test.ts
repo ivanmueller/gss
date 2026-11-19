@@ -21,6 +21,7 @@ function fakePetroleum() {
       Promise.resolve(ctx.organizationId),
     ),
     close: vi.fn<PetroleumDatabase['close']>(() => Promise.resolve()),
+    abort: vi.fn<PetroleumDatabase['abort']>(() => Promise.resolve()),
   };
 }
 
@@ -163,27 +164,22 @@ describe('GET /api/v1/petroleum/ready', () => {
     expect((await ready()).status).toBe(200);
     expect(petroleum.schemaVersion).toHaveBeenCalledTimes(2);
 
-    // A stalled check: each request gives up at its deadline, and no second check starts while
-    // it runs, even after the window.
-    let finish: (version: number) => void = () => undefined;
-    petroleum.schemaVersion.mockReturnValueOnce(
-      new Promise<number>((resolve) => {
-        finish = resolve;
-      }),
-    );
+    // A check that never answers (a hung connection): at its deadline its connection is dropped
+    // and it ends as "unavailable"; requests in the window reuse that, and no second check runs.
+    petroleum.schemaVersion.mockReturnValueOnce(new Promise<number>(() => undefined));
     now.mockReturnValue(2_000_000 + 30_000);
     const stalled = await ready();
     expect(stalled.status).toBe(503);
     expect(await stalled.json()).toMatchObject({ error: { code: 'DATABASE_UNAVAILABLE' } });
-    now.mockReturnValue(2_000_000 + 60_000);
+    expect(petroleum.abort).toHaveBeenCalledTimes(1);
     expect((await ready()).status).toBe(503);
     expect(petroleum.schemaVersion).toHaveBeenCalledTimes(3);
 
-    // When it finishes, its answer is used.
-    finish(PETROLEUM_SCHEMA_VERSION);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // F-247-1-R10-01: once the database recovers, a fresh check after the window succeeds; the
+    // hung one never holds the slot.
+    now.mockReturnValue(2_000_000 + 30_000 + 15_000);
     expect((await ready()).status).toBe(200);
-    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(3);
+    expect(petroleum.schemaVersion).toHaveBeenCalledTimes(4);
   });
 
   it('accepts a database ahead of the code (a newer migration applied first)', async () => {
