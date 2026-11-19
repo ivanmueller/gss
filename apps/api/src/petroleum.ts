@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
+import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
 import type { Membership } from './db';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import type { MapLayerWrite } from './map-layers-db';
@@ -403,6 +404,41 @@ export function petroleumRoutes(
       });
     });
   });
+
+  // /petroleum/aer/licences and /rigs: the AER's daily lists (F-243 part 1), in the same order as
+  // /health: the membership first, from grain's database; without one the oil and gas database is
+  // never opened (F-243-1-D1-06). Every role reads. JSON for the map only, never another format
+  // (the AER's terms, docs/DECISIONS.md 2026-11-19).
+  const aer = (kind: 'licences' | 'rigs') => (c: ApiContext) => {
+    c.header('Cache-Control', 'no-store');
+    const offered: readonly number[] = kind === 'licences' ? LICENCE_DAYS : RIG_DAYS;
+    const raw = c.req.query('days');
+    const days = raw === undefined ? (kind === 'licences' ? 30 : 7) : Number(raw);
+    if (!offered.includes(days) || (raw !== undefined && String(days) !== raw)) {
+      return apiError(c, 400, 'VALIDATION_FAILED', `days must be one of ${offered.join(', ')}.`);
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        const who: PetroleumContext = {
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        };
+        const since = periodStart(new Date(), days);
+        if (kind === 'licences') {
+          const { rows, dates } = await petroleum.aerLicences(who, since);
+          return c.json(licencesAnswer(rows, dates, days));
+        }
+        const { rows, dates } = await petroleum.aerRigs(who, since);
+        return c.json(rigsAnswer(rows, dates, days));
+      });
+    });
+  };
+  routes.get('/aer/licences', aer('licences'));
+  routes.get('/aer/rigs', aer('rigs'));
 
   return routes;
 }
