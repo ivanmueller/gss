@@ -206,9 +206,9 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 **Open (for the owner's detailed description):** what the page adds beyond the map (tools, filters, lists, drawing), who may open it, and whether `/map` should keep leading to Counterparties instead.
 
-#### 1f. F-239 to F-247 — The oil and gas side
+#### 1f. F-239 to F-248 — The oil and gas side
 
-The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; its own database, `petroleum-staging`, connected as ivanmueller/gss#263 and #264; next its own layer system with a Settings button, F-247 part 2; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
+The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; its own database, `petroleum-staging`, connected as ivanmueller/gss#263 and #264; its own layer system with a Settings button, live as ivanmueller/gss#268, merged by the owner without Codex's approval on 2026-11-19, what was left open being F-248 in `docs/FEATURES_OIL_GAS.md`; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
@@ -286,7 +286,8 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 
 | ID | What to check | Pull requests |
 |---|---|---|
-| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch top left, and no Layers button (grain's layers are not offered there; oil and gas layers come with F-247 part 2). | ivanmueller/gss#260, #266 |
+| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch top left, a Layers button and (admins) a Settings button. | ivanmueller/gss#260, #266 |
+| F-247 | Oil and gas layers: map.torvenco.com → Settings → Add map layer → a live Alberta ArcGIS layer address → Check → publisher and terms → Add layer; it shows under Layers and on the map. Also Workspace → the map → Layers: grain's layers still draw as before (shared code changed). | ivanmueller/gss#268 |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
