@@ -17,7 +17,7 @@ import type { ExpressionSpecification, FilterSpecification } from 'mapbox-gl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, apiFetch } from './api';
-import { LAYER_PICTURE_BASES, useLayerApi, type LayerApi } from './layerApi';
+import { LAYER_PICTURE_BASES, livePath, useLayerApi, type LayerApi } from './layerApi';
 import { signedInAs } from './useApiResource';
 
 // Map layers in the browser (F-107): reading a file an admin adds, the colours a layer is
@@ -316,7 +316,7 @@ type Square = { features: GeoJSON.Feature[]; exceeded: boolean } | 'failed';
 const MAX_KEPT_SQUARES = 600;
 
 function picturesUrl(api: LayerApi, id: string): string {
-  return `${window.location.origin}/api/v1${api.path(`/${id}/tiles/{z}/{x}/{y}.png`)}`;
+  return `${window.location.origin}/api/v1${api.path(livePath(`/${id}/tiles/{z}/{x}/{y}.png`))}`;
 }
 
 /** Whether a request to this address carries the person's sign-in (FacilityMap's pictures). */
@@ -833,7 +833,9 @@ export function useLayerOverlays(
           // The settings in the address too, so the browser's kept square is not reused after
           // they change (Codex's review of bb488a9).
           const path = api.path(
-            `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
+            livePath(
+              `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
+            ),
           );
           const era = eraOf(layer.id);
           apiFetch(path, token)

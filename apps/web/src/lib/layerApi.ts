@@ -69,6 +69,20 @@ export function petroleumLayers(organizationId: string): LayerApi {
   };
 }
 
+/**
+ * A live layer's squares, pictures and legend are asked for under addresses that carry this mark.
+ * The release before F-247 part 2 told browsers to keep those answers for an hour without asking
+ * again; under a new address nothing kept from then is reused, so every answer the updated app
+ * shows has passed the Worker's membership check (F-247-2-R18-01). The Worker ignores the mark.
+ * Changed again only if the keeping rule of these answers ever changes again.
+ */
+const LIVE_MARK = 'c=2';
+
+/** The path of a live layer's square, picture or legend, with the mark above. */
+export function livePath(rest: string): string {
+  return `${rest}${rest.includes('?') ? '&' : '?'}${LIVE_MARK}`;
+}
+
 /** The addresses under which a map layer's pictures are asked for with the person's sign-in. */
 export const LAYER_PICTURE_BASES = [`/api/v1${GRAIN_LAYERS.base}/`, `/api/v1${PETROLEUM_BASE}/`];
 

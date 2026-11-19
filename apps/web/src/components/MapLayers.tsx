@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Layers, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
-import { useLayerApi } from '../lib/layerApi';
+import { livePath, useLayerApi } from '../lib/layerApi';
 import {
   ALL_VALUES,
   choiceOf,
@@ -606,7 +606,7 @@ function PictureLegend({
   retry: number;
 }) {
   const api = useLayerApi();
-  const path = api.path(`/${layerId}/legend`);
+  const path = api.path(livePath(`/${layerId}/legend`));
   // Kept only while it is shown, and never from the page's memory of earlier answers: a layer
   // switched back on shows its legend once the Worker has answered again, which it does only
   // for a member (F-247-2-R17-01; the same rule as its squares, R5-02). The browser's own copy

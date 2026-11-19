@@ -243,7 +243,7 @@ describe('fetching what is on', () => {
     expect(result.current.overlays[1]).toEqual({
       id: RAIL,
       kind: 'pictures',
-      tiles: `${window.location.origin}/api/v1/map-layers/${RAIL}/tiles/{z}/{x}/{y}.png`,
+      tiles: `${window.location.origin}/api/v1/map-layers/${RAIL}/tiles/{z}/{x}/{y}.png?c=2`,
       look: USUAL_LOOK,
       levels: null,
     });

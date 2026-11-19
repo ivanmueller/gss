@@ -536,7 +536,8 @@ describe('what the oil and gas side does not offer', () => {
 describe('squares, pictures and details', () => {
   it('fetches a square from the stored address only', async () => {
     petroleum.layerSource.mockResolvedValue(source);
-    const res = await send(`/${LAYER}/features/5/5/10`);
+    // The app's mark on these addresses (`c`, F-247-2-R18-01) changes nothing here.
+    const res = await send(`/${LAYER}/features/5/5/10?g=x&c=2`);
     expect(res.status).toBe(200);
     // Kept by the browser for this sign-in only (F-247-2-R1-01), and reused only after asking
     // the Worker again, which checks the membership each time (F-247-2-R4-01).

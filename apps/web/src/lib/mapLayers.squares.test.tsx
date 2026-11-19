@@ -60,10 +60,12 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
   it('keeps every square the map is showing', async () => {
     expect(LAYERS.length * SQUARES_PER_LAYER).toBeGreaterThan(600);
     let n = 0;
+    const asked: string[] = [];
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => {
+      vi.fn((url: string) => {
         n += 1;
+        asked.push(url);
         return Promise.resolve(
           Response.json({
             type: 'FeatureCollection',
@@ -97,6 +99,10 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     // Nothing was asked for twice to get there.
     const total = LAYERS.length * SQUARES_PER_LAYER;
     expect(n).toBe(total);
+    // F-247-2-R18-01: every square is asked for under an address the release before never
+    // used, so nothing a browser kept under that release's "keep for an hour" is reused.
+    expect(new Set(asked).size).toBe(total);
+    for (const url of asked) expect(url).toMatch(/\/features\/\d+\/\d+\/\d+\?g=[^&]*&c=2$/);
 
     // F-247-2-R4-02 and R5-02: nothing is kept of a layer that is off. Every layer switched
     // off, then on again: every square is asked for again, none drawn from the page's memory.

@@ -104,9 +104,10 @@ function listOf(...layers: MapLayerView[]) {
 }
 
 const noLegend = {
-  [`GET /petroleum/layers/${PICTURES}/legend?${ORGANIZATION}`]: () =>
+  [`GET /petroleum/layers/${PICTURES}/legend?c=2&${ORGANIZATION}`]: () =>
     Response.json({ entries: [] }),
-  [`GET /petroleum/layers/${LINES}/legend?${ORGANIZATION}`]: () => Response.json({ entries: [] }),
+  [`GET /petroleum/layers/${LINES}/legend?c=2&${ORGANIZATION}`]: () =>
+    Response.json({ entries: [] }),
 };
 
 beforeEach(() => {
@@ -149,7 +150,7 @@ describe('FullPageMap', () => {
     // Its pictures are asked for under the oil and gas routes, naming the organization.
     expect(
       screen.getByText(
-        `Drawn: ${window.location.origin}/api/v1/petroleum/layers/${PICTURES}/tiles/{z}/{x}/{y}.png?${ORGANIZATION}`,
+        `Drawn: ${window.location.origin}/api/v1/petroleum/layers/${PICTURES}/tiles/{z}/{x}/{y}.png?c=2&${ORGANIZATION}`,
       ),
     ).toBeInTheDocument();
 
@@ -598,7 +599,7 @@ describe('FullPageMap', () => {
     let member = true;
     const calls = mockApi({
       [LIST]: listOf(pictures),
-      [`GET /petroleum/layers/${PICTURES}/legend?${ORGANIZATION}`]: () =>
+      [`GET /petroleum/layers/${PICTURES}/legend?c=2&${ORGANIZATION}`]: () =>
         member
           ? Response.json({ entries: [{ label: 'Synthetic township', image: null }] })
           : Response.json(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { GRAIN_LAYERS, livePath, petroleumLayers } from './layerApi';
 import { layerPictureStale, mapRequestRefusal, PictureSignIns } from './mapLayers';
 
 // Mapbox GL JS reports a failed request as an error with its status and address (AJAXError).
@@ -20,6 +21,21 @@ describe('layerPictureStale', () => {
     expect(layerPictureStale(failed(404, MAPBOX_STYLE))).toBeNull();
     expect(layerPictureStale({ status: 404 })).toBeNull();
     expect(layerPictureStale(null)).toBeNull();
+  });
+});
+
+// F-247-2-R18-01: the release before told browsers to keep a live layer's answers for an hour.
+// The updated app asks under addresses that release never used.
+describe('livePath', () => {
+  it('marks a live layer’s address, with or without a query already', () => {
+    expect(livePath('/a/legend')).toBe('/a/legend?c=2');
+    expect(livePath('/a/features/5/5/10?g=x')).toBe('/a/features/5/5/10?g=x&c=2');
+    expect(GRAIN_LAYERS.path(livePath('/a/tiles/{z}/{x}/{y}.png'))).toBe(
+      '/map-layers/a/tiles/{z}/{x}/{y}.png?c=2',
+    );
+    expect(petroleumLayers('org-a').path(livePath('/a/legend'))).toBe(
+      '/petroleum/layers/a/legend?c=2&organization_id=org-a',
+    );
   });
 });
 
