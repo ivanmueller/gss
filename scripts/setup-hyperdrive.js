@@ -8,9 +8,16 @@
 // "petroleum" (the oil and gas database, petroleum-staging, as petro_api; F-247).
 import { appendFileSync, readFileSync } from 'node:fs';
 
+// Each configuration reaches one Supabase project only, by its exact pooler login (the project
+// ref is part of it); the oil and gas one also by its exact host and database (F-247-1-R12-01).
 const TARGETS = {
-  staging: { config: 'gss-staging', role: 'app_api' },
-  petroleum: { config: 'gss-petroleum-staging', role: 'petro_api' },
+  staging: { config: 'gss-staging', user: 'app_api.nfwizbcpjpqxdoojfbdr' },
+  petroleum: {
+    config: 'gss-petroleum-staging',
+    user: 'petro_api.ubgyatbzjctsgzcsvwgc',
+    host: 'aws-1-us-east-2.pooler.supabase.com',
+    database: 'postgres',
+  },
 };
 const TARGET = TARGETS[process.env.HYPERDRIVE_TARGET || 'staging'];
 if (!TARGET) throw new Error('HYPERDRIVE_TARGET must be "staging" or "petroleum".');
@@ -68,15 +75,20 @@ function origin() {
   // host and login. Hyperdrive already pools in transaction mode, and stacking a second
   // transaction pooler behind it drops connections, so always use session mode.
   const supabasePooler = url.hostname.endsWith('.pooler.supabase.com');
-  // A secret meant for the other database is refused before anything is changed.
+  // A secret for another database or project is refused before anything is changed.
   const user = decodeURIComponent(url.username);
-  if (user !== TARGET.role && !user.startsWith(`${TARGET.role}.`))
-    throw new Error(`The database login for ${CONFIG_NAME} must be ${TARGET.role}.`);
+  const database = decodeURIComponent(url.pathname.slice(1)) || 'postgres';
+  if (user !== TARGET.user)
+    throw new Error(`The database login for ${CONFIG_NAME} must be ${TARGET.user}.`);
+  if (TARGET.host !== undefined && (url.hostname !== TARGET.host || database !== TARGET.database))
+    throw new Error(
+      `The database for ${CONFIG_NAME} must be ${TARGET.database} at ${TARGET.host}.`,
+    );
   return {
     scheme: 'postgres',
     host: url.hostname,
     port: supabasePooler ? 5432 : Number(url.port || 5432),
-    database: decodeURIComponent(url.pathname.slice(1)) || 'postgres',
+    database,
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
   };
