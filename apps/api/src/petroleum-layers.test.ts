@@ -168,16 +168,23 @@ describe('who may use the oil and gas layers', () => {
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       LAYER,
     );
-    // The role is the named organization's: a viewer there, whatever they are elsewhere.
+    // The role is the named organization's: a viewer there, whatever they are elsewhere, so
+    // nothing is written (F-247-2-R5-01: the role is checked again before every write).
     const removed = await send(`/${LAYER}/remove?organization_id=org-a`, 'POST', {
       version: VERSION,
     });
+    expect(removed.status).toBe(403);
+    expect(petroleum.removeLayer).not.toHaveBeenCalled();
+    // An admin in the organization named removes, as that organization's admin.
+    const asAdmin = await send(`/${LAYER}/remove?organization_id=org-b`, 'POST', {
+      version: VERSION,
+    });
+    expect(asAdmin.status).toBe(200);
     expect(petroleum.removeLayer).toHaveBeenLastCalledWith(
-      expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
+      expect.objectContaining({ organizationId: 'org-b', role: 'org_admin' }),
       LAYER,
       VERSION,
     );
-    expect(removed.status).toBe(200);
     expect((await send('?organization_id=org-c')).status).toBe(403);
   });
 
@@ -212,6 +219,7 @@ describe('who may use the oil and gas layers', () => {
   );
 
   it('passes the database’s own refusals on', async () => {
+    admin();
     petroleum.updateLayer.mockResolvedValue({ status: 'forbidden' });
     petroleum.removeLayer.mockResolvedValue({ status: 'stale' });
     petroleum.layerSource.mockResolvedValue(source);
@@ -251,6 +259,59 @@ describe('adding, changing and removing as an admin', () => {
       }),
     );
     expect(serviceCalls.filter((url) => url.startsWith(`${SERVICE}?f=json`))).toHaveLength(1);
+  });
+
+  // F-247-2-R5-03: the Settings form starts unticked; the API agrees when the field is left out.
+  it('adds a layer off when the map opens unless the admin says so', async () => {
+    const res = await send('', 'POST', {
+      ...details,
+      source: 'web',
+      url: SERVICE,
+      wmsLayers: null,
+    });
+    expect(res.status).toBe(201);
+    expect(petroleum.createLayer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mapVisible: false }),
+    );
+  });
+
+  // F-247-2-R5-01: the role is read again after the wait on the map service, before the write.
+  it('writes nothing when the admin role is removed while the map service answers', async () => {
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    service = async (url) => {
+      if (!url.startsWith(`${SERVICE}?f=json`)) return new Response('not found', { status: 404 });
+      await answered;
+      return Response.json(DESCRIPTION);
+    };
+    const adding = send('', 'POST', { ...details, source: 'web', url: SERVICE, wmsLayers: null });
+    await vi.waitFor(() => {
+      expect(serviceCalls).toHaveLength(1);
+    });
+    db.memberships.mockResolvedValue([
+      { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'viewer' },
+    ]);
+    answer();
+    const res = await adding;
+    expect(res.status).toBe(403);
+    expect(petroleum.createLayer).not.toHaveBeenCalled();
+
+    // A change and a removal check the role the same way.
+    petroleum.layerSource.mockResolvedValue(source);
+    const changed = await send(`/${LAYER}`, 'PATCH', {
+      ...details,
+      version: VERSION,
+      wmsLayers: null,
+      mapVisible: true,
+    });
+    expect(changed.status).toBe(403);
+    const removed = await send(`/${LAYER}/remove`, 'POST', { version: VERSION });
+    expect(removed.status).toBe(403);
+    expect(petroleum.updateLayer).not.toHaveBeenCalled();
+    expect(petroleum.removeLayer).not.toHaveBeenCalled();
   });
 
   it('refuses a WMS service, a file and a layer from an ArcGIS map', async () => {

@@ -3,6 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Membership } from './db';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
+import type { MapLayerWrite } from './map-layers-db';
 import {
   LayerRefusedError,
   PETROLEUM_SCHEMA_VERSION,
@@ -320,6 +321,18 @@ export function petroleumLayerBackend(
           role: membership.role,
           requestId: ctx.requestId,
         };
+        /**
+         * A write waits on the map service first (adding a layer reads its description): the
+         * person's admin role is read again from grain's database just before it, so a role
+         * removed meanwhile writes nothing (F-247-2-R5-01).
+         */
+        const asAdmin = async (write: () => Promise<MapLayerWrite>): Promise<MapLayerWrite> => {
+          const now = await grain.memberships(ctx.userId);
+          const still = now.some(
+            (m) => m.organizationId === organizationId && m.role === 'org_admin',
+          );
+          return still ? write() : { status: 'forbidden' };
+        };
         return withPetroleumCalls(
           c,
           openPetroleum,
@@ -334,11 +347,12 @@ export function petroleumLayerBackend(
               getMapLayerSource: (_ctx, id) => call((db) => db.layerSource(who, id)),
               createMapLayer: (_ctx, organization, layer) =>
                 organization === organizationId
-                  ? call((db) => db.createLayer(who, layer))
+                  ? asAdmin(() => call((db) => db.createLayer(who, layer)))
                   : Promise.resolve({ status: 'forbidden' }),
               updateMapLayer: (_ctx, id, version, changes) =>
-                call((db) => db.updateLayer(who, id, version, changes)),
-              removeMapLayer: (_ctx, id, version) => call((db) => db.removeLayer(who, id, version)),
+                asAdmin(() => call((db) => db.updateLayer(who, id, version, changes))),
+              removeMapLayer: (_ctx, id, version) =>
+                asAdmin(() => call((db) => db.removeLayer(who, id, version))),
               // Files and zoomed-out views are not offered here; their routes are not registered.
               getMapLayerFile: () => Promise.resolve(null),
               getMapLayerOverview: () => Promise.resolve(null),

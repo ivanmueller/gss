@@ -16,7 +16,7 @@ import {
 import type { ExpressionSpecification, FilterSpecification } from 'mapbox-gl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { apiFetch } from './api';
+import { ApiError, apiFetch } from './api';
 import { LAYER_PICTURE_BASES, useLayerApi, type LayerApi } from './layerApi';
 import { signedInAs } from './useApiResource';
 
@@ -661,6 +661,8 @@ export function useLayerOverlays(
   const asked = useRef(new Set<string>());
   /** The squares the map is showing now: never dropped to make room (F-247-2-R3-01). */
   const inView = useRef<ReadonlySet<string>>(new Set());
+  /** The layers on at the last look, as square key prefixes: to tell one switched back on. */
+  const active = useRef<ReadonlySet<string>>(new Set());
   const api = useLayerApi();
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
@@ -712,9 +714,27 @@ export function useLayerOverlays(
       }
       return next.size === current.size ? current : next;
     };
+    // A layer switched back on: its squares still in memory are asked for again, so each passes
+    // the Worker's membership check before it is drawn (the browser's copy answers "not
+    // modified" while the person is still a member; F-247-2-R5-02).
+    const switchedOn = layers
+      .map((layer) => `${layer.id}@`)
+      .filter((prefix) => !active.current.has(prefix));
+    active.current = new Set(layers.map((layer) => `${layer.id}@`));
+    if (switchedOn.length > 0) {
+      for (const key of [...asked.current]) {
+        if (switchedOn.some((prefix) => key.startsWith(prefix))) asked.current.delete(key);
+      }
+    }
     // Layers switched off or the map moved: squares no longer shown are let go at once, not only
     // when the next square arrives (F-247-2-R4-02).
-    setSquares(trimmed);
+    setSquares((current) => {
+      if (switchedOn.length === 0) return trimmed(current);
+      const next = new Map(
+        [...current].filter(([key]) => !switchedOn.some((prefix) => key.startsWith(prefix))),
+      );
+      return trimmed(next.size === current.size ? current : next);
+    });
     for (const layer of layers) {
       // Nothing is fetched for a layer out of its zoom range (F-138).
       if (!shownAtZoom(layer, zoom)) continue;
@@ -746,7 +766,15 @@ export function useLayerOverlays(
               const collection = asCollection(body);
               setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
-            .catch(() => {
+            .catch((error: unknown) => {
+              if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+                // Signed out or no longer a member: nothing kept in memory is drawn again, from
+                // this zoom or another (F-247-2-R5-02).
+                asked.current.clear();
+                setFiles(new Map());
+                setSquares(new Map([[key, 'failed']]));
+                return;
+              }
               // Asked again at the next move of the map.
               asked.current.delete(key);
               setSquares((current) => trimmed(new Map(current).set(key, 'failed')));

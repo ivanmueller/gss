@@ -466,6 +466,11 @@ function keptUntilChanged(c: ApiContext, tag: string) {
   c.header('ETag', tag);
 }
 
+/** Whether a request's JSON body has the field at all, before defaults are filled in. */
+function sent(body: unknown, field: string): boolean {
+  return typeof body === 'object' && body !== null && Object.hasOwn(body, field);
+}
+
 /** The browser's copy is still good: nothing is fetched from the web service. */
 function notModified(c: ApiContext, tag: string) {
   keptUntilChanged(c, tag);
@@ -1129,7 +1134,11 @@ export function layerRoutes(backend: LayerBackend) {
       maxZoom: input.maxZoom,
       othersShown: input.othersShown,
       map: input.map,
-      mapVisible: input.mapVisible,
+      // Where an admin chooses whether a layer is on when the map opens (the oil and gas map),
+      // a layer is off unless they say so; grain's layers keep their map's own setting, on by
+      // default (F-247-2-R5-03).
+      mapVisible:
+        features.defaultChangeable && !sent(body.value, 'mapVisible') ? false : input.mapVisible,
     };
     if (
       details.minZoom !== null &&

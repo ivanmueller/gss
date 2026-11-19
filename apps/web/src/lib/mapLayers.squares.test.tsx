@@ -98,14 +98,15 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     const total = LAYERS.length * SQUARES_PER_LAYER;
     expect(n).toBe(total);
 
-    // F-247-2-R4-02: every layer switched off, no square arriving after: those over the 600
-    // kept are let go at once. Switched back on, exactly those are asked for again.
+    // F-247-2-R4-02 and R5-02: every layer switched off, then on again: every square is asked
+    // for again (the browser's copy passes the Worker's membership check before it is drawn),
+    // none drawn from memory alone.
     rerender({ layers: [] });
     expect(result.current.overlays).toEqual([]);
     rerender({ layers: LAYERS });
     await waitFor(
       () => {
-        expect(n).toBe(total + (total - 600));
+        expect(n).toBe(2 * total);
         const drawn = result.current.overlays.map((overlay) =>
           overlay.kind === 'features' ? overlay.data.features.length : -1,
         );
@@ -114,4 +115,55 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       { timeout: 15_000 },
     );
   }, 40_000);
+
+  // F-247-2-R5-02: access removed while the map is open. The squares of the new zoom are
+  // refused; those kept from the zoom before are not drawn in their place.
+  it('draws nothing kept once a square is refused', async () => {
+    let refuse = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          refuse
+            ? Response.json(
+                { error: { code: 'FORBIDDEN', message: 'You are not a member.' } },
+                { status: 403 },
+              )
+            : Response.json({
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    id: 1,
+                    geometry: { type: 'Point', coordinates: [-105, 50] },
+                    properties: {},
+                  },
+                ],
+              }),
+        ),
+      ),
+    );
+    const one = LAYERS.slice(0, 1);
+    const shapes = (overlays: { kind: string; data?: unknown }[]) =>
+      overlays.reduce(
+        (sum, overlay) =>
+          sum +
+          (overlay.kind === 'features'
+            ? (overlay.data as GeoJSON.FeatureCollection).features.length
+            : 0),
+        0,
+      );
+    const { result, rerender } = renderHook(
+      ({ view }: { view: typeof VIEW }) => useLayerOverlays(one, view, 'token'),
+      { initialProps: { view: VIEW } },
+    );
+    await waitFor(() => {
+      expect(shapes(result.current.overlays)).toBeGreaterThan(0);
+    });
+    refuse = true;
+    rerender({ view: { ...VIEW, zoom: 8 } });
+    await waitFor(() => {
+      expect(shapes(result.current.overlays)).toBe(0);
+    });
+  });
 });
