@@ -666,6 +666,13 @@ export function useLayerOverlays(
   /** The sign-in now, and a count bumped to ask again for what failed under an older one. */
   const tokenNow = useRef(token);
   const [renewed, setRenewed] = useState(0);
+  /** The layers on at the last look, to tell one switched off. */
+  const wasOn = useRef<ReadonlySet<string>>(new Set());
+  /**
+   * How many times each layer's kept data was let go (switched off, removed, refused). An answer
+   * to a request sent before the last time is not kept (F-247-2-R5-02).
+   */
+  const eras = useRef(new Map<string, number>());
   const api = useLayerApi();
 
   useEffect(() => {
@@ -676,14 +683,48 @@ export function useLayerOverlays(
   const zoom = view?.zoom ?? null;
 
   useEffect(() => {
+    const eraOf = (layerId: string) => eras.current.get(layerId) ?? 0;
+    /**
+     * Nothing is kept of a layer that is off, removed or refused (F-247-2-R5-02): its squares,
+     * file and zoomed-out view go, what was asked for is forgotten, and answers still on their
+     * way are not kept. Switched back on, everything is asked for again, so each square passes
+     * the Worker's membership check before it is drawn (the browser's own copy answers "not
+     * modified" while the person is still a member).
+     */
+    const letGo = (layerIds: readonly string[]) => {
+      if (layerIds.length === 0) return;
+      const ofThese = (key: string) =>
+        layerIds.some((id) => key.startsWith(`${id}@`) || key.startsWith(`${id}#`));
+      for (const id of layerIds) eras.current.set(id, eraOf(id) + 1);
+      for (const key of [...asked.current]) if (ofThese(key)) asked.current.delete(key);
+      setSquares((current) => {
+        const next = new Map([...current].filter(([key]) => !ofThese(key)));
+        return next.size === current.size ? current : next;
+      });
+      setFiles((current) => {
+        const next = new Map(
+          [...current].filter(([id]) => !layerIds.includes(id.replace(/#overview$/, ''))),
+        );
+        return next.size === current.size ? current : next;
+      });
+    };
+    /** Signed out or no longer a member, under the sign-in as it is now. */
+    const refused = (error: unknown) =>
+      error instanceof ApiError && (error.status === 401 || error.status === 403);
+    const nowOn = new Set(layers.map((layer) => layer.id));
+    letGo([...wasOn.current].filter((id) => !nowOn.has(id)));
+    wasOn.current = nowOn;
+
     /** A whole GeoJSON document, fetched once per version and kept under `id`. */
     const fetchWhole = (id: string, key: string, path: string) => {
       if (asked.current.has(key)) return;
       asked.current.add(key);
+      const layerId = id.replace(/#overview$/, '');
+      const era = eraOf(layerId);
       apiFetch(path, token)
         .then((res) => res.json())
         .then((body: unknown) => {
-          if (gone.current.has(id.replace(/#overview$/, ''))) return;
+          if (era !== eraOf(layerId) || gone.current.has(layerId)) return;
           const collection = asCollection(body);
           // Numbered afresh: a view sent in parts repeats its parts' numbers, and the map tells
           // lines apart by them.
@@ -692,13 +733,15 @@ export function useLayerOverlays(
             new Map(current).set(id, features ? { type: 'FeatureCollection', features } : 'failed'),
           );
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          if (era !== eraOf(layerId)) return;
           asked.current.delete(key);
           if (token !== tokenNow.current) {
             // Asked under a sign-in renewed since: asked again under the new one (F-247-2-R8-02).
             setRenewed((n) => n + 1);
             return;
           }
+          if (refused(error)) letGo([...wasOn.current]);
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
     };
@@ -755,15 +798,18 @@ export function useLayerOverlays(
           const path = api.path(
             `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
           );
+          const era = eraOf(layer.id);
           apiFetch(path, token)
             .then((res) => res.json())
             .then((body: unknown) => {
-              // The layer was removed after this was asked for: not kept (F-247-2-R8-01).
-              if (gone.current.has(layer.id)) return;
+              // Asked for before the layer was switched off, removed or refused: not kept
+              // (F-247-2-R5-02, R8-01).
+              if (era !== eraOf(layer.id) || gone.current.has(layer.id)) return;
               const collection = asCollection(body);
               setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
             .catch((error: unknown) => {
+              if (era !== eraOf(layer.id)) return;
               // Asked again at the next move of the map.
               asked.current.delete(key);
               if (token !== tokenNow.current) {
@@ -772,26 +818,16 @@ export function useLayerOverlays(
                 setRenewed((n) => n + 1);
                 return;
               }
-              if (error instanceof ApiError && error.status === 404) {
+              if (refused(error)) {
+                // Nothing kept in the page is drawn again, of any layer, from this zoom or
+                // another (F-247-2-R5-02).
+                letGo([...wasOn.current]);
+              } else if (error instanceof ApiError && error.status === 404) {
+                // The layer was removed: nothing kept of it is drawn in its place, from this zoom
+                // or another, nor its zoomed-out view (F-247-2-R7-03). A passing failure keeps
+                // the filling in from other zooms.
                 gone.current.add(layer.id);
-                // The layer was removed (or is no longer this person's to see): nothing kept of it
-                // is drawn in its place, from this zoom or another, nor its zoomed-out view
-                // (F-247-2-R7-03). A passing failure keeps the filling in from other zooms.
-                const prefix = `${layer.id}@`;
-                setSquares((current) => {
-                  const next = new Map([...current].filter(([kept]) => !kept.startsWith(prefix)));
-                  for (const kept of current.keys()) {
-                    if (kept.startsWith(prefix)) asked.current.delete(kept);
-                  }
-                  return next.set(key, 'failed');
-                });
-                setFiles((current) => {
-                  if (!current.has(`${layer.id}#overview`)) return current;
-                  const next = new Map(current);
-                  next.delete(`${layer.id}#overview`);
-                  return next;
-                });
-                return;
+                letGo([layer.id]);
               }
               setSquares((current) => trimmed(new Map(current).set(key, 'failed')));
             });

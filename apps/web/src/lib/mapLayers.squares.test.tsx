@@ -98,14 +98,14 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     const total = LAYERS.length * SQUARES_PER_LAYER;
     expect(n).toBe(total);
 
-    // F-247-2-R4-02: every layer switched off, no square arriving after: those over the 600
-    // kept are let go at once. Switched back on, exactly those are asked for again.
+    // F-247-2-R4-02 and R5-02: nothing is kept of a layer that is off. Every layer switched
+    // off, then on again: every square is asked for again, none drawn from the page's memory.
     rerender({ layers: [] });
     expect(result.current.overlays).toEqual([]);
     rerender({ layers: LAYERS });
     await waitFor(
       () => {
-        expect(n).toBe(total + (total - 600));
+        expect(n).toBe(2 * total);
         const drawn = result.current.overlays.map((overlay) =>
           overlay.kind === 'features' ? overlay.data.features.length : -1,
         );
@@ -244,6 +244,156 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       expect(withNew).toHaveLength(SQUARES_PER_LAYER);
       expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
     });
+  });
+
+  // F-247-2-R5-02 (and R7-01): a layer switched off and on again draws nothing kept from before:
+  // not while its squares are asked for again, and not from an answer to a request sent before
+  // it was switched off.
+  it('draws nothing of a layer switched back on until it is answered afresh', async () => {
+    const waiting: (() => void)[] = [];
+    let hold = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        if (hold) {
+          await new Promise<void>((resolve) => {
+            waiting.push(resolve);
+          });
+        }
+        return Response.json(ONE_SHAPE);
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const none: MapLayerView[] = [];
+    const { result, rerender } = renderHook(
+      ({ layers }: { layers: MapLayerView[] }) => useLayerOverlays(layers, VIEW, 'token'),
+      { initialProps: { layers: one } },
+    );
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+
+    // Off and on again, the fresh requests not yet answered: nothing kept is drawn.
+    hold = true;
+    rerender({ layers: none });
+    rerender({ layers: one });
+    await waitFor(() => {
+      expect(waiting).toHaveLength(SQUARES_PER_LAYER);
+    });
+    expect(shapesOf(result.current.overlays)).toBe(0);
+
+    // Off and on once more: the answers to the requests sent before are not kept.
+    const before = waiting.splice(0);
+    rerender({ layers: none });
+    rerender({ layers: one });
+    await waitFor(() => {
+      expect(waiting).toHaveLength(SQUARES_PER_LAYER);
+    });
+    await act(async () => {
+      for (const answer of before) answer();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(shapesOf(result.current.overlays)).toBe(0);
+
+    // The fresh answers are drawn.
+    await act(async () => {
+      for (const answer of waiting) answer();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+  });
+
+  // F-247-2-R5-02: access removed while the map is open. The squares of the new zoom are
+  // refused; those kept from the zoom before are not drawn in their place, and an answer to a
+  // request sent before the refusal is not kept (R6-01).
+  it('draws nothing kept once a square is refused, nor an answer that arrives after', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let refuse = false;
+    let slow = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        if (slow) {
+          // Passed the membership check before access was removed, and answers slowly.
+          slow = false;
+          await held;
+          return Response.json(ONE_SHAPE);
+        }
+        return refuse
+          ? Response.json(
+              { error: { code: 'FORBIDDEN', message: 'You are not a member.' } },
+              { status: 403 },
+            )
+          : Response.json(ONE_SHAPE);
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result, rerender } = renderHook(
+      ({ view }: { view: typeof VIEW }) => useLayerOverlays(one, view, 'token'),
+      { initialProps: { view: VIEW } },
+    );
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+    slow = true;
+    refuse = true;
+    rerender({ view: { ...VIEW, zoom: 8 } });
+    await waitFor(() => {
+      expect(result.current.notes.size).toBe(1);
+    });
+    expect(shapesOf(result.current.overlays)).toBe(0);
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(shapesOf(result.current.overlays)).toBe(0);
+  });
+
+  // F-247-2-R7-02: a refusal to a request sent under an expired sign-in says nothing about the
+  // person now: what the renewed sign-in has loaded stays, and the square is asked for again.
+  it('keeps what a renewed sign-in loaded when an old request is refused late', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let oldCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (new Headers(init?.headers).get('Authorization') === 'Bearer old') {
+          oldCalls += 1;
+          // The first is still on its way when the sign-in is renewed, then refused.
+          if (oldCalls === 1) {
+            await held;
+            return Response.json(
+              { error: { code: 'UNAUTHORIZED', message: 'Sign in again.' } },
+              { status: 401 },
+            );
+          }
+        }
+        return Response.json(ONE_SHAPE);
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result, rerender } = renderHook(
+      ({ token }: { token: string }) => useLayerOverlays(one, VIEW, token),
+      { initialProps: { token: 'old' } },
+    );
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+    rerender({ token: 'new' });
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await waitFor(() => {
+      expect(result.current.notes.size).toBe(0);
+    });
+    expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
   });
 });
 
