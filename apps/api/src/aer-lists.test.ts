@@ -74,6 +74,12 @@ const ST49 = [
   '        *** END OF REPORT ***',
 ].join('\n');
 
+/** The address a fetch was called with. */
+function urlOf(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.href : input.url;
+}
+
 function text(body: string, init: ResponseInit = {}): Response {
   return new Response(body, { status: 200, headers: { 'Content-Type': 'text/plain' }, ...init });
 }
@@ -221,7 +227,7 @@ describe('refreshAerLists', () => {
 
   function fetchFor(answers: Record<string, () => Response>) {
     return vi.fn<typeof fetch>((input) => {
-      const url = String(input);
+      const url = urlOf(input);
       const answer = answers[url];
       return Promise.resolve(answer ? answer() : text('missing', { status: 404 }));
     });
@@ -299,9 +305,9 @@ describe('refreshAerLists', () => {
     petroleum.aerSubdivisionsToLocate.mockResolvedValue(pending);
     let call = 0;
     const fetchImpl = vi.fn<typeof fetch>((input, init) => {
-      if (String(input) !== ATS_LSD_QUERY) return Promise.resolve(text('missing', { status: 404 }));
+      if (urlOf(input) !== ATS_LSD_QUERY) return Promise.resolve(text('missing', { status: 404 }));
       call += 1;
-      expect(String(init?.body)).toContain('where=');
+      expect(init?.body instanceof URLSearchParams && init.body.get('where')).toContain('M=4');
       return Promise.resolve(
         call === 1 ? Response.json({ features: [] }) : text('down', { status: 500 }),
       );

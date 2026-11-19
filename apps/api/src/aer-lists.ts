@@ -66,7 +66,7 @@ type FetchOutcome =
 
 /** Reads a body as a stream, giving up past `max` bytes so a huge answer is never held. */
 async function boundedBytes(res: Response, max: number): Promise<Uint8Array | null> {
-  const reader = res.body?.getReader();
+  const reader = (res.body as ReadableStream<Uint8Array> | null)?.getReader();
   if (!reader) return new Uint8Array();
   const parts: Uint8Array[] = [];
   let size = 0;
