@@ -436,12 +436,41 @@ describe('squares, pictures and details', () => {
     petroleum.layerSource.mockResolvedValue(source);
     const res = await send(`/${LAYER}/features/5/5/10`);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('private, max-age=3600');
-    // Kept by the browser for this sign-in only: another account on the same browser is not
-    // served it from the cache, so its own membership is checked (F-247-2-R1-01).
+    // Kept by the browser for this sign-in only (F-247-2-R1-01), and reused only after asking
+    // the Worker again, which checks the membership each time (F-247-2-R4-01).
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
     expect(res.headers.get('Vary')).toMatch(/\bAuthorization\b/);
+    expect(res.headers.get('ETag')).toMatch(/^"[0-9a-f]{32}-\d+"$/);
     expect(serviceCalls).toHaveLength(1);
     expect(serviceCalls[0]?.startsWith(`${SERVICE}/query?`)).toBe(true);
+  });
+
+  // F-247-2-R4-01: a kept square is reused only after the Worker checks the membership again.
+  it('answers “not modified” to a member, and refuses a kept square once access is removed', async () => {
+    petroleum.layerSource.mockResolvedValue(source);
+    const first = await send(`/${LAYER}/features/5/5/10`);
+    const tag = first.headers.get('ETag') ?? '';
+    expect(serviceCalls).toHaveLength(1);
+    const again = () =>
+      app.request(
+        `/api/v1/petroleum/layers/${LAYER}/features/5/5/10`,
+        { headers: { ...AUTH, 'If-None-Match': tag } },
+        WITH_PETROLEUM,
+      );
+    const unchanged = await again();
+    expect(unchanged.status).toBe(304);
+    expect(unchanged.headers.get('ETag')).toBe(tag);
+    expect(unchanged.headers.get('Cache-Control')).toBe('private, no-cache');
+    // Nothing is asked of the web service for a copy still good.
+    expect(serviceCalls).toHaveLength(1);
+    // A layer changed since: fetched anew.
+    petroleum.layerSource.mockResolvedValue({ ...source, onlyField: 'STATUS', onlyValues: ['A'] });
+    expect((await again()).status).toBe(200);
+    expect(serviceCalls).toHaveLength(2);
+    // The same sign-in, its access removed: refused, the browser's copy never confirmed.
+    db.memberships.mockResolvedValue([]);
+    expect((await again()).status).toBe(403);
+    expect(serviceCalls).toHaveLength(2);
   });
 
   it('answers 404 for a layer that is removed or another organization’s', async () => {
@@ -467,7 +496,8 @@ describe('squares, pictures and details', () => {
     service = () => new Response(ONE_PIXEL_BYTES, { headers: { 'Content-Type': 'image/png' } });
     const picture = await send(`/${LAYER}/tiles/5/5/10.png`);
     expect(picture.status).toBe(200);
-    expect(picture.headers.get('Cache-Control')).toBe('private, max-age=3600');
+    expect(picture.headers.get('Cache-Control')).toBe('private, no-cache');
+    expect(picture.headers.get('ETag')).toMatch(/^"[0-9a-f]{32}-\d+"$/);
     expect(picture.headers.get('Vary')).toMatch(/\bAuthorization\b/);
   });
 });

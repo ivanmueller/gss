@@ -694,6 +694,27 @@ export function useLayerOverlays(
       for (const tile of tiles) showing.add(squareKey(layer, tile));
     }
     inView.current = showing;
+    /**
+     * Keeps memory in check: the oldest squares go first, but never one the map is showing now.
+     * With many layers on, a view can need more squares than are kept from earlier views;
+     * dropping one of those left a hole that nothing asked for again while the map stood still
+     * (F-247-2-R3-01). Unchanged when nothing needs to go, so the map is not drawn again.
+     */
+    const trimmed = (current: Map<string, Square>) => {
+      if (current.size <= MAX_KEPT_SQUARES) return current;
+      const next = new Map(current);
+      for (const old of current.keys()) {
+        if (next.size <= MAX_KEPT_SQUARES) break;
+        // The view as it is now, even for a square that arrives after the map moved again.
+        if (inView.current.has(old)) continue;
+        next.delete(old);
+        asked.current.delete(old);
+      }
+      return next.size === current.size ? current : next;
+    };
+    // Layers switched off or the map moved: squares no longer shown are let go at once, not only
+    // when the next square arrives (F-247-2-R4-02).
+    setSquares(trimmed);
     for (const layer of layers) {
       // Nothing is fetched for a layer out of its zoom range (F-138).
       if (!shownAtZoom(layer, zoom)) continue;
@@ -714,8 +735,8 @@ export function useLayerOverlays(
           const key = squareKey(layer, tile);
           if (asked.current.has(key)) continue;
           asked.current.add(key);
-          // The settings in the address too, so the browser's cached square (an hour) is not
-          // reused after they change (Codex's review of bb488a9).
+          // The settings in the address too, so the browser's kept square is not reused after
+          // they change (Codex's review of bb488a9).
           const path = api.path(
             `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
           );
@@ -723,27 +744,12 @@ export function useLayerOverlays(
             .then((res) => res.json())
             .then((body: unknown) => {
               const collection = asCollection(body);
-              setSquares((current) => {
-                const next = new Map(current).set(key, collection ?? 'failed');
-                // Keeps memory in check: the oldest squares go first, but never one the map is
-                // showing now. With many layers on, a view can need more squares than are kept
-                // from earlier views; dropping one of those left a hole that nothing asked for
-                // again while the map stood still (F-247-2-R3-01).
-                if (next.size > MAX_KEPT_SQUARES) {
-                  for (const old of next.keys()) {
-                    if (next.size <= MAX_KEPT_SQUARES) break;
-                    if (inView.current.has(old)) continue;
-                    next.delete(old);
-                    asked.current.delete(old);
-                  }
-                }
-                return next;
-              });
+              setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
             .catch(() => {
               // Asked again at the next move of the map.
               asked.current.delete(key);
-              setSquares((current) => new Map(current).set(key, 'failed'));
+              setSquares((current) => trimmed(new Map(current).set(key, 'failed')));
             });
         }
       }

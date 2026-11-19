@@ -434,17 +434,42 @@ const MAX_FEATURES_BYTES = 8 * 1024 * 1024;
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
 const MAX_DESCRIPTION_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 15_000;
-/** Pictures and squares of a live layer are kept by the browser for an hour. */
-const LIVE_CACHE = 'private, max-age=3600';
+/** A live layer's answer is fetched from its web service again at most once an hour. */
+const LIVE_HOUR_MS = 3_600_000;
 
 /**
- * A live layer's answer is kept by the person's own browser for an hour, and only for the
- * sign-in it was given to: with Vary, another account signing in on the same browser is never
- * served it from the browser's cache without its own membership check (F-247-2-R1-01).
+ * A live layer's square, picture or legend is kept by the person's own browser, only for the
+ * sign-in it was given to (Vary: another account signing in on the same browser is never served
+ * it, F-247-2-R1-01), and reused only after asking the Worker (no-cache): every reuse passes the
+ * membership check, so a person whose access is removed is refused at once (F-247-2-R4-01).
+ * The tag names what the answer was fetched from and the hour: within the hour an unchanged layer
+ * is answered "not modified" without asking the web service again; after it, it is fetched anew.
  */
-function keptForAnHour(c: ApiContext) {
-  c.header('Cache-Control', LIVE_CACHE);
+async function liveTag(c: ApiContext, source: MapLayerSource) {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(source)),
+  );
+  const hex = [...new Uint8Array(digest).slice(0, 16)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const tag = `"${hex}-${String(Math.floor(Date.now() / LIVE_HOUR_MS))}"`;
+  const asked = c.req.header('if-none-match') ?? '';
+  const fresh = asked.split(',').some((one) => one.trim().replace(/^W\//, '') === tag);
+  return { tag, fresh };
+}
+
+/** The headers of a live layer's answer the browser may keep (see `liveTag`). */
+function keptUntilChanged(c: ApiContext, tag: string) {
+  c.header('Cache-Control', 'private, no-cache');
   c.header('Vary', 'Authorization', { append: true });
+  c.header('ETag', tag);
+}
+
+/** The browser's copy is still good: nothing is fetched from the web service. */
+function notModified(c: ApiContext, tag: string) {
+  keptUntilChanged(c, tag);
+  return c.body(null, 304);
 }
 const NOT_MEMBER = 'You are not an active member.';
 const ADMINS_ONLY = 'Only admins add, change and remove map layers.';
@@ -1317,6 +1342,8 @@ export function layerRoutes(backend: LayerBackend) {
       if (source?.kind !== 'arcgis_features' || source.url === null) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
       }
+      const { tag, fresh } = await liveTag(c, source);
+      if (fresh) return notModified(c, tag);
       let answer: { body: ArrayBuffer };
       try {
         answer = await fetchService(
@@ -1332,7 +1359,7 @@ export function layerRoutes(backend: LayerBackend) {
       if (!/^\s*\{\s*"(type|crs|features|properties)"/.test(start)) {
         return serviceFailed(c, new LayerServiceError(422), 'square');
       }
-      keptForAnHour(c);
+      keptUntilChanged(c, tag);
       c.header('Content-Type', 'application/json');
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);
@@ -1541,13 +1568,15 @@ export function layerRoutes(backend: LayerBackend) {
       ) {
         return apiError(c, 404, 'NOT_FOUND', 'No such map layer.');
       }
+      const { tag, fresh } = await liveTag(c, source);
+      if (fresh) return notModified(c, tag);
       let body: unknown;
       try {
         body = await fetchJson(`${source.url}/legend?f=json`, MAX_LEGEND_BYTES);
       } catch (error) {
         return serviceFailed(c, error, 'legend');
       }
-      keptForAnHour(c);
+      keptUntilChanged(c, tag);
       return c.json({ entries: await legendEntries(body) } satisfies LayerLegend);
     });
   });
@@ -1574,6 +1603,8 @@ export function layerRoutes(backend: LayerBackend) {
       ) {
         return apiError(c, 404, 'NOT_FOUND', 'This layer has no square at this zoom.');
       }
+      const { tag, fresh } = await liveTag(c, source);
+      if (fresh) return notModified(c, tag);
       let answer: { body: ArrayBuffer; type: string };
       try {
         answer = await fetchService(
@@ -1591,14 +1622,14 @@ export function layerRoutes(backend: LayerBackend) {
           error instanceof LayerServiceError &&
           error.status === 404
         ) {
-          keptForAnHour(c);
+          keptUntilChanged(c, tag);
           return c.body(null, 204);
         }
         return serviceFailed(c, error, 'picture');
       }
       const type = await pictureType(answer.body);
       if (type === null) return serviceFailed(c, new LayerServiceError(415), 'picture');
-      keptForAnHour(c);
+      keptUntilChanged(c, tag);
       c.header('Content-Type', type);
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(answer.body, 200);

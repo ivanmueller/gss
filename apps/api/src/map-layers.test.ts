@@ -402,7 +402,8 @@ describe('fetching a layer for the map', () => {
     const res = await send(`/${LAYER}/features/6/12/21`, 'GET');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(SQUARE);
-    expect(res.headers.get('cache-control')).toBe('private, max-age=3600');
+    expect(res.headers.get('cache-control')).toBe('private, no-cache');
+    expect(res.headers.get('etag')).toMatch(/^"[0-9a-f]{32}-\d+"$/);
     expect(serviceCalls).toHaveLength(1);
     expect(serviceCalls[0]?.startsWith(`${SERVICE}/query?`)).toBe(true);
   });

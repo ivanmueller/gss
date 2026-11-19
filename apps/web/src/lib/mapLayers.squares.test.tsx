@@ -79,7 +79,10 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
         );
       }),
     );
-    const { result } = renderHook(() => useLayerOverlays(LAYERS, VIEW, 'token'));
+    const { result, rerender } = renderHook(
+      ({ layers }: { layers: MapLayerView[] }) => useLayerOverlays(layers, VIEW, 'token'),
+      { initialProps: { layers: LAYERS } },
+    );
     await waitFor(
       () => {
         expect(n).toBe(LAYERS.length * SQUARES_PER_LAYER);
@@ -92,6 +95,23 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       { timeout: 15_000 },
     );
     // Nothing was asked for twice to get there.
-    expect(n).toBe(LAYERS.length * SQUARES_PER_LAYER);
-  }, 20_000);
+    const total = LAYERS.length * SQUARES_PER_LAYER;
+    expect(n).toBe(total);
+
+    // F-247-2-R4-02: every layer switched off, no square arriving after: those over the 600
+    // kept are let go at once. Switched back on, exactly those are asked for again.
+    rerender({ layers: [] });
+    expect(result.current.overlays).toEqual([]);
+    rerender({ layers: LAYERS });
+    await waitFor(
+      () => {
+        expect(n).toBe(total + (total - 600));
+        const drawn = result.current.overlays.map((overlay) =>
+          overlay.kind === 'features' ? overlay.data.features.length : -1,
+        );
+        expect(drawn).toEqual(LAYERS.map(() => SQUARES_PER_LAYER));
+      },
+      { timeout: 15_000 },
+    );
+  }, 40_000);
 });
