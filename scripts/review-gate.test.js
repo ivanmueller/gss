@@ -557,8 +557,9 @@ describe('review evidence check', () => {
       const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
       return { onBase, c1 };
     }
-    const reviews = (onBase, c1, result = 'needs-attention') => [
-      { round: '1', mode: 'checkpoint', base: onBase, reviewed: c1, result, findings: 1 },
+    // Pre-existing findings are left out of the round's issue count (F-251-R2-01).
+    const reviews = (onBase, c1, result = 'needs-attention', findings = 0) => [
+      { round: '1', mode: 'checkpoint', base: onBase, reviewed: c1, result, findings },
     ];
     const finding = (c1, extra = {}) => ({
       id: 'F-900-R1-01',
@@ -626,7 +627,8 @@ describe('review evidence check', () => {
           where,
         );
       }
-      // A pure deletion touches the lines on both sides of it.
+      // A pure deletion is a boundary between two lines: it changes cited lines only when it lies
+      // between two of them (F-251-R2-02).
       const { onBase: b2 } = setup('pre-deleted');
       const del = commit(
         {
@@ -642,12 +644,65 @@ describe('review evidence check', () => {
           ...tracked,
           'docs/reviews/F-900.md': register({
             reviews: reviews(b2, del),
-            findings: [finding(del, { where: 'apps/web/src/lib.ts:7' })],
+            findings: [finding(del, { where: 'apps/web/src/lib.ts:6-7' })],
           }),
         },
         'register',
       );
       assert.ok(blockers(b2, head).some((b) => /in lines this pull request changed/.test(b)));
+      const beside = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(b2, del),
+            findings: [finding(del, { where: 'apps/web/src/lib.ts:7' })],
+          }),
+        },
+        'register: the line after the deletion',
+      );
+      assert.deepEqual(blockers(b2, beside), []);
+    });
+
+    // F-251-R2-03: the cited lines must exist in the file the review saw.
+    test('lines beyond the end of the file: blocks', () => {
+      const { onBase, c1 } = setup('pre-beyond');
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'apps/web/src/lib.ts:100' })],
+          }),
+        },
+        'register',
+      );
+      assert.ok(
+        blockers(onBase, head).some((b) => /is not in apps\/web\/src\/lib.ts as of/.test(b)),
+      );
+    });
+
+    // F-251-R2-02: appending the tracker row after a cited last line leaves that line as it was.
+    test('a tracker row appended after a cited last line: passes', () => {
+      git('switch', '-q', 'main');
+      branch('pre-append-base');
+      const features = 'line 1\nline 2\n';
+      const onBase = commit(
+        { 'docs/FEATURES.md': features, 'apps/web/src/lib.ts': `${lib}\n` },
+        'base',
+      );
+      git('switch', '-q', '-c', 'pre-append', onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      const head = commit(
+        {
+          'docs/FEATURES.md': `${features}F-900-R1-01 tracked\n`,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'docs/FEATURES.md:2' })],
+          }),
+        },
+        'tracker row appended',
+      );
+      assert.deepEqual(blockers(onBase, head), []);
     });
 
     // F-251-D1-02: judged against the base branch, not the previous checkpoint.
@@ -867,7 +922,7 @@ describe('review evidence check', () => {
           base: onBase,
           reviewed: code,
           result,
-          findings: findings.length,
+          findings: findings.filter((f) => f.status !== 'pre-existing').length,
         },
       ];
       const pre = finding(code);
@@ -884,6 +939,21 @@ describe('review evidence check', () => {
       const okOutcome = evaluate({ base: onBase, head: ok });
       assert.equal(okOutcome.tier, 'high');
       assert.deepEqual(okOutcome.blockers, []);
+      // F-251-R2-01: an issue count above the rows (a fix found not fixed, say) is not covered.
+      const counted = commit(
+        {
+          'docs/reviews/F-900.md': register({
+            reviews: strong('needs-attention', [pre]).map((r) =>
+              r.mode === 'final' ? { ...r, findings: 1 } : r,
+            ),
+            findings: [pre],
+          }),
+        },
+        'register: an issue no row accounts for',
+      );
+      const countedBlockers = evaluate({ base: onBase, head: counted }).blockers;
+      assert.ok(countedBlockers.some((b) => /must approve, or raise only pre-existing/.test(b)));
+      assert.ok(countedBlockers.some((b) => /did not approve/.test(b)));
       const p3 = {
         id: 'F-900-R1-02',
         sev: 'P3',

@@ -54,7 +54,8 @@ const changedFiles = (from, to) =>
 /**
  * The line ranges of `path` that changed from `from` to `to`, as [start, end] on one side of the
  * diff: `side` 'new' (lines of `to`) or 'old' (lines of `from`). A pure insertion or deletion
- * (count 0) touches the lines on both sides of where it happened. Null when the file was added or
+ * (count 0) on that side is a boundary after line `start`, as { after: start }: it changes no
+ * line there, only what lies between two lines (F-251-R2-02). Null when the file was added or
  * deleted, or is binary.
  */
 function changedRanges(from, to, path, side) {
@@ -64,11 +65,20 @@ function changedRanges(from, to, path, side) {
   for (const m of out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
     const [start, count] =
       side === 'new' ? [Number(m[3]), Number(m[4] ?? 1)] : [Number(m[1]), Number(m[2] ?? 1)];
-    ranges.push(count === 0 ? [start, start + 1] : [start, start + count - 1]);
+    ranges.push(count === 0 ? { after: start } : { start, end: start + count - 1 });
   }
   return ranges;
 }
-const overlaps = (ranges, { start, end }) => ranges.some(([a, b]) => a <= end && start <= b);
+// A changed line inside the cited lines, or a boundary between two of them.
+const overlaps = (ranges, { start, end }) =>
+  ranges.some((r) =>
+    'after' in r ? start <= r.after && r.after < end : r.start <= end && start <= r.end,
+  );
+/** How many lines `path` has at `commit`. */
+const lineCount = (commit, path) => {
+  const text = git(['show', `${commit}:${path}`]);
+  return text === '' ? 0 : text.split('\n').length;
+};
 
 export function evaluate({ base, head, labels = [] }) {
   const mergeBase = git(['merge-base', base, head]);
@@ -235,6 +245,19 @@ export function evaluate({ base, head, labels = [] }) {
     const place = whereLines(finding.where);
     if (!place || !finding.commit || !known(finding.commit)) continue; // reported by the register
     const commit = git(['rev-parse', `${finding.commit}^{commit}`]);
+    // The cited lines must exist in the file the review saw (F-251-R2-03).
+    let lines;
+    try {
+      lines = lineCount(commit, place.path);
+    } catch {
+      lines = 0;
+    }
+    if (place.end > lines) {
+      result.blockers.push(
+        `Finding ${finding.id} is pre-existing but ${finding.where} is not in ${place.path} as of ${finding.commit} (${lines} lines).`,
+      );
+      continue;
+    }
     // Against the pull request's current merge base (F-251-R1-01): if the base branch has since
     // changed those lines (a fix, say) and the pull request keeps the old ones, they now differ.
     let onBase = true;
@@ -281,9 +304,15 @@ export function evaluate({ base, head, labels = [] }) {
           result.blockers.push(
             `${tier} risk: ${f.id} (${f.severity}, ${f.status}) was raised by the final review; a change after it needs a new final review.`,
           );
+      // The exception needs the round's issue count at 0 (pre-existing findings are not counted):
+      // a higher count is an issue no row accounts for, such as a fix found not fixed (F-251-R2-01).
       if (
         last.result !== 'approve' &&
-        !(raised.length > 0 && raised.every((f) => f.status === 'pre-existing'))
+        !(
+          raised.length > 0 &&
+          raised.every((f) => f.status === 'pre-existing') &&
+          Number.parseInt(last.findings ?? '', 10) === 0
+        )
       )
         result.blockers.push(
           `${tier} risk: the final review (round ${last.round}) must approve, or raise only pre-existing findings; it says ${last.result}.`,

@@ -304,7 +304,11 @@ export function registerBlockers(register, { ownerApproved = false } = {}) {
     const raised = register.findings.filter((f) => new RegExp(`-R${last.round}-\\d+$`).test(f.id));
     // A P1 or P2 raised again as a duplicate is also a disagreement, not a pass.
     const serious = raised.filter((f) => f.severity !== 'P3' && f.status !== 'pre-existing');
-    if (raised.length === 0 || serious.length > 0)
+    // With pre-existing findings in the round, its issue count (which leaves them out) must be
+    // the round's other findings: a higher count is an issue no row accounts for (F-251-R2-01).
+    const own = raised.filter((f) => f.status !== 'pre-existing').length;
+    const unaccounted = own < raised.length && Number.parseInt(last.findings ?? '', 10) !== own;
+    if (raised.length === 0 || serious.length > 0 || unaccounted)
       blockers.push(
         `The last code review (round ${last.round}) did not approve` +
           (serious.length ? ` and raised ${serious.map((f) => f.id).join(', ')}` : '') +
