@@ -123,12 +123,17 @@ export interface AerRigServed {
 export const AER_MAX_FEATURES = 5000;
 
 export interface AerListsDatabase {
-  /** Job: stores the file once and records an edition when the address's contents changed. */
+  /**
+   * Job: stores the file once and records an edition when the address's contents changed since
+   * its latest edition; `fetchedAt` orders editions, and a fetch older than the latest edition
+   * records none (F-243-1-R4-02).
+   */
   aerCapture(
     report: AerReport,
     sourceUrl: string,
     body: string,
     sha256: string,
+    fetchedAt: Date,
   ): Promise<AerCapture>;
   /**
    * Job: files with no reading at `readerVersion`, those named in `first` first, then the newest
@@ -207,7 +212,7 @@ async function sourceDates(
 /** The AER queries over an existing connection. */
 export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
   return {
-    aerCapture(report, sourceUrl, body, sha256) {
+    aerCapture(report, sourceUrl, body, sha256, fetchedAt) {
       return asJob(sql, async (tx) => {
         // One run at a time per address, so a change is recorded once (F-243-1-D2-05); the
         // edition trigger takes the same lock.
@@ -225,13 +230,16 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
                 select id from petro.aer_list_files
                 where report = ${report} and body_sha256 = ${sha256}`;
         if (!file) throw new Error('AER list file was not stored');
-        const [latest] = await tx<{ file_id: string }[]>`
-          select file_id from petro.aer_list_editions where source_url = ${sourceUrl}
+        const [latest] = await tx<{ file_id: string; seen_at: Date }[]>`
+          select file_id, seen_at from petro.aer_list_editions where source_url = ${sourceUrl}
           order by seen_at desc, id desc limit 1`;
-        const newEdition = latest?.file_id !== file.id;
+        // A fetch made before the address's latest edition is older news: no edition.
+        const newEdition =
+          latest === undefined ||
+          (latest.file_id !== file.id && fetchedAt.getTime() > latest.seen_at.getTime());
         if (newEdition) {
-          await tx`insert into petro.aer_list_editions (file_id, source_url)
-                   values (${file.id}, ${sourceUrl})`;
+          await tx`insert into petro.aer_list_editions (file_id, source_url, seen_at)
+                   values (${file.id}, ${sourceUrl}, ${fetchedAt})`;
         }
         return { fileId: file.id, newFile: inserted.length > 0, newEdition };
       });

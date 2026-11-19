@@ -18,7 +18,6 @@ select ok(
 select ok(
   not has_column_privilege('petro_api', 'petro.aer_list_files', 'id', 'insert')
   and not has_column_privilege('petro_api', 'petro.aer_list_files', 'stored_at', 'insert')
-  and not has_column_privilege('petro_api', 'petro.aer_list_editions', 'seen_at', 'insert')
   and not has_column_privilege('petro_api', 'petro.aer_list_reads', 'read_at', 'insert')
   and not has_column_privilege('petro_api', 'petro.ats_lsd_points', 'tried_at', 'insert'),
   'ids and times are the database''s to set'
@@ -109,7 +108,8 @@ $fn$;
 create function pg_temp.edition(file_id text, url text) returns text
 language sql as $fn$
   select format(
-    'insert into petro.aer_list_editions (file_id, source_url) values (%L, %L) returning id::text',
+    'insert into petro.aer_list_editions (file_id, source_url, seen_at)
+     values (%L, %L, clock_timestamp()) returning id::text',
     file_id, url)
 $fn$;
 

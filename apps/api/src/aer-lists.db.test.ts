@@ -91,7 +91,7 @@ function rig(n: string, seconds: number, wellId: string): AerRigRow {
 }
 
 async function capture(db: PetroleumDatabase, report: 'st1' | 'st49', url: string, body: string) {
-  return db.aerCapture(report, url, body, await bodySha256(body));
+  return db.aerCapture(report, url, body, await bodySha256(body), new Date());
 }
 
 async function storedRead(
@@ -149,6 +149,23 @@ describe('the AER lists as petro_api', () => {
       await two.close();
     }
   });
+
+  it('never lets a slower, older fetch become the latest edition (F-243-1-R4-02)', () =>
+    using(async (db) => {
+      const a = unique();
+      const b = unique();
+      const fetchedA = new Date(Date.now() - 60_000);
+      // B was fetched after A but reaches the database first.
+      expect(await db.aerCapture('st1', ST1_URL, b, await bodySha256(b), new Date())).toMatchObject(
+        {
+          newEdition: true,
+        },
+      );
+      expect(await db.aerCapture('st1', ST1_URL, a, await bodySha256(a), fetchedA)).toMatchObject({
+        newFile: true,
+        newEdition: false,
+      });
+    }));
 
   it('keeps the file when the database refuses a reading, which is then recorded unreadable', () =>
     using(async (db) => {
@@ -261,6 +278,11 @@ describe('the AER lists as petro_api', () => {
       )) {
         expect(row).toMatchObject({ longitude: -113.4, latitude: 53.6 });
       }
+      // A newer placement that finds nothing retires the older point (F-243-1-R4-03).
+      await db.aerStorePoints([{ ...after, point: null }], 3);
+      expect(
+        (await db.aerLicences(who, earlier)).rows.find((row) => row.licenceNumber === n),
+      ).toMatchObject({ longitude: null, latitude: null });
     }));
 
   it('leaves a rig unplaced when its licence is not in the stored ST1 lists', () =>

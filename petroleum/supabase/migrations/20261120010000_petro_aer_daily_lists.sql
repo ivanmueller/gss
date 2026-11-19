@@ -76,7 +76,7 @@ create table petro.aer_list_editions (
     '^https://static\.aer\.ca/prd/data/('
     || 'well-lic/WELLS(MON|TUE|WED|THU|FRI|SAT|SUN)\.TXT'
     || '|wells/SPUD(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\.txt)$')),
-  seen_at timestamptz not null default now()
+  seen_at timestamptz not null
 );
 create index aer_list_editions_by_address on petro.aer_list_editions (source_url, seen_at desc, id);
 create index aer_list_editions_by_file on petro.aer_list_editions (file_id, seen_at desc, id);
@@ -209,6 +209,7 @@ as $$
 declare
   file_report text;
   latest uuid;
+  latest_seen timestamptz;
 begin
   perform pg_advisory_xact_lock(hashtextextended('petro.aer_list_editions:' || new.source_url, 0));
   select report into file_report from petro.aer_list_files where id = new.file_id;
@@ -217,12 +218,22 @@ begin
     raise exception 'An AER edition''s address and file are of different reports'
       using errcode = '23514';
   end if;
-  select file_id into latest from petro.aer_list_editions
+  -- seen_at is when the Worker fetched the file (F-243-1-R4-02): recent, and later than the
+  -- address's latest edition, so a slow fetch of older contents never becomes current again.
+  if new.seen_at is null or new.seen_at < now() - interval '15 minutes'
+     or new.seen_at > clock_timestamp() + interval '1 minute' then
+    raise exception 'An AER edition is recorded when it was fetched, just now'
+      using errcode = '23514';
+  end if;
+  select file_id, seen_at into latest, latest_seen from petro.aer_list_editions
     where source_url = new.source_url order by seen_at desc, id desc limit 1;
   if latest = new.file_id then
     raise exception 'An AER edition must change its address''s contents' using errcode = '23514';
   end if;
-  new.seen_at := clock_timestamp();
+  if latest_seen is not null and new.seen_at <= latest_seen then
+    raise exception 'An AER edition must be fetched after its address''s latest one'
+      using errcode = '23514';
+  end if;
   return new;
 end
 $$;
@@ -280,13 +291,13 @@ create view petro.aer_served_reads with (security_invoker = true) as
   ) e on true
   order by f.report, u.list_date, e.seen_at desc, e.id desc;
 
--- Each subdivision's current point: its highest-version found point (F-243-1-R3-02).
+-- Each subdivision's current point: its highest-version result (F-243-1-R3-02); when that
+-- result found nothing, no point is served (F-243-1-R4-03), the older point kept for the record.
 create view petro.ats_lsd_current_points with (security_invoker = true) as
   select distinct on (p.meridian, p.range, p.township, p.section, p.lsd)
          p.meridian, p.range, p.township, p.section, p.lsd, p.longitude, p.latitude,
          p.placement_version
   from petro.ats_lsd_points p
-  where p.found
   order by p.meridian, p.range, p.township, p.section, p.lsd, p.placement_version desc;
 
 -- Each licence once, from the served ST1 readings, its latest list date first: the licences
@@ -348,7 +359,7 @@ grant select on petro.aer_list_files, petro.aer_list_editions, petro.aer_list_re
   petro.ats_lsd_current_points
   to petro_api;
 grant insert (report, body, body_sha256) on petro.aer_list_files to petro_api;
-grant insert (file_id, source_url) on petro.aer_list_editions to petro_api;
+grant insert (file_id, source_url, seen_at) on petro.aer_list_editions to petro_api;
 grant insert (file_id, reader_version, status, list_date, rows_read, rows_skipped)
   on petro.aer_list_reads to petro_api;
 grant insert (read_id, line_no, licence_number, well_name, mineral_rights, ground_elevation, uwi,

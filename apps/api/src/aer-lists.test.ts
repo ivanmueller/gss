@@ -102,7 +102,7 @@ describe('the AER addresses', () => {
 describe('fetchAerList', () => {
   it('keeps a plain text list and refuses redirects, errors, HTML and oversized files', async () => {
     const ok = vi.fn<typeof fetch>(() => Promise.resolve(text(ST1)));
-    expect(await fetchAerList('https://x.test/a', ok)).toEqual({ kind: 'ok', body: ST1 });
+    expect(await fetchAerList('https://x.test/a', ok)).toMatchObject({ kind: 'ok', body: ST1 });
     expect(ok.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' });
 
     const thrown = vi.fn<typeof fetch>(() => Promise.reject(new TypeError('redirect')));
@@ -127,7 +127,7 @@ describe('fetchAerList', () => {
   it('keeps a list whose headings changed (the reader decides, the file is never lost)', async () => {
     const changed = ST1.replace('WELL LICENCES ISSUED', 'Well Licences Issued');
     const res = await fetchAerList('https://x.test/a', () => Promise.resolve(text(changed)));
-    expect(res).toEqual({ kind: 'ok', body: changed });
+    expect(res).toMatchObject({ kind: 'ok', body: changed });
   });
 });
 
@@ -311,7 +311,13 @@ describe('refreshAerLists', () => {
     );
     expect(result).toEqual({ status: 'done' });
     expect(order).toEqual(['capture st1', 'capture st49', 'files to read']);
-    expect(petroleum.aerCapture).toHaveBeenCalledWith('st1', st1Url, ST1, await bodySha256(ST1));
+    expect(petroleum.aerCapture).toHaveBeenCalledWith(
+      'st1',
+      st1Url,
+      ST1,
+      await bodySha256(ST1),
+      expect.any(Date),
+    );
     expect(petroleum.aerFilesToRead).toHaveBeenCalledWith(
       AER_READER_VERSION,
       ['file-st1', 'file-st49'],

@@ -217,6 +217,22 @@ describe('parseSt1', () => {
     expect(parseSt1(text).rows.map((row) => row.licenceNumber)).toEqual(['0526001']);
   });
 
+  it('is unreadable with a repeated column header or an unknown section (F-243-1-R4-01)', () => {
+    const header = at([4, 'WELL NAME'], [28, 'LICENCE NUMBER']);
+    const repeated = st1([
+      st1Record('0526001', '10-12-095-05W4'),
+      [header, '    ' + '-'.repeat(92), ''],
+      st1Record('0526002', '01-05-062-26W4'),
+    ]);
+    expect(parseSt1(repeated)).toMatchObject({ structure: false, rows: [] });
+    const unknown = st1([
+      st1Record('0526001', '10-12-095-05W4'),
+      ['    SOMETHING NEW', '    -------------', ''],
+      st1Record('0526002', '01-05-062-26W4'),
+    ]);
+    expect(parseSt1(unknown)).toMatchObject({ structure: false, rows: [] });
+  });
+
   it('has no structure when cut short, even between two records (F-243-1-R1-01)', () => {
     const whole = st1([
       st1Record('0526001', '10-12-095-05W4'),

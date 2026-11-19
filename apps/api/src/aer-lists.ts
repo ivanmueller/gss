@@ -66,7 +66,7 @@ const LOCATE_PER_RUN = 300;
 const LOCATE_BATCH = 40;
 
 type FetchOutcome =
-  | { kind: 'ok'; body: string }
+  | { kind: 'ok'; body: string; fetchedAt: Date }
   | { kind: 'refused'; reason: string }
   | { kind: 'failed'; reason: string };
 
@@ -98,6 +98,7 @@ async function boundedBytes(res: Response, max: number): Promise<Uint8Array | nu
 /** Fetches one AER list: status 200, no redirect, at most AER_LIST_MAX_CHARS bytes, not HTML. */
 export async function fetchAerList(url: string, fetchImpl: typeof fetch): Promise<FetchOutcome> {
   let res: Response;
+  const fetchedAt = new Date();
   try {
     res = await fetchImpl(url, {
       redirect: 'error',
@@ -126,7 +127,7 @@ export async function fetchAerList(url: string, fetchImpl: typeof fetch): Promis
   const body = new TextDecoder('windows-1252').decode(bytes);
   if (body.trim() === '') return { kind: 'refused', reason: 'empty' };
   if (body.trimStart().startsWith('<')) return { kind: 'refused', reason: 'an HTML page' };
-  return { kind: 'ok', body };
+  return { kind: 'ok', body, fetchedAt };
 }
 
 /** SHA-256 of the body's UTF-8 encoding, as the database checks it. */
@@ -443,6 +444,7 @@ export async function refreshAerLists(
             source.url,
             outcome.body,
             await bodySha256(outcome.body),
+            outcome.fetchedAt,
           );
           if (capture.newEdition) counts.newEditions += 1;
           else counts.unchanged += 1;

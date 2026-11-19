@@ -164,6 +164,12 @@ export function looksLikeSt49(text: string): boolean {
 const ST1_DATE = /^\s*DATE:\s+(\d{1,2}) ([A-Za-z]+) (\d{4})\s*$/;
 const DASHES = /^\s*-{10,}\s*$/;
 const ST1_END = 'END OF WELL LICENCES';
+/** The sections that follow the issued licences in an ST1 list (seen 2026-11-19). */
+const ST1_SECTIONS = [
+  'AMENDMENTS OF WELL LICENCES',
+  'WELL LICENCES UPDATED',
+  'WELL LICENCES CANCELLED',
+];
 const SEVEN_DIGITS = /^\d{7}$/;
 const OFFSETS = /^([NS])\s+(\d{1,5}(?:\.\d{1,2})?)M\s+([EW])\s+(\d{1,5}(?:\.\d{1,2})?)M$/;
 
@@ -210,9 +216,16 @@ export function parseSt1(text: string): AerListRead<St1Licence> {
       i += 1;
       continue;
     }
-    // The list's end line, or a new section: a heading followed by its own underline
-    // (`AMENDMENTS OF WELL LICENCES`).
-    if (first.includes(ST1_END) || DASHES.test(lines[i + 1] ?? '')) break;
+    // The list's end line, or one of the known sections that follow the issued licences. Any other
+    // heading or a repeated column header makes the file unreadable rather than cutting the
+    // records short (F-243-1-R4-01).
+    if (first.includes(ST1_END) || ST1_SECTIONS.includes(first.trim())) break;
+    if (
+      DASHES.test(lines[i + 1] ?? '') ||
+      (first.includes('WELL NAME') && first.includes('LICENCE NUMBER'))
+    ) {
+      return { listDate, structure: false, rows: [], skipped: 0 };
+    }
     const begin = i;
     const block = lines.slice(begin, begin + 5);
     const blank = block.findIndex((line) => line.trim() === '');
