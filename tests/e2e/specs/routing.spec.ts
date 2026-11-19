@@ -27,7 +27,14 @@ test('other unknown paths load the web app', async ({ page }) => {
 
 // F-247 part 1b: the Worker reaches the oil and gas database through its PETROLEUM binding (the
 // local "petroleum" database, as petro_api), on the public readiness route and signed in.
+// Always run in CI, which creates that database; on a developer's machine only with
+// E2E_PETROLEUM=1, once the local "petroleum" database exists (README, "The oil and gas
+// database"), so the usual local run does not need a second database (F-247-1b-R1-01).
 test('the oil and gas database answers through the Worker', async ({ page, request }) => {
+  test.skip(
+    !process.env.CI && process.env.E2E_PETROLEUM !== '1',
+    'needs the local petroleum database: set E2E_PETROLEUM=1 once it exists',
+  );
   const ready = await request.get('/api/v1/petroleum/ready');
   expect(ready.status()).toBe(200);
   expect(await ready.json()).toEqual({ status: 'ok', service: 'petroleum' });
