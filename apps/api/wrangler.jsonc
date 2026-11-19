@@ -29,7 +29,20 @@
       // which the Workers runtime cannot (docs/DECISIONS.md). Created by the "Set up
       // Hyperdrive (staging)" workflow. `wrangler dev` reads the local database from
       // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE.
-      "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "bbc915879c6848abaa08605ff7d7825c" }],
+      // PETROLEUM: the oil and gas database, petroleum-staging (F-247), configuration
+      // gss-petroleum-staging, created the same way with the choice "petroleum". For
+      // `wrangler dev` it has a local address here (a throwaway local database's local-only
+      // password, not a secret), so the Worker starts on a machine without that database (its
+      // routes then answer 503); CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_PETROLEUM, as CI
+      // sets, takes precedence.
+      "hyperdrive": [
+        { "binding": "HYPERDRIVE", "id": "bbc915879c6848abaa08605ff7d7825c" },
+        {
+          "binding": "PETROLEUM",
+          "id": "b78486b05a3e4a7bab6037599af5c97b",
+          "localConnectionString": "postgresql://petro_api:local-only-petro-api-password@127.0.0.1:54322/petroleum",
+        },
+      ],
       // Cloudflare Email Service (src/email.ts, F-114): email a person writes and sends from a
       // company's page. The domain and the one organization that sends from it are Worker
       // secrets the owner adds (EMAIL_DOMAIN, EMAIL_ORGANIZATION_ID); without them, sending
