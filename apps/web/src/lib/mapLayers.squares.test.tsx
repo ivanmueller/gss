@@ -1,5 +1,5 @@
 import { tilesForView, type MapLayerView } from '@grain/domain';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useLayerOverlays } from './mapLayers';
@@ -162,4 +162,106 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     });
     expect(shapes()).toBe(0);
   });
+
+  // F-247-2-R8-01: a square asked for before the layer was removed, answered after the 404.
+  it('keeps no answer for a layer after the server said it was removed', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let removed = false;
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          await held;
+          return Response.json(ONE_SHAPE);
+        }
+        return removed
+          ? Response.json(
+              { error: { code: 'NOT_FOUND', message: 'No such map layer.' } },
+              { status: 404 },
+            )
+          : Response.json(ONE_SHAPE);
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result, rerender } = renderHook(
+      ({ view }: { view: typeof VIEW }) => useLayerOverlays(one, view, 'token'),
+      { initialProps: { view: VIEW } },
+    );
+    await waitFor(() => {
+      expect(calls).toBe(SQUARES_PER_LAYER);
+    });
+    removed = true;
+    rerender({ view: { ...VIEW, zoom: 8 } });
+    await waitFor(() => {
+      expect(result.current.notes.size).toBe(1);
+    });
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(shapesOf(result.current.overlays)).toBe(0);
+  });
+
+  // F-247-2-R8-02: a square still on its way when the sign-in is renewed, refused afterwards as
+  // asked under the old one: asked again at once under the new one, with the map standing still.
+  it('asks again under a renewed sign-in for a square refused under the old one', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const withNew: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (new Headers(init?.headers).get('Authorization') === 'Bearer old') {
+          await held;
+          return Response.json(
+            { error: { code: 'UNAUTHORIZED', message: 'Sign in again.' } },
+            { status: 401 },
+          );
+        }
+        withNew.push(url);
+        return Response.json(ONE_SHAPE);
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result, rerender } = renderHook(
+      ({ token }: { token: string }) => useLayerOverlays(one, VIEW, token),
+      { initialProps: { token: 'old' } },
+    );
+    rerender({ token: 'new' });
+    expect(withNew).toEqual([]);
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await waitFor(() => {
+      expect(withNew).toHaveLength(SQUARES_PER_LAYER);
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+  });
 });
+
+const ONE_SHAPE = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      id: 1,
+      geometry: { type: 'Point', coordinates: [-105, 50] },
+      properties: {},
+    },
+  ],
+};
+
+function shapesOf(overlays: ReturnType<typeof useLayerOverlays>['overlays']): number {
+  return overlays.reduce(
+    (sum, overlay) => sum + (overlay.kind === 'features' ? overlay.data.features.length : 0),
+    0,
+  );
+}

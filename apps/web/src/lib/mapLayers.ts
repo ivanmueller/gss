@@ -661,7 +661,16 @@ export function useLayerOverlays(
   const asked = useRef(new Set<string>());
   /** The squares the map is showing now: never dropped to make room (F-247-2-R3-01). */
   const inView = useRef<ReadonlySet<string>>(new Set());
+  /** Layers the server answered 404 for: removed. Nothing more of them is kept (F-247-2-R8-01). */
+  const gone = useRef(new Set<string>());
+  /** The sign-in now, and a count bumped to ask again for what failed under an older one. */
+  const tokenNow = useRef(token);
+  const [renewed, setRenewed] = useState(0);
   const api = useLayerApi();
+
+  useEffect(() => {
+    tokenNow.current = token;
+  }, [token]);
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
   const zoom = view?.zoom ?? null;
@@ -674,6 +683,7 @@ export function useLayerOverlays(
       apiFetch(path, token)
         .then((res) => res.json())
         .then((body: unknown) => {
+          if (gone.current.has(id.replace(/#overview$/, ''))) return;
           const collection = asCollection(body);
           // Numbered afresh: a view sent in parts repeats its parts' numbers, and the map tells
           // lines apart by them.
@@ -684,6 +694,11 @@ export function useLayerOverlays(
         })
         .catch(() => {
           asked.current.delete(key);
+          if (token !== tokenNow.current) {
+            // Asked under a sign-in renewed since: asked again under the new one (F-247-2-R8-02).
+            setRenewed((n) => n + 1);
+            return;
+          }
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
     };
@@ -743,13 +758,22 @@ export function useLayerOverlays(
           apiFetch(path, token)
             .then((res) => res.json())
             .then((body: unknown) => {
+              // The layer was removed after this was asked for: not kept (F-247-2-R8-01).
+              if (gone.current.has(layer.id)) return;
               const collection = asCollection(body);
               setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
             .catch((error: unknown) => {
               // Asked again at the next move of the map.
               asked.current.delete(key);
+              if (token !== tokenNow.current) {
+                // Asked under a sign-in renewed since (its refusal says nothing about the person
+                // now): asked again at once under the new one, not left blank (F-247-2-R8-02).
+                setRenewed((n) => n + 1);
+                return;
+              }
               if (error instanceof ApiError && error.status === 404) {
+                gone.current.add(layer.id);
                 // The layer was removed (or is no longer this person's to see): nothing kept of it
                 // is drawn in its place, from this zoom or another, nor its zoomed-out view
                 // (F-247-2-R7-03). A passing failure keeps the filling in from other zooms.
@@ -774,7 +798,7 @@ export function useLayerOverlays(
         }
       }
     }
-  }, [layers, tiles, zoom, token, api]);
+  }, [layers, tiles, zoom, token, api, renewed]);
 
   return useMemo(() => {
     const overlays: MapOverlay[] = [];
