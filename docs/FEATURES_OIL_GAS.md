@@ -12,8 +12,8 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 |---|---|---|
 | F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260 and #266, 2026-11-18) |
 | F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | Live, check pending: its database (parts 1a and 1b, ivanmueller/gss#263 and #264, 2026-11-18) and Settings and layers (part 2, ivanmueller/gss#268, 2026-11-19, merged by the owner without Codex's approval: see F-248) |
-| F-248 | What was left open when F-247 part 2 was merged, to fix or review again | To do (2 open findings, 6 things to look at again) |
-| F-240 | Alberta reference layers: township grid and all 26 formation outlines | Planned (owner's answers 2026-11-19; after the review-rule change, F-248 item 8) |
+| F-248 | What was left open when F-247 part 2 was merged, to fix or review again | To do (2 open findings, 5 things to look at again; item 8, the review rules, done: F-251) |
+| F-240 | Alberta reference layers: township grid and all 26 formation outlines | Planned, next (owner's answers 2026-11-19; the review-rule change it waited for is merged: F-251, ivanmueller/gss#271) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
 | F-243 | Wells, new licences and rig activity (AER) | Needs owner input |
@@ -89,11 +89,11 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 5. **No ceiling by size.** The 600 squares are a count; a square can be up to 8 MB from the Worker. Very dense layers could still be heavy for a browser.
 6. **Grain's terms-link check is still case-sensitive** (F-247-2-R1-02's follow-up): on Team → Map layers a terms link typed with capital letters in "HTTPS://" fails with a database error instead of being saved. Fixed on the oil and gas side only; grain needs its own small migration.
 7. **Not tried by hand on staging before merging:** adding, changing and removing a layer in Settings; a layer in one colour with an "Only where" limit; a picture layer with its legend. The automated tests cover them; the owner's check under F-247 above covers the first.
-8. **The review process itself (agreed with the owner, 2026-11-19, not yet done):** change the review rules so a final review blocks a merge only on problems in the lines a pull request changes, and problems it finds in older code go to this list instead; smaller pull requests; one stated rule in the plan for anything a page keeps from the server. A governance pull request, to be approved by the owner: F-251 in `docs/FEATURES.md` (round 5 the last, the owner's answer of 2026-11-19).
+8. **The review process itself (agreed with the owner, 2026-11-19; done: F-251, merged as ivanmueller/gss#271 on 2026-11-19 by the owner himself, without Codex's approval):** change the review rules so a final review blocks a merge only on problems in the lines a pull request changes, and problems it finds in older code go to this list instead; smaller pull requests; one stated rule in the plan for anything a page keeps from the server. A governance pull request, to be approved by the owner: F-251 in `docs/FEATURES.md` (round 5 the last, the owner's answer of 2026-11-19).
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 
-**Status:** Planned; to start after the review-rule change (F-248 item 8; the owner, 2026-11-19: "rule change first"). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
+**Status:** Planned, next: the review-rule change it waited for (F-248 item 8; the owner, 2026-11-19: "rule change first") is merged (F-251, ivanmueller/gss#271, 2026-11-19). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
 - the **Alberta Township System** grid (township, section, quarter section, legal subdivision), from the province's ATS map service (also AltaLIS's ATS product);
 - **formation outlines**: the Alberta Geological Survey's shale plays (Digital Dataset 2013-0024: Duvernay, Muskwa, Montney, Basal Banff/Exshaw, North Nordegg, Wilrich) and its Geological Framework of Alberta, version 3 (about 90 geological units, among them Cardium, Mannville, Wabamun, Leduc).
 
