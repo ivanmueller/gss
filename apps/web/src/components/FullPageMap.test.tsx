@@ -591,6 +591,48 @@ describe('FullPageMap', () => {
     expect(lists()).toBe(2);
   });
 
+  // F-247-2-R17-01: a picture layer's legend is not shown from the page's memory. Switched
+  // off, access removed, switched back on: nothing of it shows, at once or after the refusal,
+  // and the refusal has the list read again.
+  it('shows no kept legend when a picture layer is switched back on and refused', async () => {
+    let member = true;
+    const calls = mockApi({
+      [LIST]: listOf(pictures),
+      [`GET /petroleum/layers/${PICTURES}/legend?${ORGANIZATION}`]: () =>
+        member
+          ? Response.json({ entries: [{ label: 'Synthetic township', image: null }] })
+          : Response.json(
+              {
+                error: { code: 'FORBIDDEN', message: 'You are not a member of this organization.' },
+              },
+              { status: 403 },
+            ),
+    });
+    const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+    const legends = () => calls.filter((call) => call.path.includes('/legend')).length;
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    expect(await screen.findByText('Synthetic township')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Layers (1)' }));
+    const panel = screen.getByRole('region', { name: 'Map layers' });
+    const layer = within(panel).getByRole('switch', { name: /Synthetic townships/ });
+    await userEvent.click(layer);
+    expect(screen.queryByText('Synthetic township')).not.toBeInTheDocument();
+
+    member = false;
+    const before = legends();
+    await userEvent.click(layer);
+    // Not from memory while the Worker is asked...
+    expect(screen.queryByText('Synthetic township')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(legends()).toBe(before + 1);
+    });
+    // ...nor after it refused; and the list is read again.
+    await waitFor(() => {
+      expect(lists()).toBe(2);
+    });
+    expect(screen.queryByText('Synthetic township')).not.toBeInTheDocument();
+  });
+
   // F-247-2-R9-03: a clicked shape's details go with its layer, not kept for when it is back.
   it('forgets a clicked shape’s details when its layer is switched off', async () => {
     const lines: MapLayerView = {

@@ -19,7 +19,7 @@ import {
   type StaleReason,
   type ValueChoice,
 } from '../lib/mapLayers';
-import { useApiResource } from '../lib/useApiResource';
+import { signedInAs, useApiResource } from '../lib/useApiResource';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -594,13 +594,51 @@ export function MapLayersPanel({
  * shows it (a heat map's scale from most to least dense). Nothing while it loads or if ArcGIS
  * gives none.
  */
-function PictureLegend({ layerId, token }: { layerId: string; token: string }) {
+function PictureLegend({
+  layerId,
+  token,
+  onStale,
+  retry,
+}: {
+  layerId: string;
+  token: string;
+  onStale: MapLayersState['onStale'];
+  retry: number;
+}) {
   const api = useLayerApi();
-  const [legend] = useApiResource<LayerLegend>(api.path(`/${layerId}/legend`), token);
-  if (legend.status !== 'ok') return null;
+  const path = api.path(`/${layerId}/legend`);
+  // Kept only while it is shown, and never from the page's memory of earlier answers: a layer
+  // switched back on shows its legend once the Worker has answered again, which it does only
+  // for a member (F-247-2-R17-01; the same rule as its squares, R5-02). The browser's own copy
+  // makes that quick: the Worker answers "not modified" after its check.
+  const [legend, setLegend] = useState<{
+    path: string;
+    who: string;
+    entries: LayerLegend['entries'];
+  } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    apiJson<LayerLegend>(path, token, { signal: controller.signal })
+      .then((answer) => {
+        if (controller.signal.aborted) return;
+        setLegend({ path, who: signedInAs(token), entries: answer.entries });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setLegend(null);
+        // Refused, or the layer is no longer there: the list says what is (F-247-2-R9-01).
+        if (!(error instanceof ApiError)) return;
+        if (error.status === 404) onStale?.('missing');
+        else if (error.status === 401 || error.status === 403) onStale?.('refused');
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [path, token, onStale, retry]);
+  if (legend?.path !== path || legend.who !== signedInAs(token)) return null;
   return (
     <>
-      {legend.data.entries.map((entry, i) => (
+      {legend.entries.map((entry, i) => (
         <span key={`${String(i)}-${entry.label}`} className="flex items-center gap-1">
           {entry.image && <img src={entry.image} alt="" className="h-4 max-w-16 object-contain" />}
           {entry.label}
@@ -649,7 +687,12 @@ export function MapLayersLegend({ state }: { state: MapLayersState }) {
                 {hidden > 0 && <span>({hidden.toLocaleString('en-CA')} hidden in Layers)</span>}
               </>
             ) : layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' ? (
-              <PictureLegend layerId={layer.id} token={state.token} />
+              <PictureLegend
+                layerId={layer.id}
+                token={state.token}
+                onStale={state.onStale}
+                retry={state.retry ?? 0}
+              />
             ) : (
               <span
                 aria-hidden="true"
