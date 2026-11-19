@@ -76,10 +76,18 @@ export function useMapLayers(
     session ? api.path(`?organization_id=${session.organization.id}`) : null,
     token,
   );
-  const layers = useMemo(
+  const listed = useMemo(
     () => (list.status === 'ok' && Array.isArray(list.data.layers) ? list.data.layers : []),
     [list],
   );
+  // The same list read again is the same layers to the map: nothing is asked for or drawn again
+  // unless something in it changed (so a re-read after a refusal cannot set off another).
+  const [layers, setLayers] = useState(listed);
+  const changed = useMemo(
+    () => layers !== listed && JSON.stringify(layers) !== JSON.stringify(listed),
+    [layers, listed],
+  );
+  if (changed) setLayers(listed);
   // Both are kept (hooks run always); which one counts depends on the list (F-247).
   const remembered = useLayerChoice(token);
   const fromDefault = useDefaultLayerChoice(layers);
@@ -88,13 +96,30 @@ export function useMapLayers(
   const [values, setValues] = useValueChoices(token, !api.adminDefault);
   const [view, setView] = useState<MapView | null>(null);
   const lastStale = useRef(0);
+  const laterStale = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onStale = useCallback(() => {
-    // Not on every refused square of one view: once, then again only after a while.
-    const now = Date.now();
-    if (now - lastStale.current < STALE_RELOAD_MS) return;
-    lastStale.current = now;
-    reload();
+    // Not on every refused square of one view: once at once, and, for a refusal that comes
+    // during the pause after it, once more when the pause ends, so a later change (a second
+    // layer removed) is never missed (F-247-2-R10-01).
+    const wait = lastStale.current + STALE_RELOAD_MS - Date.now();
+    if (wait <= 0) {
+      lastStale.current = Date.now();
+      reload();
+      return;
+    }
+    laterStale.current ??= setTimeout(() => {
+      laterStale.current = null;
+      lastStale.current = Date.now();
+      reload();
+    }, wait);
   }, [reload]);
+  useEffect(
+    () => () => {
+      if (laterStale.current) clearTimeout(laterStale.current);
+    },
+    [],
+  );
+  const listRefused = list.status === 'error';
   const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale);
   const [picked, setPicked] = useState<PickedFeature | null>(null);
   // A clicked shape's details go with its layer: switched off or no longer in the list, they are
@@ -116,6 +141,10 @@ export function useMapLayers(
     notes,
     onViewChange: (bbox, zoom) => {
       setView(bbox ? { bbox, zoom } : null);
+      // The list could not be read (not a member, signed out, the server away): with no layers
+      // nothing else would ask again, so moving the map does, and a member whose access is back
+      // sees their layers without reloading the page (F-247-2-R9-01).
+      if (listRefused) onStale();
     },
     picked: picked && on.some((layer) => layer.id === picked.layerId) ? picked : null,
     setPicked,

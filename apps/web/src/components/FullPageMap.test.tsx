@@ -29,6 +29,12 @@ vi.mock('./FacilityMap', () => ({
       <button type="button" onClick={props.onLayersStale}>
         A picture is refused
       </button>
+      <button
+        type="button"
+        onClick={() => props.onViewChange?.({ west: -115, south: 50, east: -110, north: 54 }, 7)}
+      >
+        Move the map
+      </button>
     </div>
   ),
 }));
@@ -335,6 +341,72 @@ describe('FullPageMap', () => {
     // Not once per refused picture: a view asks for many at once.
     await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
     await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
+    expect(lists()).toBe(2);
+  });
+
+  // F-247-2-R10-01: a second layer removed just after the first. Its refusal comes during the
+  // pause after the first re-read: the list is read once more when the pause ends.
+  it('reads the list once more after the pause for a refusal that came during it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+      const second: MapLayerView = { ...pictures, id: LINES, name: 'Synthetic agreements' };
+      let listed = [pictures, second];
+      const calls = mockApi({ [LIST]: () => Response.json({ layers: listed }), ...noLegend });
+      const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+      render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+      expect(await screen.findByText(/Drawn: .*a1a01.tiles.*a1a02.tiles/)).toBeInTheDocument();
+
+      listed = [second];
+      await user.click(screen.getByRole('button', { name: 'A picture is refused' }));
+      await waitFor(() => {
+        expect(screen.queryByText(/Drawn: .*a1a01.tiles/)).not.toBeInTheDocument();
+      });
+      expect(lists()).toBe(2);
+
+      listed = [];
+      await user.click(screen.getByRole('button', { name: 'A picture is refused' }));
+      expect(lists()).toBe(2);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await screen.findByText('Drawn: nothing')).toBeInTheDocument();
+      expect(lists()).toBe(3);
+      // The same list read again changes nothing, and nothing more is asked.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(lists()).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // F-247-2-R9-01: a member suspended, then restored, with the map open. While the list is
+  // refused there are no layers to ask about; moving the map asks for the list again.
+  it('asks for the list again when the map moves after it was refused', async () => {
+    let member = false;
+    const calls = mockApi({
+      [LIST]: () =>
+        member
+          ? Response.json({ layers: [pictures] })
+          : Response.json(
+              {
+                error: { code: 'FORBIDDEN', message: 'You are not a member of this organization.' },
+              },
+              { status: 403 },
+            ),
+      ...noLegend,
+    });
+    const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    await waitFor(() => {
+      expect(lists()).toBe(1);
+    });
+    expect(screen.getByText('Drawn: nothing')).toBeInTheDocument();
+
+    member = true;
+    await userEvent.click(screen.getByRole('button', { name: 'Move the map' }));
+    expect(await screen.findByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
+    expect(lists()).toBe(2);
+    // Read well: moving the map asks for nothing more.
+    await userEvent.click(screen.getByRole('button', { name: 'Move the map' }));
     expect(lists()).toBe(2);
   });
 
