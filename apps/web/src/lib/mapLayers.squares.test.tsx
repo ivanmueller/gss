@@ -1,5 +1,5 @@
 import { tilesForView, type MapLayerView } from '@grain/domain';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useLayerOverlays } from './mapLayers';
@@ -98,15 +98,14 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     const total = LAYERS.length * SQUARES_PER_LAYER;
     expect(n).toBe(total);
 
-    // F-247-2-R4-02 and R5-02: every layer switched off, then on again: every square is asked
-    // for again (the browser's copy passes the Worker's membership check before it is drawn),
-    // none drawn from memory alone.
+    // F-247-2-R4-02: every layer switched off, no square arriving after: those over the 600
+    // kept are let go at once. Switched back on, exactly those are asked for again.
     rerender({ layers: [] });
     expect(result.current.overlays).toEqual([]);
     rerender({ layers: LAYERS });
     await waitFor(
       () => {
-        expect(n).toBe(2 * total);
+        expect(n).toBe(total + (total - 600));
         const drawn = result.current.overlays.map((overlay) =>
           overlay.kind === 'features' ? overlay.data.features.length : -1,
         );
@@ -116,18 +115,18 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     );
   }, 40_000);
 
-  // F-247-2-R5-02: access removed while the map is open. The squares of the new zoom are
-  // refused; those kept from the zoom before are not drawn in their place.
-  it('draws nothing kept once a square is refused', async () => {
-    let refuse = false;
+  // F-247-2-R7-03: an admin removes a layer while a teammate has it open. Its squares at the new
+  // zoom answer 404; those kept from the zoom before are not drawn in their place.
+  it('draws nothing of a layer the server no longer has', async () => {
+    let removed = false;
     vi.stubGlobal(
       'fetch',
       vi.fn(() =>
         Promise.resolve(
-          refuse
+          removed
             ? Response.json(
-                { error: { code: 'FORBIDDEN', message: 'You are not a member.' } },
-                { status: 403 },
+                { error: { code: 'NOT_FOUND', message: 'No such map layer.' } },
+                { status: 404 },
               )
             : Response.json({
                 type: 'FeatureCollection',
@@ -144,13 +143,9 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       ),
     );
     const one = LAYERS.slice(0, 1);
-    const shapes = (overlays: { kind: string; data?: unknown }[]) =>
-      overlays.reduce(
-        (sum, overlay) =>
-          sum +
-          (overlay.kind === 'features'
-            ? (overlay.data as GeoJSON.FeatureCollection).features.length
-            : 0),
+    const shapes = () =>
+      result.current.overlays.reduce(
+        (sum, overlay) => sum + (overlay.kind === 'features' ? overlay.data.features.length : 0),
         0,
       );
     const { result, rerender } = renderHook(
@@ -158,64 +153,13 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       { initialProps: { view: VIEW } },
     );
     await waitFor(() => {
-      expect(shapes(result.current.overlays)).toBeGreaterThan(0);
+      expect(shapes()).toBeGreaterThan(0);
     });
-    refuse = true;
+    removed = true;
     rerender({ view: { ...VIEW, zoom: 8 } });
     await waitFor(() => {
-      expect(shapes(result.current.overlays)).toBe(0);
+      expect(result.current.notes.size).toBe(1);
     });
-  });
-
-  // F-247-2-R6-01: a square asked for before the refusal, answered after it, is not kept.
-  it('keeps no answer that arrives after a refusal', async () => {
-    let release: () => void = () => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let calls = 0;
-    const square = () =>
-      Response.json({
-        type: 'FeatureCollection',
-        features: [
-          {
-            type: 'Feature',
-            id: 1,
-            geometry: { type: 'Point', coordinates: [-105, 50] },
-            properties: {},
-          },
-        ],
-      });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        calls += 1;
-        // The first square passed the check before access was removed, and answers slowly.
-        if (calls === 1) {
-          await held;
-          return square();
-        }
-        return Response.json(
-          { error: { code: 'FORBIDDEN', message: 'You are not a member.' } },
-          { status: 403 },
-        );
-      }),
-    );
-    const one = LAYERS.slice(0, 1);
-    const { result } = renderHook(() => useLayerOverlays(one, VIEW, 'token'));
-    await waitFor(() => {
-      expect(calls).toBe(SQUARES_PER_LAYER);
-    });
-    // The refusals have arrived; now the slow one (inside act, so React draws what it keeps).
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      release();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    const drawn = result.current.overlays.reduce(
-      (sum, overlay) => sum + (overlay.kind === 'features' ? overlay.data.features.length : 0),
-      0,
-    );
-    expect(drawn).toBe(0);
+    expect(shapes()).toBe(0);
   });
 });

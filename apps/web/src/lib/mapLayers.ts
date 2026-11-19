@@ -661,11 +661,6 @@ export function useLayerOverlays(
   const asked = useRef(new Set<string>());
   /** The squares the map is showing now: never dropped to make room (F-247-2-R3-01). */
   const inView = useRef<ReadonlySet<string>>(new Set());
-  /** The layers on at the last look, as square key prefixes: to tell one switched back on. */
-  const active = useRef<ReadonlySet<string>>(new Set());
-  /** How many times a square was refused (signed out, no longer a member): answers to requests
-   *  sent before the last refusal are not kept (F-247-2-R6-01). */
-  const refusals = useRef(0);
   const api = useLayerApi();
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
@@ -676,12 +671,9 @@ export function useLayerOverlays(
     const fetchWhole = (id: string, key: string, path: string) => {
       if (asked.current.has(key)) return;
       asked.current.add(key);
-      const askedIn = refusals.current;
       apiFetch(path, token)
         .then((res) => res.json())
         .then((body: unknown) => {
-          // Asked before a refusal: its answer is not kept (F-247-2-R6-01).
-          if (askedIn !== refusals.current) return;
           const collection = asCollection(body);
           // Numbered afresh: a view sent in parts repeats its parts' numbers, and the map tells
           // lines apart by them.
@@ -691,7 +683,6 @@ export function useLayerOverlays(
           );
         })
         .catch(() => {
-          if (askedIn !== refusals.current) return;
           asked.current.delete(key);
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
@@ -721,27 +712,9 @@ export function useLayerOverlays(
       }
       return next.size === current.size ? current : next;
     };
-    // A layer switched back on: its squares still in memory are asked for again, so each passes
-    // the Worker's membership check before it is drawn (the browser's copy answers "not
-    // modified" while the person is still a member; F-247-2-R5-02).
-    const switchedOn = layers
-      .map((layer) => `${layer.id}@`)
-      .filter((prefix) => !active.current.has(prefix));
-    active.current = new Set(layers.map((layer) => `${layer.id}@`));
-    if (switchedOn.length > 0) {
-      for (const key of [...asked.current]) {
-        if (switchedOn.some((prefix) => key.startsWith(prefix))) asked.current.delete(key);
-      }
-    }
     // Layers switched off or the map moved: squares no longer shown are let go at once, not only
     // when the next square arrives (F-247-2-R4-02).
-    setSquares((current) => {
-      if (switchedOn.length === 0) return trimmed(current);
-      const next = new Map(
-        [...current].filter(([key]) => !switchedOn.some((prefix) => key.startsWith(prefix))),
-      );
-      return trimmed(next.size === current.size ? current : next);
-    });
+    setSquares(trimmed);
     for (const layer of layers) {
       // Nothing is fetched for a layer out of its zoom range (F-138).
       if (!shownAtZoom(layer, zoom)) continue;
@@ -767,29 +740,35 @@ export function useLayerOverlays(
           const path = api.path(
             `/${layer.id}/features/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}?g=${settingsTag(layer)}`,
           );
-          const askedIn = refusals.current;
           apiFetch(path, token)
             .then((res) => res.json())
             .then((body: unknown) => {
-              // Asked before a refusal: its answer is not kept (F-247-2-R6-01).
-              if (askedIn !== refusals.current) return;
               const collection = asCollection(body);
               setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
             .catch((error: unknown) => {
-              if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-                // Signed out or no longer a member: nothing kept in memory is drawn again, from
-                // this zoom or another (F-247-2-R5-02), and no answer to a request already on
-                // its way is kept either (F-247-2-R6-01).
-                refusals.current += 1;
-                asked.current.clear();
-                setFiles(new Map());
-                setSquares(new Map([[key, 'failed']]));
-                return;
-              }
-              if (askedIn !== refusals.current) return;
               // Asked again at the next move of the map.
               asked.current.delete(key);
+              if (error instanceof ApiError && error.status === 404) {
+                // The layer was removed (or is no longer this person's to see): nothing kept of it
+                // is drawn in its place, from this zoom or another, nor its zoomed-out view
+                // (F-247-2-R7-03). A passing failure keeps the filling in from other zooms.
+                const prefix = `${layer.id}@`;
+                setSquares((current) => {
+                  const next = new Map([...current].filter(([kept]) => !kept.startsWith(prefix)));
+                  for (const kept of current.keys()) {
+                    if (kept.startsWith(prefix)) asked.current.delete(kept);
+                  }
+                  return next.set(key, 'failed');
+                });
+                setFiles((current) => {
+                  if (!current.has(`${layer.id}#overview`)) return current;
+                  const next = new Map(current);
+                  next.delete(`${layer.id}#overview`);
+                  return next;
+                });
+                return;
+              }
               setSquares((current) => trimmed(new Map(current).set(key, 'failed')));
             });
         }
