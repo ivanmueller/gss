@@ -462,6 +462,77 @@ describe('adding, changing and removing as an admin', () => {
     expect(serviceCalls).toEqual([]);
   });
 
+  // F-247-2-R19-01: a layer with a limit and a shared field, its map service away. Turning it
+  // off when the map opens names no new field: saved without asking the service. A field named
+  // anew is still checked, and with the service away that change is refused, nothing saved.
+  it('saves a change that names no new field while the map service is away', async () => {
+    service = () => new Response('unavailable', { status: 503 });
+    petroleum.layerSource.mockResolvedValue({
+      ...source,
+      colourField: 'STATUS',
+      alsoFields: ['OWNER'],
+      onlyField: 'NET',
+      onlyValues: ['M'],
+    });
+    const kept = {
+      ...details,
+      version: VERSION,
+      wmsLayers: null,
+      colourField: 'STATUS',
+      colours: [['Active', '#e6194b']],
+      alsoFields: ['OWNER'],
+      onlyField: 'NET',
+      onlyValues: ['M'],
+    };
+    const off = await send(`/${LAYER}`, 'PATCH', { ...kept, mapVisible: false });
+    expect(off.status).toBe(200);
+    expect(serviceCalls).toEqual([]);
+    expect(petroleum.updateLayer).toHaveBeenCalledWith(
+      expect.anything(),
+      LAYER,
+      VERSION,
+      expect.objectContaining({
+        mapVisible: false,
+        alsoFields: ['OWNER'],
+        onlyField: 'NET',
+        onlyValues: ['M'],
+      }),
+    );
+    // Other values under the same limit field: still no new field.
+    const values = await send(`/${LAYER}`, 'PATCH', {
+      ...kept,
+      mapVisible: false,
+      onlyValues: ['M', 'I'],
+    });
+    expect(values.status).toBe(200);
+    expect(serviceCalls).toEqual([]);
+
+    petroleum.updateLayer.mockClear();
+    const anew = await send(`/${LAYER}`, 'PATCH', {
+      ...kept,
+      mapVisible: false,
+      onlyField: 'STATUS',
+    });
+    expect(anew.status).toBe(502);
+    expect(serviceCalls).toHaveLength(1);
+    expect(petroleum.updateLayer).not.toHaveBeenCalled();
+  });
+
+  // Fields that also count need the field the layer is coloured by, service or no service.
+  it('refuses fields that also count without a colour field, without asking the service', async () => {
+    petroleum.layerSource.mockResolvedValue(source);
+    const res = await send(`/${LAYER}`, 'PATCH', {
+      ...details,
+      version: VERSION,
+      wmsLayers: null,
+      mapVisible: true,
+      alsoFields: ['STATUS'],
+    });
+    expect(res.status).toBe(422);
+    expect(serviceCalls).toEqual([]);
+    expect(petroleum.updateLayer).not.toHaveBeenCalled();
+  });
+
   it('answers 409 for a version someone else changed, 404 for a removed layer', async () => {
     petroleum.layerSource.mockResolvedValue(source);
     petroleum.updateLayer.mockResolvedValue({ status: 'stale' });

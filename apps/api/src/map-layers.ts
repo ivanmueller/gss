@@ -1285,7 +1285,7 @@ export function layerRoutes(backend: LayerBackend) {
         current.kind === 'arcgis_features' &&
         changes.colourField !== null &&
         changes.colourField !== current.colourField;
-      if (changes.alsoFields.length > 0 || changes.onlyField !== null || colourChanged) {
+      if (changes.alsoFields.length > 0 || changes.onlyField !== null) {
         if (current.kind !== 'arcgis_features' || current.url === null) {
           return apiError(
             c,
@@ -1294,17 +1294,36 @@ export function layerRoutes(backend: LayerBackend) {
             'Only a live ArcGIS layer takes these settings.',
           );
         }
+      }
+      if (changes.alsoFields.length > 0 && changes.colourField === null) {
+        return apiError(
+          c,
+          422,
+          'VALIDATION_FAILED',
+          'Choose the field it is coloured by before fields that also count.',
+        );
+      }
+      // Only the fields this change names anew are checked against the service. Fields the layer
+      // already has are saved as they are, without asking it: a change of something else (the
+      // name, whether it is on when the map opens) must go through while the service is away,
+      // which is just when an admin switches a layer off (F-247-2-R19-01).
+      const newFields = [
+        ...(colourChanged ? [changes.colourField ?? ''] : []),
+        ...changes.alsoFields.filter((field) => !current.alsoFields.includes(field)),
+        ...(changes.onlyField !== null && changes.onlyField !== current.onlyField
+          ? [changes.onlyField]
+          : []),
+      ];
+      if (newFields.length > 0 && current.url !== null) {
         // The service is read only for an admin (Codex's review of 11c467e).
         if (!(await db.isOrgAdmin(ctx, current.organizationId))) {
           return apiError(c, 403, 'FORBIDDEN', ADMINS_ONLY);
         }
         try {
           const { fields } = await describeArcgis(current.url);
-          if (colourChanged && !fields.includes(changes.colourField ?? '')) {
+          if (newFields.some((field) => !fields.includes(field))) {
             return apiError(c, 422, 'VALIDATION_FAILED', 'This layer has no such field.');
           }
-          const problem = sharedProblem(fields, changes);
-          if (problem !== null) return apiError(c, 422, 'VALIDATION_FAILED', problem);
         } catch (error) {
           return serviceFailed(c, error, 'description');
         }
