@@ -25,15 +25,16 @@ afterEach(() => {
 });
 
 describe('FullPageMap', () => {
-  it('shows an empty map of Canada with map styles and layers, and no companies (F-239)', async () => {
+  it('shows an empty map of Canada with map styles, no companies and no grain layers (F-239, F-247)', async () => {
     const calls = mockApi({});
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     expect(await screen.findByText('Stand-in map: map, 0 pins')).toBeInTheDocument();
     expect(screen.getByText(`Starts at ${CANADA.join(' ')}`)).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Map style' })).toBeInTheDocument();
-    // No company's places are asked for or shown; only the team's map layers.
+    // Neither companies' places nor grain's map layers are asked for or offered.
     expect(calls.some((call) => call.path.startsWith('/facilities'))).toBe(false);
-    expect(calls.some((call) => call.path.startsWith('/map-layers'))).toBe(true);
+    expect(calls.some((call) => call.path.startsWith('/map-layers'))).toBe(false);
+    expect(screen.queryByRole('button', { name: /Layers/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('list', { name: 'Map legend' })).not.toBeInTheDocument();
   });
 

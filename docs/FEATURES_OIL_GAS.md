@@ -27,11 +27,11 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 **Status:** Live, check pending (merged as ivanmueller/gss#260 on 2026-11-18; register `docs/reviews/F-239.md`). Normal risk (screens only). **Asked:** 2026-11-18, after seeing F-238 on staging: "clean everything in this map. I did not ask you to put counterparties. We can potentially leave map layers … Let's clear the map so that it's still the same structure, but there's no data on the map yet."
 
-**Built:** the full-page map at `map.torvenco.com` and `/map` shows no companies; it starts on Canada, with the map styles (street map, satellite) and the team's map layers (Layers button), as before. Signed-in members only.
+**Built:** the full-page map at `map.torvenco.com` and `/map` shows no companies; it starts on Canada, with the map styles (street map, satellite). Signed-in members only. Grain's map layers are no longer offered there (owner, 2026-11-18, on seeing them on staging); the Layers button returns with oil and gas's own layers (F-247 part 2).
 
-**Owner's answer (2026-11-18):** oil and gas has its own layers (F-247); until then the Layers button still offers the team's grain layers.
+**Owner's answer (2026-11-18):** oil and gas has its own layers (F-247); until they are built the oil and gas map has no Layers button.
 
-**Owner check on staging:** open `https://map.torvenco.com` (Ctrl+F5 if the old page shows): Canada filling the window, no pins, the map style switch and Layers top left.
+**Owner check on staging:** open `https://map.torvenco.com` (Ctrl+F5 if the old page shows): Canada filling the window, no pins, the map style switch top left, no Layers button.
 
 ## F-247 — Oil and gas map layers: their own system
 

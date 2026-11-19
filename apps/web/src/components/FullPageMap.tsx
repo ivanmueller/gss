@@ -10,13 +10,6 @@ import {
 } from '../lib/mapbox';
 import { useTheme } from '../lib/theme';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
-import {
-  MapLayersButton,
-  MapLayersLegend,
-  MapLayersPanel,
-  PickedFeatureCard,
-  useMapLayers,
-} from './MapLayers';
 import { Callout } from './ui/callout';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -34,20 +27,20 @@ const NO_PINS = [] as const;
 
 /**
  * The map on its own page (F-238, map.torvenco.com), for the oil and gas side of the platform
- * (F-239): the map filling the window, with map styles and the team's map layers, and no
- * records of its own yet (owner's request, 2026-11-18: "no data on the map yet").
+ * (F-239): the map filling the window, with map styles, and no records of its own yet (owner's
+ * request, 2026-11-18: "no data on the map yet"). Grain's map layers are not offered here: oil
+ * and gas gets its own, from its own database (F-247).
  */
 export function FullPageMap({
-  session,
   mapbox = mapboxToken(),
 }: {
+  /** The signed-in member: not used until the oil and gas layers are read (F-247 part 2). */
   session: DirectorySession;
   mapbox?: MapboxToken;
 }) {
   const [refused, setRefused] = useState(false);
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
-  const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
 
   if (mapbox.status !== 'ok' || refused) {
     const text = refused
@@ -73,17 +66,12 @@ export function FullPageMap({
           selectedId={null}
           start={CANADA}
           onSelect={() => undefined}
-          overlays={layers.overlays}
-          authToken={session.token}
-          onViewChange={layers.onViewChange}
-          onOverlayClick={layers.setPicked}
           onTokenRefused={() => {
             setRefused(true);
           }}
         />
         {/* Shown with the map itself, so it never covers the loading message (F-238-R1-02). */}
         <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
-          <MapLayersButton state={layers} />
           <SegmentedControl
             label="Map style"
             options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
@@ -95,12 +83,6 @@ export function FullPageMap({
           />
         </div>
       </Suspense>
-      {/* Below the zoom buttons, top right (F-139). */}
-      <MapLayersPanel state={layers} side="right" />
-      <PickedFeatureCard state={layers} token={session.token} className="left-3" />
-      <div className="absolute bottom-8 left-3 z-10 max-w-[calc(100%-1.5rem)]">
-        <MapLayersLegend state={layers} />
-      </div>
     </div>
   );
 }
