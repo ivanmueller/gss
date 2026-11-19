@@ -47,6 +47,10 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 5. **Where the records live:** in the owner's new Supabase project **`petroleum-staging`** (same Supabase organization as `gss-staging`), the database for everything on the oil and gas side, from the first table on. Project ref `ubgyatbzjctsgzcsvwgc`, session pooler host `aws-1-us-east-2.pooler.supabase.com` (U.S. East, Ohio).
 6. **Sign-in:** the same as GSS (the same people, password and authenticator app; GSS's admins are admins here); the petroleum project holds no user accounts.
 
+**Owner's answers (2026-11-18, third round, for part 2):**
+7. **First layers:** from the owner's document of Alberta's public data sources: the Alberta Township System service, the mineral agreement service (petroleum and natural gas, oil sands), the offset notice layers and the non-Crown mineral ownership service, all live ArcGIS services of the Government of Alberta under the Open Government Licence – Alberta. Admins add them in Settings; none is built in.
+8. **On or off at first:** an admin chooses, per layer in Settings, whether it is on when the map opens; the choice applies to everyone who opens the page. (An agent's reading, to confirm: a person's own switch is remembered in their browser and wins; the admin's choice applies to every layer the person has not switched.)
+
 **Plan (draft for Codex's design review).** Two pull requests.
 
 *Part 1: the petroleum database wired to the Worker* (high risk and governance: database, Worker, CI and deploy workflows; held for the owner's approval of the exact commit). Codex's design review (register `docs/reviews/F-247-1.md`, 6 findings) changed the plan as below. Two pull requests, because a Worker binding must name a Hyperdrive configuration that exists: **1a** (branch `feat/f-247-petroleum-db`) everything but the binding; **1b** the binding.
