@@ -77,12 +77,31 @@ function count(value: number | unknown[]): number {
   return Array.isArray(value) ? value.length : value;
 }
 
+/** The records at the place that was clicked (several can share a place), and the one shown. */
+export interface AerPicked {
+  records: PickedFeature[];
+  index: number;
+}
+
 export interface AerListsState {
   overlays: MapOverlay[];
-  /** A dot of these lists that was clicked, or null. */
-  picked: PickedFeature | null;
-  setPicked: (picked: PickedFeature | null) => void;
+  picked: AerPicked | null;
+  /** A click on a dot of these lists: opens the records at that place. */
+  pick: (clicked: PickedFeature) => void;
+  setIndex: (index: number) => void;
+  close: () => void;
   panel: React.ReactNode;
+}
+
+/** The properties that tell one record from another on a list. */
+const IDENTITY = ['licenceNumber', 'wellId', 'activityAt', 'activityType'];
+
+function sameRecord(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return IDENTITY.every((key) => a[key] === b[key]);
+}
+
+function placeOf(feature: GeoJSON.Feature): string {
+  return feature.geometry.type === 'Point' ? feature.geometry.coordinates.join(',') : '';
 }
 
 /** The switches, the periods, the dots they draw and the card of a clicked dot. */
@@ -91,7 +110,7 @@ export function useAerLists(organizationId: string, token: string): AerListsStat
   const [rigsOn, setRigsOn] = useState(false);
   const [licenceDays, setLicenceDays] = useState<(typeof LICENCE_DAYS)[number]>('30');
   const [rigDays, setRigDays] = useState<(typeof RIG_DAYS)[number]>('7');
-  const [picked, setPicked] = useState<PickedFeature | null>(null);
+  const [picked, setPicked] = useState<AerPicked | null>(null);
   const licences = useList(
     licencesOn,
     '/petroleum/aer/licences',
@@ -117,8 +136,38 @@ export function useAerLists(organizationId: string, token: string): AerListsStat
     return out;
   }, [licences, rigs]);
 
+  // Every record of the switched-on lists at the place that was clicked, so records that share
+  // a place (two rigs on one well, a licence and its rig) can all be opened (F-243-2-R1-01).
+  const pick = (clicked: PickedFeature) => {
+    const lists: [string, State][] = [
+      [AER_LICENCES, licences],
+      [AER_RIGS, rigs],
+    ];
+    const featuresOf = (id: string, state: State): GeoJSON.Feature[] =>
+      state.status === 'ok' && id === clicked.layerId ? state.answer.located.features : [];
+    const hit = lists
+      .flatMap(([id, state]) => featuresOf(id, state))
+      .find((feature) => sameRecord(feature.properties ?? {}, clicked.properties));
+    const here = hit ? placeOf(hit) : '';
+    const records: PickedFeature[] = hit
+      ? lists.flatMap(([id, state]) =>
+          state.status === 'ok'
+            ? state.answer.located.features
+                .filter((feature) => placeOf(feature) === here)
+                .map((feature) => ({ layerId: id, properties: { ...feature.properties } }))
+            : [],
+        )
+      : [clicked];
+    const first = records.findIndex(
+      (record) =>
+        record.layerId === clicked.layerId && sameRecord(record.properties, clicked.properties),
+    );
+    setPicked({ records, index: Math.max(first, 0) });
+  };
+
   const line = (
     label: string,
+    report: string,
     colour: string,
     on: boolean,
     set: (v: boolean) => void,
@@ -131,7 +180,7 @@ export function useAerLists(organizationId: string, token: string): AerListsStat
           checked={on}
           onChange={(event) => {
             set(event.target.checked);
-            if (!event.target.checked) setPicked(null);
+            setPicked(null);
           }}
         />
         <span
@@ -146,16 +195,27 @@ export function useAerLists(organizationId: string, token: string): AerListsStat
         <p className="text-xs text-destructive">Could not be loaded. Try again in a moment.</p>
       )}
       {s.status === 'ok' && (
-        <p className="text-xs text-muted-foreground">
-          {String(s.answer.located.features.length)} on the map
-          {count(s.answer.unlocated) > 0 && `, ${String(count(s.answer.unlocated))} not placed yet`}
-          {s.answer.truncated && ', the newest 5,000 shown'}
-        </p>
+        <>
+          <p className="text-xs text-muted-foreground">
+            {String(s.answer.located.features.length)} on the map
+            {count(s.answer.unlocated) > 0 &&
+              `, ${String(count(s.answer.unlocated))} not placed yet`}
+            {s.answer.truncated && ', the newest 5,000 shown'}
+          </p>
+          {/* Each list's own source and date, beside its own count (F-243-2-R1-04). */}
+          <p className="text-xs text-muted-foreground">
+            {`Alberta Energy Regulator ${report}, ${
+              s.answer.source.latestListDate
+                ? `list of ${s.answer.source.latestListDate}`
+                : 'no list yet'
+            }, preliminary`}
+          </p>
+        </>
       )}
     </div>
   );
 
-  const sources = [licences, rigs].flatMap((s) => (s.status === 'ok' ? [s.answer.source] : []));
+  const anyShown = licences.status === 'ok' || rigs.status === 'ok';
 
   const panel = (
     <div
@@ -166,39 +226,47 @@ export function useAerLists(organizationId: string, token: string): AerListsStat
       <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
         New wells and rigs
       </p>
-      {line('New licences', LICENCE_COLOUR, licencesOn, setLicencesOn, licences)}
+      {line('New licences', 'ST1', LICENCE_COLOUR, licencesOn, setLicencesOn, licences)}
       {licencesOn && (
         <SegmentedControl
           label="Licences issued in the last"
           options={LICENCE_DAYS.map((d) => ({ value: d, label: `${d} days` }))}
           value={licenceDays}
-          onChange={setLicenceDays}
+          onChange={(value) => {
+            setLicenceDays(value);
+            // A record outside the new period has no dot: its card closes (F-243-2-R1-02).
+            setPicked(null);
+          }}
         />
       )}
-      {line('Rigs', RIG_COLOUR, rigsOn, setRigsOn, rigs)}
+      {line('Rigs', 'ST49', RIG_COLOUR, rigsOn, setRigsOn, rigs)}
       {rigsOn && (
         <SegmentedControl
           label="Rig activity in the last"
           options={RIG_DAYS.map((d) => ({ value: d, label: `${d} days` }))}
           value={rigDays}
-          onChange={setRigDays}
+          onChange={(value) => {
+            setRigDays(value);
+            setPicked(null);
+          }}
         />
       )}
-      {sources.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Source: Alberta Energy Regulator (ST1 and ST49 daily lists), preliminary.{' '}
-          {sources
-            .map((s) => s.latestListDate)
-            .filter((d): d is string => d !== null)
-            .map((d) => `List of ${d}`)
-            .join(', ')}
-          . Not an official record.
-        </p>
-      )}
+      {anyShown && <p className="text-xs text-muted-foreground">Not an official record.</p>}
     </div>
   );
 
-  return { overlays, picked, setPicked, panel };
+  return {
+    overlays,
+    picked,
+    pick,
+    setIndex: (index) => {
+      setPicked((now) => (now ? { ...now, index } : now));
+    },
+    close: () => {
+      setPicked(null);
+    },
+    panel,
+  };
 }
 
 const LABELS: [string, string][] = [
@@ -218,16 +286,21 @@ const LABELS: [string, string][] = [
   ['activityAt', 'When (Alberta time)'],
 ];
 
-/** The card of a clicked dot: the AER's fields, with its source and "preliminary". */
+/**
+ * The card of a clicked dot: the AER's fields, with its source and "preliminary". Records that
+ * share the clicked place are stepped through with Previous and Next.
+ */
 export function AerPickedCard({ state }: { state: AerListsState }) {
-  const { picked, setPicked } = state;
-  if (!picked) return null;
-  const rig = picked.layerId === AER_RIGS;
+  const { picked, setIndex, close } = state;
+  const record = picked?.records[picked.index];
+  if (!picked || !record) return null;
+  const rig = record.layerId === AER_RIGS;
   const rows = LABELS.flatMap(([key, label]) => {
-    const value = picked.properties[key];
+    const value = record.properties[key];
     if (typeof value !== 'string' || value === '') return [];
     return [[label, key === 'activityAt' ? utcToAlberta(value) : value] as const];
   });
+  const many = picked.records.length > 1;
   return (
     <div className="absolute right-3 bottom-8 z-20 w-72 max-w-[calc(100%-1.5rem)] rounded-card border bg-card p-3 text-sm shadow-md">
       <div className="mb-2 flex items-start justify-between gap-2">
@@ -236,13 +309,36 @@ export function AerPickedCard({ state }: { state: AerListsState }) {
           type="button"
           aria-label="Close"
           className="text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            setPicked(null);
-          }}
+          onClick={close}
         >
           <X className="size-4" aria-hidden="true" />
         </button>
       </div>
+      {many && (
+        <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+          <button
+            type="button"
+            className="underline disabled:no-underline disabled:opacity-40"
+            disabled={picked.index === 0}
+            onClick={() => {
+              setIndex(picked.index - 1);
+            }}
+          >
+            Previous
+          </button>
+          <span>{`${String(picked.index + 1)} of ${String(picked.records.length)} here`}</span>
+          <button
+            type="button"
+            className="underline disabled:no-underline disabled:opacity-40"
+            disabled={picked.index === picked.records.length - 1}
+            onClick={() => {
+              setIndex(picked.index + 1);
+            }}
+          >
+            Next
+          </button>
+        </div>
+      )}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
@@ -254,8 +350,8 @@ export function AerPickedCard({ state }: { state: AerListsState }) {
       <p className="mt-2 text-xs text-muted-foreground">
         Alberta Energy Regulator, preliminary
         {rig
-          ? '. Placed at the licence’s surface location, to its quarter-section.'
-          : '. Placed at the middle of its surface quarter-section.'}
+          ? '. Placed at the centre of its licence’s surface legal subdivision (about 400 m across).'
+          : '. Placed at the centre of its surface legal subdivision (about 400 m across).'}
       </p>
     </div>
   );

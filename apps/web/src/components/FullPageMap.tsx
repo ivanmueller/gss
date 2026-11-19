@@ -103,7 +103,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           onOverlayClick={(picked) => {
             // A dot of the AER's lists has its own card; any other shape, the layers' (F-243-2).
             const dot = picked.layerId === AER_LICENCES || picked.layerId === AER_RIGS;
-            aer.setPicked(dot ? picked : null);
+            if (dot) aer.pick(picked);
+            else aer.close();
             layers.setPicked(dot ? null : picked);
           }}
           onLayersStale={layers.onStale}
