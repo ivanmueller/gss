@@ -74,6 +74,14 @@ const overlaps = (ranges, { start, end }) =>
   ranges.some((r) =>
     'after' in r ? start <= r.after && r.after < end : r.start <= end && start <= r.end,
   );
+/** Whether `path` is a file (not a folder or a submodule) at `commit` (F-251-R4-02). */
+const isFile = (commit, path) => {
+  try {
+    return git(['cat-file', '-t', `${commit}:${path}`]) === 'blob';
+  } catch {
+    return false;
+  }
+};
 /** How many lines `path` has at `commit`, blank lines included (no trimming, F-251-R3-02). */
 const lineCount = (commit, path) => {
   const text = execFileSync('git', ['show', `${commit}:${path}`], {
@@ -271,12 +279,13 @@ export function evaluate({ base, head, labels = [] }) {
       continue;
     }
     // The cited lines must exist in the file the review saw (F-251-R2-03).
-    let lines;
-    try {
-      lines = lineCount(commit, place.path);
-    } catch {
-      lines = 0;
-    }
+    let lines = 0;
+    if (isFile(commit, place.path))
+      try {
+        lines = lineCount(commit, place.path);
+      } catch {
+        // counted as 0 lines: blocked below
+      }
     if (place.end > lines) {
       result.blockers.push(
         `Finding ${finding.id} is pre-existing but ${finding.where} is not in ${place.path} as of ${finding.commit} (${lines} lines).`,
@@ -285,12 +294,7 @@ export function evaluate({ base, head, labels = [] }) {
     }
     // Against the pull request's current merge base (F-251-R1-01): if the base branch has since
     // changed those lines (a fix, say) and the pull request keeps the old ones, they now differ.
-    let onBase = true;
-    try {
-      git(['cat-file', '-e', `${mergeBase}:${place.path}`]);
-    } catch {
-      onBase = false;
-    }
+    const onBase = isFile(mergeBase, place.path);
     const prChanges = onBase ? changedRanges(mergeBase, commit, place.path, 'new') : null;
     if (!prChanges)
       result.blockers.push(

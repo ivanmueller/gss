@@ -889,6 +889,8 @@ describe('review evidence check', () => {
         [{ where: 'apps/web/src/lib.ts' }, /is not one place in a file/],
         // F-251-R1-03: a design finding's ID with a code round in its Round cell.
         [{ id: 'F-900-D1-01' }, /does not name its code review round "1"/],
+        // F-251-R4-02: a folder is not a file, whatever git prints for it.
+        [{ where: 'apps/web/src:1' }, /is not in apps\/web\/src as of/],
       ];
       for (const [extra, expected] of cases) {
         const head = commit(
@@ -1268,6 +1270,15 @@ describe('register rules', () => {
     assert.deepEqual(still.retriage, []);
     assert.equal(still.issues, 0);
     assert.equal(still.escalation, null);
+    // F-251-R4-01: a fix found not fixed is never hidden behind a pre-existing finding.
+    const hidden = roundOutcome({
+      findings: [{ severity: 'P2', duplicate_of: 'X-R1-01', pre_existing: true }],
+      verifiedFixes: [{ id: 'X-R1-01', status: 'not-fixed' }],
+      previous: { issues: 1, notFixed: ['X-R1-01'] },
+      known: [{ id: 'X-R1-01', severity: 'P2', status: 'fixed' }],
+    });
+    assert.equal(hidden.issues, 1);
+    assert.match(hidden.escalation ?? '', /recurring without progress/);
   });
 
   test('a round counts each problem once, and stops on recurrence or disagreement', () => {

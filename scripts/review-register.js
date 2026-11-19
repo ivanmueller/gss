@@ -397,9 +397,11 @@ export function roundOutcome({ findings, verifiedFixes, previous, known }) {
   // Only Codex's own duplicate_of counts here; the runner's nearness match
   // (probable_duplicate_of) is a hint for Claude's triage, never grounds to stop the loop
   // (F-149-R4-01).
-  const repeated = new Set(findings.map((f) => f.duplicate_of).filter(Boolean));
-  // Problems Codex finds already on the base branch are not this pull request's (F-251).
+  // Problems Codex finds already on the base branch are not this pull request's (F-251); a fix
+  // found not fixed is merged only with a finding that is counted, never hidden behind a
+  // pre-existing one (F-251-R4-01).
   const own = findings.filter((f) => f.pre_existing !== true);
+  const repeated = new Set(own.map((f) => f.duplicate_of).filter(Boolean));
   const issues = own.length + notFixed.filter((id) => !repeated.has(id)).length;
   // A finding Claude recorded as pre-existing that Codex now says this change introduces, exposes
   // or worsens: Claude must triage it again (confirmed and fixed, or escalated), never keep it.
