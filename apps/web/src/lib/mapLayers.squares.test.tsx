@@ -1,5 +1,6 @@
 import { tilesForView, type MapLayerView } from '@grain/domain';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { layersLeftOut, TOO_MANY_LAYERS_NOTE, useLayerOverlays } from './mapLayers';
@@ -146,6 +147,76 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       { timeout: 15_000 },
     );
   }, 40_000);
+
+  // F-247-2-R21-01: the map moved on before a view's squares were answered. Their requests are
+  // called off, so they cannot hold up the view the person is looking at.
+  it('calls off the squares of a view the map has left', async () => {
+    const elsewhere = { bbox: { west: -80, south: 43, east: -77, north: 44.5 }, zoom: 7 };
+    const first: AbortSignal[] = [];
+    let moved = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (moved) return Promise.resolve(Response.json(ONE_SHAPE));
+        // The first view's squares are never answered; they end only when called off.
+        const signal = init?.signal;
+        if (!signal) return new Promise<Response>(() => undefined);
+        first.push(signal);
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      }),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result, rerender, unmount } = renderHook(
+      ({ view }: { view: typeof VIEW }) => useLayerOverlays(one, view, 'token'),
+      { initialProps: { view: VIEW } },
+    );
+    await waitFor(() => {
+      expect(first).toHaveLength(SQUARES_PER_LAYER);
+    });
+    expect(first.every((signal) => !signal.aborted)).toBe(true);
+
+    moved = true;
+    rerender({ view: elsewhere });
+    expect(first.every((signal) => signal.aborted)).toBe(true);
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+    // Called off is not failed: nothing is said about the layer.
+    expect(result.current.notes.size).toBe(0);
+
+    // Back to the first view: its squares are asked for again, and answered.
+    rerender({ view: VIEW });
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
+    });
+    expect(result.current.notes.size).toBe(0);
+    unmount();
+  });
+
+  // In development React mounts everything twice: the squares called off at the first unmount
+  // are asked for again at the second mount (F-247-2-R21-01).
+  it('loads its squares when React mounts it twice, as in development', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) =>
+        init?.signal?.aborted
+          ? Promise.reject(new DOMException('Aborted', 'AbortError'))
+          : Promise.resolve(Response.json(ONE_SHAPE)),
+      ),
+    );
+    const one = LAYERS.slice(0, 1);
+    const { result } = renderHook(() => useLayerOverlays(one, VIEW, 'token'), {
+      wrapper: StrictMode,
+    });
+    await waitFor(() => {
+      expect(shapesOf(result.current.overlays)).toBe(1);
+    });
+    expect(result.current.notes.size).toBe(0);
+  });
 
   // F-247-2-R20-01: which layers a view has room for, by the list's order.
   it('leaves out the layers a view has no room for, never the first', () => {

@@ -733,7 +733,28 @@ export function useLayerOverlays(
    * to a request sent before the last time is not kept (F-247-2-R5-02).
    */
   const eras = useRef(new Map<string, number>());
+  /**
+   * The squares asked for and not yet answered, each with the means to call its request off. A
+   * square that leaves the view, or whose layer is let go, is called off: its request stops
+   * competing with the view the person is looking at, and no more than one view's squares are
+   * ever on their way (F-247-2-R21-01).
+   */
+  const flying = useRef(new Map<string, AbortController>());
   const api = useLayerApi();
+
+  // Nothing is left running when the map goes away. What was called off is forgotten as asked
+  // for, so it is asked for again if the map comes back (as React does once in development).
+  useEffect(() => {
+    const requests = flying.current;
+    const wanted = asked.current;
+    return () => {
+      for (const [key, request] of requests) {
+        request.abort();
+        wanted.delete(key);
+      }
+      requests.clear();
+    };
+  }, []);
 
   const stale = useRef(onStale);
 
@@ -761,6 +782,11 @@ export function useLayerOverlays(
         layerIds.some((id) => key.startsWith(`${id}@`) || key.startsWith(`${id}#`));
       for (const id of layerIds) eras.current.set(id, eraOf(id) + 1);
       for (const key of [...asked.current]) if (ofThese(key)) asked.current.delete(key);
+      for (const [key, request] of [...flying.current]) {
+        if (!ofThese(key)) continue;
+        request.abort();
+        flying.current.delete(key);
+      }
       setSquares((current) => {
         const next = new Map([...current].filter(([key]) => !ofThese(key)));
         return next.size === current.size ? current : next;
@@ -821,6 +847,14 @@ export function useLayerOverlays(
       for (const tile of tiles) showing.add(squareKey(layer, tile));
     }
     inView.current = showing;
+    // Squares asked for in a view the map has left are called off, and may be asked for again
+    // if it comes back to them (F-247-2-R21-01).
+    for (const [key, request] of [...flying.current]) {
+      if (showing.has(key)) continue;
+      request.abort();
+      flying.current.delete(key);
+      asked.current.delete(key);
+    }
     /**
      * Keeps memory in check: the oldest squares go first, but never one the map is showing now.
      * With many layers on, a view can need more squares than are kept from earlier views;
@@ -872,16 +906,25 @@ export function useLayerOverlays(
             ),
           );
           const era = eraOf(layer.id);
-          apiFetch(path, token)
+          const request = new AbortController();
+          flying.current.set(key, request);
+          const landed = () => {
+            if (flying.current.get(key) === request) flying.current.delete(key);
+          };
+          apiFetch(path, token, { signal: request.signal })
             .then((res) => res.json())
             .then((body: unknown) => {
-              // Asked for before the layer was switched off, removed or refused: not kept
-              // (F-247-2-R5-02, R8-01).
-              if (era !== eraOf(layer.id)) return;
+              landed();
+              // Called off, or asked for before the layer was switched off, removed or refused:
+              // not kept (F-247-2-R5-02, R8-01, R21-01).
+              if (request.signal.aborted || era !== eraOf(layer.id)) return;
               const collection = asCollection(body);
               setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
             .catch((error: unknown) => {
+              landed();
+              // Called off: nothing to say or keep; what it had asked for was already forgotten.
+              if (request.signal.aborted) return;
               if (era !== eraOf(layer.id)) return;
               // Asked again at the next move of the map.
               asked.current.delete(key);
