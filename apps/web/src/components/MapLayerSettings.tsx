@@ -720,7 +720,11 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
       colour: colourField === NO_FIELD ? colour : OTHER_VALUES_COLOUR,
       colourField: colourField === NO_FIELD ? null : colourField,
       colours: colourField === NO_FIELD ? [] : colours,
-      ...sharedFor(colourField === NO_FIELD ? null : colourField, shared),
+      // Shared fields and a limit are a live ArcGIS layer's; a file or a picture layer is saved
+      // without, whatever was chosen before (the API refuses them there, F-247-2-R16-01).
+      ...(source === 'web' && inspection?.kind === 'arcgis_features'
+        ? sharedFor(colourField === NO_FIELD ? null : colourField, shared)
+        : NO_SHARED),
       ...(api.adminDefault && { mapVisible: shownAtOpen }),
     };
     const body =
@@ -796,6 +800,9 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
         setProblem(null);
         setColourField(NO_FIELD);
         setColours([]);
+        // A limit or shared fields chosen for a web layer do not follow to a file, whose form
+        // does not show them (F-247-2-R16-01).
+        setShared(NO_SHARED);
       }}
     />
   );
