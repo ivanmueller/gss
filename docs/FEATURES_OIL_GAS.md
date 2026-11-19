@@ -8,7 +8,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 | ID | Feature | Status |
 |---|---|---|
-| F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260, 2026-11-18) |
+| F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260 and #266, 2026-11-18) |
 | F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | In progress: its database connected (parts 1a and 1b, ivanmueller/gss#263 and #264, 2026-11-18); part 2 (Settings and layers) next |
 | F-240 | Alberta reference layers: township grid and formation outlines | Planned (after F-247) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
@@ -25,7 +25,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-239 — The oil and gas map page
 
-**Status:** Live, check pending (merged as ivanmueller/gss#260 on 2026-11-18; register `docs/reviews/F-239.md`). Normal risk (screens only). **Asked:** 2026-11-18, after seeing F-238 on staging: "clean everything in this map. I did not ask you to put counterparties. We can potentially leave map layers … Let's clear the map so that it's still the same structure, but there's no data on the map yet."
+**Status:** Live, check pending (merged as ivanmueller/gss#260 on 2026-11-18, register `docs/reviews/F-239.md`; grain's layers removed from the page in ivanmueller/gss#266 the same day, register `docs/reviews/F-239-2.md`). Normal risk (screens only). **Asked:** 2026-11-18, after seeing F-238 on staging: "clean everything in this map. I did not ask you to put counterparties. We can potentially leave map layers … Let's clear the map so that it's still the same structure, but there's no data on the map yet."
 
 **Built:** the full-page map at `map.torvenco.com` and `/map` shows no companies; it starts on Canada, with the map styles (street map, satellite). Signed-in members only. Grain's map layers are no longer offered there (owner, 2026-11-18, on seeing them on staging); the Layers button returns with oil and gas's own layers (F-247 part 2).
 
