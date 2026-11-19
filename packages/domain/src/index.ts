@@ -9,6 +9,7 @@ export * from './members';
 export * from './quotes';
 export * from './freight';
 export * from './website';
+export * from './aerLists';
 export * from './alberta';
 export * from './crm';
 export * from './commodities';

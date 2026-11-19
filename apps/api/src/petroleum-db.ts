@@ -1,6 +1,7 @@
 import type { MapLayerKind, MapLayerView } from '@grain/domain';
 import postgres from 'postgres';
 
+import { aerListsQueries, type AerListsDatabase } from './aer-lists-db';
 import { connectionOptions } from './db';
 import type { MapLayerChanges, MapLayerSource, MapLayerWrite, NewMapLayer } from './map-layers-db';
 
@@ -24,9 +25,10 @@ export interface PetroleumContext {
  * answer "not ready" (F-247-1-R3-01), so a deploy whose migration failed never runs new code
  * against an old schema.
  */
-export const PETROLEUM_SCHEMA_VERSION = 2;
+export const PETROLEUM_SCHEMA_VERSION = 3;
 
-export interface PetroleumDatabase {
+/** The AER's daily lists (F-243 part 1) are in `AerListsDatabase` (aer-lists-db.ts). */
+export interface PetroleumDatabase extends AerListsDatabase {
   /** The database's schema version (petro.schema_version()). Reads no data. */
   schemaVersion(): Promise<number>;
   /** The organization the database sees for this person: the health check. */
@@ -171,6 +173,7 @@ async function refusalsNamed<T>(work: Promise<T>): Promise<T> {
 /** The oil and gas database over an existing connection; tests use it directly. */
 export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
   return {
+    ...aerListsQueries(sql),
     async schemaVersion() {
       const [row] = await sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;

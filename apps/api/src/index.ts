@@ -20,6 +20,7 @@ import { forwardingRoutes } from './forwarding';
 import { handleEmail, replayPendingMail } from './receive-mail';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
+import { refreshAerLists } from './aer-lists';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { mapLayerRoutes } from './map-layers';
@@ -206,6 +207,9 @@ export default {
       return;
     }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));
+    // The AER's daily licence and rig lists (F-243 part 1): its own waitUntil, catching its own
+    // failures, so neither job stops the other.
+    ctx.waitUntil(refreshAerLists(env, postgresPetroleum));
   },
   // Cloudflare Email Routing: the business domain's mail (F-114 step 4a). Awaited, not
   // waitUntil: whether the message is rejected must be decided before the handler returns.
