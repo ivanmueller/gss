@@ -149,17 +149,18 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
         0,
       );
     const onStale = vi.fn();
+    const closer = { ...VIEW, zoom: 8 };
     const { result, rerender } = renderHook(
-      ({ view }: { view: typeof VIEW }) =>
-        useLayerOverlays(one, view, 'token', NO_CHOICES, onStale),
-      { initialProps: { view: VIEW } },
+      ({ view, retry }: { view: typeof VIEW; retry: number }) =>
+        useLayerOverlays(one, view, 'token', NO_CHOICES, onStale, retry),
+      { initialProps: { view: VIEW, retry: 0 } },
     );
     await waitFor(() => {
       expect(shapes()).toBeGreaterThan(0);
     });
     expect(onStale).not.toHaveBeenCalled();
     removed = true;
-    rerender({ view: { ...VIEW, zoom: 8 } });
+    rerender({ view: closer, retry: 0 });
     await waitFor(() => {
       expect(result.current.notes.size).toBe(1);
     });
@@ -167,10 +168,11 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     // The list of layers is asked to be read again: it says what is still there.
     expect(onStale).toHaveBeenCalledWith('missing');
 
-    // F-247-2-R9-01: the layer is there again (a member suspended, then restored): asked for and
-    // drawn as any other, without reloading the page.
+    // F-247-2-R9-01 and R12-02: the layer is there again (on grain's side a suspended member is
+    // answered "not found", then restored) and the list, read well, still holds it: told to ask
+    // again, the map draws it without being moved or the page reloaded.
     removed = false;
-    rerender({ view: { ...VIEW, zoom: 9 } });
+    rerender({ view: closer, retry: 1 });
     await waitFor(() => {
       expect(shapes()).toBeGreaterThan(0);
     });

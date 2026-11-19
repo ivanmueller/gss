@@ -101,7 +101,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           }}
         />
         {/* Shown with the map itself, so it never covers the loading message (F-238-R1-02). */}
-        <div className="absolute top-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
+        <div className="absolute top-3 left-3 z-20 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
           <MapLayersButton state={layers} />
           <SegmentedControl
             label="Map style"
@@ -138,8 +138,10 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />
       {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's
           details, so it never covers their fields or their close button (F-247-2-R3-02). */}
+      {/* With many layers on, the legend scrolls within the space under the buttons (which sit
+          above it), so Layers, the map style and Settings stay in reach (F-247-2-R13-02). */}
       {layers.picked === null && (
-        <div className="absolute bottom-8 left-3 z-10 max-w-[calc(100%-1.5rem)]">
+        <div className="absolute bottom-8 left-3 z-10 max-h-[calc(100%-9rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
           <MapLayersLegend state={layers} />
         </div>
       )}

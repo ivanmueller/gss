@@ -71,6 +71,12 @@ export interface MapLayersState {
 
 /** The list of layers is read again at most this often on the server's refusals. */
 const STALE_RELOAD_MS = 10_000;
+/**
+ * After a refusal or a "not found", a list read well again has the map ask again for what it let
+ * go, at most this often: a layer that is listed yet keeps answering "not found" is not asked
+ * for in a circle.
+ */
+const ASK_AGAIN_MS = 60_000;
 
 /** The organization's map layers, the ones this person has on, and their features in view. */
 export function useMapLayers(
@@ -104,10 +110,14 @@ export function useMapLayers(
   const lastStale = useRef(0);
   const laterStale = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryAfter = useRef(false);
+  const lastRetry = useRef(0);
   const [retry, setRetry] = useState(0);
   const onStale = useCallback(
     (reason?: StaleReason) => {
-      if (reason === 'refused') retryAfter.current = true;
+      // Refused, or "not found" (how grain's database answers a suspended member for a layer's
+      // squares): either way, if the list is then read well, the map asks again
+      // (F-247-2-R12-02). Not when it is only the map moving after a refused list.
+      if (reason !== undefined) retryAfter.current = true;
       // Not on every refused square of one view: once at once, and, for a refusal that comes
       // during the pause after it, once more when the pause ends, so a later change (a second
       // layer removed) is never missed (F-247-2-R10-01).
@@ -132,11 +142,14 @@ export function useMapLayers(
     [],
   );
   const listRefused = list.status === 'error';
-  // The list read well again after a refusal (access is back, perhaps with the very same
-  // layers): what the refusal let go is asked for again, the map standing still.
+  // The list read well again after a refusal or a "not found" (access is back, perhaps with the
+  // very same layers): what was let go is asked for again, the map standing still. At most once
+  // a minute, so a layer that is listed yet keeps answering "not found" ends there.
   useEffect(() => {
     if (list.status !== 'ok' || !retryAfter.current) return;
     retryAfter.current = false;
+    if (Date.now() - lastRetry.current < ASK_AGAIN_MS) return;
+    lastRetry.current = Date.now();
     setRetry((n) => n + 1);
   }, [list]);
   const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale, retry);

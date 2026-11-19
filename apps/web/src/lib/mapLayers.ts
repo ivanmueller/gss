@@ -352,9 +352,9 @@ export function layerPictureStale(error: unknown): StaleReason | null {
 
 /**
  * Why the list of layers is read again: the Worker refused the person ("refused": signed out or
- * not a member), or no longer has the layer ("missing"). After a refusal, a list read well again
- * means access is back, and what the refusal let go is asked for again (F-247-2-R12-02); a
- * missing layer is not asked for again by itself: the list says whether it is there.
+ * not a member), or does not have the layer for them ("missing": removed, or, on grain's side,
+ * hidden from a suspended member). If the list is then read well and still holds the layer,
+ * what was let go is asked for again (F-247-2-R12-02).
  */
 export type StaleReason = 'refused' | 'missing';
 

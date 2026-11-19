@@ -398,16 +398,54 @@ describe('FullPageMap', () => {
     expect(screen.getByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
   });
 
-  it('does not ask the map again by itself for a layer that is only missing', async () => {
-    const calls = mockApi({ [LIST]: listOf(pictures), ...noLegend });
-    const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
-    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
-    expect(await screen.findByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
-    await waitFor(() => {
+  // F-247-2-R12-02 (round 13): grain's database answers "not found" to a suspended member, so
+  // a "not found" followed by the same list read well also has the map ask again; but only once
+  // a minute, so a layer that is listed yet keeps answering "not found" ends there.
+  it('asks the map again after a "not found" too, and not in a circle', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+      const calls = mockApi({ [LIST]: listOf(pictures), ...noLegend });
+      const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+      render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+      expect(await screen.findByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'A picture is refused' }));
+      expect(await screen.findByText('Asked again: 1')).toBeInTheDocument();
       expect(lists()).toBe(2);
-    });
-    expect(screen.getByText('Asked again: 0')).toBeInTheDocument();
+
+      // Still "not found" after asking again: the list is read once more, the map is not told
+      // to ask again, and nothing more follows.
+      await user.click(screen.getByRole('button', { name: 'A picture is refused' }));
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => {
+        expect(lists()).toBe(3);
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(lists()).toBe(3);
+      expect(screen.getByText('Asked again: 1')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // F-247-2-R13-02: with many layers on, the legend keeps to the space under the buttons and
+  // scrolls there; the buttons sit above it.
+  it('keeps a long legend under the buttons, scrolling', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ...pictures,
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      name: `Synthetic layer ${String(i)}`,
+    }));
+    mockApi({ [LIST]: listOf(...many) });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const legend = await screen.findByRole('list', { name: 'Map layers shown' });
+    expect(within(legend).getAllByRole('listitem')).toHaveLength(30);
+    const box = legend.parentElement;
+    expect(box?.className).toMatch(/\bmax-h-\[calc\(100%-9rem\)\]/);
+    expect(box?.className).toMatch(/\boverflow-y-auto\b/);
+    const buttons = screen.getByRole('button', { name: 'Layers (30)' }).parentElement;
+    expect(buttons?.className).toMatch(/\bz-20\b/);
+    expect(box?.className).toMatch(/\bz-10\b/);
   });
 
   // F-247-2-R9-01: a member suspended, then restored, with the map open. While the list is
