@@ -408,6 +408,13 @@ export default function FacilityMap(props: FacilityMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const shownStyle = useRef(basemapStyle(basemap, theme));
+  /**
+   * Whether the map's style can take sources and layers now: from its 'style.load' until another
+   * style is set. Not Mapbox's isStyleLoaded(), which is also false while any picture or tile is
+   * still loading: a layer switched off at such a moment was skipped and stayed drawn while the
+   * map stood still (F-247-2-R11-01).
+   */
+  const styleReady = useRef(false);
   // The sign-in sent with each map layer picture, for pictures refused when it lapsed.
   const pictureSignIns = useRef(new PictureSignIns());
   // The latest props, read by map event handlers that are registered once.
@@ -508,6 +515,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('moveend', report);
     // Also after a basemap or theme change, which replaces the whole style.
     instance.on('style.load', () => {
+      styleReady.current = true;
       if (latest.current.simple) hideClutter(instance);
       if (latest.current.areas) addAreaLayers(instance, latest.current.areas);
       paintTheme(instance, latest.current.basemap);
@@ -586,6 +594,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     map.current = instance;
     return () => {
+      styleReady.current = false;
       instance.remove();
       map.current = null;
     };
@@ -606,8 +615,9 @@ export default function FacilityMap(props: FacilityMapProps) {
       // Without diffing, the whole style reloads, so 'style.load' repaints and adds the pins.
       // (Mapbox's types also demand its font options, which setStyle otherwise keeps.)
       const reload = { diff: false } as Parameters<mapboxgl.Map['setStyle']>[1];
+      styleReady.current = false;
       instance.setStyle(style, reload);
-    } else if (instance.isStyleLoaded()) {
+    } else if (styleReady.current) {
       // Same imagery (satellite), new theme: only the pins change colour.
       paintTheme(instance, basemap);
     }
@@ -621,7 +631,7 @@ export default function FacilityMap(props: FacilityMapProps) {
 
   useEffect(() => {
     const instance = map.current;
-    if (!instance?.isStyleLoaded()) return;
+    if (!instance || !styleReady.current) return;
     if (props.areas && !instance.getSource(AREAS)) {
       addAreaLayers(instance, props.areas);
       return;
@@ -632,7 +642,8 @@ export default function FacilityMap(props: FacilityMapProps) {
 
   useEffect(() => {
     const instance = map.current;
-    if (instance?.isStyleLoaded()) syncOverlays(instance, props.overlays ?? []);
+    // Before the style is ready, its 'style.load' draws the overlays as they are then.
+    if (instance && styleReady.current) syncOverlays(instance, props.overlays ?? []);
   }, [props.overlays]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
