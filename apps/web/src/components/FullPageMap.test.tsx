@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearApiCache } from '../lib/useApiResource';
 import { mockApi, ORG, SESSION } from '../test/api';
+import { choose } from '../test/select';
 import type { FacilityMapProps } from './FacilityMap';
 import { CANADA, FullPageMap } from './FullPageMap';
 
@@ -305,6 +306,72 @@ describe('FullPageMap', () => {
     expect(await within(settings).findByText(/On when the map opens\./)).toBeInTheDocument();
     // Nobody switched it this visit, so the map follows the new default at once.
     expect(await screen.findByText(`Drawn: ${LINES}`)).toBeInTheDocument();
+  });
+
+  // F-247-2-R15-01: a layer added in one colour with a limit ("Only where"): choosing the
+  // limit counts again without starting the form over, and the limit is saved with the layer.
+  it('adds a one-colour layer with its limit', async () => {
+    const inspection: LayerInspection = {
+      kind: 'arcgis_features',
+      url: SERVICE,
+      wmsLayers: null,
+      title: 'Synthetic agreements',
+      copyright: 'Open licence.',
+      fields: ['STATUS'],
+      values: null,
+      count: 12,
+      drawing: null,
+    };
+    const calls = mockApi({
+      [LIST]: listOf(),
+      [`POST /petroleum/layers/inspect?${ORGANIZATION}`]: () => Response.json(inspection),
+      [`POST /petroleum/layers?${ORGANIZATION}`]: () =>
+        Response.json({ id: LINES }, { status: 201 }),
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const settings = await screen.findByRole('dialog', { name: 'Map settings' });
+    await userEvent.click(await within(settings).findByRole('button', { name: 'Add map layer' }));
+    const form = await screen.findByRole('dialog', { name: 'Add map layer' });
+    await userEvent.type(within(form).getByLabelText('Web address'), SERVICE);
+    await userEvent.click(within(form).getByRole('button', { name: 'Check' }));
+    await within(form).findByText(/Found:/);
+    await userEvent.type(within(form).getByLabelText('Published by'), 'Synthetic publisher');
+    await userEvent.type(
+      within(form).getByLabelText('Link to its terms of use'),
+      'https://example.com/terms',
+    );
+    // Colour by stays "One colour"; the limit is chosen and typed.
+    await userEvent.click(within(form).getByText('Shared track and limits (optional)'));
+    await choose(within(form).getByLabelText('Only where'), 'STATUS');
+    const values = await within(form).findByLabelText('is one of');
+    await userEvent.type(values, 'Active');
+    await userEvent.tab();
+    // Counted again under the limit, and the limit is still in the form.
+    await waitFor(() => {
+      const counts = calls.filter((c) => c.path === `/petroleum/layers/inspect?${ORGANIZATION}`);
+      expect(counts.at(-1)?.body).toMatchObject({
+        field: null,
+        onlyField: 'STATUS',
+        onlyValues: ['Active'],
+      });
+    });
+    expect(within(form).getByLabelText('is one of')).toHaveValue('Active');
+    expect(within(form).getByLabelText('Published by')).toHaveValue('Synthetic publisher');
+
+    await userEvent.click(within(form).getByRole('button', { name: 'Add layer' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Add map layer' })).not.toBeInTheDocument();
+    });
+    const create = calls.find(
+      (c) => c.method === 'POST' && c.path === `/petroleum/layers?${ORGANIZATION}`,
+    );
+    expect(create?.body).toMatchObject({
+      colourField: null,
+      alsoFields: [],
+      onlyField: 'STATUS',
+      onlyValues: ['Active'],
+    });
   });
 
   // F-247-2-R14-02: a layer in one colour with a limit ("Only where") keeps the limit when an

@@ -623,8 +623,14 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     source === 'web' ? (inspection?.fields ?? []) : file ? featureFields(file.collection) : [];
   const ready = source === 'web' ? inspection !== null : file !== null;
 
-  function inspect(chosenField: string | null, settings: Shared = NO_SHARED) {
-    setBusy(chosenField === null ? 'Checking the address…' : 'Counting its values…');
+  /**
+   * Asks the Worker what the address offers. `fresh` is the first check of an address (the
+   * Check button): the form starts over from what it finds. Anything after it (a colour field,
+   * fields that also count, a limit) counts again under the settings as they are, and resets
+   * nothing: a limit chosen on a layer in one colour stays (F-247-2-R15-01).
+   */
+  function inspect(chosenField: string | null, settings: Shared = NO_SHARED, fresh = false) {
+    setBusy(fresh ? 'Checking the address…' : 'Counting its values…');
     setProblem(null);
     return sendJson<LayerInspection>(api.path(`/inspect${query}`), token, 'POST', {
       url,
@@ -633,20 +639,25 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
     })
       .then((answer) => {
         setInspection(answer);
-        if (chosenField === null) {
+        if (fresh) {
           if (name === '' && answer.title) setName(answer.title.slice(0, 200));
           if (termsNote === '' && answer.copyright) setTermsNote(answer.copyright);
           if (answer.wmsLayers) setWmsLayers(answer.wmsLayers);
           setColourField(NO_FIELD);
           setColours([]);
           setShared(NO_SHARED);
-        } else {
+        } else if (chosenField !== null) {
           setColours(assignColours(answer.values ?? []));
         }
       })
       .catch((reason: unknown) => {
-        setProblem(message(reason, 'The address could not be checked.'));
-        if (chosenField === null) setInspection(null);
+        setProblem(
+          message(
+            reason,
+            fresh ? 'The address could not be checked.' : 'Its values could not be counted.',
+          ),
+        );
+        if (fresh) setInspection(null);
       })
       .finally(() => {
         setBusy(null);
@@ -822,7 +833,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
               type="button"
               variant="outline"
               disabled={busy !== null || url.trim() === ''}
-              onClick={() => void inspect(null)}
+              onClick={() => void inspect(null, NO_SHARED, true)}
             >
               Check
             </Button>
