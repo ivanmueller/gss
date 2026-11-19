@@ -547,7 +547,11 @@ function EditMapLayerForm({
             sourceName.trim() === '' ||
             termsUrl.trim() === '' ||
             termsNote.trim() === '' ||
-            (colourField !== NO_FIELD && colours.length === 0)
+            // A colour field needs its colours, unless the layer was kept that way and its
+            // colouring is not being changed (F-247-2-R20-02).
+            (colourField !== NO_FIELD &&
+              colours.length === 0 &&
+              !(colourField === layer.colourField && layer.colours.length === 0))
           }
         >
           Save

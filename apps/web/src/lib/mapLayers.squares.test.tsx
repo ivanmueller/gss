@@ -2,11 +2,12 @@ import { tilesForView, type MapLayerView } from '@grain/domain';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { useLayerOverlays } from './mapLayers';
+import { layersLeftOut, TOO_MANY_LAYERS_NOTE, useLayerOverlays } from './mapLayers';
 
-// F-247-2-R3-01: with many live layers on, one view needs more map squares than are kept from
-// earlier views (600). The squares the map is showing are never dropped to make room: a dropped
-// one left a hole nothing asked for again while the map stood still. Synthetic layers only.
+// F-247-2-R3-01 and R20-01: with many live layers on, one view would need more map squares than
+// are kept (600). The squares the map is showing are never dropped to make room (a dropped one
+// left a hole nothing asked for again while the map stood still); instead the view loads only
+// the layers it has room for, in the list's order, and the others say so. Synthetic layers only.
 
 const base: MapLayerView = {
   id: '',
@@ -42,7 +43,9 @@ const base: MapLayerView = {
 
 const VIEW = { bbox: { west: -106, south: 49.5, east: -103, north: 51 }, zoom: 7 };
 const SQUARES_PER_LAYER = tilesForView(VIEW.bbox, VIEW.zoom).length;
-/** Enough layers that the view needs well over the 600 squares kept. */
+/** How many of them one view has room for. */
+const FIT = Math.floor(600 / SQUARES_PER_LAYER);
+/** Enough layers that the view would need well over the 600 squares kept. */
 const LAYERS: MapLayerView[] = Array.from(
   { length: Math.ceil(700 / SQUARES_PER_LAYER) },
   (_, i) => ({
@@ -59,6 +62,10 @@ afterEach(() => {
 describe('useLayerOverlays with more squares in view than are kept', () => {
   it('keeps every square the map is showing', async () => {
     expect(LAYERS.length * SQUARES_PER_LAYER).toBeGreaterThan(600);
+    expect(FIT).toBeGreaterThan(0);
+    expect(FIT).toBeLessThan(LAYERS.length);
+    const fitting = LAYERS.slice(0, FIT);
+    const leftOut = LAYERS.slice(FIT);
     let n = 0;
     const asked: string[] = [];
     vi.stubGlobal(
@@ -85,41 +92,76 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       ({ layers }: { layers: MapLayerView[] }) => useLayerOverlays(layers, VIEW, 'token'),
       { initialProps: { layers: LAYERS } },
     );
+    const total = FIT * SQUARES_PER_LAYER;
+    const drawn = () =>
+      result.current.overlays.map((overlay) =>
+        overlay.kind === 'features' ? [overlay.id, overlay.data.features.length] : [overlay.id, -1],
+      );
     await waitFor(
       () => {
-        expect(n).toBe(LAYERS.length * SQUARES_PER_LAYER);
-        const drawn = result.current.overlays.map((overlay) =>
-          overlay.kind === 'features' ? overlay.data.features.length : -1,
-        );
-        // One shape per square, for every layer: none was dropped while in view.
-        expect(drawn).toEqual(LAYERS.map(() => SQUARES_PER_LAYER));
+        expect(n).toBe(total);
+        // One shape per square, for every layer the view has room for: none was dropped while
+        // in view (F-247-2-R3-01).
+        expect(drawn()).toEqual(fitting.map((layer) => [layer.id, SQUARES_PER_LAYER]));
       },
       { timeout: 15_000 },
     );
-    // Nothing was asked for twice to get there.
-    const total = LAYERS.length * SQUARES_PER_LAYER;
+    // Nothing was asked for twice to get there, and nothing for the layers left out: what one
+    // view loads and keeps stays within the 600 squares (F-247-2-R20-01). Each says why.
     expect(n).toBe(total);
+    expect(total).toBeLessThanOrEqual(600);
+    for (const layer of leftOut) {
+      expect(asked.some((url) => url.includes(layer.id))).toBe(false);
+      expect(result.current.notes.get(layer.id)).toBe(TOO_MANY_LAYERS_NOTE);
+    }
+    for (const layer of fitting) expect(result.current.notes.has(layer.id)).toBe(false);
     // F-247-2-R18-01: every square is asked for under an address the release before never
     // used, so nothing a browser kept under that release's "keep for an hour" is reused.
     expect(new Set(asked).size).toBe(total);
     for (const url of asked) expect(url).toMatch(/\/features\/\d+\/\d+\/\d+\?g=[^&]*&c=2$/);
 
+    // With fewer layers on, one left out before has room and is loaded.
+    const fewer = [...LAYERS.slice(1, FIT), ...leftOut.slice(0, 1)];
+    rerender({ layers: fewer });
+    await waitFor(
+      () => {
+        expect(drawn()).toEqual(fewer.map((layer) => [layer.id, SQUARES_PER_LAYER]));
+      },
+      { timeout: 15_000 },
+    );
+    expect(result.current.notes.size).toBe(0);
+    expect(n).toBe(total + SQUARES_PER_LAYER);
+
     // F-247-2-R4-02 and R5-02: nothing is kept of a layer that is off. Every layer switched
     // off, then on again: every square is asked for again, none drawn from the page's memory.
     rerender({ layers: [] });
     expect(result.current.overlays).toEqual([]);
+    const before = n;
     rerender({ layers: LAYERS });
     await waitFor(
       () => {
-        expect(n).toBe(2 * total);
-        const drawn = result.current.overlays.map((overlay) =>
-          overlay.kind === 'features' ? overlay.data.features.length : -1,
-        );
-        expect(drawn).toEqual(LAYERS.map(() => SQUARES_PER_LAYER));
+        expect(n).toBe(before + total);
+        expect(drawn()).toEqual(fitting.map((layer) => [layer.id, SQUARES_PER_LAYER]));
       },
       { timeout: 15_000 },
     );
   }, 40_000);
+
+  // F-247-2-R20-01: which layers a view has room for, by the list's order.
+  it('leaves out the layers a view has no room for, never the first', () => {
+    const ids = (set: ReadonlySet<string>) => LAYERS.filter((layer) => set.has(layer.id));
+    expect(ids(layersLeftOut(LAYERS, SQUARES_PER_LAYER, VIEW.zoom))).toEqual(LAYERS.slice(FIT));
+    expect(layersLeftOut(LAYERS.slice(0, FIT), SQUARES_PER_LAYER, VIEW.zoom).size).toBe(0);
+    // One layer always loads, however many squares its view has.
+    expect(layersLeftOut(LAYERS.slice(0, 1), 5000, VIEW.zoom).size).toBe(0);
+    expect(layersLeftOut(LAYERS.slice(0, 2), 5000, VIEW.zoom)).toEqual(new Set([LAYERS[1]?.id]));
+    // A layer out of its zoom range, or not drawn by squares, takes no room.
+    const hidden = { ...base, id: 'hidden', minZoom: 12 };
+    const pictures = { ...base, id: 'pictures', kind: 'arcgis_image' as const };
+    expect(ids(layersLeftOut([hidden, pictures, ...LAYERS], SQUARES_PER_LAYER, VIEW.zoom))).toEqual(
+      LAYERS.slice(FIT),
+    );
+  });
 
   // F-247-2-R7-03: an admin removes a layer while a teammate has it open. Its squares at the new
   // zoom answer 404; those kept from the zoom before are not drawn in their place.

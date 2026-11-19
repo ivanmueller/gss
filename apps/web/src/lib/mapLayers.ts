@@ -312,8 +312,39 @@ export interface MapView {
 
 type Square = { features: GeoJSON.Feature[]; exceeded: boolean } | 'failed';
 
-/** The most map squares kept in memory, across layers and zooms. */
+/**
+ * The most map squares kept in memory, across layers and zooms, and so the most one view loads:
+ * the layers that are on take their squares in the list's order, and a layer the view has no
+ * room left for is not loaded there (F-247-2-R20-01).
+ */
 const MAX_KEPT_SQUARES = 600;
+
+/** Said of a layer the view has no room left for. */
+export const TOO_MANY_LAYERS_NOTE =
+  'Too many layers are on to load this one here: zoom in, or switch some layers off.';
+
+/**
+ * The live layers one view has no room left for, by id: in the list's order, each layer drawn
+ * by squares at this zoom takes one square per map square in view, until the most kept is
+ * reached. The first always fits (a view has far fewer squares than that). So what a view loads
+ * and keeps is bounded whatever the number of layers switched on, and a layer left out says so
+ * instead of showing holes (F-247-2-R3-01, R20-01).
+ */
+export function layersLeftOut(
+  layers: readonly MapLayerView[],
+  squaresInView: number,
+  zoom: number | null,
+): ReadonlySet<string> {
+  const leftOut = new Set<string>();
+  let taken = 0;
+  for (const layer of layers) {
+    if (layer.kind !== 'arcgis_features' || !shownAtZoom(layer, zoom)) continue;
+    if (usesOverview(layer, zoom)) continue;
+    if (taken > 0 && taken + squaresInView > MAX_KEPT_SQUARES) leftOut.add(layer.id);
+    else taken += squaresInView;
+  }
+  return leftOut;
+}
 
 function picturesUrl(api: LayerApi, id: string): string {
   return `${window.location.origin}/api/v1${api.path(livePath(`/${id}/tiles/{z}/{x}/{y}.png`))}`;
@@ -713,6 +744,7 @@ export function useLayerOverlays(
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
   const zoom = view?.zoom ?? null;
+  const leftOut = useMemo(() => layersLeftOut(layers, tiles.length, zoom), [layers, tiles, zoom]);
 
   useEffect(() => {
     const eraOf = (layerId: string) => eras.current.get(layerId) ?? 0;
@@ -785,7 +817,7 @@ export function useLayerOverlays(
     const showing = new Set<string>();
     for (const layer of layers) {
       if (layer.kind !== 'arcgis_features' || !shownAtZoom(layer, zoom)) continue;
-      if (usesOverview(layer, zoom)) continue;
+      if (usesOverview(layer, zoom) || leftOut.has(layer.id)) continue;
       for (const tile of tiles) showing.add(squareKey(layer, tile));
     }
     inView.current = showing;
@@ -826,6 +858,8 @@ export function useLayerOverlays(
           );
         }
         if (usesOverview(layer, zoom)) continue;
+        // No room left in this view: nothing is asked for; the layer says so (below).
+        if (leftOut.has(layer.id)) continue;
         for (const tile of tiles) {
           const key = squareKey(layer, tile);
           if (asked.current.has(key)) continue;
@@ -877,7 +911,7 @@ export function useLayerOverlays(
         }
       }
     }
-  }, [layers, tiles, zoom, token, api, renewed, retry]);
+  }, [layers, tiles, zoom, token, api, renewed, retry, leftOut]);
 
   return useMemo(() => {
     const overlays: MapOverlay[] = [];
@@ -916,6 +950,12 @@ export function useLayerOverlays(
       const overviewReady = overview !== undefined && overview !== 'failed';
       if (overviewReady && usesOverview(layer, zoom)) {
         whole(overview);
+        continue;
+      }
+      if (leftOut.has(layer.id)) {
+        // Not loaded in this view; its zoomed-out view is drawn if it has one.
+        notes.set(layer.id, TOO_MANY_LAYERS_NOTE);
+        if (overviewReady) whole(overview);
         continue;
       }
       const prefix = `${layer.id}@${settingsTag(layer)}/`;
@@ -1013,5 +1053,5 @@ export function useLayerOverlays(
       }
     }
     return { overlays, notes };
-  }, [layers, files, squares, tiles, zoom, choices, api]);
+  }, [layers, files, squares, tiles, zoom, choices, api, leftOut]);
 }

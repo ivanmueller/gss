@@ -412,6 +412,42 @@ describe('FullPageMap', () => {
     });
   });
 
+  // F-247-2-R20-02: a layer kept with a colour field and no colours of its own (the API takes
+  // it; the map draws it in its one colour) can still be edited when its colouring stays.
+  it('saves an edit of a layer coloured by a field with no colours kept', async () => {
+    const plain: MapLayerView = {
+      ...pictures,
+      id: LINES,
+      name: 'Synthetic agreements',
+      kind: 'arcgis_features',
+      url: SERVICE,
+      mapVisible: false,
+      colourField: 'STATUS',
+      colours: [],
+    };
+    const calls = mockApi({
+      [LIST]: listOf(plain),
+      [`PATCH /petroleum/layers/${LINES}?${ORGANIZATION}`]: () => Response.json({ id: LINES }),
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const settings = await screen.findByRole('dialog', { name: 'Map settings' });
+    await userEvent.click(await within(settings).findByRole('button', { name: 'Edit' }));
+    const form = await screen.findByRole('dialog', { name: 'Edit Synthetic agreements' });
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'On when the map opens' }));
+    const save = within(form).getByRole('button', { name: 'Save' });
+    expect(save).toBeEnabled();
+    await userEvent.click(save);
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'PATCH')).toBe(true);
+    });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({
+      mapVisible: true,
+      colourField: 'STATUS',
+      colours: [],
+    });
+  });
+
   // F-247-2-R3-02: both sit at the bottom left over the map; the legend makes way.
   it('hides the legend while a clicked shape’s details are open', async () => {
     const lines: MapLayerView = {
