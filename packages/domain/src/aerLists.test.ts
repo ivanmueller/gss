@@ -285,6 +285,22 @@ describe('parseSt49', () => {
     expect(parseSt49(st49(changed))).toMatchObject({ structure: false, rows: [] });
   });
 
+  it('is unreadable when a later page changes layout or lacks its separator (F-243-1-R2-01)', () => {
+    const later = st49Page([RIG_A]);
+    later[6] = WIDTHS.slice(0, 10)
+      .map((w) => '-'.repeat(w))
+      .join(' ');
+    expect(parseSt49(st49(st49Page([RIG_A]), later))).toMatchObject({
+      structure: false,
+      rows: [],
+    });
+    const noRule = st49Page([RIG_A]).filter((_, k) => k !== 6);
+    expect(parseSt49(st49(st49Page([RIG_A]), noRule))).toMatchObject({
+      structure: false,
+      rows: [],
+    });
+  });
+
   it('has no structure when cut short, even between two pages (F-243-1-R1-01)', () => {
     expect(parseSt49(st49Page([RIG_A]).join('\n'))).toMatchObject({ structure: false, rows: [] });
     const whole = st49(st49Page([RIG_A]), st49Page([RIG_A]));

@@ -181,6 +181,12 @@ export function lsdWhere(subdivisions: AtsLsd[]): string {
 
 type Ring = [number, number][];
 
+/** A polygon: its outer ring and its holes. */
+interface Polygon {
+  outer: Ring;
+  holes: Ring[];
+}
+
 function ringArea(ring: Ring): number {
   let area = 0;
   for (let i = 0; i < ring.length - 1; i++) {
@@ -191,36 +197,95 @@ function ringArea(ring: Ring): number {
   return Math.abs(area / 2);
 }
 
-/** The average of a ring's corners, its closing corner counted once. */
-function ringCentre(ring: Ring): [number, number] | null {
-  const corners =
-    ring.length > 1 && ring[0]?.[0] === ring.at(-1)?.[0] && ring[0]?.[1] === ring.at(-1)?.[1]
-      ? ring.slice(0, -1)
-      : ring;
-  if (corners.length === 0) return null;
-  const sum = corners.reduce((acc, [x, y]) => [acc[0] + x, acc[1] + y], [0, 0]);
-  return [sum[0] / corners.length, sum[1] / corners.length];
+function polygonArea(polygon: Polygon): number {
+  return ringArea(polygon.outer) - polygon.holes.reduce((sum, hole) => sum + ringArea(hole), 0);
+}
+
+/** Whether a point is inside a ring (ray casting; a point on an edge counts either way). */
+function inRing([x, y]: [number, number], ring: Ring): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i] ?? [0, 0];
+    const [xj, yj] = ring[j] ?? [0, 0];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Whether a point is inside a polygon: in its outer ring and in none of its holes. */
+function inPolygon(point: [number, number], polygon: Polygon): boolean {
+  return inRing(point, polygon.outer) && !polygon.holes.some((hole) => inRing(point, hole));
+}
+
+/**
+ * A point inside the polygon (F-243-1-R2-03): the average of its outer corners when that lies
+ * inside (a grid square, nearly always); otherwise the middle of the widest stretch inside along a
+ * few horizontal lines across it. Null when none is found.
+ */
+export function pointOnSurface(polygon: Polygon): [number, number] | null {
+  const corners = polygon.outer.slice(0, -1);
+  if (corners.length < 3) return null;
+  const average: [number, number] = [
+    corners.reduce((sum, [x]) => sum + x, 0) / corners.length,
+    corners.reduce((sum, [, y]) => sum + y, 0) / corners.length,
+  ];
+  if (inPolygon(average, polygon)) return average;
+  const ys = corners.map(([, y]) => y);
+  const south = Math.min(...ys);
+  const north = Math.max(...ys);
+  let best: { width: number; point: [number, number] } | null = null;
+  for (const share of [0.5, 0.25, 0.75, 0.125, 0.375, 0.625, 0.875]) {
+    const y = south + (north - south) * share;
+    const xs: number[] = [];
+    for (const ring of [polygon.outer, ...polygon.holes]) {
+      for (let i = 0; i < ring.length - 1; i++) {
+        const [x1, y1] = ring[i] ?? [0, 0];
+        const [x2, y2] = ring[i + 1] ?? [0, 0];
+        if (y1 > y !== y2 > y) xs.push(x1 + ((y - y1) * (x2 - x1)) / (y2 - y1));
+      }
+    }
+    xs.sort((a, b) => a - b);
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const west = xs[i] ?? 0;
+      const east = xs[i + 1] ?? 0;
+      const point: [number, number] = [(west + east) / 2, y];
+      if (east - west > (best?.width ?? 0) && inPolygon(point, polygon)) {
+        best = { width: east - west, point };
+      }
+    }
+  }
+  return best?.point ?? null;
 }
 
 function isRing(value: unknown): value is Ring {
   return (
     Array.isArray(value) &&
+    value.length >= 4 &&
     value.every(
       (p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]),
     )
   );
 }
 
-/** Outer rings of a GeoJSON polygon or multipolygon geometry. */
-function outerRings(geometry: unknown): Ring[] {
+function polygonOf(rings: unknown): Polygon | null {
+  if (!Array.isArray(rings) || !isRing(rings[0])) return null;
+  return { outer: rings[0], holes: rings.slice(1).filter(isRing) };
+}
+
+/** The polygons of a GeoJSON polygon or multipolygon geometry, with their holes. */
+function polygonsOf(geometry: unknown): Polygon[] {
   if (typeof geometry !== 'object' || geometry === null) return [];
   const { type, coordinates } = geometry as { type?: unknown; coordinates?: unknown };
   if (!Array.isArray(coordinates)) return [];
-  if (type === 'Polygon') return isRing(coordinates[0]) ? [coordinates[0]] : [];
+  if (type === 'Polygon') {
+    const polygon = polygonOf(coordinates);
+    return polygon ? [polygon] : [];
+  }
   if (type === 'MultiPolygon') {
-    return coordinates.flatMap((polygon: unknown) =>
-      Array.isArray(polygon) && isRing(polygon[0]) ? [polygon[0]] : [],
-    );
+    return coordinates.flatMap((rings: unknown) => {
+      const polygon = polygonOf(rings);
+      return polygon ? [polygon] : [];
+    });
   }
   return [];
 }
@@ -228,8 +293,9 @@ function outerRings(geometry: unknown): Ring[] {
 const ALBERTA = { west: -120.1, east: -109.9, south: 48.9, north: 60.1 };
 
 /**
- * The township grid's answer for `asked`, as points: each subdivision's largest piece's centre;
- * a subdivision not in the answer, or whose centre lies outside Alberta, is not found.
+ * The township grid's answer for `asked`, as points: a point inside each subdivision's largest
+ * piece, checked inside it once rounded (F-243-1-R2-03); a subdivision not in the answer, without
+ * such a point, or outside Alberta, is not found.
  */
 export function pointsFromGrid(asked: AtsLsd[], body: unknown): AerPoint[] {
   const features =
@@ -239,7 +305,7 @@ export function pointsFromGrid(asked: AtsLsd[], body: unknown): AerPoint[] {
       ? (body as { features: unknown[] }).features
       : null;
   if (features === null) throw new Error('township grid answer malformed');
-  const best = new Map<string, { area: number; centre: [number, number] }>();
+  const best = new Map<string, { area: number; polygon: Polygon }>();
   const key = (m: number, r: number, t: number, s: number, l: number) =>
     `${String(m)}-${String(r)}-${String(t)}-${String(s)}-${String(l)}`;
   for (const feature of features) {
@@ -252,29 +318,27 @@ export function pointsFromGrid(asked: AtsLsd[], body: unknown): AerPoint[] {
       Number(props.SEC),
       Number(props.LS),
     );
-    for (const ring of outerRings((feature as { geometry?: unknown }).geometry)) {
-      const centre = ringCentre(ring);
-      const area = ringArea(ring);
-      if (centre && area > (best.get(k)?.area ?? -1)) best.set(k, { area, centre });
+    for (const polygon of polygonsOf((feature as { geometry?: unknown }).geometry)) {
+      const area = polygonArea(polygon);
+      if (area > (best.get(k)?.area ?? 0)) best.set(k, { area, polygon });
     }
   }
   return asked.map((s) => {
-    const found = best.get(key(s.meridian, s.range, s.township, s.section, s.lsd));
-    const inside =
-      found !== undefined &&
-      found.centre[0] >= ALBERTA.west &&
-      found.centre[0] <= ALBERTA.east &&
-      found.centre[1] >= ALBERTA.south &&
-      found.centre[1] <= ALBERTA.north;
-    return {
-      ...s,
-      point: inside
-        ? {
-            longitude: Math.round(found.centre[0] * 1e6) / 1e6,
-            latitude: Math.round(found.centre[1] * 1e6) / 1e6,
-          }
-        : null,
-    };
+    const piece = best.get(key(s.meridian, s.range, s.township, s.section, s.lsd))?.polygon;
+    const inner = piece ? pointOnSurface(piece) : null;
+    // Stored to six places (about 10 cm): the rounded point must still lie inside the piece.
+    const point: [number, number] | null = inner
+      ? [Math.round(inner[0] * 1e6) / 1e6, Math.round(inner[1] * 1e6) / 1e6]
+      : null;
+    const usable =
+      piece !== undefined &&
+      point !== null &&
+      inPolygon(point, piece) &&
+      point[0] >= ALBERTA.west &&
+      point[0] <= ALBERTA.east &&
+      point[1] >= ALBERTA.south &&
+      point[1] <= ALBERTA.north;
+    return { ...s, point: usable ? { longitude: point[0], latitude: point[1] } : null };
   });
 }
 

@@ -5,7 +5,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public;
 
-select plan(46);
+select plan(47);
 
 -- Privileges.
 select ok(
@@ -274,6 +274,15 @@ select is(
   (select file_id::text from petro.aer_served_reads where report = 'st1' and list_date = '2026-11-17'),
   :'file_c',
   'a fully read edition is served before a partly read newer one'
+);
+-- A list with any record the reader could not read is never served (F-243-1-R2-02).
+select pg_temp.as_petro(pg_temp.file('st1', 'list F, partial only')) as file_f \gset
+select pg_temp.as_petro(pg_temp.edition(:'file_f', :'st1_mon'));
+select pg_temp.as_petro(pg_temp.reading(:'file_f', 1, 'partial', '2026-11-18', 1, 1));
+select is(
+  (select count(*)::int from petro.aer_served_reads where report = 'st1' and list_date = '2026-11-18'),
+  0,
+  'a partly read list is never served'
 );
 -- A reader upgrade that fails on a file keeps its earlier usable reading (F-243-1-D2-03).
 select pg_temp.as_petro(pg_temp.reading(:'file_c', 2, 'unreadable', null, 0, 0));

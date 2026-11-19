@@ -201,6 +201,51 @@ describe('the township grid', () => {
     ]);
     expect(() => pointsFromGrid(asked, { error: 'x' })).toThrow();
   });
+
+  it('places an L-shaped subdivision inside itself, not at its corners average (F-243-1-R2-03)', () => {
+    const asked = [{ lsd: 1, section: 1, township: 50, range: 1, meridian: 5 }];
+    const u = 0.001;
+    const at = (x: number, y: number) => [-114 + x * u, 53 + y * u];
+    // Corners (0,0), (4,0), (4,1), (1,1), (1,4), (0,4): their average, about (1.67, 1.67), is
+    // in the missing corner.
+    const l = [at(0, 0), at(4, 0), at(4, 1), at(1, 1), at(1, 4), at(0, 4), at(0, 0)];
+    const body = {
+      features: [
+        {
+          properties: { M: 5, RGE: 1, TWP: 50, SEC: 1, LS: 1 },
+          geometry: { type: 'Polygon', coordinates: [l] },
+        },
+      ],
+    };
+    const [placed] = pointsFromGrid(asked, body);
+    const point = placed?.point;
+    expect(point).not.toBeNull();
+    const x = ((point?.longitude ?? 0) + 114) / u;
+    const y = ((point?.latitude ?? 0) - 53) / u;
+    // Inside the L: in its bottom bar (y < 1) or its left bar (x < 1).
+    expect((x > 0 && x < 4 && y > 0 && y < 1) || (x > 0 && x < 1 && y > 0 && y < 4)).toBe(true);
+  });
+
+  it('never places a point in a hole', () => {
+    const asked = [{ lsd: 2, section: 1, township: 50, range: 1, meridian: 5 }];
+    const u = 0.001;
+    const at = (x: number, y: number) => [-114 + x * u, 53 + y * u];
+    const outer = [at(0, 0), at(4, 0), at(4, 4), at(0, 4), at(0, 0)];
+    const hole = [at(1, 1), at(3, 1), at(3, 3), at(1, 3), at(1, 1)];
+    const body = {
+      features: [
+        {
+          properties: { M: 5, RGE: 1, TWP: 50, SEC: 1, LS: 2 },
+          geometry: { type: 'Polygon', coordinates: [outer, hole] },
+        },
+      ],
+    };
+    const point = pointsFromGrid(asked, body)[0]?.point;
+    const x = ((point?.longitude ?? 0) + 114) / u;
+    const y = ((point?.latitude ?? 0) - 53) / u;
+    expect(point).not.toBeNull();
+    expect(x > 1 && x < 3 && y > 1 && y < 3).toBe(false);
+  });
 });
 
 describe('refreshAerLists', () => {

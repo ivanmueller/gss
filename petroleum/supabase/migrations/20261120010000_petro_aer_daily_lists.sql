@@ -12,8 +12,10 @@
 -- * an edition is each time an address is seen with a content other than its last one
 --   (A, B, then A again are three editions);
 -- * a reading is what one version of the Worker's reader made of a file: read, partial or
---   unreadable. A file is served by its best usable reading of any version, so a reader upgrade
---   or a failed re-reading never hides a list that was usable.
+--   unreadable. Only a list read whole (`read`: every record read) is ever served, by its
+--   highest-version such reading, so a reader upgrade or a failed re-reading never hides a list
+--   that was usable, and a list with any record the reader could not read never replaces one
+--   (F-243-1-R2-02). Partial and unreadable readings are kept for the record and the logs.
 -- Everything is append-only, except a township grid point not found, which may be asked again
 -- after a week.
 
@@ -252,18 +254,18 @@ create trigger ats_lsd_points_keep
 
 -- What is served (security invoker: row level security applies to whoever reads).
 --
--- Each file's usable reading: its highest-version `read` reading; without one, its
--- highest-version `partial` one. Unreadable readings are never usable (F-243-1-D2-03).
+-- Each file's usable reading: its highest-version `read` reading, every record read. Partial and
+-- unreadable readings are never usable (F-243-1-D2-03, F-243-1-R2-02).
 create view petro.aer_usable_reads with (security_invoker = true) as
   select distinct on (r.file_id)
          r.id, r.file_id, r.reader_version, r.status, r.list_date, r.rows_read, r.rows_skipped
   from petro.aer_list_reads r
-  where r.status in ('read', 'partial')
-  order by r.file_id, (r.status = 'read') desc, r.reader_version desc;
+  where r.status = 'read'
+  order by r.file_id, r.reader_version desc;
 
 -- For each report and list date, one reading: among the files with a usable reading for that
--- date, `read` before `partial`, then the file whose latest edition is newest. An unreadable or
--- unread file never displaces anything.
+-- date, the file whose latest edition is newest. A partial, unreadable or unread file never
+-- displaces anything.
 create view petro.aer_served_reads with (security_invoker = true) as
   select distinct on (f.report, u.list_date)
          u.id as read_id, u.file_id, f.report, u.list_date, u.status, e.seen_at
@@ -273,7 +275,7 @@ create view petro.aer_served_reads with (security_invoker = true) as
     select e.seen_at, e.id from petro.aer_list_editions e
     where e.file_id = u.file_id order by e.seen_at desc, e.id desc limit 1
   ) e on true
-  order by f.report, u.list_date, (u.status = 'read') desc, e.seen_at desc, e.id desc;
+  order by f.report, u.list_date, e.seen_at desc, e.id desc;
 
 -- Each licence once, from the served ST1 readings, its latest list date first: the licences
 -- route and the placing of rigs both read this, so they agree on a licence's location

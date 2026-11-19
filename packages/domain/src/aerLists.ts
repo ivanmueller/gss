@@ -289,8 +289,7 @@ export interface St49Activity {
 
 const ST49_PERIOD = /Notification Period\s+.+?\s+To\s+(\d{1,2}) ([A-Za-z]{3}) (\d{4})/;
 const ST49_TIME = /^(\d{1,2}) ([A-Za-z]{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) (AM|PM)$/;
-/** The separator under ST49's column header: runs of dashes, one per column. */
-const ST49_RULE = /^-{5,}(?: -+){10,}\s*$/;
+/** The columns of ST49's separator: one run of dashes per column. */
 const ST49_COLUMNS = 12;
 
 /** `15 Nov 2026 08:30:15 PM` as `2026-11-15T20:30:15`; null when not a real time. */
@@ -307,6 +306,14 @@ export function st49WallTime(text: string): string | null {
   return `${date}T${two(hour)}:${two(minute)}:${two(second)}`;
 }
 
+/**
+ * A separator line, whatever its number of columns: dashes and spaces only, starting with a dash
+ * and with at least two runs (checked by characters, not a nested pattern: linear on any input).
+ */
+function isRule(line: string): boolean {
+  const trimmed = line.trimEnd();
+  return trimmed.startsWith('-') && trimmed.includes(' -') && /^[- ]+$/.test(trimmed);
+}
 /** ST49's page header, repeated at the top of each page. */
 const ST49_PAGE = 'Report Number:';
 /** The report's last line. */
@@ -326,6 +333,9 @@ export function parseSt49(text: string): AerListRead<St49Activity> {
   let listDate: string | null = null;
   let columns: [number, number][] | null = null;
   let sawPage = false;
+  // A page header was seen and its separator not yet (F-243-1-R2-01).
+  let awaitingRule = false;
+  const unreadable = { listDate, structure: false, rows: [], skipped: 0 };
   const rows: St49Activity[] = [];
   let skipped = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -334,14 +344,19 @@ export function parseSt49(text: string): AerListRead<St49Activity> {
       const period = ST49_PERIOD.exec(line);
       if (period) listDate = aerDate(period[1] ?? '', period[2] ?? '', period[3] ?? '');
     }
-    if (ST49_RULE.test(line)) {
+    // Any separator line: every page's must have the 12 columns, so a page in another layout
+    // makes the whole file unreadable instead of being left out (F-243-1-R2-01).
+    if (isRule(line)) {
       columns = [...line.matchAll(/-+/g)].map((run) => [run.index, run.index + run[0].length]);
-      if (columns.length !== ST49_COLUMNS)
-        return { listDate, structure: false, rows: [], skipped: 0 };
+      if (columns.length !== ST49_COLUMNS) return { ...unreadable, listDate };
       sawPage = true;
+      awaitingRule = false;
       continue;
     }
     if (line.startsWith(ST49_PAGE)) {
+      // A page without a separator before the next page header: its rows cannot be read.
+      if (awaitingRule) return { ...unreadable, listDate };
+      awaitingRule = true;
       columns = null;
       continue;
     }
@@ -378,7 +393,7 @@ export function parseSt49(text: string): AerListRead<St49Activity> {
   }
   // A copy cut short, even between two pages, has no end line (F-243-1-R1-01).
   const ended = lines.some((line) => line.includes(ST49_END_LINE));
-  if (!sawPage || listDate === null || !ended) {
+  if (!sawPage || awaitingRule || listDate === null || !ended) {
     return { listDate, structure: false, rows: [], skipped: 0 };
   }
   return { listDate, structure: true, rows, skipped };
