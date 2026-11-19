@@ -307,6 +307,43 @@ describe('FullPageMap', () => {
     expect(await screen.findByText(`Drawn: ${LINES}`)).toBeInTheDocument();
   });
 
+  // F-247-2-R14-02: a layer in one colour with a limit ("Only where") keeps the limit when an
+  // admin edits something else about it.
+  it('keeps a one-colour layer’s limit when only its opening default is changed', async () => {
+    const limited: MapLayerView = {
+      ...pictures,
+      id: LINES,
+      name: 'Synthetic agreements',
+      kind: 'arcgis_features',
+      url: SERVICE,
+      mapVisible: false,
+      colourField: null,
+      onlyField: 'NET',
+      onlyValues: ['M'],
+    };
+    const calls = mockApi({
+      [LIST]: listOf(limited),
+      [`PATCH /petroleum/layers/${LINES}?${ORGANIZATION}`]: () => Response.json({ id: LINES }),
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    const settings = await screen.findByRole('dialog', { name: 'Map settings' });
+    await userEvent.click(await within(settings).findByRole('button', { name: 'Edit' }));
+    const form = await screen.findByRole('dialog', { name: 'Edit Synthetic agreements' });
+    await userEvent.click(within(form).getByRole('checkbox', { name: 'On when the map opens' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'PATCH')).toBe(true);
+    });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({
+      mapVisible: true,
+      colourField: null,
+      alsoFields: [],
+      onlyField: 'NET',
+      onlyValues: ['M'],
+    });
+  });
+
   // F-247-2-R3-02: both sit at the bottom left over the map; the legend makes way.
   it('hides the legend while a clicked shape’s details are open', async () => {
     const lines: MapLayerView = {
@@ -413,8 +450,9 @@ describe('FullPageMap', () => {
       expect(await screen.findByText('Asked again: 1')).toBeInTheDocument();
       expect(lists()).toBe(2);
 
-      // Still "not found" after asking again: the list is read once more, the map is not told
-      // to ask again, and nothing more follows.
+      // "Not found" again within the minute (a second suspension and return, or a layer that
+      // keeps answering so): the list is read once more, and the map is told to ask again when
+      // the minute ends, not at once and not never (F-247-2-R14-01).
       await user.click(screen.getByRole('button', { name: 'A picture is refused' }));
       await vi.advanceTimersByTimeAsync(10_000);
       await waitFor(() => {
@@ -423,6 +461,12 @@ describe('FullPageMap', () => {
       await vi.advanceTimersByTimeAsync(30_000);
       expect(lists()).toBe(3);
       expect(screen.getByText('Asked again: 1')).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(await screen.findByText('Asked again: 2')).toBeInTheDocument();
+      // And nothing more by itself after that.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(lists()).toBe(3);
+      expect(screen.getByText('Asked again: 2')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

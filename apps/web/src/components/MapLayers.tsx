@@ -73,8 +73,9 @@ export interface MapLayersState {
 const STALE_RELOAD_MS = 10_000;
 /**
  * After a refusal or a "not found", a list read well again has the map ask again for what it let
- * go, at most this often: a layer that is listed yet keeps answering "not found" is not asked
- * for in a circle.
+ * go, at most this often: a layer that is listed yet keeps answering "not found" is asked for
+ * once a minute at most, not in a tight circle. A request to ask again that comes sooner is
+ * kept and done when the minute ends (F-247-2-R14-01).
  */
 const ASK_AGAIN_MS = 60_000;
 
@@ -111,6 +112,7 @@ export function useMapLayers(
   const laterStale = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryAfter = useRef(false);
   const lastRetry = useRef(0);
+  const laterRetry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [retry, setRetry] = useState(0);
   const onStale = useCallback(
     (reason?: StaleReason) => {
@@ -138,19 +140,30 @@ export function useMapLayers(
   useEffect(
     () => () => {
       if (laterStale.current) clearTimeout(laterStale.current);
+      if (laterRetry.current) clearTimeout(laterRetry.current);
     },
     [],
   );
   const listRefused = list.status === 'error';
   // The list read well again after a refusal or a "not found" (access is back, perhaps with the
   // very same layers): what was let go is asked for again, the map standing still. At most once
-  // a minute, so a layer that is listed yet keeps answering "not found" ends there.
+  // a minute; a second time within the minute waits for its end, and is not lost.
   useEffect(() => {
     if (list.status !== 'ok' || !retryAfter.current) return;
     retryAfter.current = false;
-    if (Date.now() - lastRetry.current < ASK_AGAIN_MS) return;
-    lastRetry.current = Date.now();
-    setRetry((n) => n + 1);
+    const askAgain = () => {
+      lastRetry.current = Date.now();
+      setRetry((n) => n + 1);
+    };
+    const wait = lastRetry.current + ASK_AGAIN_MS - Date.now();
+    if (wait <= 0) {
+      askAgain();
+      return;
+    }
+    laterRetry.current ??= setTimeout(() => {
+      laterRetry.current = null;
+      askAgain();
+    }, wait);
   }, [list]);
   const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale, retry);
   const [picked, setPicked] = useState<PickedFeature | null>(null);

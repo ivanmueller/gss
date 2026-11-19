@@ -101,6 +101,15 @@ interface Shared {
 
 const NO_SHARED: Shared = { alsoFields: [], onlyField: null, onlyValues: [] };
 
+/**
+ * A layer's shared settings as they are saved. Fields that also count need the field it is
+ * coloured by; its limit ("Only where") does not: a layer in one colour keeps its limit when it
+ * is added, edited or changed to one colour (F-247-2-R14-02: editing such a layer cleared it).
+ */
+function sharedFor(colourField: string | null, shared: Shared): Shared {
+  return colourField === null ? { ...shared, alsoFields: [] } : shared;
+}
+
 /** The limit's values as typed ("M, I"), tidied. */
 function parseOnlyValues(text: string): string[] {
   return [
@@ -339,7 +348,7 @@ function EditMapLayerForm({
 
   function chooseField(value: string) {
     setColourField(value);
-    const settings = value === NO_FIELD ? NO_SHARED : shared;
+    const settings = sharedFor(value === NO_FIELD ? null : value, shared);
     setShared(settings);
     recount(value, settings);
   }
@@ -364,7 +373,7 @@ function EditMapLayerForm({
       colour: chosen === null ? colour : OTHER_VALUES_COLOUR,
       colourField: chosen,
       colours: chosen === null ? [] : colours,
-      ...(chosen === null ? NO_SHARED : shared),
+      ...sharedFor(chosen, shared),
       ...(api.adminDefault && { mapVisible: shownAtOpen }),
     })
       .then(async () => {
@@ -373,7 +382,7 @@ function EditMapLayerForm({
         const saved = {
           id: layer.id,
           colourField: chosen,
-          ...(chosen === null ? NO_SHARED : shared),
+          ...sharedFor(chosen, shared),
         };
         if (
           api.overviews &&
@@ -647,7 +656,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
   function chooseField(value: string) {
     setColourField(value);
     setColours([]);
-    const settings = value === NO_FIELD ? NO_SHARED : shared;
+    const settings = sharedFor(value === NO_FIELD ? null : value, shared);
     setShared(settings);
     if (value === NO_FIELD) return;
     if (source === 'web') void inspect(value, settings);
@@ -700,7 +709,7 @@ function AddMapLayerForm({ session, onAdded }: { session: DirectorySession; onAd
       colour: colourField === NO_FIELD ? colour : OTHER_VALUES_COLOUR,
       colourField: colourField === NO_FIELD ? null : colourField,
       colours: colourField === NO_FIELD ? [] : colours,
-      ...(colourField === NO_FIELD && shared.onlyField === null ? NO_SHARED : shared),
+      ...sharedFor(colourField === NO_FIELD ? null : colourField, shared),
       ...(api.adminDefault && { mapVisible: shownAtOpen }),
     };
     const body =
