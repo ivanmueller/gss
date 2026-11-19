@@ -226,12 +226,52 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     // One layer always loads, however many squares its view has.
     expect(layersLeftOut(LAYERS.slice(0, 1), 5000, VIEW.zoom).size).toBe(0);
     expect(layersLeftOut(LAYERS.slice(0, 2), 5000, VIEW.zoom)).toEqual(new Set([LAYERS[1]?.id]));
-    // A layer out of its zoom range, or not drawn by squares, takes no room.
+    // A layer out of its zoom range, or from a file (fetched whole, once), takes no room.
     const hidden = { ...base, id: 'hidden', minZoom: 12 };
-    const pictures = { ...base, id: 'pictures', kind: 'arcgis_image' as const };
-    expect(ids(layersLeftOut([hidden, pictures, ...LAYERS], SQUARES_PER_LAYER, VIEW.zoom))).toEqual(
+    const file = { ...base, id: 'file', kind: 'file' as const, url: null };
+    expect(ids(layersLeftOut([hidden, file, ...LAYERS], SQUARES_PER_LAYER, VIEW.zoom))).toEqual(
       LAYERS.slice(FIT),
     );
+    // A picture layer takes its squares like any other (F-247-2-R22-01).
+    const pictures = { ...base, id: 'pictures', kind: 'arcgis_image' as const };
+    expect(ids(layersLeftOut([pictures, ...LAYERS], SQUARES_PER_LAYER, VIEW.zoom))).toEqual(
+      LAYERS.slice(FIT - 1),
+    );
+  });
+
+  // F-247-2-R22-01: picture layers count toward what one view loads, from the moment the map
+  // opens: an admin can set a hundred on for everyone, and the map is handed only those there
+  // is room for; the others say so.
+  it('hands the map only the picture layers a view has room for', () => {
+    const many: MapLayerView[] = Array.from({ length: 100 }, (_, i) => ({
+      ...base,
+      id: `00000000-0000-4000-8000-1${String(i).padStart(11, '0')}`,
+      name: `Synthetic pictures ${String(i)}`,
+      kind: 'arcgis_image',
+    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('Nothing is fetched for picture layers here.'))),
+    );
+    // Before the map has said what is in view: 12 squares counted for each, so 50 of them.
+    const { result, rerender } = renderHook(
+      ({ view }: { view: typeof VIEW | null }) => useLayerOverlays(many, view, 'token'),
+      { initialProps: { view: null as typeof VIEW | null } },
+    );
+    expect(result.current.overlays.map((overlay) => overlay.id)).toEqual(
+      many.slice(0, 50).map((layer) => layer.id),
+    );
+    expect([...result.current.notes.keys()]).toEqual(many.slice(50).map((layer) => layer.id));
+
+    // With the view known: as many as its squares leave room for.
+    rerender({ view: VIEW });
+    expect(result.current.overlays.map((overlay) => overlay.id)).toEqual(
+      many.slice(0, FIT).map((layer) => layer.id),
+    );
+    for (const layer of many.slice(FIT)) {
+      expect(result.current.notes.get(layer.id)).toBe(TOO_MANY_LAYERS_NOTE);
+    }
+    expect(result.current.overlays.length * SQUARES_PER_LAYER).toBeLessThanOrEqual(600);
   });
 
   // F-247-2-R7-03: an admin removes a layer while a teammate has it open. Its squares at the new

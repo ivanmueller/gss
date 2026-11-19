@@ -323,25 +323,31 @@ const MAX_KEPT_SQUARES = 600;
 export const TOO_MANY_LAYERS_NOTE =
   'Too many layers are on to load this one here: zoom in, or switch some layers off.';
 
+/** The squares a layer is counted for before the map has said what is in view. */
+const SQUARES_BEFORE_VIEW = 12;
+
 /**
- * The live layers one view has no room left for, by id: in the list's order, each layer drawn
- * by squares at this zoom takes one square per map square in view, until the most kept is
- * reached. The first always fits (a view has far fewer squares than that). So what a view loads
- * and keeps is bounded whatever the number of layers switched on, and a layer left out says so
- * instead of showing holes (F-247-2-R3-01, R20-01).
+ * The live layers one view has no room left for, by id: in the list's order, each layer loaded
+ * by map square at this zoom (lines and areas by squares, pictures by picture squares) takes
+ * one square per map square in view, until the most kept is reached. The first always fits (a
+ * view has far fewer squares than that). So what a view loads is bounded whatever the number of
+ * layers switched on, pictures included, from the moment the map opens, and a layer left out
+ * says so instead of showing holes (F-247-2-R3-01, R20-01, R22-01). A layer from a file or
+ * drawn from its zoomed-out view is fetched whole, once, and takes no squares.
  */
 export function layersLeftOut(
   layers: readonly MapLayerView[],
   squaresInView: number,
   zoom: number | null,
 ): ReadonlySet<string> {
+  const perLayer = squaresInView > 0 ? squaresInView : SQUARES_BEFORE_VIEW;
   const leftOut = new Set<string>();
   let taken = 0;
   for (const layer of layers) {
-    if (layer.kind !== 'arcgis_features' || !shownAtZoom(layer, zoom)) continue;
-    if (usesOverview(layer, zoom)) continue;
-    if (taken > 0 && taken + squaresInView > MAX_KEPT_SQUARES) leftOut.add(layer.id);
-    else taken += squaresInView;
+    if (layer.kind === 'file' || !shownAtZoom(layer, zoom)) continue;
+    if (layer.kind === 'arcgis_features' && usesOverview(layer, zoom)) continue;
+    if (taken > 0 && taken + perLayer > MAX_KEPT_SQUARES) leftOut.add(layer.id);
+    else taken += perLayer;
   }
   return leftOut;
 }
@@ -961,6 +967,12 @@ export function useLayerOverlays(
     const notes = new Map<string, string>();
     for (const layer of layers) {
       if (layer.kind === 'arcgis_image' || layer.kind === 'arcgis_tiles' || layer.kind === 'wms') {
+        if (leftOut.has(layer.id)) {
+          // No room left in this view: the map is not handed it, so none of its pictures are
+          // asked for (F-247-2-R22-01).
+          notes.set(layer.id, TOO_MANY_LAYERS_NOTE);
+          continue;
+        }
         overlays.push({
           id: layer.id,
           kind: 'pictures',
