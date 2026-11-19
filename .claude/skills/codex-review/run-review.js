@@ -451,6 +451,11 @@ try {
         `\nESCALATE: ${escalation}. Stop the loop: record the findings, set the register's Status to escalated, and explain it to the owner in the pull request (docs/AI_WORKFLOW.md §11.5, step 7).`,
       );
       exitCode = 6;
+    } else if (review.verdict === 'approve' && mode !== 'design' && notFixed.length) {
+      // F-251-R5-01: an approval with a fix found not fixed is not the end of the loop.
+      console.log(
+        `\nCodex approved, but found ${notFixed.join(', ')} not fixed: set each back to confirmed and fix it; the loop is not over.`,
+      );
     } else if (review.verdict === 'approve' && mode !== 'design') {
       console.log(
         '\nCodex approved: stop the loop. Record the round, then run the evidence check (node scripts/review-gate.js) and let CI run.',

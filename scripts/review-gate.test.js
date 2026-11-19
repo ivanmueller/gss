@@ -1008,6 +1008,23 @@ describe('review evidence check', () => {
       const countedBlockers = evaluate({ base: onBase, head: counted }).blockers;
       assert.ok(countedBlockers.some((b) => /must approve, or raise only pre-existing/.test(b)));
       assert.ok(countedBlockers.some((b) => /did not approve/.test(b)));
+      // F-251-R5-01: the same when the final approves (a fix found not fixed beside it).
+      const approvedCounted = commit(
+        {
+          'docs/reviews/F-900.md': register({
+            reviews: strong('approve', [pre]).map((r) =>
+              r.mode === 'final' ? { ...r, findings: 1 } : r,
+            ),
+            findings: [pre],
+          }),
+        },
+        'register: an approving final with an issue no row accounts for',
+      );
+      assert.ok(
+        evaluate({ base: onBase, head: approvedCounted }).blockers.some((b) =>
+          /counts more issues than its rows/.test(b),
+        ),
+      );
       const p3 = {
         id: 'F-900-R1-02',
         sev: 'P3',

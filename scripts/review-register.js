@@ -300,14 +300,23 @@ export function registerBlockers(register, { ownerApproved = false } = {}) {
   // P3 or pre-existing findings (F-251). A P1 or P2 Claude rejected in that round is a
   // disagreement for the owner.
   const last = code.at(-1);
+  // With pre-existing findings in the last round, whatever its verdict, its issue count (which
+  // leaves them out) must be the round's other findings: a higher count is an issue no row
+  // accounts for, such as a fix found not fixed (F-251-R2-01, R5-01).
+  const lastRaised = last
+    ? register.findings.filter((f) => new RegExp(`-R${last.round}-\\d+$`).test(f.id))
+    : [];
+  const lastOwn = lastRaised.filter((f) => f.status !== 'pre-existing').length;
+  const unaccounted =
+    lastOwn < lastRaised.length && Number.parseInt(last?.findings ?? '', 10) !== lastOwn;
+  if (last && last.result === 'approve' && unaccounted)
+    blockers.push(
+      `The last code review (round ${last.round}) counts more issues than its rows other than pre-existing ones: record every issue it found (a fix found not fixed goes back to confirmed).`,
+    );
   if (last && last.result !== 'approve') {
-    const raised = register.findings.filter((f) => new RegExp(`-R${last.round}-\\d+$`).test(f.id));
+    const raised = lastRaised;
     // A P1 or P2 raised again as a duplicate is also a disagreement, not a pass.
     const serious = raised.filter((f) => f.severity !== 'P3' && f.status !== 'pre-existing');
-    // With pre-existing findings in the round, its issue count (which leaves them out) must be
-    // the round's other findings: a higher count is an issue no row accounts for (F-251-R2-01).
-    const own = raised.filter((f) => f.status !== 'pre-existing').length;
-    const unaccounted = own < raised.length && Number.parseInt(last.findings ?? '', 10) !== own;
     if (raised.length === 0 || serious.length > 0 || unaccounted)
       blockers.push(
         `The last code review (round ${last.round}) did not approve` +

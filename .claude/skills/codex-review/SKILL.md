@@ -66,8 +66,10 @@ For each confirmed finding: write or keep the failing test, fix the code, run th
 
 ## 6. When to stop
 
+- **First triage and record the round** (step 3), whatever comes next.
 - **Codex approves** (the runner says "Codex approved: stop the loop"): stop. Record the round and go to step 7.
-- **Limit** (the runner enforces it, exit code 3; the owner's rule of 2026-11-19, F-251): rounds 1 to 5 run; beyond 5 only with the owner's approval. If round 5 has not approved, stop and bring the owner, in plain words, the cause and the options (fix with a cap on rounds, split the pull request, or the owner merges); never "one more round". Record each round's "Issues this round" in the Reviews table's Findings column.
+- **Only pre-existing findings** (F-251): a review whose every finding is recorded pre-existing and whose issue count is 0 also ends the loop: add their tracker rows and go to step 7; the evidence check accepts it, in round 5 too.
+- **Limit** (the runner enforces it, exit code 3; the owner's rule of 2026-11-19, F-251): rounds 1 to 5 run; beyond 5 only with the owner's approval. If round 5 leaves findings that block (confirmed, requires-decision, or a final that neither approves nor raised only pre-existing findings), stop and bring the owner, in plain words, the cause and the options (fix with a cap on rounds, split the pull request, or the owner merges); never "one more round". Record each round's "Issues this round" in the Reviews table's Findings column.
 - **High risk and governance, the final within 5:** when round 4 or 5 is next and fixes are waiting to be verified, run it as `--mode final` (it verifies them too); never spend round 5 on a re-review.
 - **Escalation** (exit code 6, "ESCALATE: …"): the same fix was found not fixed two rounds running without the issue count falling, or Codex raised again a P1 or P2 you rejected or accepted. Also escalate yourself when you would reject a P1 or P2 in what should be the last round: that is a significant disagreement, never a pass.
 
@@ -75,7 +77,7 @@ To stop for the owner: record the round's findings, set the register's Status to
 
 ## 7. Finish
 
-1. The last code review must have reviewed the final code and approved (or raised only P3 or pre-existing findings; high risk and governance: only pre-existing ones): after its commit only `docs/reviews/` and the tracker (`docs/FEATURES.md`, `docs/FEATURES_OIL_GAS.md`) may change. For a pull request into a branch other than `main`, pass `--target <that branch>` to every review. If code changed since, run a re-review. **High risk and governance:** the last code review must be a final review of the whole pull request, `run-review.js --id <ID> --mode final` (background), after the loop has settled; it counts as a round. Triage its findings like any other; if it raises a P1 or P2, fix, re-review, and run the final review again (within the round limits).
+1. The last code review must have reviewed the final code and approved (or raised only P3 or pre-existing findings; high risk and governance: only pre-existing ones): after its commit only `docs/reviews/` and the tracker (`docs/FEATURES.md`, `docs/FEATURES_OIL_GAS.md`) may change. For a pull request into a branch other than `main`, pass `--target <that branch>` to every review. If code changed since, run a re-review. **High risk and governance:** the last code review must be a final review of the whole pull request, `run-review.js --id <ID> --mode final` (background), after the loop has settled; it counts as a round. Triage its findings like any other; pre-existing ones go to the tracker; if it raises a P1 or P2 that is not pre-existing, fix and run the final review again (within the round limits).
 2. Set Status to **complete** (or **escalated**), commit the register.
 3. Run `node scripts/review-gate.js --base origin/main --head HEAD` and fix whatever it lists.
 4. Push and open the pull request, ready for review (template sections filled, the register linked, rounds and any escalation stated).
