@@ -5,13 +5,24 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public;
 
-select plan(66);
+select plan(69);
 
 -- Privileges.
 select ok(
   has_table_privilege('petro_api', 'petro.map_layers', 'select')
-  and has_table_privilege('petro_api', 'petro.map_layers', 'insert'),
+  and has_column_privilege('petro_api', 'petro.map_layers', 'name', 'insert')
+  and has_column_privilege('petro_api', 'petro.map_layers', 'created_by', 'insert'),
   'petro_api reads and adds map layers'
+);
+-- F-247-2-R3-03: a layer's id, times and removal are the database's to set when it is added.
+select ok(
+  not has_table_privilege('petro_api', 'petro.map_layers', 'insert')
+  and not has_column_privilege('petro_api', 'petro.map_layers', 'id', 'insert')
+  and not has_column_privilege('petro_api', 'petro.map_layers', 'created_at', 'insert')
+  and not has_column_privilege('petro_api', 'petro.map_layers', 'updated_at', 'insert')
+  and not has_column_privilege('petro_api', 'petro.map_layers', 'removed_at', 'insert')
+  and not has_column_privilege('petro_api', 'petro.map_layers', 'removed_by', 'insert'),
+  'petro_api cannot supply a new layer''s id, times or removal'
 );
 select ok(
   not has_table_privilege('petro_api', 'petro.map_layers', 'delete')
@@ -140,6 +151,17 @@ select throws_ok(
 select throws_ok(
   format('select pg_temp.as_petro(%L)', pg_temp.adding(:'org_b', :'user_a', 'Elsewhere')),
   '42501', null, 'an admin adds no layer to another organization'
+);
+
+select throws_ok(
+  $$select pg_temp.as_petro('insert into petro.map_layers (organization_id, name, kind,
+      source_url, source_name, terms_url, terms_note, colour, created_by, updated_by, updated_at)
+    values (''00000000-0000-4000-8000-0000000000b1'', ''Its own version'', ''arcgis_features'',
+      ''https://services.example.com/rest/services/Land/MapServer/8'', ''Synthetic publisher'',
+      ''https://example.com/terms'', ''Open licence.'', ''#2f6baa'',
+      ''00000000-0000-4000-8000-0000000000a1'', ''00000000-0000-4000-8000-0000000000a1'',
+      ''infinity'') returning id::text')$$,
+  '42501', null, 'an admin cannot supply a new layer''s version (F-247-2-R3-03)'
 );
 
 -- Every member reads; only admins write.
@@ -342,6 +364,8 @@ select throws_ok(pg_temp.row_with('only_values', 'array[''M'']'), '23514', null,
   'values to keep need their field');
 select throws_ok(pg_temp.row_with('removed_at', 'now()'), '23514', null,
   'a removal names who removed it');
+select throws_ok(pg_temp.row_with('updated_at', '''infinity'''), '23514', null,
+  'a version is a real time (F-247-2-R3-03)');
 
 -- The ceiling: 200 layers not removed per organization.
 insert into petro.map_layers (organization_id, name, kind, source_url, source_name, terms_url,

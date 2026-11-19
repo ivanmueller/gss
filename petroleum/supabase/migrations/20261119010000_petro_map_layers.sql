@@ -146,7 +146,9 @@ create table petro.map_layers (
     and (tile_min_level is null or tile_min_level <= tile_max_level)
     and (tile_min_level is null) = (tile_max_level is null)
   ),
-  check ((removed_at is null) = (removed_by is null))
+  check ((removed_at is null) = (removed_by is null)),
+  -- The version the API compares is a real time, always (F-247-2-R3-03).
+  check (isfinite(created_at) and isfinite(updated_at))
 );
 
 create index map_layers_organization_idx on petro.map_layers (organization_id, created_at)
@@ -285,7 +287,14 @@ create policy map_layers_update_for_admins on petro.map_layers
 -- deleted, and the history is out of its reach.
 revoke all on petro.map_layers, petro.map_layer_history
   from public, anon, authenticated, service_role, petro_api;
-grant select, insert on petro.map_layers to petro_api;
+grant select on petro.map_layers to petro_api;
+-- Only what the Worker writes: a layer's id, its times (its version among them) and its removal
+-- are the database's to set, never the caller's (F-247-2-R3-03).
+grant insert (organization_id, name, kind, source_url, id_field, source_name, terms_url,
+  terms_note, colour, colour_field, colours, also_fields, only_field, only_values, line_width,
+  opacity, min_zoom, max_zoom, definition_expression, others_shown, shown_by_default,
+  tile_min_level, tile_max_level, created_by, updated_by)
+  on petro.map_layers to petro_api;
 grant update (name, source_name, terms_url, terms_note, colour, colour_field, colours,
   also_fields, only_field, only_values, shown_by_default, updated_by, removed_at, removed_by)
   on petro.map_layers to petro_api;

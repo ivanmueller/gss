@@ -18,20 +18,33 @@ vi.mock('./FacilityMap', () => ({
       <button type="button" onClick={props.onTokenRefused}>
         Refuse the token
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          props.onOverlayClick?.({ layerId: LINES_ID, properties: { STATUS: 'Active' } })
+        }
+      >
+        Click a shape
+      </button>
     </div>
   ),
 }));
 
+const LINES_ID = '00000000-0000-4000-8000-0000000a1a02';
+
 // A zoomed-out view is never prepared on the oil and gas side: the test fails if it is tried.
 const prepare = vi.hoisted(() => vi.fn());
 vi.mock('../lib/mapOverview', () => ({ prepareOverview: prepare }));
+
+// The Settings tests type whole addresses into forms: slow when the whole suite runs at once.
+vi.setConfig({ testTimeout: 20_000 });
 
 const MAPBOX = { status: 'ok', token: 'pk.synthetic' } as const;
 const ORGANIZATION = `organization_id=${ORG.id}`;
 const LIST = `GET /petroleum/layers?${ORGANIZATION}`;
 const SERVICE = 'https://services.example.com/rest/services/Land/MapServer/8';
 const PICTURES = '00000000-0000-4000-8000-0000000a1a01';
-const LINES = '00000000-0000-4000-8000-0000000a1a02';
+const LINES = LINES_ID;
 
 /** Every layer, address and value is synthetic. */
 const pictures: MapLayerView = {
@@ -279,6 +292,27 @@ describe('FullPageMap', () => {
     expect(await within(settings).findByText(/On when the map opens\./)).toBeInTheDocument();
     // Nobody switched it this visit, so the map follows the new default at once.
     expect(await screen.findByText(`Drawn: ${LINES}`)).toBeInTheDocument();
+  });
+
+  // F-247-2-R3-02: both sit at the bottom left over the map; the legend makes way.
+  it('hides the legend while a clicked shape’s details are open', async () => {
+    const lines: MapLayerView = {
+      ...pictures,
+      id: LINES,
+      name: 'Synthetic agreements',
+      kind: 'arcgis_features',
+      url: SERVICE,
+      colourField: 'STATUS',
+      colours: [['Active', '#e6194b']],
+    };
+    mockApi({ [LIST]: listOf(lines) });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    expect(await screen.findByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Click a shape' }));
+    const close = await screen.findByRole('button', { name: 'Close details' });
+    expect(screen.queryByRole('list', { name: 'Map layers shown' })).not.toBeInTheDocument();
+    await userEvent.click(close);
+    expect(await screen.findByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
   });
 
   it('starts on the provinces where oil and gas is produced, coast to coast', () => {

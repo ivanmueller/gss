@@ -134,9 +134,13 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       {/* Below the zoom buttons, top right (F-139). */}
       <MapLayersPanel state={layers} side="right" />
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />
-      <div className="absolute bottom-8 left-3 z-10 max-w-[calc(100%-1.5rem)]">
-        <MapLayersLegend state={layers} />
-      </div>
+      {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's
+          details, so it never covers their fields or their close button (F-247-2-R3-02). */}
+      {layers.picked === null && (
+        <div className="absolute bottom-8 left-3 z-10 max-w-[calc(100%-1.5rem)]">
+          <MapLayersLegend state={layers} />
+        </div>
+      )}
     </div>
   );
 }

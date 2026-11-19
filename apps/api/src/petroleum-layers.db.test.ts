@@ -238,6 +238,65 @@ describe('oil and gas map layers as petro_api', () => {
     expect(await db.removeLayer(admin, id, version)).toEqual({ status: 'not_found' });
   });
 
+  // F-247-2-R3-04: two requests that both read the same version before either writes. On two
+  // connections: the first holds its change uncommitted; the second passes the version read,
+  // waits on the row, and once the first commits its own update must find the version changed.
+  it('refuses the second of two changes that both saw the same version', async () => {
+    const admin = member('org_admin');
+    const id = await added(admin);
+    const version = (await db.listLayers(admin))[0]?.version ?? '';
+    const firstSql = postgres(PETRO_URL, connectionOptions(PETRO_URL));
+    const secondSql = postgres(PETRO_URL, connectionOptions(PETRO_URL));
+    const second = createPetroleumDatabase(secondSql);
+    try {
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let changed: () => void = () => undefined;
+      const firstChanged = new Promise<void>((resolve) => {
+        changed = resolve;
+      });
+      const first = firstSql.begin(async (tx) => {
+        await tx`select set_config('petro.user_id', ${admin.userId}, true),
+                        set_config('petro.organization_id', ${admin.organizationId}, true),
+                        set_config('petro.member_role', 'org_admin', true)`;
+        const updated = await tx`
+          update petro.map_layers set name = 'First', updated_by = petro.current_user_id()
+          where id = ${id} and updated_at::text = ${version} and removed_at is null`;
+        changed();
+        await held;
+        return updated.count;
+      });
+      await firstChanged;
+      const other = second.updateLayer(
+        member('org_admin', admin.organizationId),
+        id,
+        version,
+        layer({ name: 'Second' }),
+      );
+      // The second is waiting on the row the first changed: only then does the first commit.
+      await expect
+        .poll(
+          async () =>
+            (
+              await sql<{ n: number }[]>`select count(*)::int as n from pg_locks where not granted`
+            )[0]?.n ?? 0,
+          { timeout: 5_000 },
+        )
+        .toBeGreaterThan(0);
+      release();
+      expect(await first).toBe(1);
+      expect(await other).toEqual({ status: 'stale' });
+      const [now] = await db.listLayers(admin);
+      expect(now?.name).toBe('First');
+      expect(now?.version).not.toBe(version);
+    } finally {
+      await firstSql.end({ timeout: 5 });
+      await second.close();
+    }
+  });
+
   it('gives two people at once one winner', async () => {
     const admin = member('org_admin');
     const id = await added(admin);

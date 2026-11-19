@@ -659,6 +659,8 @@ export function useLayerOverlays(
   );
   const [squares, setSquares] = useState<Map<string, Square>>(() => new Map());
   const asked = useRef(new Set<string>());
+  /** The squares the map is showing now: never dropped to make room (F-247-2-R3-01). */
+  const inView = useRef<ReadonlySet<string>>(new Set());
   const api = useLayerApi();
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
@@ -685,6 +687,13 @@ export function useLayerOverlays(
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
     };
+    const showing = new Set<string>();
+    for (const layer of layers) {
+      if (layer.kind !== 'arcgis_features' || !shownAtZoom(layer, zoom)) continue;
+      if (usesOverview(layer, zoom)) continue;
+      for (const tile of tiles) showing.add(squareKey(layer, tile));
+    }
+    inView.current = showing;
     for (const layer of layers) {
       // Nothing is fetched for a layer out of its zoom range (F-138).
       if (!shownAtZoom(layer, zoom)) continue;
@@ -716,12 +725,17 @@ export function useLayerOverlays(
               const collection = asCollection(body);
               setSquares((current) => {
                 const next = new Map(current).set(key, collection ?? 'failed');
-                // Keeps memory in check: the oldest squares go first.
-                while (next.size > MAX_KEPT_SQUARES) {
-                  const oldest = next.keys().next().value;
-                  if (oldest === undefined) break;
-                  next.delete(oldest);
-                  asked.current.delete(oldest);
+                // Keeps memory in check: the oldest squares go first, but never one the map is
+                // showing now. With many layers on, a view can need more squares than are kept
+                // from earlier views; dropping one of those left a hole that nothing asked for
+                // again while the map stood still (F-247-2-R3-01).
+                if (next.size > MAX_KEPT_SQUARES) {
+                  for (const old of next.keys()) {
+                    if (next.size <= MAX_KEPT_SQUARES) break;
+                    if (inView.current.has(old)) continue;
+                    next.delete(old);
+                    asked.current.delete(old);
+                  }
                 }
                 return next;
               });
