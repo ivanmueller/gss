@@ -235,14 +235,15 @@ export function evaluate({ base, head, labels = [] }) {
     const place = whereLines(finding.where);
     if (!place || !finding.commit || !known(finding.commit)) continue; // reported by the register
     const commit = git(['rev-parse', `${finding.commit}^{commit}`]);
-    const findingBase = git(['merge-base', base, commit]);
+    // Against the pull request's current merge base (F-251-R1-01): if the base branch has since
+    // changed those lines (a fix, say) and the pull request keeps the old ones, they now differ.
     let onBase = true;
     try {
-      git(['cat-file', '-e', `${findingBase}:${place.path}`]);
+      git(['cat-file', '-e', `${mergeBase}:${place.path}`]);
     } catch {
       onBase = false;
     }
-    const prChanges = onBase ? changedRanges(findingBase, commit, place.path, 'new') : null;
+    const prChanges = onBase ? changedRanges(mergeBase, commit, place.path, 'new') : null;
     if (!prChanges)
       result.blockers.push(
         `Finding ${finding.id} is pre-existing but ${place.path} is not on the base branch as the same file: it cannot be pre-existing.`,
@@ -251,8 +252,10 @@ export function evaluate({ base, head, labels = [] }) {
       result.blockers.push(
         `Finding ${finding.id} is pre-existing but ${finding.where} is in lines this pull request changed: fix it here.`,
       );
-    if (last && known(last.reviewed) && isAncestor(commit, last.reviewed)) {
-      const since = changedRanges(commit, last.reviewed, place.path, 'old');
+    // Up to the head, so that a tracker edit after the last review cannot change them either
+    // (F-251-R1-02).
+    if (isAncestor(commit, head)) {
+      const since = changedRanges(commit, head, place.path, 'old');
       if (!since || overlaps(since, place))
         result.blockers.push(
           `Finding ${finding.id} is pre-existing but ${finding.where} was edited after round ${finding.round}: triage it again.`,

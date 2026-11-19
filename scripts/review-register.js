@@ -348,6 +348,13 @@ export function registerBlockers(register, { ownerApproved = false } = {}) {
  */
 export function preExistingProblems(register, finding) {
   const problems = [];
+  // The round in its ID (`…-R2-01`) must be its Round cell: the final-review check reads the ID,
+  // this one the cell (F-251-R1-03).
+  const fromId = /-R(\d+)-\d+$/.exec(finding.id ?? '')?.[1];
+  if (fromId !== finding.round)
+    problems.push(
+      `Finding ${finding.id} is pre-existing but its ID does not name its code review round "${finding.round}" (…-R${finding.round}-<n>).`,
+    );
   const review = register.reviews.find(
     (r) => r.round === finding.round && r.mode !== 'design' && r.result !== 'failed',
   );

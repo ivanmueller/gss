@@ -672,6 +672,56 @@ describe('review evidence check', () => {
       assert.ok(blockers(onBase, head).some((b) => /in lines this pull request changed/.test(b)));
     });
 
+    // F-251-R1-01: the base branch fixed the line since; the pull request, updated from it, keeps
+    // the old line.
+    test('a line the base branch has since fixed and the pull request keeps: blocks', () => {
+      const { onBase, c1 } = setup('pre-upstream');
+      git('switch', '-q', 'pre-upstream-base');
+      const fixed = commit(
+        { 'apps/web/src/lib.ts': `${edit(10, 'export const l10 = 10; // fixed')}\n` },
+        'fix on base',
+      );
+      git('switch', '-q', 'pre-upstream');
+      git('merge', '-q', '-s', 'ours', '-m', 'update from base, keeping ours', fixed);
+      const head = commit(
+        {
+          ...tracked,
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1)],
+          }),
+        },
+        'register',
+      );
+      assert.ok(blockers(fixed, head).some((b) => /in lines this pull request changed/.test(b)));
+    });
+
+    // F-251-R1-02: the tracker may change after the last review, but not the lines a pre-existing
+    // finding in it cites.
+    test('a cited tracker line changed after the last review: blocks', () => {
+      git('switch', '-q', 'main');
+      branch('pre-trackerline-base');
+      const features = `${Array.from({ length: 5 }, (_, i) => `line ${i + 1}`).join('\n')}\n`;
+      const onBase = commit(
+        { 'docs/FEATURES.md': features, 'apps/web/src/lib.ts': `${lib}\n` },
+        'base',
+      );
+      git('switch', '-q', '-c', 'pre-trackerline', onBase);
+      const c1 = commit({ 'apps/web/src/lib.ts': `${edit(3, 'export const l3 = 33;')}\n` }, 'c1');
+      const head = commit(
+        {
+          'docs/FEATURES.md':
+            features.replace('line 2', 'line 2 changed') + 'F-900-R1-01 tracked\n',
+          'docs/reviews/F-900.md': register({
+            reviews: reviews(onBase, c1),
+            findings: [finding(c1, { where: 'docs/FEATURES.md:2' })],
+          }),
+        },
+        'tracker row and an edit of the cited line',
+      );
+      assert.ok(blockers(onBase, head).some((b) => /was edited after round 1/.test(b)));
+    });
+
     test('in a file the pull request added: blocks', () => {
       const { onBase, c1 } = setup('pre-newfile');
       const c2 = commit({ 'apps/web/src/new.ts': `${lib}\n` }, 'new file');
@@ -730,6 +780,8 @@ describe('review evidence check', () => {
         [{ round: 'D1' }, /is not a completed code review/],
         [{ where: 'PLAN' }, /is not one place in a file/],
         [{ where: 'apps/web/src/lib.ts' }, /is not one place in a file/],
+        // F-251-R1-03: a design finding's ID with a code round in its Round cell.
+        [{ id: 'F-900-D1-01' }, /does not name its code review round "1"/],
       ];
       for (const [extra, expected] of cases) {
         const head = commit(
