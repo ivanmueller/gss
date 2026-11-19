@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapRequestRefusal, PictureSignIns } from './mapLayers';
+import { layerPictureStale, mapRequestRefusal, PictureSignIns } from './mapLayers';
 
 // Mapbox GL JS reports a failed request as an error with its status and address (AJAXError).
 const failed = (status: number, url: string) => ({ status, url, message: 'failed' });
 const PICTURES = `${window.location.origin}/api/v1/map-layers/00000000-0000-4000-8000-0000000000a1/tiles/5/8/11.png`;
 const OTHER_PICTURE = PICTURES.replace('5/8/11', '5/9/11');
 const MAPBOX_STYLE = 'https://api.mapbox.com/styles/v1/mapbox/light-v11?access_token=pk.synthetic';
+
+// F-247-2-R9-02: a layer's picture answered "not a member" or "no such layer" has the list of
+// layers read again; a lapsed sign-in (401) is renewed instead, and Mapbox's own failures are not
+// about layers.
+describe('layerPictureStale', () => {
+  it('is a layer picture refused for good, or of a layer no longer there', () => {
+    expect(layerPictureStale(failed(404, PICTURES))).toBe(true);
+    expect(layerPictureStale(failed(403, PICTURES))).toBe(true);
+    expect(layerPictureStale(failed(401, PICTURES))).toBe(false);
+    expect(layerPictureStale(failed(502, PICTURES))).toBe(false);
+    expect(layerPictureStale(failed(404, MAPBOX_STYLE))).toBe(false);
+    expect(layerPictureStale({ status: 404 })).toBe(false);
+    expect(layerPictureStale(null)).toBe(false);
+  });
+});
 
 describe('mapRequestRefusal', () => {
   it('hides the map only when Mapbox refuses its own token', () => {

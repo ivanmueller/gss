@@ -337,6 +337,18 @@ export function mapRequestRefusal(error: unknown): 'mapbox-token' | 'sign-in' | 
   return typeof url === 'string' && isLayerPictureUrl(url) ? 'sign-in' : 'mapbox-token';
 }
 
+/**
+ * Whether a failed map request says a layer's pictures are no longer this person's to see: the
+ * Worker answered "not a member" (403) or "no such layer" (404) for a layer's picture. The list of
+ * layers is then read again (F-247-2-R9-02). A lapsed sign-in (401) is renewed, not this.
+ */
+export function layerPictureStale(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const status: unknown = 'status' in error ? error.status : undefined;
+  const url: unknown = 'url' in error ? error.url : undefined;
+  return (status === 403 || status === 404) && typeof url === 'string' && isLayerPictureUrl(url);
+}
+
 /** The most picture addresses whose sign-in is remembered (a map asks for a few hundred). */
 const MAX_SENT_PICTURES = 1000;
 
@@ -653,6 +665,11 @@ export function useLayerOverlays(
   view: MapView | null,
   token: string,
   choices: Readonly<Record<string, ValueChoice>> = {},
+  /**
+   * Called when the server refuses a layer's data or no longer has the layer: the list of layers
+   * is then read again, and only what it holds is drawn (F-247-2-R9-01).
+   */
+  onStale?: () => void,
 ): { overlays: MapOverlay[]; notes: Map<string, string> } {
   const [files, setFiles] = useState<Map<string, GeoJSON.FeatureCollection | 'failed'>>(
     () => new Map(),
@@ -661,8 +678,6 @@ export function useLayerOverlays(
   const asked = useRef(new Set<string>());
   /** The squares the map is showing now: never dropped to make room (F-247-2-R3-01). */
   const inView = useRef<ReadonlySet<string>>(new Set());
-  /** Layers the server answered 404 for: removed. Nothing more of them is kept (F-247-2-R8-01). */
-  const gone = useRef(new Set<string>());
   /** The sign-in now, and a count bumped to ask again for what failed under an older one. */
   const tokenNow = useRef(token);
   const [renewed, setRenewed] = useState(0);
@@ -675,9 +690,12 @@ export function useLayerOverlays(
   const eras = useRef(new Map<string, number>());
   const api = useLayerApi();
 
+  const stale = useRef(onStale);
+
   useEffect(() => {
     tokenNow.current = token;
-  }, [token]);
+    stale.current = onStale;
+  }, [token, onStale]);
 
   const tiles = useMemo(() => (view ? tilesForView(view.bbox, view.zoom) : []), [view]);
   const zoom = view?.zoom ?? null;
@@ -711,6 +729,8 @@ export function useLayerOverlays(
     /** Signed out or no longer a member, under the sign-in as it is now. */
     const refused = (error: unknown) =>
       error instanceof ApiError && (error.status === 401 || error.status === 403);
+    /** The server no longer has the layer (removed, or no longer this person's to see). */
+    const missing = (error: unknown) => error instanceof ApiError && error.status === 404;
     const nowOn = new Set(layers.map((layer) => layer.id));
     letGo([...wasOn.current].filter((id) => !nowOn.has(id)));
     wasOn.current = nowOn;
@@ -724,7 +744,7 @@ export function useLayerOverlays(
       apiFetch(path, token)
         .then((res) => res.json())
         .then((body: unknown) => {
-          if (era !== eraOf(layerId) || gone.current.has(layerId)) return;
+          if (era !== eraOf(layerId)) return;
           const collection = asCollection(body);
           // Numbered afresh: a view sent in parts repeats its parts' numbers, and the map tells
           // lines apart by them.
@@ -742,6 +762,8 @@ export function useLayerOverlays(
             return;
           }
           if (refused(error)) letGo([...wasOn.current]);
+          else if (missing(error)) letGo([layerId]);
+          if (refused(error) || missing(error)) stale.current?.();
           setFiles((current) => new Map(current).set(id, 'failed'));
         });
     };
@@ -804,7 +826,7 @@ export function useLayerOverlays(
             .then((body: unknown) => {
               // Asked for before the layer was switched off, removed or refused: not kept
               // (F-247-2-R5-02, R8-01).
-              if (era !== eraOf(layer.id) || gone.current.has(layer.id)) return;
+              if (era !== eraOf(layer.id)) return;
               const collection = asCollection(body);
               setSquares((current) => trimmed(new Map(current).set(key, collection ?? 'failed')));
             })
@@ -822,13 +844,16 @@ export function useLayerOverlays(
                 // Nothing kept in the page is drawn again, of any layer, from this zoom or
                 // another (F-247-2-R5-02).
                 letGo([...wasOn.current]);
-              } else if (error instanceof ApiError && error.status === 404) {
+              } else if (missing(error)) {
                 // The layer was removed: nothing kept of it is drawn in its place, from this zoom
-                // or another, nor its zoomed-out view (F-247-2-R7-03). A passing failure keeps
-                // the filling in from other zooms.
-                gone.current.add(layer.id);
+                // or another, nor its zoomed-out view, and answers sent before are not kept
+                // (F-247-2-R7-03, R8-01). A passing failure keeps the filling in from other
+                // zooms. If the layer is there again later (a member suspended, then restored),
+                // it is asked for and drawn as any other (F-247-2-R9-01).
                 letGo([layer.id]);
               }
+              // Either way the list of layers is read again: it says what is still there.
+              if (refused(error) || missing(error)) stale.current?.();
               setSquares((current) => trimmed(new Map(current).set(key, 'failed')));
             });
         }

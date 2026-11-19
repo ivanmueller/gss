@@ -94,6 +94,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           authToken={session.token}
           onViewChange={layers.onViewChange}
           onOverlayClick={layers.setPicked}
+          onLayersStale={layers.onStale}
           onTokenRefused={() => {
             setRefused(true);
           }}

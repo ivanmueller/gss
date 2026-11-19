@@ -135,6 +135,7 @@ export function CounterpartyMap({
                 authToken={token}
                 onViewChange={layers.onViewChange}
                 onOverlayClick={layers.setPicked}
+                onLayersStale={layers.onStale}
                 onTokenRefused={() => {
                   setRefused(true);
                 }}

@@ -1,8 +1,8 @@
 import type { LayerLegend, MapLayerList, MapLayerView } from '@grain/domain';
 import { ChevronDown, ChevronRight, Layers, Search, X } from 'lucide-react';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import { apiJson } from '../lib/api';
+import { ApiError, apiJson } from '../lib/api';
 import { useLayerApi } from '../lib/layerApi';
 import {
   ALL_VALUES,
@@ -55,7 +55,16 @@ export interface MapLayersState {
   error: string | null;
   /** Reads the list again, after an admin changed it elsewhere on the page (F-247-2-D1-03). */
   reload?: () => void;
+  /**
+   * The server refused a layer's data or no longer has the layer (a square, a picture, a
+   * shape's details): the list is read again, at most once every few seconds, and the map draws
+   * only what it holds (F-247-2-R9-01, R9-02).
+   */
+  onStale?: () => void;
 }
+
+/** The list of layers is read again at most this often on the server's refusals. */
+const STALE_RELOAD_MS = 10_000;
 
 /** The organization's map layers, the ones this person has on, and their features in view. */
 export function useMapLayers(
@@ -78,8 +87,20 @@ export function useMapLayers(
   const on = useMemo(() => layers.filter((layer) => chosen.has(layer.id)), [layers, chosen]);
   const [values, setValues] = useValueChoices(token, !api.adminDefault);
   const [view, setView] = useState<MapView | null>(null);
-  const { overlays, notes } = useLayerOverlays(on, view, token, values);
+  const lastStale = useRef(0);
+  const onStale = useCallback(() => {
+    // Not on every refused square of one view: once, then again only after a while.
+    const now = Date.now();
+    if (now - lastStale.current < STALE_RELOAD_MS) return;
+    lastStale.current = now;
+    reload();
+  }, [reload]);
+  const { overlays, notes } = useLayerOverlays(on, view, token, values, onStale);
   const [picked, setPicked] = useState<PickedFeature | null>(null);
+  // A clicked shape's details go with its layer: switched off or no longer in the list, they are
+  // forgotten, not hidden, so nothing of them shows when the layer is switched back on
+  // (F-247-2-R9-03).
+  if (picked && !on.some((layer) => layer.id === picked.layerId)) setPicked(null);
   const [panelOpen, setPanelOpen] = useState(false);
   return {
     token,
@@ -96,10 +117,11 @@ export function useMapLayers(
     onViewChange: (bbox, zoom) => {
       setView(bbox ? { bbox, zoom } : null);
     },
-    picked: picked && chosen.has(picked.layerId) ? picked : null,
+    picked: picked && on.some((layer) => layer.id === picked.layerId) ? picked : null,
     setPicked,
     error: list.status === 'error' ? list.error.message : null,
     reload,
+    onStale,
   };
 }
 
@@ -606,6 +628,9 @@ export function PickedFeatureCard({
     (typeof objectId === 'number' || typeof objectId === 'string');
   const [details, setDetails] = useState<{ key: string; fields: Fields | 'failed' } | null>(null);
   const key = `${picked?.layerId ?? ''}/${String(objectId)}`;
+  // Nothing is kept of a shape no longer picked (its layer switched off, F-247-2-R9-03).
+  if (!picked && details) setDetails(null);
+  const { onStale } = state;
 
   useEffect(() => {
     if (!live || (typeof objectId !== 'number' && typeof objectId !== 'string')) return;
@@ -618,13 +643,16 @@ export function PickedFeatureCard({
       .then((body) => {
         setDetails({ key, fields: body.fields });
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setDetails({ key, fields: 'failed' });
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setDetails({ key, fields: 'failed' });
+        // Refused, or the layer is no longer there: the list says what is (F-247-2-R9-01).
+        if (error instanceof ApiError && [401, 403, 404].includes(error.status)) onStale?.();
       });
     return () => {
       controller.abort();
     };
-  }, [live, layer, objectId, key, token, api]);
+  }, [live, layer, objectId, key, token, api, onStale]);
 
   if (!picked || !layer) return null;
   const fields: Fields | 'failed' | null = live

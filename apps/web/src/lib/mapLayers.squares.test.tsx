@@ -148,19 +148,33 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
         (sum, overlay) => sum + (overlay.kind === 'features' ? overlay.data.features.length : 0),
         0,
       );
+    const onStale = vi.fn();
     const { result, rerender } = renderHook(
-      ({ view }: { view: typeof VIEW }) => useLayerOverlays(one, view, 'token'),
+      ({ view }: { view: typeof VIEW }) =>
+        useLayerOverlays(one, view, 'token', NO_CHOICES, onStale),
       { initialProps: { view: VIEW } },
     );
     await waitFor(() => {
       expect(shapes()).toBeGreaterThan(0);
     });
+    expect(onStale).not.toHaveBeenCalled();
     removed = true;
     rerender({ view: { ...VIEW, zoom: 8 } });
     await waitFor(() => {
       expect(result.current.notes.size).toBe(1);
     });
     expect(shapes()).toBe(0);
+    // The list of layers is asked to be read again: it says what is still there.
+    expect(onStale).toHaveBeenCalled();
+
+    // F-247-2-R9-01: the layer is there again (a member suspended, then restored): asked for and
+    // drawn as any other, without reloading the page.
+    removed = false;
+    rerender({ view: { ...VIEW, zoom: 9 } });
+    await waitFor(() => {
+      expect(shapes()).toBeGreaterThan(0);
+    });
+    expect(result.current.notes.size).toBe(0);
   });
 
   // F-247-2-R8-01: a square asked for before the layer was removed, answered after the 404.
@@ -331,8 +345,10 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       }),
     );
     const one = LAYERS.slice(0, 1);
+    const onStale = vi.fn();
     const { result, rerender } = renderHook(
-      ({ view }: { view: typeof VIEW }) => useLayerOverlays(one, view, 'token'),
+      ({ view }: { view: typeof VIEW }) =>
+        useLayerOverlays(one, view, 'token', NO_CHOICES, onStale),
       { initialProps: { view: VIEW } },
     );
     await waitFor(() => {
@@ -345,6 +361,8 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
       expect(result.current.notes.size).toBe(1);
     });
     expect(shapesOf(result.current.overlays)).toBe(0);
+    // Once for the view's refusals, not once per square (the first lets everything go).
+    expect(onStale).toHaveBeenCalledTimes(1);
     await act(async () => {
       release();
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -396,6 +414,8 @@ describe('useLayerOverlays with more squares in view than are kept', () => {
     expect(shapesOf(result.current.overlays)).toBeGreaterThan(0);
   });
 });
+
+const NO_CHOICES = {};
 
 const ONE_SHAPE = {
   type: 'FeatureCollection',

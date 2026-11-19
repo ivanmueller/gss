@@ -26,6 +26,9 @@ vi.mock('./FacilityMap', () => ({
       >
         Click a shape
       </button>
+      <button type="button" onClick={props.onLayersStale}>
+        A picture is refused
+      </button>
     </div>
   ),
 }));
@@ -313,6 +316,52 @@ describe('FullPageMap', () => {
     expect(screen.queryByRole('list', { name: 'Map layers shown' })).not.toBeInTheDocument();
     await userEvent.click(close);
     expect(await screen.findByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
+  });
+
+  // F-247-2-R9-02: an admin removes a picture layer while a teammate has the map open. The
+  // map reports its picture refused; the list is read again and the layer leaves the map.
+  it('reads the list again when a picture is refused, and draws only what it holds', async () => {
+    let listed = [pictures];
+    const calls = mockApi({ [LIST]: () => Response.json({ layers: listed }), ...noLegend });
+    const lists = () => calls.filter((call) => `${call.method} ${call.path}` === LIST).length;
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    expect(await screen.findByText(/Drawn: .*a1a01.tiles/)).toBeInTheDocument();
+    expect(lists()).toBe(1);
+
+    listed = [];
+    await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
+    expect(await screen.findByText('Drawn: nothing')).toBeInTheDocument();
+    expect(lists()).toBe(2);
+    // Not once per refused picture: a view asks for many at once.
+    await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
+    await userEvent.click(screen.getByRole('button', { name: 'A picture is refused' }));
+    expect(lists()).toBe(2);
+  });
+
+  // F-247-2-R9-03: a clicked shape's details go with its layer, not kept for when it is back.
+  it('forgets a clicked shape’s details when its layer is switched off', async () => {
+    const lines: MapLayerView = {
+      ...pictures,
+      id: LINES,
+      name: 'Synthetic agreements',
+      kind: 'arcgis_features',
+      url: SERVICE,
+      colourField: 'STATUS',
+      colours: [['Active', '#e6194b']],
+    };
+    mockApi({ [LIST]: listOf(lines) });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Layers (1)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Click a shape' }));
+    expect(await screen.findByRole('region', { name: 'Map layer details' })).toBeInTheDocument();
+
+    const panel = screen.getByRole('region', { name: 'Map layers' });
+    const layer = within(panel).getByRole('switch', { name: /Synthetic agreements/ });
+    await userEvent.click(layer);
+    expect(screen.queryByRole('region', { name: 'Map layer details' })).not.toBeInTheDocument();
+    await userEvent.click(layer);
+    expect(layer).toBeChecked();
+    expect(screen.queryByRole('region', { name: 'Map layer details' })).not.toBeInTheDocument();
   });
 
   it('starts on the provinces where oil and gas is produced, coast to coast', () => {

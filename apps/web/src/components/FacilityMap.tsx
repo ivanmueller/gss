@@ -20,6 +20,7 @@ import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
 import {
   isLayerPictureUrl,
+  layerPictureStale,
   mapRequestRefusal,
   PictureSignIns,
   USUAL_LOOK,
@@ -96,6 +97,11 @@ export interface FacilityMapProps {
   onSelect: (pinId: string) => void;
   /** Mapbox refused the token (wrong token or not allowed on this address). */
   onTokenRefused: () => void;
+  /**
+   * A map layer's picture was refused or its layer is no longer there: the list of layers is
+   * read again, and a layer it no longer holds leaves the map (F-247-2-R9-02).
+   */
+  onLayersStale?: (() => void) | undefined;
 }
 
 function selectedData(pins: readonly MapPin[], selectedId: string | null): PinFeatureCollection {
@@ -566,6 +572,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('error', (event: { error?: unknown }) => {
       const refusal = mapRequestRefusal(event.error);
       if (refusal === 'mapbox-token') latest.current.onTokenRefused();
+      if (layerPictureStale(event.error)) latest.current.onLayersStale?.();
       // The person's sign-in lapsed: the pictures load again once it renews (below), or at
       // once if it renewed while this answer was on its way.
       const url = (event.error as { url?: unknown }).url;
