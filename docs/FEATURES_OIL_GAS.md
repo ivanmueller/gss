@@ -2,6 +2,8 @@
 
 The oil and gas side of the platform, on its own map page (`map.torvenco.com`, F-238). Asked by the owner on 2026-11-18: as the platform expands beyond grain, this page tracks oil and gas production across Canada. Built from the owner's study of the public data behind such a map (2026-11-18, kept by the owner); that study covers **Alberta only**, from free government sources.
 
+**Direction (the owner, 2026-11-19):** the oil and gas side is a **map and data tool, not a CRM**. Its purpose is to show the oil and gas picture: the township grid, formation areas, wells (multi-leg wells among them), pipelines, Crown land, sales and the like. The aim is first to show what Offset Signal (offsetsignal.ca) shows, from the same public sources its own pages name (the owner's "Offset Signal — Data Source Breakdown", 2026-11-18), then to go further with new features. Built from the government sources only: never Offset Signal's data, wording or look. Oil and gas companies are a reference list of their own (F-244), never grain counterparties.
+
 Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded before code, statuses as there) and as the rest of the platform: nothing invented; every dataset shows its source and date; **each source's terms of use and any price are read from its own published page and recorded in `docs/DECISIONS.md` before it is used** (the links and terms below are the study's findings, not yet checked by an agent); sources are fetched by the Worker, never the browser; no data copied from other companies' compiled products, only from the government sources themselves.
 
 ## Status
@@ -11,13 +13,15 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | F-239 | The oil and gas map page: empty, with map styles and layers | Live, check pending (ivanmueller/gss#260 and #266, 2026-11-18) |
 | F-247 | Oil and gas map layers: their own system, added from a Settings button on the oil and gas map | Live, check pending: its database (parts 1a and 1b, ivanmueller/gss#263 and #264, 2026-11-18) and Settings and layers (part 2, ivanmueller/gss#268, 2026-11-19, merged by the owner without Codex's approval: see F-248) |
 | F-248 | What was left open when F-247 part 2 was merged, to fix or review again | To do (2 open findings, 6 things to look at again) |
-| F-240 | Alberta reference layers: township grid and formation outlines | Planned (after F-247) |
+| F-240 | Alberta reference layers: township grid and all 26 formation outlines | Planned (owner's answers 2026-11-19; after the review-rule change, F-248 item 8) |
 | F-241 | Crown agreements, offset notices and freehold minerals as live map layers | Planned |
 | F-242 | Crown land sales: upcoming parcels and results | Needs owner input |
 | F-243 | Wells, new licences and rig activity (AER) | Needs owner input |
 | F-244 | Companies across sources: buyers, holders and licensees | Needs owner input |
 | F-245 | Company, formation and weekly summaries | Needs owner input |
 | F-246 | Other provinces: British Columbia, Saskatchewan, Manitoba and beyond | Needs owner input |
+| F-249 | Pipelines on the map | Needs owner input |
+| F-250 | Search by legal land description | Later (owner, 2026-11-19) |
 
 ## Two things that shape the order
 
@@ -89,13 +93,25 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-240 — Alberta reference layers: township grid and formation outlines
 
-**Status:** Planned (after F-247). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
+**Status:** Planned; to start after the review-rule change (F-248 item 8; the owner, 2026-11-19: "rule change first"). The first attempt at its part 1 (layers kept apart, ivanmueller/gss#261) was closed unmerged on 2026-11-18 in favour of F-247; its branch `feat/f-240-oil-gas-layers` and register `docs/reviews/F-240.md` (on that branch) are kept for reference. **What:** the layers that turn land descriptions and formation names into shapes:
 - the **Alberta Township System** grid (township, section, quarter section, legal subdivision), from the province's ATS map service (also AltaLIS's ATS product);
 - **formation outlines**: the Alberta Geological Survey's shale plays (Digital Dataset 2013-0024: Duvernay, Muskwa, Montney, Basal Banff/Exshaw, North Nordegg, Wilrich) and its Geological Framework of Alberta, version 3 (about 90 geological units, among them Cardium, Mannville, Wabamun, Leduc).
 
 **How:** the grid as a live ArcGIS layer (no storage); the outlines as file layers or live layers, as the AGS publishes them. Credit line on the map: "Contains information licensed under the Open Government Licence – Alberta", plus the AGS as source.
 
-**Questions:** which formations matter to the desk first; whether a search box for a legal land description (for example SE-34-62-2-W4) is wanted now (that needs the grid stored, or a lookup through the service).
+**Owner's answers (2026-11-19):**
+1. **Formations:** all 26 that Offset Signal shows, built from the AGS sources (the six shale plays of Digital Dataset 2013-0024 and the others from the Geological Framework of Alberta).
+2. **Search by land description:** later (F-250).
+
+**Found on 2026-11-19 (by an agent, from the services themselves):**
+- The province's township grid service (`geospatial.alberta.ca/titan/rest/services/base/alberta_township_system/MapServer`) has 21 polygon layers, each for a range of zooms: township outlines, sections, quarter sections and legal subdivisions, with label layers; JSON, GeoJSON and PBF, 1,000 records per request. Settings can add them today, but one at a time: adding a whole ArcGIS map from its link (F-141 on grain's Team page) is not offered on the oil and gas side.
+- The platform's maps draw no text labels, so the grid would show without township, range and section numbers.
+- The AGS publishes some formation extents as live feature layers on ArcGIS Online (account `alberta-geological-survey`, for example the Montney's), under coded names; Digital Dataset 2013-0024 (the shale plays) is a shapefile download, and file layers are not offered on the oil and gas side.
+
+**Plan (to be reviewed before code):**
+1. **Grid:** "add a whole ArcGIS map from its link" in oil and gas Settings, and labels drawn from the ArcGIS layer's label settings (township, range, section numbers).
+2. **Formations from live layers:** an agent matches each of the 26 formations to a live AGS layer and checks its terms; the owner adds them in Settings from that list.
+3. **Formations from files** (the shale plays, and any formation with no live layer): file layers on the oil and gas side (stored in `petroleum-staging`: high risk, Codex design review first).
 
 ## F-241 — Crown agreements, offset notices and freehold minerals as live layers
 
@@ -121,7 +137,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 **Status:** Needs owner input. **What:** from the Alberta Energy Regulator's free reports:
 - **new well licences** (ST1, daily): licensee, target zone, horizontal or vertical, projected depth, surface location, cancellations;
 - **rig activity** (ST49, daily): rigs moving onto licences, activity, contractor and rig number;
-- **every well** (ST37, monthly): status, licensee, field and pool, spud date;
+- **every well** (ST37, monthly): status, licensee, field and pool, spud date, and each well's drilled paths, so that **multi-leg (multilateral) wells** show every leg (asked by the owner, 2026-11-19);
 - **codes** (ST103 field, pool and formation codes; ST104 licensee codes).
 
 **How:** daily files are overwritten after a week, so a job must **save every daily file from the first day** (older issues are sold by the AER). The well list needs the large-file job (architecture decision above). The AER calls its daily lists preliminary: shown as such.
@@ -132,7 +148,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 **Status:** Needs owner input. **What:** one company list linking the names each source uses: sale buyers (name only), agreement holders and partners (names), well licensees and drilling contractors (AER business associate codes, ST104). Aliases with the dates they apply (agreements and licences change hands), known land brokers flagged, a person able to correct a match.
 
-**Questions:** whether these companies join GSS's counterparties (a producer as a seller of crude, a buyer of services) or stay a separate reference list (as Grains is).
+**Owner's answer (2026-11-19):** a separate reference list on the oil and gas side, never GSS's counterparties: the oil and gas side is not a CRM.
 
 ## F-245 — Company, formation and weekly summaries
 
@@ -141,6 +157,16 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 ## F-246 — Other provinces
 
 **Status:** Needs owner input. The study covers Alberta only; "across Canada" needs each province's regulator and mineral-tenure data (British Columbia, Saskatchewan, Manitoba, and offshore Newfoundland and Labrador and Nova Scotia), each found and checked from its own pages, with its terms, before anything is built. Not started.
+
+## F-249 — Pipelines on the map
+
+**Status:** Needs owner input. **Asked:** 2026-11-19, among what the oil and gas map should show ("the oil and gas pipelines, etc."). Not in the owner's data source study, so its source is still to find: the AER's and the province's published pipeline data, each with its terms and any price read from its own pages and recorded before use.
+
+**Questions:** which pipelines (all licensed oil and gas pipelines, or major lines only); whether the owner knows a source to use. The owner, 2026-11-19: not sure yet.
+
+## F-250 — Search by legal land description
+
+**Status:** Later (the owner, 2026-11-19). **What:** type a description such as SE-34-62-2-W4 and the map moves to that quarter section; possible through a lookup in the province's township grid service (its layers are keyed by meridian, range, township, section, quarter and LSD), with nothing stored.
 
 ## Owner's answers (2026-11-18)
 

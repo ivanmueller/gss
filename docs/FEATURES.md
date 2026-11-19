@@ -206,7 +206,7 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 **Open (for the owner's detailed description):** what the page adds beyond the map (tools, filters, lists, drawing), who may open it, and whether `/map` should keep leading to Counterparties instead.
 
-#### 1f. F-239 to F-248 — The oil and gas side
+#### 1f. F-239 to F-250 — The oil and gas side
 
 The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; its own database, `petroleum-staging`, connected as ivanmueller/gss#263 and #264; its own layer system with a Settings button, live as ivanmueller/gss#268, merged by the owner without Codex's approval on 2026-11-19, what was left open being F-248 in `docs/FEATURES_OIL_GAS.md`; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
 
