@@ -51,7 +51,12 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { nextReviewBase, roundAllowed, roundOutcome } from '../../../scripts/review-register.js';
+import {
+  flaggedPreExisting,
+  nextReviewBase,
+  roundAllowed,
+  roundOutcome,
+} from '../../../scripts/review-register.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = join(HERE, 'review-output.schema.json');
@@ -428,7 +433,7 @@ try {
     console.log(review.summary);
     review.findings.forEach((f, i) => {
       console.log(
-        `\n${i + 1}. [${f.severity}/${f.category}${f.security_sensitive ? '/SECURITY' : ''}${f.needs_owner_decision ? '/OWNER' : ''}${f.pre_existing ? '/PRE-EXISTING' : ''}] ${f.title}`,
+        `\n${i + 1}. [${f.severity}/${f.category}${f.security_sensitive ? '/SECURITY' : ''}${f.needs_owner_decision ? '/OWNER' : ''}${flaggedPreExisting(f) ? '/PRE-EXISTING' : ''}] ${f.title}`,
       );
       console.log(
         `   ${f.file}:${f.line_start ?? '?'}${f.probable_duplicate_of ? `  (probable duplicate of ${f.probable_duplicate_of})` : ''}`,

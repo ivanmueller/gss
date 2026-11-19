@@ -1296,6 +1296,19 @@ describe('register rules', () => {
     });
     assert.equal(hidden.issues, 1);
     assert.match(hidden.escalation ?? '', /recurring without progress/);
+    // F-251-R6-01: a security-sensitive finding is counted, even flagged pre-existing; and
+    // re-triaged when it names a row recorded as pre-existing.
+    const security = roundOutcome({
+      findings: [
+        { severity: 'P2', duplicate_of: null, pre_existing: true, security_sensitive: true },
+        { severity: 'P2', duplicate_of: 'X-R1-03', pre_existing: true, security_sensitive: true },
+      ],
+      verifiedFixes: [],
+      previous: { issues: 0, notFixed: [] },
+      known,
+    });
+    assert.equal(security.issues, 2);
+    assert.deepEqual(security.retriage, ['X-R1-03']);
   });
 
   test('a round counts each problem once, and stops on recurrence or disagreement', () => {

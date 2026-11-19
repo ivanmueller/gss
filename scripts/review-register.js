@@ -391,6 +391,13 @@ export function preExistingProblems(register, finding) {
 }
 
 /**
+ * Whether Codex's finding counts as pre-existing: flagged so, and not security-sensitive. A
+ * security-sensitive finding is never pre-existing, whatever Codex's flags say (F-251-R6-01).
+ */
+export const flaggedPreExisting = (finding) =>
+  finding.pre_existing === true && finding.security_sensitive !== true;
+
+/**
  * What one Codex review round amounts to, for the runner (owner's rule, 2026-11-09):
  * - `issues`: its new findings, plus fixes Codex found not fixed that no new finding repeats
  *   (one problem counted once); the register's Findings column, used to measure progress;
@@ -409,7 +416,7 @@ export function roundOutcome({ findings, verifiedFixes, previous, known }) {
   // Problems Codex finds already on the base branch are not this pull request's (F-251); a fix
   // found not fixed is merged only with a finding that is counted, never hidden behind a
   // pre-existing one (F-251-R4-01).
-  const own = findings.filter((f) => f.pre_existing !== true);
+  const own = findings.filter((f) => !flaggedPreExisting(f));
   const repeated = new Set(own.map((f) => f.duplicate_of).filter(Boolean));
   const issues = own.length + notFixed.filter((id) => !repeated.has(id)).length;
   // A finding Claude recorded as pre-existing that Codex now says this change introduces, exposes
@@ -417,7 +424,7 @@ export function roundOutcome({ findings, verifiedFixes, previous, known }) {
   const retriage = findings
     .filter((f) => {
       const row = known.find((k) => k.id === f.duplicate_of);
-      return f.pre_existing !== true && row?.status === 'pre-existing';
+      return !flaggedPreExisting(f) && row?.status === 'pre-existing';
     })
     .map((f) => f.duplicate_of);
   if (previous === undefined) return { issues, notFixed, retriage, escalation: null };

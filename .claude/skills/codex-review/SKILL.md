@@ -79,7 +79,7 @@ To stop for the owner: record the round's findings, set the register's Status to
 
 1. The last code review must have reviewed the final code and approved (or raised only P3 or pre-existing findings; high risk and governance: only pre-existing ones): after its commit only `docs/reviews/` and the tracker (`docs/FEATURES.md`, `docs/FEATURES_OIL_GAS.md`) may change. For a pull request into a branch other than `main`, pass `--target <that branch>` to every review. If code changed since, run a re-review. **High risk and governance:** the last code review must be a final review of the whole pull request, `run-review.js --id <ID> --mode final` (background), after the loop has settled; it counts as a round. Triage its findings like any other; pre-existing ones go to the tracker; if it raises a P1 or P2 that is not pre-existing, fix and run the final review again (within the round limits).
 2. Set Status to **complete** (or **escalated**), commit the register.
-3. Run `node scripts/review-gate.js --base origin/main --head HEAD` and fix whatever it lists.
+3. Run `node scripts/review-gate.js --base origin/main --head HEAD` and fix whatever it lists (for a pull request into another branch, `--base <that branch>`, the same ref as the reviews' `--target`).
 4. Push and open the pull request, ready for review (template sections filled, the register linked, rounds and any escalation stated).
 
 ## 8. Merge and staging (docs/AI_WORKFLOW.md §11.6)
