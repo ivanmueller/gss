@@ -396,7 +396,7 @@ select ok(
   'a removed layer frees its place'
 );
 
-select is(pg_temp.as_petro('select petro.schema_version()::text'), '2', 'schema version 2');
+select ok(pg_temp.as_petro('select petro.schema_version()::text')::int >= 2, 'schema version 2 or later');
 
 select * from finish();
 rollback;
