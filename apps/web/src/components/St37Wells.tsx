@@ -421,7 +421,6 @@ export function St37Card({
       {member && well.statusClass !== 'licensed' && (
         <WellProduction
           uwi={well.uwi}
-          spudDate={well.spudDate}
           organizationId={member.organizationId}
           token={member.token}
         />

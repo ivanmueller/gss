@@ -280,12 +280,10 @@ export function clearProductionCache() {
 /** A well's monthly production, on its card. */
 export function WellProduction({
   uwi,
-  spudDate,
   organizationId,
   token,
 }: {
   uwi: string;
-  spudDate: string | null;
   organizationId: string;
   token: string;
 }) {
@@ -310,17 +308,9 @@ export function WellProduction({
       </p>
     );
   }
-  // Drilled before the first free month: its earlier production is not in the files loaded.
-  const earlier = firstMonth !== null && spudDate !== null && spudDate.slice(0, 7) < firstMonth;
   return (
     <div className="mt-2 border-t pt-2">
       <ProductionCharts answer={answer} interactive={false} />
-      {earlier && (
-        <p className="mt-1 text-[0.6875rem] text-muted-foreground">
-          Incomplete: only from {monthLabel(firstMonth)}; this well&apos;s earlier production is not
-          loaded.
-        </p>
-      )}
     </div>
   );
 }
@@ -377,7 +367,11 @@ export function FormationProductionAbout({
       Production: the total of the wells loaded, by month
       {firstMonth && lastMonth ? `, ${monthLabel(firstMonth)} to ${monthLabel(lastMonth)}` : ''}
       {wells !== undefined ? `; ${wells.toLocaleString('en-CA')} wells in the last month` : ''}.
-      Point at a chart for a month. {answer.source.name}. Not an official record.
+      Point at a chart for a month.
+      {firstMonth
+        ? ` A well drilled before ${monthLabel(firstMonth)} shows only its production since then.`
+        : ''}{' '}
+      {answer.source.name}. Not an official record.
     </p>
   );
 }

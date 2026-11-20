@@ -75,7 +75,7 @@ describe('WellProduction', () => {
 
   it("shows a chart per product the well has, its latest month, and Petrinex's credit", async () => {
     mockApi({ [WELL_PATH]: () => Response.json(WELL) });
-    render(<WellProduction {...props} spudDate="2026-06-02" />);
+    render(<WellProduction {...props} />);
     expect(screen.getByText('Production: loading…')).toBeInTheDocument();
     expect(
       await screen.findByRole('img', { name: /^Oil, m³ a month, Jun 2026 to Sep 2026/ }),
@@ -85,18 +85,11 @@ describe('WellProduction', () => {
     expect(screen.getByText('250')).toBeInTheDocument();
     // The source is named in the panel's About this data, not on every card.
     expect(screen.queryByText(/Petrinex/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Incomplete/)).not.toBeInTheDocument();
-  });
-
-  it('says the history is incomplete for a well drilled before the first month loaded', async () => {
-    mockApi({ [WELL_PATH]: () => Response.json(WELL) });
-    render(<WellProduction {...props} spudDate="2019-03-10" />);
-    expect(await screen.findByText(/Incomplete: only from Jun 2026/)).toBeInTheDocument();
   });
 
   it('says so when the well reported nothing, and shows nothing before any load', async () => {
     mockApi({ [WELL_PATH]: () => Response.json({ source: SOURCE, months: [] }) });
-    const first = render(<WellProduction {...props} spudDate={null} />);
+    const first = render(<WellProduction {...props} />);
     expect(await screen.findByText('No production reported since Jun 2026.')).toBeInTheDocument();
     first.unmount();
     clearProductionCache();
@@ -104,7 +97,7 @@ describe('WellProduction', () => {
       [WELL_PATH]: () =>
         Response.json({ source: { ...SOURCE, loadedAt: null, firstMonth: null }, months: [] }),
     });
-    const { container } = render(<WellProduction {...props} spudDate={null} />);
+    const { container } = render(<WellProduction {...props} />);
     await vi.waitFor(() => {
       expect(container).toBeEmptyDOMElement();
     });
@@ -112,7 +105,7 @@ describe('WellProduction', () => {
 
   it('says so when it cannot be loaded', async () => {
     mockApi({});
-    render(<WellProduction {...props} spudDate={null} />);
+    render(<WellProduction {...props} />);
     expect(await screen.findByText('Production could not be loaded.')).toBeInTheDocument();
   });
 });
@@ -139,7 +132,7 @@ describe('FormationProduction', () => {
     render(<FormationProductionAbout organizationId="org-a" token="token" />);
     expect(
       screen.getByText(
-        /Production: the total of the wells loaded, by month, Jun 2026 to Sep 2026; 12 wells in the last month\. Point at a chart for a month\. Petrinex public data, Conventional Volumetric Data, © Government of Alberta\. Not an official record\./,
+        /Production: the total of the wells loaded, by month, Jun 2026 to Sep 2026; 12 wells in the last month\. Point at a chart for a month\. A well drilled before Jun 2026 shows only its production since then\. Petrinex public data, Conventional Volumetric Data, © Government of Alberta\. Not an official record\./,
       ),
     ).toBeInTheDocument();
     // The latest month until a month is pointed at.

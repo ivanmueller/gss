@@ -66,7 +66,7 @@ describe('contourRings', () => {
 });
 
 describe('st37Zones', () => {
-  const options = { spreadKm: 4, level: 1.5, minWells: 25, cellKm: 1 };
+  const options = { spreadKm: 4, level: 1.5, minWells: 25, share: 1, cellKm: 1 };
 
   it('draws one smooth zone around each cluster of enough wells, largest first', () => {
     const north = block(-117, 54.4, 6);
@@ -102,6 +102,33 @@ describe('st37Zones', () => {
     const stray: ZoneWell = { surface: [-112, 51], bottom: [-112, 51] };
     expect(st37Zones([...few, stray], options)).toEqual([]);
     expect(st37Zones([], options)).toEqual([]);
+  });
+
+  it("draws the smallest area holding a share of a cluster's wells, leaving its fringe out", () => {
+    // A tight block of 64 wells with 16 more strung out to the east, 2 km apart: one cluster.
+    const core = block(-117, 54.4, 8);
+    const fringe = Array.from({ length: 16 }, (_, i): ZoneWell => {
+      const surface: [number, number] = [-116.88 + i * 0.031, 54.43];
+      return { surface, bottom: [surface[0], surface[1] + 0.01] };
+    });
+    const wells = [...core, ...fringe];
+    const [whole, ...others] = st37Zones(wells, options);
+    expect(others).toEqual([]);
+    expect(whole?.wells).toBe(80);
+    const [zone, ...rest] = st37Zones(wells, { ...options, share: 0.8 });
+    if (!zone || !whole) throw new Error('no zone');
+    expect(rest).toEqual([]);
+    // The share asked for (the well the edge runs through may fall either side), and not the
+    // far end of the fringe.
+    expect(zone.wells).toBeGreaterThanOrEqual(62);
+    expect(zone.wells).toBeLessThan(80);
+    const last = fringe.at(-1);
+    expect(last && insideRing(last.surface, zone.ring)).toBe(false);
+    expect(last && insideRing(last.surface, whole.ring)).toBe(true);
+    // Nearly all of the tight block is in (a corner well may sit on the edge).
+    expect(core.filter((well) => insideRing(well.surface, zone.ring)).length).toBeGreaterThan(58);
+    const east = (ring: [number, number][]) => Math.max(...ring.map((p) => p[0]));
+    expect(east(zone.ring)).toBeLessThan(east(whole.ring));
   });
 
   it('leaves a stray well near a cluster outside its zone', () => {

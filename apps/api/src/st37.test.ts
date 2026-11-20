@@ -109,7 +109,9 @@ describe('st37Answer', () => {
       name: 'Duvernay',
       totals: { producing: 3, licensed: 2 },
     });
-    expect(answer.formation?.zones.map((z) => z.wells)).toEqual([60]);
+    // The smallest area holding about four in five of the cluster's wells.
+    expect(answer.formation?.zones).toHaveLength(1);
+    expect(answer.formation?.zones[0]?.wells).toBeGreaterThan(40);
     expect(answer.source.licenceSource).toMatch(/Petrinex.*Government of Alberta/);
   });
 });

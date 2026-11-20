@@ -1,6 +1,7 @@
 /**
- * Zones where a formation's drilled wells cluster (F-255): a smooth outline around the ground
- * where wells are dense. Each well is spread over its surroundings as a soft bump (three along
+ * Zones where a formation's drilled wells cluster (F-255): for each cluster, the smallest area
+ * that holds a set share of its wells (80%), the densest ground first; in statistics, a highest
+ * density region. A smooth outline around the ground where wells are dense. Each well is spread over its surroundings as a soft bump (three along
  * its path, from the surface hole to the bottom hole); where the bumps of many wells add up past
  * a level, the ground is in a zone, and the zone's edge is the line where the sum equals that
  * level. Stray wells and small groups make no zone. Computed from the stored wells alone;
@@ -19,14 +20,26 @@ export interface ZoneOptions {
   spreadKm: number;
   /** The sum of bumps at a zone's edge, in wells: higher draws tighter zones. */
   level: number;
-  /** A zone holding fewer wells than this is dropped. */
+  /** A cluster holding fewer wells than this is dropped. */
   minWells: number;
+  /**
+   * The share of a cluster's wells its zone holds: the zone is the smallest area holding that
+   * share (the densest ground first), so a few scattered wells no longer stretch it. 1 draws
+   * the whole cluster.
+   */
+  share: number;
   /** The size of the grid's squares; the outline is drawn between their corners. */
   cellKm: number;
 }
 
 /** Tuned on the Duvernay's wells (2026-11-20, the owner: smooth, following the producing wells). */
-export const ST37_ZONE_OPTIONS: ZoneOptions = { spreadKm: 4, level: 1.5, minWells: 50, cellKm: 1 };
+export const ST37_ZONE_OPTIONS: ZoneOptions = {
+  spreadKm: 4,
+  level: 1.5,
+  minWells: 50,
+  share: 0.8,
+  cellKm: 1,
+};
 
 export interface St37Zone {
   wells: number;
@@ -205,16 +218,32 @@ export function st37Zones(
       }
     }
   }
-  const rings = contourRings(values, nx, ny, options.level).map((ring) =>
-    ring.map((p): Point => [minX + p[0] * cell, minY + p[1] * cell]),
-  );
+  const toKm = (ring: Point[]) => ring.map((p): Point => [minX + p[0] * cell, minY + p[1] * cell]);
+  /** The outer lines at a level: a line inside another is a gap, and zones are drawn whole. */
+  const outlines = (level: number) => {
+    const rings = contourRings(values, nx, ny, level).map(toKm);
+    return rings.filter((ring) => {
+      const [first] = ring;
+      return first && !rings.some((other) => other !== ring && insideRing(first, other));
+    });
+  };
+  /** The sum of bumps at a place, read between the four corners around it. */
+  const densityAt = ([x, y]: Point) => {
+    const gx = (x - minX) / cell;
+    const gy = (y - minY) / cell;
+    const i = Math.min(nx - 2, Math.max(0, Math.floor(gx)));
+    const j = Math.min(ny - 2, Math.max(0, Math.floor(gy)));
+    const [fx, fy] = [gx - i, gy - j];
+    const v = (di: number, dj: number) => values[(j + dj) * nx + i + di] ?? 0;
+    return (
+      v(0, 0) * (1 - fx) * (1 - fy) +
+      v(1, 0) * fx * (1 - fy) +
+      v(0, 1) * (1 - fx) * fy +
+      v(1, 1) * fx * fy
+    );
+  };
   const zones: St37Zone[] = [];
-  for (const ring of rings) {
-    // A line inside another is a gap in that zone: zones are drawn whole, without gaps.
-    const [first] = ring;
-    if (!first || rings.some((other) => other !== ring && insideRing(first, other))) continue;
-    const held = places.filter((p) => insideRing(p.middle, ring)).length;
-    if (held < options.minWells) continue;
+  const add = (ring: Point[], held: number) => {
     const out = ring.map((p): [number, number] => [
       Math.round((lon0 + p[0] / kmLon) * 1e5) / 1e5,
       Math.round((lat0 + p[1] / KM_PER_DEG_LAT) * 1e5) / 1e5,
@@ -222,6 +251,24 @@ export function st37Zones(
     const [start] = out;
     if (start) out[out.length - 1] = start;
     zones.push({ wells: held, ring: out });
+  };
+  for (const cluster of outlines(options.level)) {
+    const members = places.filter((p) => insideRing(p.middle, cluster));
+    if (members.length < options.minWells) continue;
+    if (options.share >= 1) {
+      add(cluster, members.length);
+      continue;
+    }
+    // The level that the densest `share` of the cluster's wells stand at or above.
+    const densities = members.map((p) => densityAt(p.middle)).sort((a, b) => b - a);
+    const cut = densities[Math.ceil(members.length * options.share) - 1] ?? options.level;
+    for (const ring of outlines(Math.max(cut, options.level))) {
+      const [first] = ring;
+      if (!first || !insideRing(first, cluster)) continue;
+      const held = members.filter((p) => insideRing(p.middle, ring)).length;
+      // A small separate patch of a cluster (under a tenth of its wells) is left out.
+      if (held * 10 >= members.length) add(ring, held);
+    }
   }
   return zones.sort((a, b) => b.wells - a.wells);
 }
