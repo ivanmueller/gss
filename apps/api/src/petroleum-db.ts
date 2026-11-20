@@ -3,6 +3,7 @@ import postgres from 'postgres';
 
 import { aerListsQueries, type AerListsDatabase } from './aer-lists-db';
 import { connectionOptions } from './db';
+import { wellsQueries, type WellsDatabase } from './wells-db';
 import type { MapLayerChanges, MapLayerSource, MapLayerWrite, NewMapLayer } from './map-layers-db';
 
 /**
@@ -28,7 +29,7 @@ export interface PetroleumContext {
 export const PETROLEUM_SCHEMA_VERSION = 3;
 
 /** The AER's daily lists (F-243 part 1) are in `AerListsDatabase` (aer-lists-db.ts). */
-export interface PetroleumDatabase extends AerListsDatabase {
+export interface PetroleumDatabase extends AerListsDatabase, WellsDatabase {
   /** The database's schema version (petro.schema_version()). Reads no data. */
   schemaVersion(): Promise<number>;
   /** The organization the database sees for this person: the health check. */
@@ -174,6 +175,7 @@ async function refusalsNamed<T>(work: Promise<T>): Promise<T> {
 export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
   return {
     ...aerListsQueries(sql),
+    ...wellsQueries(sql),
     async schemaVersion() {
       const [row] = await sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;

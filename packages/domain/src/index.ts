@@ -29,3 +29,4 @@ export * from './emailReading';
 export * from './emailForward';
 export * from './forwarding';
 export * from './emailAttachments';
+export * from './wells';

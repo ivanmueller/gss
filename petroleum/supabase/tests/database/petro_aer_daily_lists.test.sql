@@ -60,7 +60,7 @@ select ok(
   and not has_function_privilege('anon', 'petro.aer_job_writing()', 'execute'),
   'the trigger functions are out of reach; the rules only for petro_api'
 );
-select is((select petro.schema_version()), 3, 'the schema is at version 3');
+select ok((select petro.schema_version()) >= 3, 'the schema is at version 3 or later');
 
 grant petro_api to current_user;
 

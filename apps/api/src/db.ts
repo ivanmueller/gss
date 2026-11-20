@@ -380,6 +380,11 @@ export interface Database
     AutoDraftsDatabase,
     ForwardingDatabase {
   memberships: (userId: string) => Promise<Membership[]>;
+  /**
+   * The database's size in bytes (pg_database_size): with the oil and gas database's, what the
+   * wells job keeps under the free plan's shared limit (F-243 part 3). Reads no data.
+   */
+  databaseSize: () => Promise<number>;
   canEditDirectory: (ctx: RequestContext, organizationId: string) => Promise<boolean>;
   listCounterparties: (
     ctx: RequestContext,
@@ -984,6 +989,13 @@ export function createDatabase(sql: postgres.Sql): Database {
     ...emailQueries(asUser, sql),
     ...autoDraftQueries(asUser, sql),
     ...forwardingQueries(asUser),
+
+    async databaseSize() {
+      const [row] = await sql<
+        { size: string }[]
+      >`select pg_database_size(current_database())::text as size`;
+      return Number(row?.size ?? NaN);
+    },
 
     async memberships(userId) {
       const rows = await sql.begin(async (tx) => {

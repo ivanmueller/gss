@@ -46,6 +46,7 @@ export function fakeDatabase(): Mocked<Database> {
         { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'trader' },
       ]),
     ),
+    databaseSize: vi.fn<Database['databaseSize']>(() => Promise.resolve(50_000_000)),
     canEditDirectory: vi.fn<Database['canEditDirectory']>(() => Promise.resolve(true)),
     listCounterparties: vi.fn<Database['listCounterparties']>(() => Promise.resolve([])),
     getCounterparty: vi.fn<Database['getCounterparty']>(() => Promise.resolve(null)),
