@@ -104,6 +104,24 @@ describe('parseWellPage', () => {
     expect(page.rows[0]).toMatchObject({ objectId: 7, wellName: 'LATER' });
   });
 
+  it('merges two rows of one UWI field by field, whichever comes first (F-243-3-R4-02)', () => {
+    const good = well(5, { WELL_NAME: 'OLDER' });
+    const badPlace = well(7, { WELL_NAME: 'NEWER', SURFACE_LATITUDE: 99 });
+    for (const features of [
+      [good, badPlace],
+      [badPlace, good],
+    ]) {
+      const [only] = parseWellPage({ features }, 2000).rows;
+      expect(only).toMatchObject({
+        objectId: 7,
+        wellName: 'NEWER',
+        longitude: -113.617905,
+        latitude: 53.386619,
+        invalid: [],
+      });
+    }
+  });
+
   it('says whether more follow, and refuses a page it cannot trust', () => {
     expect(parseWellPage({ features: [well(1)], exceededTransferLimit: true }, 2000).more).toBe(
       true,

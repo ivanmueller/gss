@@ -29,6 +29,8 @@ export const WELLS_SCHEMA_VERSION = 4;
 /** Grain's and the oil and gas databases together never pass this (the shared limit is 500 MB). */
 export const WELLS_SIZE_BUDGET_BYTES = 400 * 1024 * 1024;
 const PAGE_SIZE = 2000;
+/** More than one page of wells takes in the database (about 0.5 MB with its indexes). */
+const PAGE_RESERVE_BYTES = 5 * 1024 * 1024;
 const PAGES_PER_RUN = 60;
 const RUN_LIMIT_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -171,7 +173,9 @@ export async function refreshWells(
       }
       const total = grainSize + petroleumSize;
       sizes = `grain ${mb(grainSize)} + oil and gas ${mb(petroleumSize)} = ${mb(total)} of ${mb(WELLS_SIZE_BUDGET_BYTES)}`;
-      if (total >= WELLS_SIZE_BUDGET_BYTES) {
+      // Room for one more page is kept, so even the last page never crosses the budget
+      // (F-243-3-R4-03).
+      if (total + PAGE_RESERVE_BYTES >= WELLS_SIZE_BUDGET_BYTES) {
         await petroleum.stopWellLoad(load.id, 'stopped_size');
         console.warn(`Wells load ${String(load.id)} stopped at the size limit: ${sizes}`);
         return { status: 'stopped_size' };
@@ -193,6 +197,13 @@ export async function refreshWells(
       // The last page finishes the load. No well is retired, so a short or changing answer
       // never hides a well (F-243-3-R3-01): it only leaves some values a month older.
       const ending = page.more ? null : 'complete';
+      // A load that ends having saved nothing at all is a failed answer, not an empty province:
+      // it is marked failed, so the next run starts again (F-243-3-R4-01).
+      if (ending !== null && load.rowsSaved + saved + page.rows.length === 0) {
+        await petroleum.stopWellLoad(load.id, 'failed');
+        console.warn(`Wells load ${String(load.id)}: the service answered no wells; next run`);
+        break;
+      }
       if ((await petroleum.saveWellPage(load.id, cursor, page, ending)) === 'moved') {
         console.log(`Wells load ${String(load.id)}: another run moved on; this one stops`);
         break;

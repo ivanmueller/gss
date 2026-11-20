@@ -118,6 +118,35 @@ function location(
   return inside ? { longitude, latitude } : undefined;
 }
 
+/** Where each checked field lives on a row. */
+const FIELD_KEYS: Record<WellField, (keyof WellRow)[]> = {
+  wellName: ['wellName'],
+  operatorCode: ['operatorCode'],
+  operatorName: ['operatorName'],
+  wellType: ['wellType'],
+  statusCode: ['statusCode'],
+  status: ['status'],
+  finalDrillDate: ['finalDrillDate'],
+  location: ['longitude', 'latitude'],
+};
+
+/**
+ * Two rows of one UWI on a page, combined as two pages would be (F-243-3-R4-02): the higher
+ * OBJECTID's values, except where its field failed its check and the other's did not.
+ */
+function merged(a: WellRow, b: WellRow): WellRow {
+  const [older, newer] = a.objectId < b.objectId ? [a, b] : [b, a];
+  const out: WellRow = { ...newer, invalid: [] };
+  for (const field of newer.invalid) {
+    if (older.invalid.includes(field)) {
+      out.invalid.push(field);
+      continue;
+    }
+    for (const key of FIELD_KEYS[field]) Object.assign(out, { [key]: older[key] });
+  }
+  return out;
+}
+
 /**
  * One page of the service's answer, asked for after `after`; throws when the answer cannot be
  * trusted: not a feature list, a continuation flag that is not true or false, or a row at or
@@ -169,7 +198,7 @@ export function parseWellPage(body: unknown, asked: number, after = 0): WellPage
       invalid,
     };
     const before = byUwi.get(uwi);
-    if (!before || before.objectId < objectId) byUwi.set(uwi, row);
+    byUwi.set(uwi, before ? merged(before, row) : row);
   }
   const more = record(body)?.exceededTransferLimit === true || features.length >= asked;
   return { rows: [...byUwi.values()], unidentified, lastObjectId, more };

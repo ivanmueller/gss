@@ -109,6 +109,31 @@ describe('refreshWells', () => {
     expect(petroleum.startWellLoad).not.toHaveBeenCalled();
   });
 
+  it('keeps room for one more page below the budget (F-243-3-R4-03)', async () => {
+    petroleum.latestWellLoad.mockResolvedValue(running);
+    grain.databaseSize.mockResolvedValue(WELLS_SIZE_BUDGET_BYTES - 4 * 1024 * 1024);
+    petroleum.databaseSize.mockResolvedValue(0);
+    const fetchImpl = pages();
+    expect(await refreshWells(env, openDatabase, openPetroleum, NOW, fetchImpl)).toEqual({
+      status: 'stopped_size',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('marks a load that ended with no wells at all failed, to start again next run (F-243-3-R4-01)', async () => {
+    petroleum.latestWellLoad.mockResolvedValue(running);
+    await refreshWells(env, openDatabase, openPetroleum, NOW, pages({ features: [] }));
+    expect(petroleum.stopWellLoad).toHaveBeenCalledWith(1, 'failed');
+    expect(petroleum.saveWellPage).not.toHaveBeenCalled();
+    petroleum.latestWellLoad.mockResolvedValue({
+      ...running,
+      status: 'failed',
+      finishedAt: NOW.toISOString(),
+    });
+    await refreshWells(env, openDatabase, openPetroleum, NOW, pages());
+    expect(petroleum.startWellLoad).toHaveBeenCalled();
+  });
+
   it('never loads blind: an unreadable size stops the run', async () => {
     petroleum.latestWellLoad.mockResolvedValue(running);
     grain.databaseSize.mockRejectedValue(new Error('down'));
@@ -144,7 +169,7 @@ describe('refreshWells', () => {
   });
 
   it('finishes on an empty or short last page, hiding no well (F-243-3-R3-01)', async () => {
-    petroleum.latestWellLoad.mockResolvedValue(running);
+    petroleum.latestWellLoad.mockResolvedValue({ ...running, rowsSaved: 1000 });
     await refreshWells(
       env,
       openDatabase,
