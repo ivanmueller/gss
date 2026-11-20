@@ -59,7 +59,7 @@ jobs:
             const [w, s, e, n] = process.argv.slice(1).map(Number);
             const ok = w >= -120.1 && e <= -109.9 && s >= 48.9 && n <= 60.1 && w < e && s < n;
             if (!ok) { console.log("::error::The area must lie in Alberta, west of east and south of north."); process.exit(1); }
-          ' "$WEST" "$SOUTH" "$EAST" "$NORTH"
+          ' -- "$WEST" "$SOUTH" "$EAST" "$NORTH"
       - name: Check the databases
         env:
           PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
