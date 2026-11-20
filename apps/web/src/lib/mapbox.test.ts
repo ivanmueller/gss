@@ -8,9 +8,11 @@ import {
   isClutterLayer,
   mapboxToken,
   mapPaint,
+  PAPER_MAP,
   pinBounds,
   pinFeatures,
   readMapColours,
+  withPaper,
   type MapColours,
 } from './mapbox';
 
@@ -203,6 +205,21 @@ describe('isClutterLayer', () => {
     expect(kept.filter((id) => isClutterLayer({ id, type: 'symbol' }))).toEqual([]);
     // Only labels go: the roads themselves stay drawn.
     expect(isClutterLayer({ id: 'road-primary', type: 'line' })).toBe(false);
+  });
+});
+
+describe('withPaper', () => {
+  it('gives a light map that asks for it the warm off-white base map, and keeps the pin colours', () => {
+    const paper = withPaper(COLOURS, true, 'light');
+    expect(paper).toMatchObject(PAPER_MAP);
+    expect(paper.land).toBe('#f2f0e8');
+    expect(paper.bid).toBe(COLOURS.bid);
+    expect(paper.selected).toBe(COLOURS.selected);
+  });
+
+  it('leaves the night theme and maps that do not ask for it as they are', () => {
+    expect(withPaper(COLOURS, true, 'dark')).toBe(COLOURS);
+    expect(withPaper(COLOURS, false, 'light')).toBe(COLOURS);
   });
 });
 

@@ -104,6 +104,28 @@ export function readMapColours(element: Element = document.documentElement): Map
   return colours;
 }
 
+/**
+ * The oil and gas map's light look (the owner, 2026-11-20): warm off-white land, pale
+ * blue-grey water, quiet borders and roads, so wells and outlines stand out. The night theme
+ * keeps its slate.
+ */
+export const PAPER_MAP: Pick<
+  MapColours,
+  'land' | 'water' | 'border' | 'road' | 'label' | 'labelHalo'
+> = {
+  land: '#f2f0e8',
+  water: '#d3dde2',
+  border: '#b9b5a8',
+  road: '#e6e3d8',
+  label: '#6b6a62',
+  labelHalo: '#f2f0e8',
+};
+
+/** The theme's map colours, with the paper look's base map on a light map that asks for it. */
+export function withPaper(colours: MapColours, paper: boolean, theme: Theme): MapColours {
+  return paper && theme === 'light' ? { ...colours, ...PAPER_MAP } : colours;
+}
+
 export interface StyleLayer {
   id: string;
   type: string;

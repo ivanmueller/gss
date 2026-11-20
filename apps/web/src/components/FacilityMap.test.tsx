@@ -75,7 +75,14 @@ vi.mock('mapbox-gl', () => {
   }
   // The zoom buttons and the attribution: made, handed to the map, nothing more.
   const Control = vi.fn();
-  return { default: { Map: Fake, NavigationControl: Control, AttributionControl: Control } };
+  return {
+    default: {
+      Map: Fake,
+      NavigationControl: Control,
+      AttributionControl: Control,
+      ScaleControl: Control,
+    },
+  };
 });
 
 const LAYER = '00000000-0000-4000-8000-0000000a1a01';
