@@ -1,0 +1,133 @@
+name: Load Petrinex production
+
+# Run by hand from the Actions tab (Actions → Load Petrinex production → Run workflow), after
+# "Load ST37 wells". Downloads Petrinex's public Conventional Volumetric Data, one file a month
+# (about 8 MB zipped) for the years it gives free (the current production year and the four
+# before it), keeps the monthly oil, gas, water and condensate volumes and hours of the wells
+# already in the oil and gas database (petroleum-staging), and loads them there, replacing the
+# copy in one transaction (F-252 step 3, docs/FEATURES_OIL_GAS.md).
+#
+# Petrinex's data is used on the owner's decision (docs/DECISIONS.md, 2026-11-20: non-commercial,
+# members only, never exported, Crown copyright acknowledged): it stays on the runner and in
+# that database, never in the repository or the run's logs or artifacts. The load is refused if
+# grain's and the oil and gas databases together would pass 400 MB (the free plan's limit is
+# shared by both).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-petrinex
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 7 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 7)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB."
+      - name: List the wells to look for
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/petrinex"
+          cd "$RUNNER_TEMP/petrinex"
+          psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select uwi from petro.st37_wells order by uwi" > uwis.txt
+          wells=$(wc -l < uwis.txt)
+          if [ "$wells" -eq 0 ]; then
+            echo "::error::No wells in the oil and gas database: run Load ST37 wells first."
+            exit 1
+          fi
+          formation=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select coalesce(formation, '-') from petro.st37_loads order by id desc limit 1")
+          [[ "$formation" =~ ^(-|[a-z][a-z_]{1,39})$ ]] || { echo "::error::Unexpected formation name."; exit 1; }
+          echo "FORMATION=$formation" >> "$GITHUB_ENV"
+          echo "$wells wells to look for (formation: $formation)."
+      - name: Read each month's file
+        run: |
+          cd "$RUNNER_TEMP/petrinex"
+          # The free years: January of the fourth year before this one, to this month. The latest
+          # months are not published yet: up to four missing at the end are passed over; a
+          # missing month before them stops the load.
+          first="$(( $(date -u +%Y) - 4 ))-01"
+          now=$(date -u +%Y-%m)
+          : > rows.csv
+          files=0
+          last=""
+          missing=""
+          month=$first
+          while [[ ! "$month" > "$now" ]]; do
+            url="https://www.petrinex.gov.ab.ca/publicdata/API/Files/AB/Vol/$month/CSV"
+            rm -rf month && mkdir month
+            if curl -sSfL --retry 3 --retry-delay 5 -o month/vol.zip "$url" 2>/dev/null \
+              && unzip -q -o month/vol.zip -d month && unzip -q -o 'month/*.zip' -d month; then
+              csv=$(find month -maxdepth 1 -iname '*.csv' | head -1)
+              [ -n "$csv" ] || { echo "::error::No table in Petrinex's file for $month."; exit 1; }
+              if [ -n "$missing" ]; then
+                echo "::error::Petrinex gave no file for$missing, but one for $month; nothing was loaded."
+                exit 1
+              fi
+              node --experimental-strip-types "$GITHUB_WORKSPACE/scripts/load-petrinex.js" \
+                month "$csv" "$month" uwis.txt >> rows.csv
+              files=$((files + 1))
+              last=$month
+            else
+              missing="$missing $month"
+              echo "$month: no file."
+            fi
+            month=$(date -u -d "$month-01 +1 month" +%Y-%m)
+          done
+          rm -rf month
+          if [ "$files" -eq 0 ]; then
+            echo "::error::Petrinex gave no file at all; nothing was loaded."
+            exit 1
+          fi
+          if [ "$(wc -w <<< "$missing")" -gt 4 ]; then
+            echo "::error::More than four months are missing at the end ($missing ); nothing was loaded."
+            exit 1
+          fi
+          echo "FIRST_MONTH=$first" >> "$GITHUB_ENV"
+          echo "LAST_MONTH=$last" >> "$GITHUB_ENV"
+          echo "FILES=$files" >> "$GITHUB_ENV"
+          echo "$files monthly files read, $first to $last."
+      - name: Load the production
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          node --experimental-strip-types scripts/load-petrinex.js sql \
+            "$RUNNER_TEMP/petrinex/rows.csv" "$FORMATION" "$FIRST_MONTH" "$LAST_MONTH" "$FILES" \
+            "$GRAIN_BYTES" > "$RUNNER_TEMP/petrinex/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/petrinex/load.sql"
+      - name: Remove Petrinex's files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/petrinex"
