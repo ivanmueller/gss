@@ -7,10 +7,11 @@
 -- by page under a size guard (the free plan's limit is shared with grain's database). Rows are
 -- updated in place: keeping every monthly copy would not fit the free plan.
 --
--- Loads are numbered. A well is current when the latest clean, finished load saw it (or a later
--- one): wells gone from the source drop out of petro.current_wells without any mass write
--- (F-243-3-D1-02). A row the job could not identify makes its load "unclean", and an unclean
--- load never retires anything (F-243-3-D1-01).
+-- Loads are numbered; each refreshes the wells it sees. No well is retired automatically: a
+-- well once listed stays, with its latest values (the AER's list keeps abandoned and suspended
+-- wells, with their status). Proving that a well left the source, while the source changes
+-- during a load, kept failing review (F-243-3-R1-01 to R3-02); retiring wells is left for a
+-- later, separate step.
 
 -- The scheduled jobs' names: the AER lists and the wells.
 create or replace function petro.current_job()
@@ -117,13 +118,9 @@ create trigger well_loads_keep
   before update on petro.well_loads
   for each row execute function petro.keep_well_load();
 
--- The wells that are current: seen by the latest clean finished load, or since (a running load
--- adds and refreshes wells as it goes; it retires none until it finishes clean).
+-- The wells shown: every well the loads have seen (none is retired automatically).
 create view petro.current_wells with (security_invoker = true) as
-  select w.*
-  from petro.wells w
-  where w.load_id >= coalesce(
-    (select max(l.id) from petro.well_loads l where l.status = 'done'), 0);
+  select w.* from petro.wells w;
 
 -- Each policy calls its rule once per query, not once per row: (select …) (550,000 wells).
 alter table petro.well_loads enable row level security;

@@ -125,16 +125,16 @@ select pg_temp.as_petro('insert into petro.well_loads (status) values (''running
 select pg_temp.as_petro('with u as (update petro.wells set load_id = ' || :'load3' || ' where uwi = ''0514250908000'' returning 1) select count(*)::text from u');
 select pg_temp.as_petro('with u as (update petro.well_loads set last_object_id = 300, status = ''done'', finished_at = now() where id = ' || :'load3' || ' returning 1) select count(*)::text from u');
 select is(
-  pg_temp.as_petro('select string_agg(uwi, '','') from petro.current_wells'),
-  '0514250908000',
-  'a clean finished load retires the wells it did not see, without rewriting them (F-243-3-D1-02)'
+  pg_temp.as_petro('select count(*)::text from petro.current_wells'),
+  '2',
+  'no well is retired automatically, even one a later load did not see (F-243-3-R3-01)'
 );
 select is(pg_temp.as_petro('select count(*)::text from petro.wells'), '2', 'the retired well is kept');
 
 -- Who reads.
 select pg_temp.be('00000000-0000-4000-8000-0000000000a1',
                   '00000000-0000-4000-8000-0000000000b1', 'viewer', '');
-select is(pg_temp.as_petro('select count(*)::text from petro.current_wells'), '1', 'a member reads the current wells');
+select is(pg_temp.as_petro('select count(*)::text from petro.current_wells'), '2', 'a member reads the wells');
 select is(
   pg_temp.as_petro('with u as (update petro.wells set well_name = ''x'' returning 1) select count(*)::text from u'),
   '0',

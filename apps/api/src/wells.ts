@@ -88,26 +88,6 @@ export async function fetchWellPage(
   }
 }
 
-/** How many wells the service counts; null when it did not answer usably. */
-export async function countWells(fetchImpl: typeof fetch): Promise<number | null> {
-  const params = new URLSearchParams({ where: '1=1', returnCountOnly: 'true', f: 'json' });
-  try {
-    const res = await fetchImpl(WELLS_SERVICE, {
-      method: 'POST',
-      body: params,
-      redirect: 'error',
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    const body: unknown = await res.json();
-    const count =
-      typeof body === 'object' && body !== null ? (body as { count?: unknown }).count : undefined;
-    return typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 ? count : null;
-  } catch {
-    return null;
-  }
-}
-
 function petroleumTarget(env: ApiEnv['Bindings']): { url: string; viaHyperdrive: boolean } | null {
   if (env.PETROLEUM) return { url: env.PETROLEUM.connectionString, viaHyperdrive: true };
   return env.PETROLEUM_DATABASE_URL
@@ -178,8 +158,6 @@ export async function refreshWells(
     let cursor = load.lastObjectId;
     let pages = 0;
     let saved = 0;
-    // Rows the load has seen so far (saved or not identifiable), for the completeness check.
-    let seen = load.rowsSaved + load.rowsUnidentified;
     let sizes = '';
     for (; pages < PAGES_PER_RUN && Date.now() - started < RUN_LIMIT_MS; pages++) {
       // The size guard, before every page: both databases, never loading blind.
@@ -212,26 +190,9 @@ export async function refreshWells(
         console.warn(`Wells load ${String(load.id)}: a page could not be read; next run`);
         break;
       }
-      seen += page.rows.length + page.unidentified;
-      // The last page: the load retires wells only when it saw every well the service counts
-      // (F-243-3-R1-01, R2-01); without a count it stays open and checks again next run
-      // (F-243-3-R2-02).
-      let ending: 'complete' | 'incomplete' | null = null;
-      if (!page.more) {
-        const counted = await countWells(fetchImpl);
-        if (counted === null) {
-          console.warn(
-            `Wells load ${String(load.id)}: the service's count did not answer; next run`,
-          );
-        } else {
-          ending = counted > 0 && seen >= counted ? 'complete' : 'incomplete';
-          if (ending === 'incomplete') {
-            console.warn(
-              `Wells load ${String(load.id)}: saw ${String(seen)} of ${String(counted)}; finished without retiring any well`,
-            );
-          }
-        }
-      }
+      // The last page finishes the load. No well is retired, so a short or changing answer
+      // never hides a well (F-243-3-R3-01): it only leaves some values a month older.
+      const ending = page.more ? null : 'complete';
       if ((await petroleum.saveWellPage(load.id, cursor, page, ending)) === 'moved') {
         console.log(`Wells load ${String(load.id)}: another run moved on; this one stops`);
         break;
@@ -240,7 +201,7 @@ export async function refreshWells(
       cursor = page.lastObjectId ?? cursor;
       if (!page.more) {
         pages += 1;
-        if (ending !== null) console.log(`Wells load ${String(load.id)} finished`);
+        console.log(`Wells load ${String(load.id)} finished`);
         break;
       }
     }

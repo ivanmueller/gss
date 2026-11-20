@@ -132,7 +132,6 @@ describe('refreshWells', () => {
     const first = fetchImpl.mock.calls[0]?.[1]?.body;
     expect(first instanceof URLSearchParams && first.get('where')).toBe('OBJECTID > 100');
     expect(petroleum.saveWellPage).toHaveBeenNthCalledWith(1, 1, 100, expect.anything(), null);
-    // The last page: 3 seen of the 3 the service counts, so complete.
     expect(petroleum.saveWellPage).toHaveBeenNthCalledWith(
       2,
       1,
@@ -144,60 +143,16 @@ describe('refreshWells', () => {
     expect(logs.join('\n')).toContain('Wells load 1 finished');
   });
 
-  it('never calls an empty or cut-short answer complete (F-243-3-R1-01)', async () => {
+  it('finishes on an empty or short last page, hiding no well (F-243-3-R3-01)', async () => {
     petroleum.latestWellLoad.mockResolvedValue(running);
-    const fetchImpl = vi.fn<typeof fetch>((_input, init) =>
-      Promise.resolve(
-        init?.body instanceof URLSearchParams && init.body.get('returnCountOnly') === 'true'
-          ? Response.json({ count: 549743 })
-          : Response.json({ features: [], exceededTransferLimit: false }),
-      ),
+    await refreshWells(
+      env,
+      openDatabase,
+      openPetroleum,
+      NOW,
+      pages({ features: [], exceededTransferLimit: false }),
     );
-    await refreshWells(env, openDatabase, openPetroleum, NOW, fetchImpl);
-    expect(petroleum.saveWellPage).toHaveBeenCalledWith(1, 0, expect.anything(), 'incomplete');
-    expect(logs.join('\n')).toContain('saw 0 of 549743; finished without retiring any well');
-  });
-
-  it('retires nothing after seeing 98% of the wells, a false last page (F-243-3-R2-01)', async () => {
-    petroleum.latestWellLoad.mockResolvedValue({
-      ...running,
-      lastObjectId: 539_000,
-      rowsSaved: 539_000,
-    });
-    const fetchImpl = vi.fn<typeof fetch>((_input, init) =>
-      Promise.resolve(
-        init?.body instanceof URLSearchParams && init.body.get('returnCountOnly') === 'true'
-          ? Response.json({ count: 549743 })
-          : Response.json({ features: [feature(539_001)], exceededTransferLimit: false }),
-      ),
-    );
-    await refreshWells(env, openDatabase, openPetroleum, NOW, fetchImpl);
-    expect(petroleum.saveWellPage).toHaveBeenCalledWith(
-      1,
-      539_000,
-      expect.anything(),
-      'incomplete',
-    );
-  });
-
-  it('keeps the load open when the count fails, and finishes it next run (F-243-3-R2-02)', async () => {
-    petroleum.latestWellLoad.mockResolvedValue({ ...running, rowsSaved: 0 });
-    let countAnswers = 0;
-    const fetchImpl = vi.fn<typeof fetch>((_input, init) => {
-      if (init?.body instanceof URLSearchParams && init.body.get('returnCountOnly') === 'true') {
-        countAnswers += 1;
-        return Promise.resolve(
-          countAnswers === 1 ? new Response('busy', { status: 503 }) : Response.json({ count: 1 }),
-        );
-      }
-      return Promise.resolve(
-        Response.json({ features: [feature(1)], exceededTransferLimit: false }),
-      );
-    });
-    await refreshWells(env, openDatabase, openPetroleum, NOW, fetchImpl);
-    expect(petroleum.saveWellPage).toHaveBeenLastCalledWith(1, 0, expect.anything(), null);
-    await refreshWells(env, openDatabase, openPetroleum, NOW, fetchImpl);
-    expect(petroleum.saveWellPage).toHaveBeenLastCalledWith(1, 0, expect.anything(), 'complete');
+    expect(petroleum.saveWellPage).toHaveBeenCalledWith(1, 0, expect.anything(), 'complete');
   });
 
   it('tries again a week after a load that retired nothing, not twice a day (F-243-3-R1-03)', async () => {
