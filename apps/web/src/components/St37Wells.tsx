@@ -19,7 +19,7 @@ import {
   type St37View,
 } from '../lib/st37Map';
 import type { St37Hover } from './FacilityMap';
-import { FormationProduction, WellProduction } from './Production';
+import { FormationProduction, FormationProductionAbout, WellProduction } from './Production';
 import { Button } from './ui/button';
 
 /**
@@ -221,10 +221,6 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                   {formationTotal(answer.formation.totals).toLocaleString('en-CA')} wells
                 </span>
               </Button>
-              <p className="text-xs text-muted-foreground">
-                Every well of the formation, whatever its status. The counts below are those of the
-                wells in view. Shaded zones: where its drilled wells cluster.
-              </p>
             </div>
           )}
           {answer?.formation && (
@@ -273,11 +269,6 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               })}
             </ul>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Zoomed out: how dense the wells are. Zoom in for each well and its drilled path; point
-            at one for its details. A dashed line is a plan: straight from the surface location to
-            the planned bottom hole of a well not drilled yet.
-          </p>
           {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
           {failed && (
             <p className="text-xs text-destructive">
@@ -301,18 +292,41 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               Go to the wells loaded
             </Button>
           )}
-          {outline && <p className="text-xs text-muted-foreground">{outline.credit}</p>}
-          {answer && (
-            <p className="text-xs text-muted-foreground">
-              {answer.source.loadedAt
-                ? `${answer.source.name}${
-                    answer.source.sourceDate ? `, list of ${answer.source.sourceDate}` : ''
-                  }${answer.source.licenceSource ? `; ${answer.source.licenceSource}` : ''}; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for ${
-                    answer.formation ? `the ${answer.formation.name} only` : 'one area'
-                  } so far. Not an official record.`
-                : 'No wells loaded yet.'}
-            </p>
-          )}
+          {/* What the panel shows and where it comes from, out of the way until asked for (the
+              owner, 2026-11-20). The sources stay here: their terms ask that they be named. */}
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none hover:text-foreground">
+              About this data
+            </summary>
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              {answer?.formation && (
+                <p>
+                  Every well of the formation, whatever its status. The counts are those of the
+                  wells in view. Shaded zones: where its drilled wells cluster.
+                </p>
+              )}
+              {answer?.formation && (
+                <FormationProductionAbout organizationId={organizationId} token={token} />
+              )}
+              <p>
+                Zoomed out: how dense the wells are. Zoom in for each well and its drilled path;
+                point at one for its details. A dashed line is a plan: straight from the surface
+                location to the planned bottom hole of a well not drilled yet.
+              </p>
+              {outline && <p>{outline.credit}</p>}
+              {answer && (
+                <p>
+                  {answer.source.loadedAt
+                    ? `${answer.source.name}${
+                        answer.source.sourceDate ? `, list of ${answer.source.sourceDate}` : ''
+                      }${answer.source.licenceSource ? `; ${answer.source.licenceSource}` : ''}; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for ${
+                        answer.formation ? `the ${answer.formation.name} only` : 'one area'
+                      } so far. Not an official record.`
+                    : 'No wells loaded yet.'}
+                </p>
+              )}
+            </div>
+          </details>
         </>
       )}
     </div>
