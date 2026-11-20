@@ -94,6 +94,22 @@ describe('theme', () => {
     expect(isDark()).toBe(true);
   });
 
+  it('stays light while a page is light only, and goes back to the choice after', async () => {
+    const theme = await load();
+    theme.setThemePreference('dark');
+    expect(isDark()).toBe(true);
+    const page = renderHook(() => {
+      theme.useLightOnly(true);
+      return theme.useTheme()[0];
+    });
+    expect(isDark()).toBe(false);
+    expect(page.result.current).toBe('light');
+    // The saved choice is kept for the rest of the app.
+    expect(window.localStorage.getItem('gss.theme')).toBe('dark');
+    page.unmount();
+    expect(isDark()).toBe(true);
+  });
+
   it('tracks the device setting live while on System', async () => {
     const theme = await load();
     const stop = theme.startThemeSync();

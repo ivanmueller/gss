@@ -96,14 +96,20 @@ describe('st37Answer', () => {
         area: { west: -118.75, south: 51.57, east: -112.9, north: 55.28 },
         formation: 'duvernay',
         totals: { producing: 3, licensed: 2 },
+        // Sixty made-up wells about 1 km apart: one zone; nothing for a rectangle's load.
+        drilled: Array.from({ length: 60 }, (_, i) => ({
+          surface: [-116 + i * 0.015, 54] as const,
+          bottom: [-116 + i * 0.015, 54.02] as const,
+        })),
       },
       [],
     );
-    expect(answer.formation).toEqual({
+    expect(answer.formation).toMatchObject({
       key: 'duvernay',
       name: 'Duvernay',
       totals: { producing: 3, licensed: 2 },
     });
+    expect(answer.formation?.zones.map((z) => z.wells)).toEqual([60]);
     expect(answer.source.licenceSource).toMatch(/Petrinex.*Government of Alberta/);
   });
 });

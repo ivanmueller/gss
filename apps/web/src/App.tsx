@@ -11,6 +11,7 @@ import { IncomingCalls } from './components/IncomingCalls';
 import { canLogContacts } from './lib/crm';
 import { useFollowUpCount } from './lib/useFollowUpCount';
 import { useMe } from './lib/useMe';
+import { useLightOnly } from './lib/theme';
 import { CounterpartiesPage, type DirectorySession } from './pages/CounterpartiesPage';
 import { CounterpartyPage } from './pages/CounterpartyPage';
 import { FollowUpsPage } from './pages/FollowUpsPage';
@@ -68,6 +69,8 @@ export function App({ account }: { account?: Account }) {
   const [meVersion, setMeVersion] = useState(0);
   const me = useMe(account?.accessToken ?? null, meVersion);
   const route = matchRoute(usePath(), window.location.hostname);
+  // The oil and gas map is light only for now (the owner, 2026-11-20).
+  useLightOnly(route.page === 'map');
   const organization = me.status === 'ok' ? (me.organizations[0] ?? null) : undefined;
   const redirectTo = route.page === 'redirect' ? route.to : null;
   const userId = me.status === 'ok' ? (me.id ?? undefined) : undefined;

@@ -1,4 +1,4 @@
-import { ST37_FORMATIONS } from '@grain/domain';
+import { ST37_FORMATIONS, st37Zones } from '@grain/domain';
 
 import type { St37Box, St37Load, St37WellRow } from './st37-db';
 
@@ -56,6 +56,8 @@ export function st37Answer(load: St37Load | null, rows: St37WellRow[]) {
           key: load.formation,
           name: FORMATION_NAMES[load.formation] ?? load.formation,
           totals: load.totals,
+          // Where its drilled wells cluster (F-255): computed here from the stored wells.
+          zones: st37Zones(load.drilled ?? []),
         }
       : null,
     truncated,

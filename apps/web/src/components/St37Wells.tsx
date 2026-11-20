@@ -13,7 +13,9 @@ import {
   ST37_COLOURS,
   ST37_OUTLINES,
   st37Features,
+  st37ZoneFeatures,
   type St37MapWell,
+  type St37MapZone,
   type St37View,
 } from '../lib/st37Map';
 import type { St37Hover } from './FacilityMap';
@@ -39,6 +41,8 @@ interface Answer {
     key: string;
     name: string;
     totals: Partial<Record<St37StatusClass, number>>;
+    /** Where its drilled wells cluster (F-255). */
+    zones?: St37MapZone[];
   } | null;
   truncated: boolean;
   wells: St37MapWell[];
@@ -150,9 +154,15 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   );
   const outline = answer?.formation ? (ST37_OUTLINES[answer.formation.key] ?? null) : null;
   const outlineUrl = outline?.url ?? null;
+  // The same zones come with every answer: kept as one object while they do not change.
+  const zonesKey = JSON.stringify(answer?.formation?.zones ?? null);
+  const zones = useMemo(() => {
+    const list = JSON.parse(zonesKey) as St37MapZone[] | null;
+    return list ? st37ZoneFeatures(list) : null;
+  }, [zonesKey]);
   const mapView = useMemo<St37View | null>(
-    () => (on ? { wells: features, shown, outline: outlineUrl } : null),
-    [on, features, shown, outlineUrl],
+    () => (on ? { wells: features, shown, outline: outlineUrl, zones } : null),
+    [on, features, shown, outlineUrl, zones],
   );
   const counts = useMemo(() => {
     const out = new Map<St37StatusClass, number>();
@@ -212,7 +222,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               </Button>
               <p className="text-xs text-muted-foreground">
                 Every well of the formation, whatever its status. The counts below are those of the
-                wells in view.
+                wells in view. Shaded zones: where its drilled wells cluster.
               </p>
             </div>
           )}
