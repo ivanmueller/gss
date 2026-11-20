@@ -5,6 +5,7 @@ import { mockApi } from '../test/api';
 import {
   clearProductionCache,
   FormationProduction,
+  FormationProductionAbout,
   monthLabel,
   productSeries,
   seriesPath,
@@ -57,6 +58,10 @@ describe('reading the months', () => {
     expect(path.endsWith('L260 39')).toBe(true);
   });
 
+  it('draws a month alone between empty ones as a dot', () => {
+    expect(seriesPath([null, 400, null, 200, 100], 400)).toBe('M65 2L65 2M195 20.5L260 29.8');
+  });
+
   it('writes months and volumes for reading', () => {
     expect(monthLabel('2026-08')).toBe('Aug 2026');
     expect(volumeText(310.5)).toBe('311');
@@ -78,7 +83,8 @@ describe('WellProduction', () => {
     expect(screen.getByRole('img', { name: /^Gas, 10³ m³ a month/ })).toBeInTheDocument();
     expect(screen.queryByRole('img', { name: /^Water/ })).not.toBeInTheDocument();
     expect(screen.getByText('250')).toBeInTheDocument();
-    expect(screen.getByText(/Petrinex public data, © Government of Alberta/)).toBeInTheDocument();
+    // The source is named in the panel's About this data, not on every card.
+    expect(screen.queryByText(/Petrinex/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Incomplete/)).not.toBeInTheDocument();
   });
 
@@ -128,7 +134,14 @@ describe('FormationProduction', () => {
     render(<FormationProduction name="Duvernay" organizationId="org-a" token="token" />);
     const oil = await screen.findByRole('img', { name: /^Oil, m³ a month/ });
     expect(screen.getByText('Duvernay production')).toBeInTheDocument();
-    expect(screen.getByText(/12 wells in the last month/)).toBeInTheDocument();
+    // What it shows and its source are in the panel's About this data.
+    expect(screen.queryByText(/Petrinex/)).not.toBeInTheDocument();
+    render(<FormationProductionAbout organizationId="org-a" token="token" />);
+    expect(
+      screen.getByText(
+        /Production: the total of the wells loaded, by month, Jun 2026 to Sep 2026; 12 wells in the last month\. Point at a chart for a month\. Petrinex public data, Conventional Volumetric Data, © Government of Alberta\. Not an official record\./,
+      ),
+    ).toBeInTheDocument();
     // The latest month until a month is pointed at.
     expect(screen.getByText('1,300')).toBeInTheDocument();
     oil.getBoundingClientRect = () => ({ left: 0, width: 300 }) as DOMRect;

@@ -91,7 +91,10 @@ export function productSeries(
 const W = 260;
 const H = 40;
 
-/** The line of the months that have a value, broken where a month has none. */
+/**
+ * The line of the months that have a value, broken where a month has none. A month alone
+ * between two empty ones is drawn as a dot (a line to itself, with the line's round ends).
+ */
 export function seriesPath(values: readonly (number | null)[], max: number): string {
   const step = values.length > 1 ? W / (values.length - 1) : 0;
   let path = '';
@@ -103,7 +106,8 @@ export function seriesPath(values: readonly (number | null)[], max: number): str
     }
     const x = Math.round(i * step * 10) / 10;
     const y = Math.round((H - 1 - (max > 0 ? v / max : 0) * (H - 3)) * 10) / 10;
-    path += `${pen ? 'L' : 'M'}${String(x)} ${String(y)}`;
+    const alone = !pen && (values[i + 1] ?? null) === null;
+    path += `${pen ? 'L' : 'M'}${String(x)} ${String(y)}${alone ? `L${String(x)} ${String(y)}` : ''}`;
     pen = true;
   });
   return path;
@@ -311,12 +315,12 @@ export function WellProduction({
   return (
     <div className="mt-2 border-t pt-2">
       <ProductionCharts answer={answer} interactive={false} />
-      <p className="mt-1 text-[0.6875rem] text-muted-foreground">
-        {earlier && firstMonth
-          ? `Incomplete: only from ${monthLabel(firstMonth)}; this well's earlier production is not loaded. `
-          : ''}
-        Petrinex public data, © Government of Alberta.
-      </p>
+      {earlier && (
+        <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+          Incomplete: only from {monthLabel(firstMonth)}; this well&apos;s earlier production is not
+          loaded.
+        </p>
+      )}
     </div>
   );
 }
@@ -338,20 +342,42 @@ export function FormationProduction({
     0,
   );
   if (state !== 'ok' || !answer.source.loadedAt || answer.months.length === 0) return null;
-  const { firstMonth, lastMonth } = answer.source;
-  const wells = answer.months.at(-1)?.wells;
   return (
     <div className="flex flex-col gap-1.5">
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {name} production
       </p>
       <ProductionCharts answer={answer} interactive />
-      <p className="text-xs text-muted-foreground">
-        The total of the wells loaded, by month
-        {firstMonth && lastMonth ? `, ${monthLabel(firstMonth)} to ${monthLabel(lastMonth)}` : ''}
-        {wells !== undefined ? `; ${wells.toLocaleString('en-CA')} wells in the last month` : ''}.
-        Point at a chart for a month. {answer.source.name}. Not an official record.
-      </p>
     </div>
+  );
+}
+
+/**
+ * What the formation's charts show and where the numbers come from, for the panel's "About this
+ * data" (Petrinex's terms ask that Crown copyright be acknowledged). Nothing before a load.
+ */
+export function FormationProductionAbout({
+  organizationId,
+  token,
+}: {
+  organizationId: string;
+  token: string;
+}) {
+  const query = new URLSearchParams({ organization_id: organizationId });
+  const { answer, state } = useProduction(
+    `/petroleum/production/formation?${query.toString()}`,
+    token,
+    0,
+  );
+  if (state !== 'ok' || !answer.source.loadedAt || answer.months.length === 0) return null;
+  const { firstMonth, lastMonth } = answer.source;
+  const wells = answer.months.at(-1)?.wells;
+  return (
+    <p>
+      Production: the total of the wells loaded, by month
+      {firstMonth && lastMonth ? `, ${monthLabel(firstMonth)} to ${monthLabel(lastMonth)}` : ''}
+      {wells !== undefined ? `; ${wells.toLocaleString('en-CA')} wells in the last month` : ''}.
+      Point at a chart for a month. {answer.source.name}. Not an official record.
+    </p>
   );
 }
