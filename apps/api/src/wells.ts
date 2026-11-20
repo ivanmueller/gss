@@ -2,11 +2,7 @@ import { parseWellPage, WELL_FIELDS } from '@grain/domain';
 
 import type { DatabaseFactory } from './respond';
 import { failureSummary, type ApiEnv } from './respond';
-import {
-  PETROLEUM_SCHEMA_VERSION,
-  type PetroleumDatabase,
-  type PetroleumFactory,
-} from './petroleum-db';
+import type { PetroleumDatabase, PetroleumFactory } from './petroleum-db';
 import type { WellLoad } from './wells-db';
 
 /**
@@ -22,6 +18,19 @@ import type { WellLoad } from './wells-db';
 
 export const WELLS_SERVICE =
   'https://gis.energy.gov.ab.ca/arcgis/rest/services/Geoview/ERCB_Ext_PROD/MapServer/3/query';
+
+/**
+ * The oil and gas schema version the wells need (20261121010000_petro_wells.sql). Only the wells
+ * job and route ask for it, so a failed wells migration leaves the other oil and gas features
+ * working (F-243-3-R1-02).
+ */
+export const WELLS_SCHEMA_VERSION = 4;
+
+/**
+ * A load is complete only when it saw at least this share of the wells the service counts, so an
+ * empty or cut-short answer never retires the catalogue (F-243-3-R1-01).
+ */
+const COMPLETE_SHARE = 0.98;
 
 /** Grain's and the oil and gas databases together never pass this (the shared limit is 500 MB). */
 export const WELLS_SIZE_BUDGET_BYTES = 400 * 1024 * 1024;
@@ -56,9 +65,48 @@ export async function fetchWellPage(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    const text = await res.text();
-    if (text.length > PAGE_MAX_BYTES) return null;
-    return JSON.parse(text) as unknown;
+    // Read with a byte counter, given up past the cap (F-243-3-R1-06).
+    const reader = (res.body as ReadableStream<Uint8Array> | null)?.getReader();
+    if (!reader) return null;
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > PAGE_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      parts.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const part of parts) {
+      bytes.set(part, at);
+      at += part.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** How many wells the service counts; null when it did not answer usably. */
+export async function countWells(fetchImpl: typeof fetch): Promise<number | null> {
+  const params = new URLSearchParams({ where: '1=1', returnCountOnly: 'true', f: 'json' });
+  try {
+    const res = await fetchImpl(WELLS_SERVICE, {
+      method: 'POST',
+      body: params,
+      redirect: 'error',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body: unknown = await res.json();
+    const count =
+      typeof body === 'object' && body !== null ? (body as { count?: unknown }).count : undefined;
+    return typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 ? count : null;
   } catch {
     return null;
   }
@@ -81,12 +129,12 @@ async function loadToRun(db: PetroleumDatabase, now: Date): Promise<WellLoad | '
   if (latest?.status === 'running') return latest;
   // A load stopped at the size limit waits for the owner (a plan decision), never restarted.
   if (latest?.status === 'stopped_size') return 'stopped';
-  const done = await db.lastDoneWellLoad();
+  // The monthly rhythm follows the latest finished load, clean or not, so an unclean one is not
+  // redone twice a day (F-243-3-R1-03); only a clean one retires wells.
   const due =
     latest === null ||
     latest.status === 'failed' ||
-    done === null ||
-    now.getTime() - Date.parse(done.finishedAt ?? done.startedAt) > REFRESH_AFTER_MS;
+    now.getTime() - Date.parse(latest.finishedAt ?? latest.startedAt) > REFRESH_AFTER_MS;
   if (!due) return 'idle';
   return (await db.startWellLoad()) ?? 'idle';
 }
@@ -120,7 +168,7 @@ export async function refreshWells(
   }
   const started = Date.now();
   try {
-    if ((await petroleum.schemaVersion()) < PETROLEUM_SCHEMA_VERSION) {
+    if ((await petroleum.schemaVersion()) < WELLS_SCHEMA_VERSION) {
       console.log('Wells not refreshed: the oil and gas database is not at this version yet');
       return { status: 'not_ready' };
     }
@@ -133,6 +181,8 @@ export async function refreshWells(
     let cursor = load.lastObjectId;
     let pages = 0;
     let saved = 0;
+    // Rows the load has seen so far (saved or not identifiable), for the completeness check.
+    let seen = load.rowsSaved + load.rowsUnidentified;
     let sizes = '';
     for (; pages < PAGES_PER_RUN && Date.now() - started < RUN_LIMIT_MS; pages++) {
       // The size guard, before every page: both databases, never loading blind.
@@ -160,12 +210,24 @@ export async function refreshWells(
       }
       let page;
       try {
-        page = parseWellPage(body, PAGE_SIZE);
+        page = parseWellPage(body, PAGE_SIZE, cursor);
       } catch {
         console.warn(`Wells load ${String(load.id)}: a page could not be read; next run`);
         break;
       }
-      if ((await petroleum.saveWellPage(load.id, cursor, page)) === 'moved') {
+      seen += page.rows.length + page.unidentified;
+      // The last page: complete only if the load saw (nearly) every well the service counts.
+      let complete = false;
+      if (!page.more) {
+        const counted = await countWells(fetchImpl);
+        complete = counted !== null && counted > 0 && seen >= counted * COMPLETE_SHARE;
+        if (!complete) {
+          console.warn(
+            `Wells load ${String(load.id)}: saw ${String(seen)} of ${counted === null ? 'an unknown number' : String(counted)}; finished without retiring any well`,
+          );
+        }
+      }
+      if ((await petroleum.saveWellPage(load.id, cursor, page, complete)) === 'moved') {
         console.log(`Wells load ${String(load.id)}: another run moved on; this one stops`);
         break;
       }

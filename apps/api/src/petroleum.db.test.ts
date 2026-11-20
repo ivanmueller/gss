@@ -29,7 +29,7 @@ describe('the oil and gas database as petro_api', () => {
   it('has the schema version this code needs once migrated', async () => {
     const db = postgresPetroleum(PETRO_URL);
     try {
-      expect(await db.schemaVersion()).toBe(PETROLEUM_SCHEMA_VERSION);
+      expect(await db.schemaVersion()).toBeGreaterThanOrEqual(PETROLEUM_SCHEMA_VERSION);
     } finally {
       await db.close();
     }
@@ -102,7 +102,7 @@ describe('the oil and gas database as petro_api', () => {
     try {
       const before = await timeout();
       expect(before).not.toBe('10s');
-      expect(await db.schemaVersion()).toBe(PETROLEUM_SCHEMA_VERSION);
+      expect(await db.schemaVersion()).toBeGreaterThanOrEqual(PETROLEUM_SCHEMA_VERSION);
       expect(await timeout()).toBe(before);
       const inside = await sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', '10s', true)`;

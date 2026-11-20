@@ -3,6 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
 import type { Membership } from './db';
+import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import type { MapLayerWrite } from './map-layers-db';
 import {
@@ -448,6 +449,15 @@ export function petroleumRoutes(
       const membership = membershipOf(c, await db.memberships(ctx.userId));
       if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
       return withPetroleum(c, openPetroleum, async (petroleum) => {
+        // The wells need their own migration; without it only this route waits (F-243-3-R1-02).
+        if ((await petroleum.schemaVersion()) < WELLS_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
         const { load, current } = await petroleum.wellsStatus({
           userId: ctx.userId,
           organizationId: membership.organizationId,

@@ -59,6 +59,31 @@ describe('parseWellPage', () => {
     expect(page.rows[2]?.finalDrillDate).toBeNull();
   });
 
+  it('keeps the stored value for a field missing from the answer or holding a NUL (F-243-3-R1-04, R1-05)', () => {
+    const missing = well(1);
+    const attributes = missing.attributes as Record<string, unknown>;
+    delete attributes.OPERATOR_NAME;
+    delete attributes.FINAL_DRILL_DATE;
+    delete attributes.SURFACE_LONGITUDE;
+    delete attributes.SURFACE_LATITUDE;
+    const nul = well(2, { UWI: '0514250908001', WELL_NAME: 'BAD\u0000NAME' });
+    const page = parseWellPage({ features: [missing, nul] }, 2000);
+    expect([...(page.rows[0]?.invalid ?? [])].sort()).toEqual([
+      'finalDrillDate',
+      'location',
+      'operatorName',
+    ]);
+    expect(page.rows[1]?.invalid).toEqual(['wellName']);
+  });
+
+  it('refuses a page it cannot trust: a bad continuation flag, or rows before the cursor (F-243-3-R1-01)', () => {
+    expect(() =>
+      parseWellPage({ features: [well(1)], exceededTransferLimit: 'yes' }, 2000),
+    ).toThrow();
+    expect(() => parseWellPage({ features: [well(5)] }, 2000, 5)).toThrow();
+    expect(parseWellPage({ features: [well(6)] }, 2000, 5).lastObjectId).toBe(6);
+  });
+
   it('counts rows without a valid UWI as unidentified', () => {
     const page = parseWellPage(
       { features: [well(1, { UWI: 'bad' }), well(2, { UWI: null })] },

@@ -80,7 +80,7 @@ describe('the wells as petro_api', () => {
     using(async (db) => {
       const uwi = ownUwi();
       const first = await freshLoad(db);
-      expect(await db.saveWellPage(first.id, 0, page([row(uwi, 10)], true))).toBe('saved');
+      expect(await db.saveWellPage(first.id, 0, page([row(uwi, 10)], true), true)).toBe('saved');
       // Seen again with a bad date and a bad location: the good ones are kept.
       expect(
         await db.saveWellPage(
@@ -98,6 +98,7 @@ describe('the wells as petro_api', () => {
             ],
             false,
           ),
+          true,
         ),
       ).toBe('saved');
       expect(await db.latestWellLoad()).toMatchObject({
@@ -127,16 +128,18 @@ describe('the wells as petro_api', () => {
       const other = postgresPetroleum(URL);
       try {
         const results = await Promise.all([
-          db.saveWellPage(load.id, 0, page([row(ownUwi(), 5)], true)),
-          other.saveWellPage(load.id, 0, page([row(ownUwi(), 6)], true)),
+          db.saveWellPage(load.id, 0, page([row(ownUwi(), 5)], true), true),
+          other.saveWellPage(load.id, 0, page([row(ownUwi(), 6)], true), true),
         ]);
         expect(results.sort()).toEqual(['moved', 'saved']);
-        expect(await db.saveWellPage(load.id, 0, page([row(ownUwi(), 7)], true))).toBe('moved');
+        expect(await db.saveWellPage(load.id, 0, page([row(ownUwi(), 7)], true), true)).toBe(
+          'moved',
+        );
       } finally {
         await other.close();
       }
       expect(await db.stopWellLoad(load.id, 'stopped_size')).toBe('saved');
-      expect(await db.saveWellPage(load.id, 6, page([row(ownUwi(), 8)], true))).toBe('moved');
+      expect(await db.saveWellPage(load.id, 6, page([row(ownUwi(), 8)], true), true)).toBe('moved');
       expect(await db.stopWellLoad(load.id, 'stopped_size')).toBe('moved');
     }));
 
@@ -144,9 +147,9 @@ describe('the wells as petro_api', () => {
     using(async (db) => {
       const kept = ownUwi();
       const a = await freshLoad(db);
-      await db.saveWellPage(a.id, 0, page([row(kept, 1)], false));
+      await db.saveWellPage(a.id, 0, page([row(kept, 1)], false), true);
       const b = await freshLoad(db);
-      expect(await db.saveWellPage(b.id, 0, page([], false, 3))).toBe('saved');
+      expect(await db.saveWellPage(b.id, 0, page([], false, 3), true)).toBe('saved');
       expect(await db.latestWellLoad()).toMatchObject({
         status: 'done_unclean',
         rowsUnidentified: 3,
@@ -154,6 +157,13 @@ describe('the wells as petro_api', () => {
       const status = await db.wellsStatus(member());
       expect(status.current).toBeGreaterThan(0);
       expect(status.load).toMatchObject({ status: 'done_unclean' });
+    }));
+
+  it('finishes unclean when the job could not show the load complete (F-243-3-R1-01)', () =>
+    using(async (db) => {
+      const load = await freshLoad(db);
+      expect(await db.saveWellPage(load.id, 0, page([], false), false)).toBe('saved');
+      expect(await db.latestWellLoad()).toMatchObject({ id: load.id, status: 'done_unclean' });
     }));
 
   it('allows one running load at a time', () =>

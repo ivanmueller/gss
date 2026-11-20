@@ -26,7 +26,7 @@ export interface PetroleumContext {
  * answer "not ready" (F-247-1-R3-01), so a deploy whose migration failed never runs new code
  * against an old schema.
  */
-export const PETROLEUM_SCHEMA_VERSION = 4;
+export const PETROLEUM_SCHEMA_VERSION = 3;
 
 /** The AER's daily lists (F-243 part 1) are in `AerListsDatabase` (aer-lists-db.ts). */
 export interface PetroleumDatabase extends AerListsDatabase, WellsDatabase {

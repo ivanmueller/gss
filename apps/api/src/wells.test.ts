@@ -5,7 +5,12 @@ import { createApp } from './index';
 import { PETROLEUM_SCHEMA_VERSION, type PetroleumFactory } from './petroleum-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
 import { fakePetroleum } from './testing/petroleum';
-import { refreshWells, WELLS_SERVICE, WELLS_SIZE_BUDGET_BYTES } from './wells';
+import {
+  refreshWells,
+  WELLS_SCHEMA_VERSION,
+  WELLS_SERVICE,
+  WELLS_SIZE_BUDGET_BYTES,
+} from './wells';
 import type { WellLoad } from './wells-db';
 
 // Every Alberta well (F-243 part 3): the shared size guard, paging, the monthly rule, and the
@@ -54,6 +59,7 @@ let logs: string[] = [];
 beforeEach(() => {
   grain = fakeDatabase();
   petroleum = fakePetroleum();
+  petroleum.schemaVersion.mockResolvedValue(WELLS_SCHEMA_VERSION);
   logs = [];
   for (const level of ['log', 'warn', 'error'] as const) {
     vi.spyOn(console, level).mockImplementation((line: unknown) => {
@@ -67,7 +73,11 @@ afterEach(() => {
 });
 
 function pages(...answers: unknown[]) {
-  return vi.fn<typeof fetch>(() => {
+  return vi.fn<typeof fetch>((_input, init) => {
+    // The service's own count of its wells (the completeness check).
+    if (init?.body instanceof URLSearchParams && init.body.get('returnCountOnly') === 'true') {
+      return Promise.resolve(Response.json({ count: 3 }));
+    }
     const next = answers.shift();
     return Promise.resolve(
       next === undefined ? new Response('down', { status: 500 }) : Response.json(next),
@@ -118,10 +128,39 @@ describe('refreshWells', () => {
     expect(fetchImpl.mock.calls[0]?.[0]).toBe(WELLS_SERVICE);
     const first = fetchImpl.mock.calls[0]?.[1]?.body;
     expect(first instanceof URLSearchParams && first.get('where')).toBe('OBJECTID > 100');
-    expect(petroleum.saveWellPage).toHaveBeenNthCalledWith(1, 1, 100, expect.anything());
-    expect(petroleum.saveWellPage).toHaveBeenNthCalledWith(2, 1, 102, expect.anything());
+    expect(petroleum.saveWellPage).toHaveBeenNthCalledWith(1, 1, 100, expect.anything(), false);
+    // The last page: 3 seen of the 3 the service counts, so complete.
+    expect(petroleum.saveWellPage).toHaveBeenNthCalledWith(2, 1, 102, expect.anything(), true);
     expect(grain.databaseSize).toHaveBeenCalledTimes(2);
     expect(logs.join('\n')).toContain('Wells load 1 finished');
+  });
+
+  it('never calls an empty or cut-short answer complete (F-243-3-R1-01)', async () => {
+    petroleum.latestWellLoad.mockResolvedValue(running);
+    const fetchImpl = vi.fn<typeof fetch>((_input, init) =>
+      Promise.resolve(
+        init?.body instanceof URLSearchParams && init.body.get('returnCountOnly') === 'true'
+          ? Response.json({ count: 549743 })
+          : Response.json({ features: [], exceededTransferLimit: false }),
+      ),
+    );
+    await refreshWells(env, openDatabase, openPetroleum, NOW, fetchImpl);
+    expect(petroleum.saveWellPage).toHaveBeenCalledWith(1, 0, expect.anything(), false);
+    expect(logs.join('\n')).toContain('saw 0 of 549743; finished without retiring any well');
+  });
+
+  it('keeps the monthly rhythm after an unclean load (F-243-3-R1-03)', async () => {
+    const unclean: WellLoad = {
+      ...running,
+      status: 'done_unclean',
+      finishedAt: '2026-11-19T00:00:00.000Z',
+    };
+    petroleum.latestWellLoad.mockResolvedValue(unclean);
+    petroleum.lastDoneWellLoad.mockResolvedValue(null);
+    expect(await refreshWells(env, openDatabase, openPetroleum, NOW, pages())).toEqual({
+      status: 'idle',
+    });
+    expect(petroleum.startWellLoad).not.toHaveBeenCalled();
   });
 
   it('stops when another run moved the load on, and when the service fails', async () => {
@@ -160,7 +199,7 @@ describe('refreshWells', () => {
     expect(await refreshWells(ENV, openDatabase, openPetroleum, NOW, pages())).toEqual({
       status: 'not_configured',
     });
-    petroleum.schemaVersion.mockResolvedValue(PETROLEUM_SCHEMA_VERSION - 1);
+    petroleum.schemaVersion.mockResolvedValue(WELLS_SCHEMA_VERSION - 1);
     expect(await refreshWells(env, openDatabase, openPetroleum, NOW, pages())).toEqual({
       status: 'not_ready',
     });
@@ -182,7 +221,20 @@ describe('GET /api/v1/petroleum/wells/status', () => {
     expect(openPetroleum).not.toHaveBeenCalled();
   });
 
+  it('waits for the wells migration alone, the rest of the oil and gas side at version 3 (F-243-3-R1-02)', async () => {
+    grain.memberships.mockResolvedValue([
+      { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'viewer' },
+    ]);
+    petroleum.schemaVersion.mockResolvedValue(PETROLEUM_SCHEMA_VERSION);
+    const res = await app.request('/api/v1/petroleum/wells/status', { headers: AUTH }, env);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { code: 'PETROLEUM_NOT_READY' } });
+    const layers = await app.request('/api/v1/petroleum/health', { headers: AUTH }, env);
+    expect(layers.status).toBe(200);
+  });
+
   it('tells a viewer the load and how many wells are current', async () => {
+    petroleum.schemaVersion.mockResolvedValue(WELLS_SCHEMA_VERSION);
     openPetroleum.mockClear();
     grain.memberships.mockResolvedValue([
       { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'viewer' },

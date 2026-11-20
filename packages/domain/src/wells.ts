@@ -68,16 +68,21 @@ function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-/** A text field: trimmed, within `max` characters; null text is empty; anything else invalid. */
+/**
+ * A text field: trimmed, within `max` characters; an explicit null is empty. Omitted (the key
+ * missing from the answer, F-243-3-R1-04), not text, too long, or holding a NUL character
+ * (which Postgres cannot store, F-243-3-R1-05): invalid, so the stored value is kept.
+ */
 function text(value: unknown, max: number): string | undefined {
-  if (value === null || value === undefined) return '';
-  if (typeof value !== 'string') return undefined;
+  if (value === null) return '';
+  if (typeof value !== 'string' || value.includes('\u0000')) return undefined;
   const trimmed = value.trim();
   return trimmed.length <= max ? trimmed : undefined;
 }
 
 function date(value: unknown): string | null | undefined {
-  if (value === null || value === undefined || value === '') return null;
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
   if (typeof value !== 'string') return undefined;
   const match = DATE.exec(value.trim());
   if (!match) return undefined;
@@ -96,7 +101,7 @@ function location(
   lon: unknown,
   lat: unknown,
 ): { longitude: number; latitude: number } | null | undefined {
-  if ((lon === null || lon === undefined) && (lat === null || lat === undefined)) return null;
+  if (lon === null && lat === null) return null;
   if (typeof lon !== 'number' || typeof lat !== 'number') return undefined;
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return undefined;
   const longitude = Math.round((lon > 0 ? -lon : lon) * 1e6) / 1e6;
@@ -109,10 +114,16 @@ function location(
   return inside ? { longitude, latitude } : undefined;
 }
 
-/** One page of the service's answer; throws when the answer is not a feature list. */
-export function parseWellPage(body: unknown, asked: number): WellPage {
+/**
+ * One page of the service's answer, asked for after `after`; throws when the answer cannot be
+ * trusted: not a feature list, a continuation flag that is not true or false, or a row at or
+ * before the cursor (F-243-3-R1-01).
+ */
+export function parseWellPage(body: unknown, asked: number, after = 0): WellPage {
   const features = record(body)?.features;
   if (!Array.isArray(features)) throw new Error('well page malformed');
+  const flag = record(body)?.exceededTransferLimit;
+  if (flag !== undefined && typeof flag !== 'boolean') throw new Error('well page malformed');
   const byUwi = new Map<string, WellRow>();
   let unidentified = 0;
   let lastObjectId: number | null = null;
@@ -123,6 +134,7 @@ export function parseWellPage(body: unknown, asked: number): WellPage {
       // Without an OBJECTID the cursor cannot move past it: the page cannot be trusted.
       throw new Error('well page has a row without an OBJECTID');
     }
+    if (objectId <= after) throw new Error('well page goes back before its cursor');
     lastObjectId = Math.max(lastObjectId ?? 0, objectId);
     const uwi = typeof a.UWI === 'string' ? a.UWI.trim() : '';
     if (!UWI.test(uwi)) {

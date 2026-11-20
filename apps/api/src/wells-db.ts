@@ -35,7 +35,12 @@ export interface WellsDatabase {
    * fetched from (F-243-3-D1-03); `moved` when another run changed it first (nothing written).
    * A last page finishes the load: done, or done_unclean when any row could not be identified.
    */
-  saveWellPage(loadId: number, fromObjectId: number, page: WellPage): Promise<'saved' | 'moved'>;
+  saveWellPage(
+    loadId: number,
+    fromObjectId: number,
+    page: WellPage,
+    complete: boolean,
+  ): Promise<'saved' | 'moved'>;
   /** Job: stops a running load (the size guard, or a failure); `moved` when it no longer runs. */
   stopWellLoad(loadId: number, status: 'stopped_size' | 'failed'): Promise<'saved' | 'moved'>;
   /** Members: the latest load and the number of current wells. */
@@ -116,7 +121,7 @@ export function wellsQueries(sql: postgres.Sql): WellsDatabase {
       });
     },
 
-    saveWellPage(loadId, fromObjectId, page) {
+    saveWellPage(loadId, fromObjectId, page, complete) {
       return asJob(sql, async (tx) => {
         // The load row is locked for the whole page: one run at a time moves it (D1-03).
         const [load] = await tx<{ status: string; last_object_id: string }[]>`
@@ -189,8 +194,9 @@ export function wellsQueries(sql: postgres.Sql): WellsDatabase {
             rows_unidentified = rows_unidentified + ${page.unidentified},
             rows_invalid = rows_invalid + ${invalid},
             status = case when ${finished}::boolean
-                          then case when rows_unidentified + ${page.unidentified} > 0
-                                    then 'done_unclean' else 'done' end
+                          then case when rows_unidentified + ${page.unidentified} = 0
+                                         and ${complete}::boolean
+                                    then 'done' else 'done_unclean' end
                           else status end,
             finished_at = case when ${finished}::boolean then now() else null end
           where id = ${loadId}`;
