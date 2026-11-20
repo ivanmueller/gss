@@ -26,7 +26,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | F-246 | Other provinces: British Columbia, Saskatchewan, Manitoba and beyond | Needs owner input |
 | F-249 | Pipelines on the map | Needs owner input |
 | F-250 | Search by legal land description | Later (owner, 2026-11-19) |
-| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | Needs owner input (which formation; "Fastest MVP" below) |
+| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | Planned: step 1 next, the count of the Duvernay, Exshaw and Rock Creek for the owner's final choice (the owner's answers 2026-11-20, "Fastest MVP" below) |
 | F-253 | Analysis on the stored data: type curves, decline curves, financial forecasts, Monte Carlo simulations | Planned after F-252 (the owner's inputs needed for the financial part) |
 | F-254 | A plain-language box that sets the map's filters and the charts | Later, after F-253 |
 
@@ -57,6 +57,13 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 3. **"A button … that we can download all the data for":** loading it into our database (understood so above), or also a file for the person to save (the AER's terms stand in the way)?
 4. **For the financial forecasts:** where the prices and costs come from (typed in each time, or a source the owner names), and which results matter most to show friends first (for example net present value, payout, rate of return).
 5. **Licensed wells as planned lines (part 4b):** built first as a quick visible change in Leduc–Devon, or folded into step 2 once the formation is chosen (proposed: folded in, the same code either way).
+
+**The owner's answers (2026-11-20):**
+1. **Which formation:** the owner gave two lists to recommend from: Duvernay, Wilrich, Nordegg, Montney, Exshaw (Alberta Bakken), Muskwa; and Wabamun, Nisku, Rock Creek, Beaverhill Lake (incl. Swan Hills), Slave Point, Spirit River (Falher, Wilrich, Notikewin), Mannville (incl. Clearwater), Second White Specks, Bluesky, Cardium, Leduc, Edmonton Group (Horseshoe Canyon), Dunvegan, Doig, Halfway. **An agent's recommendation, from general knowledge, not yet counted from the files: the Duvernay**, with the Exshaw (Alberta Bakken) and the Rock Creek counted beside it as smaller alternatives. Why: a young play (its wells are recent horizontals, so the public monthly production is likely to cover most wells from their first month, which a type curve needs), still being licensed and drilled (so "upcoming" shows something), and far smaller than the Montney, Cardium or Mannville. Its weakness: few abandoned wells; the Exshaw has more wells suspended and abandoned but little new drilling. Old plays (Leduc, Beaverhill Lake, Nisku, Wabamun) are set aside for the MVP: their production began decades before the public monthly files are likely to reach. **To confirm by the count (step 1) before the owner's final choice:** wells by status for the three, their size in the database, and how far back the production source reaches. ST37 gives each production string's pool code (already stored, `pool_code`); the names come from ST103.
+2. **Historical data:** production per well, by month, to start.
+3. **Download:** no file for the person to save; the data is loaded into our database only.
+4. **Financial forecasts:** recommended values are loaded beforehand and each person can type their own over them. Each recommended value is shown with its source and date and is proposed to the owner before it is loaded, never made up by an agent (`AGENTS.md` rule 1). Results to show first (left to the agent): the forecast volumes and the estimated ultimate recovery, then net present value at a discount rate the person can change, payout time and rate of return.
+5. **Part 4b:** folded into step 2.
 
 ## Two things that shape the order
 
