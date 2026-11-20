@@ -97,6 +97,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           pins={NO_PINS}
           selectedId={null}
           start={CANADA}
+          scale
+          paper
           onSelect={() => undefined}
           overlays={layers.overlays}
           authToken={session.token}

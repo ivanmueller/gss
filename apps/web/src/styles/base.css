@@ -60,6 +60,11 @@
 .mapboxgl-map .mapboxgl-ctrl-attrib a {
   color: var(--color-muted-foreground);
 }
+.mapboxgl-map .mapboxgl-ctrl-scale {
+  border-color: var(--color-foreground);
+  background-color: color-mix(in oklch, var(--color-card) 80%, transparent);
+  color: var(--color-foreground);
+}
 .dark .mapboxgl-map .mapboxgl-ctrl-attrib-button {
   filter: invert(1);
 }

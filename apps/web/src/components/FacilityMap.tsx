@@ -10,6 +10,7 @@ import {
   mapPaint,
   pinFeatures,
   readMapColours,
+  withPaper,
   type Basemap,
   type MapBounds,
   type MapColours,
@@ -79,6 +80,10 @@ export interface FacilityMapProps {
   selectedId: string | null;
   /** Where the zoom buttons go; the workspace keeps the right side for its order book. */
   controls?: 'top-left' | 'top-right';
+  /** A distance bar (kilometres) in the bottom right corner, which follows the zoom. */
+  scale?: boolean;
+  /** The warm off-white base map in the light theme (the oil and gas map). */
+  paper?: boolean;
   /** Pixels on the right covered by a panel; the starting view keeps the pins clear of it. */
   coveredRight?: number;
   /** The starting view [west, south, east, north]; western Canada and the plains by default. */
@@ -214,8 +219,8 @@ function addAreaLayers(map: mapboxgl.Map, areas: LaneAreas) {
 }
 
 /** Repaints the base map (for the "Map" style only) and the pins in the theme's colours. */
-function paintTheme(map: mapboxgl.Map, basemap: Basemap) {
-  const colours = readMapColours();
+function paintTheme(map: mapboxgl.Map, basemap: Basemap, theme: Theme, paper: boolean) {
+  const colours = withPaper(readMapColours(), paper, theme);
   if (basemap === 'map') {
     for (const layer of map.getStyle().layers) {
       for (const [name, value] of mapPaint(layer, colours)) {
@@ -429,7 +434,7 @@ function syncOverlays(map: mapboxgl.Map, overlays: readonly MapOverlay[]) {
 
 /** A Mapbox map with the given pins. */
 export default function FacilityMap(props: FacilityMapProps) {
-  const { token, basemap, theme, pins, selectedId } = props;
+  const { token, basemap, theme, pins, selectedId, paper } = props;
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const shownStyle = useRef(basemapStyle(basemap, theme));
@@ -529,6 +534,13 @@ export default function FacilityMap(props: FacilityMapProps) {
       new mapboxgl.AttributionControl({ compact: true }),
       side === 'top-left' ? 'bottom-left' : 'bottom-right',
     );
+    if (latest.current.scale) {
+      // Added after the attribution, so it sits above it in the same corner.
+      instance.addControl(
+        new mapboxgl.ScaleControl({ unit: 'metric', maxWidth: 120 }),
+        'bottom-right',
+      );
+    }
     const report = () => {
       const bounds = instance.getBounds();
       latest.current.onViewChange?.(
@@ -543,7 +555,12 @@ export default function FacilityMap(props: FacilityMapProps) {
       styleReady.current = true;
       if (latest.current.simple) hideClutter(instance);
       if (latest.current.areas) addAreaLayers(instance, latest.current.areas);
-      paintTheme(instance, latest.current.basemap);
+      paintTheme(
+        instance,
+        latest.current.basemap,
+        latest.current.theme,
+        latest.current.paper ?? false,
+      );
       addPinLayers(
         instance,
         latest.current.data,
@@ -698,9 +715,9 @@ export default function FacilityMap(props: FacilityMapProps) {
       instance.setStyle(style, reload);
     } else if (styleReady.current) {
       // Same imagery (satellite), new theme: only the pins change colour.
-      paintTheme(instance, basemap);
+      paintTheme(instance, basemap, theme, paper ?? false);
     }
-  }, [basemap, theme]);
+  }, [basemap, theme, paper]);
 
   useEffect(() => {
     map.current?.getSource<GeoJSONSource>(SOURCE)?.setData(pinFeatures(pins));

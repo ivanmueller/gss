@@ -26,7 +26,8 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | F-246 | Other provinces: British Columbia, Saskatchewan, Manitoba and beyond | Needs owner input |
 | F-249 | Pipelines on the map | Needs owner input |
 | F-250 | Search by legal land description | Later (owner, 2026-11-19) |
-| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | In progress. Step 2 built (ivanmueller/gss#284): the Duvernay's wells loaded whole by **Load ST37 wells**, a Duvernay button on the map, licensed wells as dashed planned lines; owner step: run the workflow once, then check the map. Next: step 3, monthly production from Petrinex (free years, from 2022) |
+| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | In progress. Step 2 built (ivanmueller/gss#284): the Duvernay's wells loaded whole by **Load ST37 wells**, a Duvernay button on the map, licensed wells as dashed planned lines; owner step: run the workflow once, then check the map. The Duvernay's outline from the Alberta Geological Survey merged as ivanmueller/gss#285 (2026-11-20; owner check pending). Next: step 3, monthly production from Petrinex (free years, from 2022) |
+| F-255 | The oil and gas map's look: warm off-white base map in the light theme, a distance bar (km) bottom right; shaded zones where a formation's wells cluster | Look and distance bar built (asked 2026-11-20; owner check pending). Zones: to build once the owner agrees to computing them from the stored wells (wells within a set distance of each other grouped, a smooth shape drawn around each group) |
 | F-253 | Analysis on the stored data: type curves, decline curves, financial forecasts, Monte Carlo simulations | Planned after F-252 (the owner's inputs needed for the financial part) |
 | F-254 | A plain-language box that sets the map's filters and the charts | Later, after F-253 |
 
