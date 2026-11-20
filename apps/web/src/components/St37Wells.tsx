@@ -19,6 +19,7 @@ import {
   type St37View,
 } from '../lib/st37Map';
 import type { St37Hover } from './FacilityMap';
+import { FormationProduction, WellProduction } from './Production';
 import { Button } from './ui/button';
 
 /**
@@ -226,6 +227,13 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               </p>
             </div>
           )}
+          {answer?.formation && (
+            <FormationProduction
+              name={answer.formation.name}
+              organizationId={organizationId}
+              token={token}
+            />
+          )}
           <div className="flex flex-col gap-1.5">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               Colour by status
@@ -344,9 +352,12 @@ const metres = (n: number) => `${n.toLocaleString('en-CA', { maximumFractionDigi
 export function St37Card({
   hover,
   byUwi,
+  member,
 }: {
   hover: St37Hover | null;
   byUwi: ReadonlyMap<string, St37MapWell>;
+  /** Whose sign-in reads the well's monthly production (F-252 step 3); none shows no chart. */
+  member?: { organizationId: string; token: string };
 }) {
   if (!hover) return null;
   const [first, ...rest] = hover.uwis;
@@ -366,7 +377,7 @@ export function St37Card({
     .join(' · ');
   // Opens to the left of the pointer near the window's right edge, and above it near the bottom.
   const left = hover.x > window.innerWidth - 340;
-  const up = hover.y > window.innerHeight - 180;
+  const up = hover.y > window.innerHeight - (member ? 380 : 180);
   return (
     <div
       role="status"
@@ -392,6 +403,14 @@ export function St37Card({
           The dashed line is the plan: straight from the surface location to the planned bottom
           hole. The drilled path comes once the well is drilled.
         </p>
+      )}
+      {member && well.statusClass !== 'licensed' && (
+        <WellProduction
+          uwi={well.uwi}
+          spudDate={well.spudDate}
+          organizationId={member.organizationId}
+          token={member.token}
+        />
       )}
       {rest.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">
