@@ -35,6 +35,11 @@ const well = (uwi: string): St37WellRow => ({
     [-113.6, 53.3],
     [-113.62, 53.3],
   ],
+  licenceDate: null,
+  plannedOperation: null,
+  plannedFormation: null,
+  plannedDepthM: null,
+  plannedBottom: null,
 });
 
 let grain = fakeDatabase();
@@ -79,6 +84,27 @@ describe('st37Answer', () => {
     expect(answer.truncated).toBe(true);
     expect(answer.wells).toHaveLength(ST37_MAX_WELLS);
     expect(answer.source.name).toMatch(/Alberta Energy Regulator/);
+    expect(answer.formation).toBeNull();
+    expect(answer.source.licenceSource).toBeNull();
+  });
+
+  it("names a formation loaded whole, with its wells by status and the licences' source", () => {
+    const answer = st37Answer(
+      {
+        loadedAt: '2026-11-20T06:00:00.000Z',
+        sourceDate: '2026-11-01',
+        area: { west: -118.75, south: 51.57, east: -112.9, north: 55.28 },
+        formation: 'duvernay',
+        totals: { producing: 3, licensed: 2 },
+      },
+      [],
+    );
+    expect(answer.formation).toEqual({
+      key: 'duvernay',
+      name: 'Duvernay',
+      totals: { producing: 3, licensed: 2 },
+    });
+    expect(answer.source.licenceSource).toMatch(/Petrinex.*Government of Alberta/);
   });
 });
 
@@ -122,6 +148,8 @@ describe('GET /api/v1/petroleum/st37/wells', () => {
         loadedAt: '2026-11-20T06:00:00.000Z',
         sourceDate: '2026-11-01',
         area: { west: -113.95, south: 53.12, east: -113.25, north: 53.48 },
+        formation: null,
+        totals: { producing: 1 },
       },
       wells: [well('00/09-07-030-26W4/0')],
     });

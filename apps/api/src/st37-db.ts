@@ -29,12 +29,23 @@ export interface St37WellRow {
   surface: [number, number];
   bottom: [number, number];
   path: [number, number][] | null;
+  /** What the licence planned (Petrinex), when the load read it. */
+  licenceDate: string | null;
+  plannedOperation: string | null;
+  plannedFormation: string | null;
+  plannedDepthM: number | null;
+  /** The planned bottom hole of a well with no drilled path yet, or null. */
+  plannedBottom: [number, number] | null;
 }
 
 export interface St37Load {
   loadedAt: string;
   sourceDate: string | null;
   area: St37Box;
+  /** The formation loaded whole ("duvernay"), or null when the load was a rectangle. */
+  formation: string | null;
+  /** How many wells the whole load holds, by status. */
+  totals: Partial<Record<St37StatusClass, number>>;
 }
 
 export interface St37Database {
@@ -65,11 +76,18 @@ interface WellDbRow {
   bottom_longitude: string;
   bottom_latitude: string;
   path: [number, number][] | null;
+  licence_date: string | null;
+  planned_operation: string | null;
+  planned_formation: string | null;
+  planned_depth_m: string | null;
+  planned_bottom_longitude: string | null;
+  planned_bottom_latitude: string | null;
 }
 
 interface LoadDbRow {
   loaded_at: Date;
   source_date: string | null;
+  formation: string | null;
   west: string;
   south: string;
   east: string;
@@ -88,12 +106,19 @@ export function st37Queries(sql: postgres.Sql): St37Database {
                         set_config('petro.member_role', ${ctx.role}, true),
                         set_config('petro.request_id', ${ctx.requestId}, true)`;
         const [load] = await tx<LoadDbRow[]>`
-          select loaded_at, source_date::text as source_date, west, south, east, north
+          select loaded_at, source_date::text as source_date, formation, west, south, east, north
           from petro.st37_loads order by id desc limit 1`;
+        const totals = load
+          ? await tx<{ status_class: St37StatusClass; wells: number }[]>`
+              select status_class, count(*)::int as wells
+              from petro.st37_wells group by status_class`
+          : [];
         const rows = await tx<WellDbRow[]>`
           select uwi, licence_number, well_name, licensee, status_class, status_fluid,
                  status_type, spud_date::text as spud_date, total_depth_m, true_vertical_depth_m,
-                 surface_longitude, surface_latitude, bottom_longitude, bottom_latitude, path
+                 surface_longitude, surface_latitude, bottom_longitude, bottom_latitude, path,
+                 licence_date::text as licence_date, planned_operation, planned_formation,
+                 planned_depth_m, planned_bottom_longitude, planned_bottom_latitude
           from petro.st37_wells
           where surface_longitude between ${box.west} and ${box.east}
             and surface_latitude between ${box.south} and ${box.north}
@@ -110,6 +135,8 @@ export function st37Queries(sql: postgres.Sql): St37Database {
                   east: Number(load.east),
                   north: Number(load.north),
                 },
+                formation: load.formation,
+                totals: Object.fromEntries(totals.map((t) => [t.status_class, t.wells])),
               }
             : null,
           wells: rows.map((r) => ({
@@ -126,6 +153,14 @@ export function st37Queries(sql: postgres.Sql): St37Database {
             surface: [Number(r.surface_longitude), Number(r.surface_latitude)],
             bottom: [Number(r.bottom_longitude), Number(r.bottom_latitude)],
             path: r.path,
+            licenceDate: r.licence_date,
+            plannedOperation: r.planned_operation,
+            plannedFormation: r.planned_formation,
+            plannedDepthM: num(r.planned_depth_m),
+            plannedBottom:
+              r.planned_bottom_longitude !== null && r.planned_bottom_latitude !== null
+                ? [Number(r.planned_bottom_longitude), Number(r.planned_bottom_latitude)]
+                : null,
           })),
         };
       });

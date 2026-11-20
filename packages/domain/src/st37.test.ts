@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildSt37Wells,
+  ST37_FORMATIONS,
+  st37CsvFields,
   st37Date,
+  st37FormationLicences,
+  st37LsdCentres,
+  st37PlanBottoms,
   st37Reach,
+  st37Simplify,
   st37StatusClass,
+  st37UwiLsd,
   type St37Feature,
   type St37StatusInput,
 } from './st37';
@@ -206,5 +213,150 @@ describe('buildSt37Wells', () => {
     expect(h1.totalDepthM).toBe(5846);
     expect(h1.trueVerticalDepthM).toBeNull();
     expect(h1.poolCode).toBe(336005);
+  });
+});
+
+describe('st37Simplify', () => {
+  it('drops the vertices that lie on the line, and keeps a real bend and both ends', () => {
+    // 0.0001 degrees of latitude is about 11 m: the third point is a bend, the second is not.
+    const line: [number, number][] = [
+      [-113.6, 53.3],
+      [-113.6, 53.3001],
+      [-113.6, 53.3002],
+      [-113.6002, 53.3002],
+    ];
+    expect(st37Simplify(line, 2)).toEqual([
+      [-113.6, 53.3],
+      [-113.6, 53.3002],
+      [-113.6002, 53.3002],
+    ]);
+    expect(st37Simplify(line.slice(0, 2), 2)).toEqual(line.slice(0, 2));
+  });
+});
+
+// Petrinex's Well Licence file, in its layout, with made-up licences (F-252).
+const LICENCE_HEADER =
+  'LicenceType,LicenceNumber,LicenceIssueDate,LicenceStatus,LicenceStatusDate,Licensee,LicenseeName,LicenceLocation,LicenceLegalSubdivision,LicenceSection,LicenceTownship,LicenceRange,LicenceMeridian,DrillingOperationType,WellPurpose,WellLicenceType,WellSubstance,ProjectedFormation,TerminatingFormation,ProjectedTotalDepth,AERClass,HeadLessor,WellCompletionType,TargetPool,OrphanWellFlg';
+const licenceLine = (number: string, status: string, projected: string, depth = '5300.000000000') =>
+  `WELL,${number},2026-11-19,${status},2026-11-19,X001,"EXAMPLE ENERGY, LTD.",01-09-043-06W5,1,9,43,6,5,HORIZONTAL,NEW WELL,PRODUCTION,GAS,${projected},DUVERNAY FM,${depth},DEVELOPMENT WELL,ALBERTA CROWN,,,N`;
+
+describe('st37FormationLicences', () => {
+  const csv = [
+    LICENCE_HEADER,
+    licenceLine('0999001', 'ISSUED', 'DUVERNAY FM'),
+    licenceLine('0999002', 'CANCELLED', 'DUVERNAY FM'),
+    // Only passes through the Duvernay: aimed elsewhere.
+    licenceLine('0999003', 'ISSUED', 'SPARKY MBR'),
+    licenceLine('0999004', 'Amended', 'DUVERNAY FM', ''),
+    '',
+  ].join('\r\n');
+  const duvernay = ST37_FORMATIONS.duvernay;
+  if (!duvernay) throw new Error('no Duvernay');
+
+  it('keeps the licences aimed at the formation, but for the cancelled ones', () => {
+    const licences = st37FormationLicences(csv, duvernay);
+    expect([...licences.keys()]).toEqual(['0999001', '0999004']);
+    expect(licences.get('0999001')).toEqual({
+      licenceDate: '2026-11-19',
+      operation: 'Horizontal',
+      formation: 'Duvernay Fm',
+      depthM: 5300,
+    });
+    expect(licences.get('0999004')?.depthM).toBeNull();
+  });
+
+  it('refuses a file that is not the one expected', () => {
+    expect(() => st37FormationLicences('a,b\n1,2', duvernay)).toThrow(/no LicenceType column/);
+  });
+
+  it('reads quoted fields', () => {
+    expect(st37CsvFields('a,"b, ""c""",d')).toEqual(['a', 'b, "c"', 'd']);
+  });
+});
+
+describe('planned bottom holes', () => {
+  it('reads the legal subdivision in a UWI', () => {
+    expect(st37UwiLsd('00/01-29-049-26W4/0')).toEqual({
+      meridian: 4,
+      range: 26,
+      township: 49,
+      section: 29,
+      lsd: 1,
+    });
+    expect(st37UwiLsd('00/17-29-049-26W4/0')).toBeNull();
+    expect(st37UwiLsd('bad')).toBeNull();
+  });
+
+  // A subdivision about 400 m square, 1.3 km north of the surface hole, as the grid answers.
+  const grid = {
+    features: [
+      {
+        properties: { M: 4, RGE: 26, TWP: 49, SEC: 29, LS: 1 },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [-113.603, 53.31],
+              [-113.597, 53.31],
+              [-113.597, 53.314],
+              [-113.603, 53.314],
+              [-113.603, 53.31],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
+  it("finds the centre of each subdivision in the grid's answer", () => {
+    expect(st37LsdCentres(grid).get('4-26-49-29-1')).toEqual([-113.6, 53.312]);
+    expect(() => st37LsdCentres({})).toThrow(/malformed/);
+  });
+
+  it('plans a licensed well with no path, from its licence, and no other', () => {
+    const LICENSED = '00/01-29-049-26W4/0';
+    const VERTICAL = '02/01-29-049-26W4/0';
+    const DRILLED = '03/01-29-049-26W4/0';
+    const undrilled = { Spud_Date: null, Final_Drill_Date: null };
+    const { wells } = buildSt37Wells(
+      {
+        surface: [surface('0999001', -113.6, 53.3), surface('0999005', -113.6, 53.3)],
+        bottom: [
+          bottom(LICENSED, '0999001', -113.6, 53.3, undrilled),
+          bottom(VERTICAL, '0999005', -113.6, 53.3, undrilled),
+          bottom(DRILLED, '0999001', -113.6, 53.312),
+        ],
+        strings: [],
+        paths: [],
+      },
+      AREA,
+      new Map([
+        [
+          '0999001',
+          {
+            licenceDate: '2026-11-19',
+            operation: 'Horizontal',
+            formation: 'Duvernay Fm',
+            depthM: 5300,
+          },
+        ],
+        ['0999005', { licenceDate: null, operation: 'Vertical', formation: null, depthM: null }],
+      ]),
+    );
+    expect(wells.map((w) => w.statusClass)).toEqual(['licensed', 'licensed', 'awaiting']);
+    expect(wells[0]).toMatchObject({
+      licenceDate: '2026-11-19',
+      plannedOperation: 'Horizontal',
+      plannedFormation: 'Duvernay Fm',
+      plannedDepthM: 5300,
+      plannedBottom: null,
+    });
+
+    expect(st37PlanBottoms(wells, st37LsdCentres(grid))).toBe(1);
+    expect(wells.map((w) => w.plannedBottom)).toEqual([[-113.6, 53.312], null, null]);
+    // A subdivision the grid did not find, or one at the surface hole, plans nothing.
+    for (const w of wells) w.plannedBottom = null;
+    expect(st37PlanBottoms(wells, new Map())).toBe(0);
+    expect(st37PlanBottoms(wells, new Map([['4-26-49-29-1', [-113.6, 53.3005]]]))).toBe(0);
   });
 });

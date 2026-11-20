@@ -26,7 +26,14 @@ interface Answer {
     loadedAt: string | null;
     sourceDate: string | null;
     area: Bbox | null;
+    licenceSource: string | null;
   };
+  /** The formation loaded whole, with its wells by status; null for a rectangle. */
+  formation: {
+    key: string;
+    name: string;
+    totals: Partial<Record<St37StatusClass, number>>;
+  } | null;
   truncated: boolean;
   wells: St37MapWell[];
 }
@@ -176,6 +183,31 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
       </label>
       {on && (
         <>
+          {answer?.formation && answer.source.area && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                Formation
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="justify-between"
+                onClick={() => {
+                  const a = answer.source.area;
+                  if (a) goTo([a.west, a.south, a.east, a.north]);
+                }}
+              >
+                <span>{answer.formation.name}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {formationTotal(answer.formation.totals).toLocaleString('en-CA')} wells
+                </span>
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Every well of the formation, whatever its status. The counts below are those of the
+                wells in view.
+              </p>
+            </div>
+          )}
           <div className="flex flex-col gap-1.5">
             <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               Colour by status
@@ -217,7 +249,8 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
           </div>
           <p className="text-xs text-muted-foreground">
             Zoomed out: how dense the wells are. Zoom in for each well and its drilled path; point
-            at one for its details.
+            at one for its details. A dashed line is a plan: straight from the surface location to
+            the planned bottom hole of a well not drilled yet.
           </p>
           {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
           {failed && (
@@ -230,7 +263,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               More wells than can be drawn at once here: zoom in to see every one.
             </p>
           )}
-          {answer?.source.area && (
+          {answer?.source.area && !answer.formation && (
             <Button
               size="sm"
               variant="outline"
@@ -247,7 +280,9 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               {answer.source.loadedAt
                 ? `${answer.source.name}${
                     answer.source.sourceDate ? `, list of ${answer.source.sourceDate}` : ''
-                  }; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for one area so far. Not an official record.`
+                  }${answer.source.licenceSource ? `; ${answer.source.licenceSource}` : ''}; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for ${
+                    answer.formation ? `the ${answer.formation.name} only` : 'one area'
+                  } so far. Not an official record.`
                 : 'No wells loaded yet.'}
             </p>
           )}
@@ -257,6 +292,31 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   );
 
   return { on, view: mapView, byUwi, onViewChange, panel };
+}
+
+function formationTotal(totals: Partial<Record<St37StatusClass, number>>): number {
+  return Object.values(totals).reduce((sum, n) => sum + n, 0);
+}
+
+/**
+ * What a licence planned, for a well not drilled yet: "Planned horizontal in the Duvernay Fm,
+ * 5,300 m measured depth · Licensed 2026-11-19"; null when the load read no plan.
+ */
+export function st37Plan(well: St37MapWell): string | null {
+  const parts: string[] = [];
+  if (well.plannedOperation || well.plannedFormation || well.plannedDepthM !== null) {
+    const what = [
+      `Planned${well.plannedOperation ? ` ${well.plannedOperation.toLowerCase()}` : ''}`,
+      well.plannedFormation && `in the ${well.plannedFormation}`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    parts.push(
+      well.plannedDepthM !== null ? `${what}, ${metres(well.plannedDepthM)} measured depth` : what,
+    );
+  }
+  if (well.licenceDate) parts.push(`Licensed ${well.licenceDate}`);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 const metres = (n: number) => `${n.toLocaleString('en-CA', { maximumFractionDigits: 0 })} m`;
@@ -305,6 +365,15 @@ export function St37Card({
       </p>
       <p className="mt-1">{status}</p>
       {depth && <p className="text-muted-foreground">{depth}</p>}
+      {(well.statusClass === 'licensed' || well.statusClass === 'drilling') && st37Plan(well) && (
+        <p className="text-muted-foreground">{st37Plan(well)}</p>
+      )}
+      {well.plannedBottom && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          The dashed line is the plan: straight from the surface location to the planned bottom
+          hole. The drilled path comes once the well is drilled.
+        </p>
+      )}
       {rest.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">
           +{rest.length} more {rest.length === 1 ? 'well' : 'wells'} here

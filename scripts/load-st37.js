@@ -1,27 +1,59 @@
 #!/usr/bin/env node
-// Writes the SQL that loads one area of the AER's ST37 wells into the oil and gas database
-// (F-243 part 4; run by .github/workflows/load-st37.yml, "Load ST37 wells").
+// Writes the SQL that loads the AER's ST37 wells into the oil and gas database: one area
+// (F-243 part 4) or one formation whole (F-252); run by .github/workflows/load-st37.yml,
+// "Load ST37 wells".
 //
 //   node --experimental-strip-types scripts/load-st37.js <dir> <west> <south> <east> <north> \
-//     <source-url> <source-date|-> <grain-bytes> > load.sql
+//     <source-url> <source-date|-> <grain-bytes> [formation] > load.sql
 //
 // <dir> holds surface.geojson, bottom.geojson, strings.geojson and paths.geojson, the four
-// layers of ST_37_Wells.gdb cut to the area by ogr2ogr (EPSG:4326). <grain-bytes> is the size of
-// grain's database: the load is refused, and nothing changes, if both databases together would
-// pass 400 MB (the free plan's limit is shared, docs/DECISIONS.md, 2026-11-19).
+// layers of ST_37_Wells.gdb cut to the area (or to the formation's licences) by ogr2ogr
+// (EPSG:4326). <grain-bytes> is the size of grain's database: the load is refused, and nothing
+// changes, if both databases together would pass 400 MB (the free plan's limit is shared,
+// docs/DECISIONS.md, 2026-11-19).
+//
+// With a formation (`duvernay`), <dir> also holds licences.json, written by the first step:
+//
+//   node --experimental-strip-types scripts/load-st37.js pick <formation> \
+//     <pool-strings.geojson> <well-licence.csv> <dir>
+//
+// which reads the formation's production strings (cut from ST37 by pool code) and Petrinex's
+// public Well Licence file, and writes <dir>/licences.csv (every licence of the formation, which
+// ogr2ogr cuts the layers by) and <dir>/licences.json (what each licence planned). The load then gives
+// each well with no drilled path yet its planned bottom hole, the legal subdivision in its UWI,
+// placed from the province's township grid (F-243 part 4b).
 //
 // The SQL replaces the whole ST37 copy in one transaction, so the map never shows half a load.
-// The AER's data is never written to the repository: the files live only on the runner.
+// The AER's and Petrinex's data is never written to the repository: the files live only on the
+// runner.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { URLSearchParams } from 'node:url';
 
-import { buildSt37Wells } from '../packages/domain/src/st37.ts';
+import {
+  buildSt37Wells,
+  ST37_FORMATIONS,
+  st37FormationLicences,
+  st37LsdCentres,
+  st37LsdKey,
+  st37NeedsPlan,
+  st37PlanBottoms,
+  st37UwiLsd,
+} from '../packages/domain/src/st37.ts';
 
 const BUDGET_BYTES = 400 * 1024 * 1024;
+const ALBERTA = { west: -120.1, south: 48.9, east: -109.9, north: 60.1 };
+/** The province's township grid, legal subdivisions (as the Worker's daily lists use it). */
+const ATS_LSD_QUERY =
+  'https://geospatial.alberta.ca/titan/rest/services/base/alberta_township_system/MapServer/20/query';
+const LSD_BATCH = 40;
 
 export function usage() {
-  return 'usage: load-st37.js <dir> <west> <south> <east> <north> <source-url> <source-date|-> <grain-bytes>';
+  return [
+    'usage: load-st37.js <dir> <west> <south> <east> <north> <source-url> <source-date|-> <grain-bytes> [formation]',
+    '       load-st37.js pick <formation> <pool-strings.geojson> <well-licence.csv> <dir>',
+  ].join('\n');
 }
 
 /** A value for COPY's CSV format: empty for null, quoted otherwise. */
@@ -35,7 +67,25 @@ function literal(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes) {
+/** The box around the wells' surface holes, a little wider, for "Go to the wells loaded". */
+export function boxOf(wells) {
+  let { east: west, north: south, west: east, south: north } = ALBERTA;
+  for (const w of wells) {
+    west = Math.min(west, w.surface[0]);
+    east = Math.max(east, w.surface[0]);
+    south = Math.min(south, w.surface[1]);
+    north = Math.max(north, w.surface[1]);
+  }
+  const round = (n) => Math.round(n * 100) / 100;
+  return {
+    west: Math.max(ALBERTA.west, round(west - 0.05)),
+    south: Math.max(ALBERTA.south, round(south - 0.05)),
+    east: Math.min(ALBERTA.east, round(east + 0.05)),
+    north: Math.min(ALBERTA.north, round(north + 0.05)),
+  };
+}
+
+export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation = null) {
   const columns = [
     'uwi',
     'licence_number',
@@ -56,6 +106,12 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes) {
     'bottom_longitude',
     'bottom_latitude',
     'path',
+    'licence_date',
+    'planned_operation',
+    'planned_formation',
+    'planned_depth_m',
+    'planned_bottom_longitude',
+    'planned_bottom_latitude',
   ];
   const rows = wells.map((w) =>
     [
@@ -78,6 +134,12 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes) {
       w.bottom[0],
       w.bottom[1],
       w.path === null ? null : JSON.stringify(w.path),
+      w.licenceDate,
+      w.plannedOperation,
+      w.plannedFormation,
+      w.plannedDepthM,
+      w.plannedBottom?.[0] ?? null,
+      w.plannedBottom?.[1] ?? null,
     ]
       .map(csv)
       .join(','),
@@ -90,8 +152,8 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes) {
     `copy petro.st37_wells (${columns.join(', ')}) from stdin with (format csv);`,
     ...rows,
     '\\.',
-    'insert into petro.st37_loads (source_url, source_date, west, south, east, north, wells)',
-    `values (${literal(sourceUrl)}, ${sourceDate ? `${literal(sourceDate)}::date` : 'null'}, ${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}, ${String(wells.length)});`,
+    'insert into petro.st37_loads (source_url, source_date, west, south, east, north, wells, formation)',
+    `values (${literal(sourceUrl)}, ${sourceDate ? `${literal(sourceDate)}::date` : 'null'}, ${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}, ${String(wells.length)}, ${formation ? literal(formation) : 'null'});`,
     // Measured inside the transaction, with the new rows written: over the guard, nothing stays.
     'do $$',
     'begin',
@@ -101,13 +163,101 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes) {
     'end',
     '$$;',
     'commit;',
-    "select count(*) as wells, count(path) as with_paths, pg_size_pretty(pg_total_relation_size('petro.st37_wells')) as size from petro.st37_wells;",
+    "select count(*) as wells, count(path) as with_paths, count(planned_bottom_longitude) as planned_lines, pg_size_pretty(pg_total_relation_size('petro.st37_wells')) as size from petro.st37_wells;",
     '',
   ].join('\n');
 }
 
-function main(argv) {
-  const [dir, west, south, east, north, sourceUrl, sourceDate, grainBytes] = argv;
+const readFeatures = (file) => JSON.parse(readFileSync(file, 'utf8')).features ?? [];
+
+/**
+ * The formation's licences: those of its production strings, and those Petrinex's file says
+ * aim at it. Returns the list ogr2ogr cuts by and what each licence planned.
+ */
+export function pick(formation, poolStrings, licenceCsv) {
+  const planned = st37FormationLicences(licenceCsv, formation);
+  const licences = new Set(planned.keys());
+  let inPools = 0;
+  for (const f of poolStrings) {
+    const pool = f.properties?.Pool_Code;
+    const raw = f.properties?.Well_Licence_Number;
+    const licence = typeof raw === 'string' ? raw.trim() : '';
+    if (typeof pool !== 'number' || pool < formation.poolFrom || pool > formation.poolTo) continue;
+    if (!/^[0-9A-Z]{1,9}$/.test(licence)) continue;
+    inPools += 1;
+    licences.add(licence);
+  }
+  return {
+    // One licence a line, under a header: ogr2ogr joins the ST37 layers to it.
+    csv: ['licence', ...[...licences].sort(), ''].join('\n'),
+    licences: Object.fromEntries(planned),
+    count: licences.size,
+    inPools,
+    aimed: planned.size,
+  };
+}
+
+/** The centres of the legal subdivisions the planned lines need, from the township grid. */
+async function lsdCentres(wells) {
+  const wanted = new Map();
+  for (const w of wells) {
+    if (!st37NeedsPlan(w)) continue;
+    const lsd = st37UwiLsd(w.uwi);
+    if (lsd) wanted.set(st37LsdKey(lsd), lsd);
+  }
+  const all = [...wanted.values()];
+  const centres = new Map();
+  for (let i = 0; i < all.length; i += LSD_BATCH) {
+    const where = all
+      .slice(i, i + LSD_BATCH)
+      .map(
+        (s) =>
+          `(M=${String(s.meridian)} AND RGE=${String(s.range)} AND TWP=${String(s.township)} AND SEC=${String(s.section)} AND LS=${String(s.lsd)})`,
+      )
+      .join(' OR ');
+    const body = new URLSearchParams({
+      where,
+      outFields: 'M,RGE,TWP,SEC,LS',
+      returnGeometry: 'true',
+      outSR: '4326',
+      f: 'geojson',
+    });
+    const res = await fetch(ATS_LSD_QUERY, {
+      method: 'POST',
+      body,
+      signal: globalThis.AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) throw new Error(`township grid answered ${String(res.status)}`);
+    for (const [key, centre] of st37LsdCentres(await res.json())) centres.set(key, centre);
+  }
+  return { centres, asked: all.length };
+}
+
+function mainPick(argv) {
+  const [key, poolFile, licenceFile, dir] = argv;
+  const formation = ST37_FORMATIONS[key ?? ''];
+  if (!formation || !poolFile || !licenceFile || !dir) {
+    console.error(usage());
+    process.exit(2);
+  }
+  const picked = pick(formation, readFeatures(poolFile), readFileSync(licenceFile, 'utf8'));
+  console.error(
+    `${formation.name}: ${String(picked.count)} licences (${String(picked.inPools)} production strings in its pools, ${String(picked.aimed)} licences aimed at it).`,
+  );
+  if (picked.count === 0) {
+    console.error('No licences found: nothing to load.');
+    process.exit(1);
+  }
+  writeFileSync(join(dir, 'licences.csv'), picked.csv);
+  writeFileSync(join(dir, 'licences.json'), JSON.stringify(picked.licences));
+}
+
+async function main(argv) {
+  if (argv[0] === 'pick') {
+    mainPick(argv.slice(1));
+    return;
+  }
+  const [dir, west, south, east, north, sourceUrl, sourceDate, grainBytes, formationKey] = argv;
   const area = {
     west: Number(west),
     south: Number(south),
@@ -115,6 +265,7 @@ function main(argv) {
     north: Number(north),
   };
   const bytes = Number(grainBytes);
+  const formation = formationKey ? ST37_FORMATIONS[formationKey] : null;
   if (
     !dir ||
     !sourceUrl ||
@@ -122,7 +273,8 @@ function main(argv) {
     Object.values(area).some((n) => !Number.isFinite(n)) ||
     !(area.west < area.east && area.south < area.north) ||
     !Number.isSafeInteger(bytes) ||
-    bytes < 0
+    bytes < 0 ||
+    formation === undefined
   ) {
     console.error(usage());
     process.exit(2);
@@ -132,7 +284,10 @@ function main(argv) {
     console.error('source date must be YYYY-MM-DD or -');
     process.exit(2);
   }
-  const read = (name) => JSON.parse(readFileSync(join(dir, name), 'utf8')).features ?? [];
+  const read = (name) => readFeatures(join(dir, name));
+  const licences = formation
+    ? new Map(Object.entries(JSON.parse(readFileSync(join(dir, 'licences.json'), 'utf8'))))
+    : new Map();
   const { wells, skipped } = buildSt37Wells(
     {
       surface: read('surface.geojson'),
@@ -140,17 +295,28 @@ function main(argv) {
       strings: read('strings.geojson'),
       paths: read('paths.geojson'),
     },
-    area,
+    formation ? ALBERTA : area,
+    licences,
   );
   const withPaths = wells.filter((w) => w.path !== null).length;
   console.error(
-    `ST37: ${String(wells.length)} wells in the area (${String(withPaths)} with drilled paths), ${String(skipped)} records skipped as unreadable.`,
+    `ST37: ${String(wells.length)} wells in ${formation ? `the ${formation.name}` : 'the area'} (${String(withPaths)} with drilled paths), ${String(skipped)} records skipped as unreadable.`,
   );
   if (wells.length === 0) {
-    console.error('No wells in the area: nothing to load.');
+    console.error('No wells: nothing to load.');
     process.exit(1);
   }
-  process.stdout.write(sqlFor(wells, area, sourceUrl, date, bytes));
+  const { centres, asked } = await lsdCentres(wells);
+  const planned = st37PlanBottoms(wells, centres);
+  console.error(
+    `Planned lines: ${String(planned)} wells with no drilled path yet (${String(asked)} subdivisions asked of the township grid, ${String(centres.size)} found).`,
+  );
+  process.stdout.write(
+    sqlFor(wells, formation ? boxOf(wells) : area, sourceUrl, date, bytes, formation?.key ?? null),
+  );
 }
 
-main(process.argv.slice(2));
+main(process.argv.slice(2)).catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
