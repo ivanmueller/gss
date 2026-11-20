@@ -31,3 +31,4 @@ export * from './forwarding';
 export * from './emailAttachments';
 export * from './wells';
 export * from './st37';
+export * from './st37Zones';

@@ -45,6 +45,25 @@ export interface St37View {
   shown: readonly St37StatusClass[];
   /** The address of the outline (GeoJSON) of the formation loaded whole, or null. */
   outline: string | null;
+  /** The zones where the formation's drilled wells cluster (F-255), or null. */
+  zones: GeoJSON.FeatureCollection | null;
+}
+
+/** A zone as the API sends it: how many drilled wells it holds, and its closed ring. */
+export interface St37MapZone {
+  wells: number;
+  ring: [number, number][];
+}
+
+export function st37ZoneFeatures(zones: readonly St37MapZone[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: zones.map((zone) => ({
+      type: 'Feature',
+      properties: { wells: zone.wells },
+      geometry: { type: 'Polygon', coordinates: [zone.ring] },
+    })),
+  };
 }
 
 /**
@@ -85,9 +104,11 @@ export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, stri
 
 const SOURCE = 'st37-wells';
 const OUTLINE_SOURCE = 'st37-outline';
+const ZONES_SOURCE = 'st37-zones';
 export const ST37_LAYERS = {
   outlineFill: 'st37-outline-fill',
   outlineLine: 'st37-outline-line',
+  zones: 'st37-zones-fill',
   density: 'st37-density',
   paths: 'st37-paths',
   planned: 'st37-planned',
@@ -207,10 +228,12 @@ export function syncSt37(
     for (const id of layers) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(SOURCE)) map.removeSource(SOURCE);
     if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
+    if (map.getSource(ZONES_SOURCE)) map.removeSource(ZONES_SOURCE);
     return;
   }
   const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
   syncOutline(map, view.outline, tone, before);
+  syncZones(map, view.zones, tone, before);
   const existing = map.getSource<GeoJSONSource>(SOURCE);
   if (existing) existing.setData(view.wells);
   else map.addSource(SOURCE, { type: 'geojson', data: view.wells });
@@ -408,6 +431,41 @@ function syncOutline(
   const ink = tone === 'light' ? '#44403c' : '#e7e5e4';
   map.setPaintProperty(ST37_LAYERS.outlineFill, 'fill-color', ink);
   map.setPaintProperty(ST37_LAYERS.outlineLine, 'line-color', ink);
+}
+
+/**
+ * The zones where the formation's drilled wells cluster (F-255): a soft shading over the
+ * outline and under the wells, with no edge line. Removed when there are none.
+ */
+function syncZones(
+  map: MapboxMap,
+  zones: GeoJSON.FeatureCollection | null,
+  tone: 'light' | 'dark',
+  before: string | undefined,
+) {
+  if (zones === null) {
+    if (map.getLayer(ST37_LAYERS.zones)) map.removeLayer(ST37_LAYERS.zones);
+    if (map.getSource(ZONES_SOURCE)) map.removeSource(ZONES_SOURCE);
+    return;
+  }
+  const existing = map.getSource<GeoJSONSource>(ZONES_SOURCE);
+  if (existing) existing.setData(zones);
+  else map.addSource(ZONES_SOURCE, { type: 'geojson', data: zones });
+  if (!map.getLayer(ST37_LAYERS.zones)) {
+    map.addLayer(
+      {
+        id: ST37_LAYERS.zones,
+        type: 'fill',
+        source: ZONES_SOURCE,
+        paint: {
+          // Lighter close in, where each well shows for itself.
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.16, 9, 0.1, 12, 0.06],
+        },
+      },
+      map.getLayer(ST37_LAYERS.density) ? ST37_LAYERS.density : before,
+    );
+  }
+  map.setPaintProperty(ST37_LAYERS.zones, 'fill-color', tone === 'light' ? '#44403c' : '#e7e5e4');
 }
 
 /** Draws the hovered well's path thicker and a square on its surface hole; null clears it. */

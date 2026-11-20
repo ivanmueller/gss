@@ -1,4 +1,4 @@
-import type { St37StatusClass } from '@grain/domain';
+import type { St37StatusClass, ZoneWell } from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { PetroleumContext } from './petroleum-db';
@@ -46,6 +46,11 @@ export interface St37Load {
   formation: string | null;
   /** How many wells the whole load holds, by status. */
   totals: Partial<Record<St37StatusClass, number>>;
+  /**
+   * Every drilled well of a formation loaded whole (not the licensed or the ones being
+   * drilled), for the zones where they cluster (F-255); absent for a rectangle.
+   */
+  drilled?: ZoneWell[];
 }
 
 export interface St37Database {
@@ -113,6 +118,18 @@ export function st37Queries(sql: postgres.Sql): St37Database {
               select status_class, count(*)::int as wells
               from petro.st37_wells group by status_class`
           : [];
+        const drilled = load?.formation
+          ? await tx<
+              Pick<
+                WellDbRow,
+                'surface_longitude' | 'surface_latitude' | 'bottom_longitude' | 'bottom_latitude'
+              >[]
+            >`
+              select surface_longitude, surface_latitude, bottom_longitude, bottom_latitude
+              from petro.st37_wells
+              where status_class not in ('licensed', 'drilling')
+              order by uwi`
+          : null;
         const rows = await tx<WellDbRow[]>`
           select uwi, licence_number, well_name, licensee, status_class, status_fluid,
                  status_type, spud_date::text as spud_date, total_depth_m, true_vertical_depth_m,
@@ -137,6 +154,12 @@ export function st37Queries(sql: postgres.Sql): St37Database {
                 },
                 formation: load.formation,
                 totals: Object.fromEntries(totals.map((t) => [t.status_class, t.wells])),
+                ...(drilled && {
+                  drilled: drilled.map((d) => ({
+                    surface: [Number(d.surface_longitude), Number(d.surface_latitude)] as const,
+                    bottom: [Number(d.bottom_longitude), Number(d.bottom_latitude)] as const,
+                  })),
+                }),
               }
             : null,
           wells: rows.map((r) => ({

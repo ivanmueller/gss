@@ -4,7 +4,14 @@ import type { Map as MapboxMap } from 'mapbox-gl';
 import { validate } from 'mapbox-gl/dist/style-spec/index.es.js';
 import { describe, expect, it } from 'vitest';
 
-import { highlightSt37, ST37_LAYERS, ST37_OUTLINES, st37Features, syncSt37 } from './st37Map';
+import {
+  highlightSt37,
+  ST37_LAYERS,
+  ST37_OUTLINES,
+  st37Features,
+  st37ZoneFeatures,
+  syncSt37,
+} from './st37Map';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -72,6 +79,18 @@ const WELLS = st37Features([
 ]);
 
 const OUTLINE = '/outlines/duvernay.geojson';
+/** One made-up zone. */
+const ZONES = st37ZoneFeatures([
+  {
+    wells: 30,
+    ring: [
+      [-113.7, 53.2],
+      [-113.5, 53.2],
+      [-113.5, 53.4],
+      [-113.7, 53.2],
+    ],
+  },
+]);
 
 describe('syncSt37', () => {
   it('draws layers Mapbox accepts, in both tones', () => {
@@ -79,7 +98,12 @@ describe('syncSt37', () => {
       const { map, layers } = fakeMap();
       syncSt37(
         map,
-        { wells: WELLS, shown: ['producing', 'licensed'], outline: '/outlines/duvernay.geojson' },
+        {
+          wells: WELLS,
+          shown: ['producing', 'licensed'],
+          outline: '/outlines/duvernay.geojson',
+          zones: ZONES,
+        },
         tone,
       );
       highlightSt37(map, '00/09-07-030-26W4/0');
@@ -88,6 +112,7 @@ describe('syncSt37', () => {
         sources: {
           'st37-wells': { type: 'geojson', data: WELLS },
           'st37-outline': { type: 'geojson', data: '/outlines/duvernay.geojson' },
+          'st37-zones': { type: 'geojson', data: ZONES },
         },
         layers: [...layers.values()],
       };
@@ -98,7 +123,7 @@ describe('syncSt37', () => {
 
   it('removes everything when the wells are switched off', () => {
     const { map, layers, sources } = fakeMap();
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE }, 'light');
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE, zones: ZONES }, 'light');
     syncSt37(map, null, 'light');
     expect(layers.size).toBe(0);
     expect(sources.size).toBe(0);
@@ -106,13 +131,25 @@ describe('syncSt37', () => {
 
   it("draws a formation's outline under the wells, and takes it away without one", () => {
     const { map, layers, sources } = fakeMap();
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE }, 'light');
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE, zones: null }, 'light');
     expect(sources.get('st37-outline')).toEqual({ type: 'geojson', data: OUTLINE });
     expect(layers.has(ST37_LAYERS.outlineLine)).toBe(true);
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null }, 'light');
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
     expect(sources.has('st37-outline')).toBe(false);
     expect(layers.has(ST37_LAYERS.outlineFill)).toBe(false);
     expect(layers.has(ST37_LAYERS.density)).toBe(true);
+  });
+
+  it('shades the zones under the wells, and takes them away without any', () => {
+    const { map, layers, sources } = fakeMap();
+    const view = { wells: WELLS, shown: ['producing' as const], outline: null };
+    syncSt37(map, { ...view, zones: ZONES }, 'light');
+    expect(sources.get('st37-zones')).toEqual({ type: 'geojson', data: ZONES });
+    expect(ZONES.features[0]?.properties).toEqual({ wells: 30 });
+    expect(layers.has(ST37_LAYERS.zones)).toBe(true);
+    syncSt37(map, { ...view, zones: null }, 'light');
+    expect(sources.has('st37-zones')).toBe(false);
+    expect(layers.has(ST37_LAYERS.zones)).toBe(false);
   });
 
   it("names the Survey and its licence for the Duvernay's outline", () => {

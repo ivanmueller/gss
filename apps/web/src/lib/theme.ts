@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 import { useMediaQuery } from './useMediaQuery';
 
@@ -38,8 +38,13 @@ export function resolveTheme(preference: ThemePreference, prefersDark: boolean):
   return preference;
 }
 
+// The oil and gas map is light only for now (the owner, 2026-11-20): while it is open, the
+// saved choice and the device's setting are left as they are and not applied.
+let lightOnly = false;
+const lightOnlySnapshot = () => lightOnly;
+
 function apply(preference: ThemePreference) {
-  const theme = resolveTheme(preference, systemPrefersDark());
+  const theme = lightOnly ? 'light' : resolveTheme(preference, systemPrefersDark());
   const root = document.documentElement;
   root.classList.toggle('dark', theme === 'dark');
   root.style.colorScheme = theme;
@@ -83,7 +88,23 @@ export function useThemePreference(): [ThemePreference, (preference: ThemePrefer
 export function useTheme(): [Theme, (theme: Theme) => void] {
   const [preference] = useThemePreference();
   const prefersDark = useMediaQuery(DARK_QUERY, false);
-  return [resolveTheme(preference, prefersDark), setThemePreference];
+  const light = useSyncExternalStore(subscribe, lightOnlySnapshot);
+  return [light ? 'light' : resolveTheme(preference, prefersDark), setThemePreference];
+}
+
+/** Shows the page in the light theme whatever the choice, while `on` (the oil and gas map). */
+export function useLightOnly(on: boolean) {
+  useEffect(() => {
+    if (!on) return;
+    lightOnly = true;
+    apply(snapshot());
+    window.dispatchEvent(new Event(CHANGE));
+    return () => {
+      lightOnly = false;
+      apply(snapshot());
+      window.dispatchEvent(new Event(CHANGE));
+    };
+  }, [on]);
 }
 
 /**
