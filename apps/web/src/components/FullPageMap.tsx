@@ -11,7 +11,7 @@ import {
 } from '../lib/mapbox';
 import { useTheme } from '../lib/theme';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
-import { AER_LICENCES, AER_RIGS, AerPickedCard, useAerLists } from './AerLists';
+import type { St37Hover } from './FacilityMap';
 import {
   MapLayersButton,
   MapLayersLegend,
@@ -22,6 +22,7 @@ import {
 import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
+import { St37Card, useSt37Wells } from './St37Wells';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -65,13 +66,13 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
   const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
-  const aer = useAerLists(session.organization.id, session.token);
+  // The AER's new licences and rigs (F-243 part 2) are off the map for now (the owner,
+  // 2026-11-19); their code and daily job stay. The ST37 wells take their place (F-243 part 4).
+  const wells = useSt37Wells(session.organization.id, session.token);
+  const [hover, setHover] = useState<St37Hover | null>(null);
+  const [fitTo, setFitTo] = useState<MapBounds | null>(null);
   const admin = session.organization.role === 'org_admin';
-
-  const allOverlays = useMemo(
-    () => [...layers.overlays, ...aer.overlays],
-    [layers.overlays, aer.overlays],
-  );
+  const tone = theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
 
   if (mapbox.status !== 'ok' || refused) {
     const text = refused
@@ -97,16 +98,16 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           selectedId={null}
           start={CANADA}
           onSelect={() => undefined}
-          overlays={allOverlays}
+          overlays={layers.overlays}
           authToken={session.token}
-          onViewChange={layers.onViewChange}
-          onOverlayClick={(picked) => {
-            // A dot of the AER's lists has its own card; any other shape, the layers' (F-243-2).
-            const dot = picked.layerId === AER_LICENCES || picked.layerId === AER_RIGS;
-            if (dot) aer.pick(picked);
-            else aer.close();
-            layers.setPicked(dot ? null : picked);
+          st37={wells.view}
+          onSt37Hover={setHover}
+          fitTo={fitTo}
+          onViewChange={(bbox, zoom) => {
+            layers.onViewChange(bbox, zoom);
+            wells.onViewChange(bbox);
           }}
+          onOverlayClick={layers.setPicked}
           onLayersStale={layers.onStale}
           layersRetry={layers.retry}
           onTokenRefused={() => {
@@ -148,9 +149,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       </Suspense>
       {/* Below the zoom buttons, top right (F-139). */}
       <MapLayersPanel state={layers} side="right" />
-      {/* The AER's new licences and rigs: under the controls, top left (F-243-2). */}
-      <div className="absolute top-16 left-3 z-10 max-w-[calc(100%-1.5rem)]">{aer.panel}</div>
-      <AerPickedCard state={aer} />
+      {/* The wells: under the controls, top left (F-243 part 4). */}
+      <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
+        {wells.panel(tone, setFitTo)}
+      </div>
+      <St37Card hover={hover} byUwi={wells.byUwi} />
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />
       {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's
           details, so it never covers their fields or their close button (F-247-2-R3-02). */}

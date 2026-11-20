@@ -286,6 +286,7 @@ Built and deployed, not yet checked by the owner. Details and click paths are in
 |---|---|---|
 | F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch top left, a Layers button and (admins) a Settings button. | ivanmueller/gss#260, #266 |
 | F-247 | Oil and gas layers: map.torvenco.com → Settings → Add map layer → a live Alberta ArcGIS layer address → Check → publisher and terms → Add layer; it shows under Layers and on the map. Also Workspace → the map → Layers: grain's layers still draw as before (shared code changed). | ivanmueller/gss#268 |
+| F-243 part 4 | Oil and gas wells (once merged and deployed): (1) GitHub → the repository → **Actions** → **Load ST37 wells** → **Run workflow** (leave the four edges as they are: Leduc–Devon) → Run; wait for the green tick (about 10 minutes). (2) map.torvenco.com (Ctrl+F5) → the **Wells** panel top left → **Go to the wells loaded**: grey shading zoomed out, then drilled paths and dots coloured by status as you zoom in; point at a well for its card; click a status to hide or show it. The new licences and rigs are gone from the map. | this pull request |
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 

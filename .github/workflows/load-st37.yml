@@ -1,0 +1,141 @@
+name: Load ST37 wells
+
+# Run by hand from the Actions tab (Actions → Load ST37 wells → Run workflow). Downloads the AER's
+# ST37 list of wells (its geodatabase, about 1.3 GB), cuts out one area and loads its wells, with
+# their status and drilled paths, into the oil and gas database (petroleum-staging), replacing the
+# copy there in one transaction (F-243 part 4, docs/FEATURES_OIL_GAS.md). The default area is
+# Leduc–Devon, the owner's first test area (2026-11-19).
+#
+# The AER's data is used on the owner's decision (docs/DECISIONS.md, 2026-11-19): it stays on the
+# runner and in that database, never in the repository or the run's logs or artifacts. The load
+# is refused if grain's and the oil and gas databases together would pass 400 MB (the free plan's
+# limit is shared by both).
+on:
+  workflow_dispatch:
+    inputs:
+      west:
+        description: West edge (longitude)
+        default: '-113.95'
+      south:
+        description: South edge (latitude)
+        default: '53.12'
+      east:
+        description: East edge (longitude)
+        default: '-113.25'
+      north:
+        description: North edge (latitude)
+        default: '53.48'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-st37
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the area
+        env:
+          WEST: ${{ inputs.west }}
+          SOUTH: ${{ inputs.south }}
+          EAST: ${{ inputs.east }}
+          NORTH: ${{ inputs.north }}
+        run: |
+          # Numbers in Alberta, west of east and south of north; no other text reaches a command.
+          num='^-?[0-9]{1,3}(\.[0-9]{1,6})?$'
+          for v in "$WEST" "$SOUTH" "$EAST" "$NORTH"; do
+            [[ "$v" =~ $num ]] || { echo "::error::Each edge must be a number such as -113.95."; exit 1; }
+          done
+          node -e '
+            const [w, s, e, n] = process.argv.slice(1).map(Number);
+            const ok = w >= -120.1 && e <= -109.9 && s >= 48.9 && n <= 60.1 && w < e && s < n;
+            if (!ok) { console.log("::error::The area must lie in Alberta, west of east and south of north."); process.exit(1); }
+          ' "$WEST" "$SOUTH" "$EAST" "$NORTH"
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 5 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 5)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB."
+      - name: Download the AER's ST37 list
+        run: |
+          mkdir -p "$RUNNER_TEMP/st37"
+          cd "$RUNNER_TEMP/st37"
+          url=https://static.aer.ca/prd/documents/sts/st37/ST_37_GeoDB.zip
+          curl -sSfL --retry 3 -D headers.txt -o st37.zip "$url"
+          # The file's own date, when the AER sends one.
+          modified=$(grep -i '^last-modified:' headers.txt | cut -d' ' -f2- | tr -d '\r' || true)
+          date=$(date -u -d "$modified" +%F 2>/dev/null || echo -)
+          echo "SOURCE_URL=$url" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE=$date" >> "$GITHUB_ENV"
+          echo "Downloaded $(( $(stat -c %s st37.zip) / 1048576 )) MB, dated $date."
+          unzip -q st37.zip -x '*/ST_37_Wells.gdb_zip.zip'
+          rm st37.zip
+      - name: Cut out the area
+        env:
+          WEST: ${{ inputs.west }}
+          SOUTH: ${{ inputs.south }}
+          EAST: ${{ inputs.east }}
+          NORTH: ${{ inputs.north }}
+        run: |
+          cd "$RUNNER_TEMP/st37"
+          gdb=$(find . -maxdepth 2 -type d -name '*.gdb' | head -1)
+          [ -n "$gdb" ] || { echo "::error::No geodatabase in the AER's file."; exit 1; }
+          mkdir -p out
+          cut_layer() {
+            # $1: layer, $2: output, then any extra options. Paths are simplified to about a metre
+            # in the source projection (metres) before they are turned into longitude and latitude.
+            local layer=$1 out=$2; shift 2
+            docker run --rm -v "$PWD:/data" ghcr.io/osgeo/gdal:alpine-small-3.10.0 \
+              ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim XY \
+              -spat "$WEST" "$SOUTH" "$EAST" "$NORTH" -spat_srs EPSG:4326 \
+              "$@" "/data/out/$out" "/data/$gdb" "$layer"
+          }
+          cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson
+          cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson
+          cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson
+          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson -simplify 1
+          ls -la out
+      - name: Load the wells
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          WEST: ${{ inputs.west }}
+          SOUTH: ${{ inputs.south }}
+          EAST: ${{ inputs.east }}
+          NORTH: ${{ inputs.north }}
+        run: |
+          node --experimental-strip-types scripts/load-st37.js "$RUNNER_TEMP/st37/out" \
+            "$WEST" "$SOUTH" "$EAST" "$NORTH" "$SOURCE_URL" "$SOURCE_DATE" "$GRAIN_BYTES" \
+            > "$RUNNER_TEMP/st37/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/st37/load.sql"
+      - name: Remove the AER's files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/st37"
