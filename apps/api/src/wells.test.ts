@@ -123,7 +123,7 @@ describe('refreshWells', () => {
   it('marks a load that ended with no wells at all failed, to start again next run (F-243-3-R4-01)', async () => {
     petroleum.latestWellLoad.mockResolvedValue(running);
     await refreshWells(env, openDatabase, openPetroleum, NOW, pages({ features: [] }));
-    expect(petroleum.stopWellLoad).toHaveBeenCalledWith(1, 'failed');
+    expect(petroleum.stopWellLoad).toHaveBeenCalledWith(1, 'failed', 0);
     expect(petroleum.saveWellPage).not.toHaveBeenCalled();
     petroleum.latestWellLoad.mockResolvedValue({
       ...running,

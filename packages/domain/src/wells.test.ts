@@ -122,6 +122,29 @@ describe('parseWellPage', () => {
     }
   });
 
+  it('combines three rows of one UWI oldest first, in any order (F-243-3-R5-03)', () => {
+    const a = well(5, { WELL_NAME: 'OLD' });
+    const b = well(9);
+    delete (b.attributes as Record<string, unknown>).WELL_NAME;
+    const c = well(7, { WELL_NAME: 'MIDDLE' });
+    for (const features of [
+      [a, b, c],
+      [c, a, b],
+      [b, c, a],
+    ]) {
+      expect(parseWellPage({ features }, 2000).rows[0]).toMatchObject({
+        objectId: 9,
+        wellName: 'MIDDLE',
+      });
+    }
+  });
+
+  it('refuses a page with more rows than asked for (F-243-3-R5-02)', () => {
+    expect(() =>
+      parseWellPage({ features: [well(1), well(2, { UWI: '0514250908001' })] }, 1),
+    ).toThrow();
+  });
+
   it('says whether more follow, and refuses a page it cannot trust', () => {
     expect(parseWellPage({ features: [well(1)], exceededTransferLimit: true }, 2000).more).toBe(
       true,

@@ -44,7 +44,12 @@ export interface WellsDatabase {
     ending: 'complete' | 'incomplete' | null,
   ): Promise<'saved' | 'moved'>;
   /** Job: stops a running load (the size guard, or a failure); `moved` when it no longer runs. */
-  stopWellLoad(loadId: number, status: 'stopped_size' | 'failed'): Promise<'saved' | 'moved'>;
+  stopWellLoad(
+    loadId: number,
+    status: 'stopped_size' | 'failed',
+    /** For 'failed': only while the load is still at this cursor with nothing saved (R5-01). */
+    expectedObjectId?: number,
+  ): Promise<'saved' | 'moved'>;
   /** Members: the latest load and the number of current wells. */
   wellsStatus(ctx: PetroleumContext): Promise<{ load: WellLoad | null; current: number }>;
 }
@@ -207,11 +212,17 @@ export function wellsQueries(sql: postgres.Sql): WellsDatabase {
       });
     },
 
-    stopWellLoad(loadId, status) {
+    stopWellLoad(loadId, status, expectedObjectId) {
       return asJob(sql, async (tx) => {
-        const updated = await tx`
-          update petro.well_loads set status = ${status}, finished_at = now()
-          where id = ${loadId} and status = 'running'`;
+        const updated =
+          expectedObjectId === undefined
+            ? await tx`
+                update petro.well_loads set status = ${status}, finished_at = now()
+                where id = ${loadId} and status = 'running'`
+            : await tx`
+                update petro.well_loads set status = ${status}, finished_at = now()
+                where id = ${loadId} and status = 'running'
+                  and last_object_id = ${expectedObjectId} and rows_saved = 0`;
         return updated.count === 1 ? 'saved' : 'moved';
       });
     },

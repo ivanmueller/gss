@@ -157,7 +157,9 @@ export function parseWellPage(body: unknown, asked: number, after = 0): WellPage
   if (!Array.isArray(features)) throw new Error('well page malformed');
   const flag = record(body)?.exceededTransferLimit;
   if (flag !== undefined && typeof flag !== 'boolean') throw new Error('well page malformed');
-  const byUwi = new Map<string, WellRow>();
+  // More rows than asked for would outgrow the size guard's reserve (F-243-3-R5-02).
+  if (features.length > asked) throw new Error('well page larger than asked');
+  const byUwi = new Map<string, WellRow[]>();
   let unidentified = 0;
   let lastObjectId: number | null = null;
   for (const feature of features) {
@@ -197,9 +199,12 @@ export function parseWellPage(body: unknown, asked: number, after = 0): WellPage
       latitude: place?.latitude ?? null,
       invalid,
     };
-    const before = byUwi.get(uwi);
-    byUwi.set(uwi, before ? merged(before, row) : row);
+    byUwi.set(uwi, [...(byUwi.get(uwi) ?? []), row]);
   }
   const more = record(body)?.exceededTransferLimit === true || features.length >= asked;
-  return { rows: [...byUwi.values()], unidentified, lastObjectId, more };
+  // Rows of one UWI are combined oldest first, as successive pages would be (F-243-3-R5-03).
+  const rows = [...byUwi.values()].map((group) =>
+    group.sort((a, b) => a.objectId - b.objectId).reduce((older, newer) => merged(older, newer)),
+  );
+  return { rows, unidentified, lastObjectId, more };
 }

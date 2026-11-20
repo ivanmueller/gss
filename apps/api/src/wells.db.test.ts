@@ -181,6 +181,14 @@ describe('the wells as petro_api', () => {
       expect(await db.latestWellLoad()).toMatchObject({ id: load.id, status: 'done' });
     }));
 
+  it('never fails a load another run has already moved on (F-243-3-R5-01)', () =>
+    using(async (db) => {
+      const load = await freshLoad(db);
+      expect(await db.saveWellPage(load.id, 0, page([row(ownUwi(), 4)], true), null)).toBe('saved');
+      expect(await db.stopWellLoad(load.id, 'failed', 0)).toBe('moved');
+      expect(await db.latestWellLoad()).toMatchObject({ id: load.id, status: 'running' });
+    }));
+
   it('allows one running load at a time', () =>
     using(async (db) => {
       await freshLoad(db);

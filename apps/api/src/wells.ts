@@ -200,7 +200,7 @@ export async function refreshWells(
       // A load that ends having saved nothing at all is a failed answer, not an empty province:
       // it is marked failed, so the next run starts again (F-243-3-R4-01).
       if (ending !== null && load.rowsSaved + saved + page.rows.length === 0) {
-        await petroleum.stopWellLoad(load.id, 'failed');
+        await petroleum.stopWellLoad(load.id, 'failed', cursor);
         console.warn(`Wells load ${String(load.id)}: the service answered no wells; next run`);
         break;
       }
