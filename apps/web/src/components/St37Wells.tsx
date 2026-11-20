@@ -9,7 +9,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
 import type { MapBounds } from '../lib/mapbox';
-import { ST37_COLOURS, st37Features, type St37MapWell, type St37View } from '../lib/st37Map';
+import {
+  ST37_COLOURS,
+  ST37_OUTLINES,
+  st37Features,
+  type St37MapWell,
+  type St37View,
+} from '../lib/st37Map';
 import type { St37Hover } from './FacilityMap';
 import { Button } from './ui/button';
 
@@ -142,9 +148,11 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     () => ST37_STATUS_CLASSES.filter((status) => !hidden.has(status)),
     [hidden],
   );
+  const outline = answer?.formation ? (ST37_OUTLINES[answer.formation.key] ?? null) : null;
+  const outlineUrl = outline?.url ?? null;
   const mapView = useMemo<St37View | null>(
-    () => (on ? { wells: features, shown } : null),
-    [on, features, shown],
+    () => (on ? { wells: features, shown, outline: outlineUrl } : null),
+    [on, features, shown, outlineUrl],
   );
   const counts = useMemo(() => {
     const out = new Map<St37StatusClass, number>();
@@ -275,6 +283,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               Go to the wells loaded
             </Button>
           )}
+          {outline && <p className="text-xs text-muted-foreground">{outline.credit}</p>}
           {answer && (
             <p className="text-xs text-muted-foreground">
               {answer.source.loadedAt

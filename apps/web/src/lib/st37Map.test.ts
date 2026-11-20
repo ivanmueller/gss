@@ -4,7 +4,7 @@ import type { Map as MapboxMap } from 'mapbox-gl';
 import { validate } from 'mapbox-gl/dist/style-spec/index.es.js';
 import { describe, expect, it } from 'vitest';
 
-import { highlightSt37, ST37_LAYERS, st37Features, syncSt37 } from './st37Map';
+import { highlightSt37, ST37_LAYERS, ST37_OUTLINES, st37Features, syncSt37 } from './st37Map';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -16,7 +16,15 @@ function fakeMap() {
   const map = {
     getLayer: (id: string) => layers.get(id),
     getSource: (id: string) => sources.get(id),
-    addSource: (id: string, source: unknown) => sources.set(id, source),
+    // A source can be given new data later, as a Mapbox source can (kept out of comparisons).
+    addSource: (id: string, source: object) =>
+      sources.set(
+        id,
+        Object.defineProperty({ ...source }, 'setData', {
+          value: () => undefined,
+          enumerable: false,
+        }),
+      ),
     removeSource: (id: string) => sources.delete(id),
     addLayer: (layer: { id: string; paint?: Record<string, unknown> }) => {
       layers.set(layer.id, { ...layer, paint: { ...layer.paint } });
@@ -63,15 +71,24 @@ const WELLS = st37Features([
   },
 ]);
 
+const OUTLINE = '/outlines/duvernay.geojson';
+
 describe('syncSt37', () => {
   it('draws layers Mapbox accepts, in both tones', () => {
     for (const tone of ['light', 'dark'] as const) {
       const { map, layers } = fakeMap();
-      syncSt37(map, { wells: WELLS, shown: ['producing', 'licensed'] }, tone);
+      syncSt37(
+        map,
+        { wells: WELLS, shown: ['producing', 'licensed'], outline: '/outlines/duvernay.geojson' },
+        tone,
+      );
       highlightSt37(map, '00/09-07-030-26W4/0');
       const style = {
         version: 8,
-        sources: { 'st37-wells': { type: 'geojson', data: WELLS } },
+        sources: {
+          'st37-wells': { type: 'geojson', data: WELLS },
+          'st37-outline': { type: 'geojson', data: '/outlines/duvernay.geojson' },
+        },
         layers: [...layers.values()],
       };
       expect(validate(style)).toEqual([]);
@@ -81,9 +98,26 @@ describe('syncSt37', () => {
 
   it('removes everything when the wells are switched off', () => {
     const { map, layers, sources } = fakeMap();
-    syncSt37(map, { wells: WELLS, shown: ['producing'] }, 'light');
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE }, 'light');
     syncSt37(map, null, 'light');
     expect(layers.size).toBe(0);
     expect(sources.size).toBe(0);
+  });
+
+  it("draws a formation's outline under the wells, and takes it away without one", () => {
+    const { map, layers, sources } = fakeMap();
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE }, 'light');
+    expect(sources.get('st37-outline')).toEqual({ type: 'geojson', data: OUTLINE });
+    expect(layers.has(ST37_LAYERS.outlineLine)).toBe(true);
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null }, 'light');
+    expect(sources.has('st37-outline')).toBe(false);
+    expect(layers.has(ST37_LAYERS.outlineFill)).toBe(false);
+    expect(layers.has(ST37_LAYERS.density)).toBe(true);
+  });
+
+  it("names the Survey and its licence for the Duvernay's outline", () => {
+    expect(ST37_OUTLINES.duvernay?.credit).toMatch(
+      /Alberta Geological Survey.*Open Government Licence – Alberta/,
+    );
   });
 });
