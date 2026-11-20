@@ -6,7 +6,7 @@ set local search_path = extensions, public;
 
 select plan(23);
 
-select is((select petro.schema_version()), 4, 'the schema is at version 4');
+select ok((select petro.schema_version()) >= 4, 'the schema is at version 4 or later');
 select ok(
   has_table_privilege('petro_api', 'petro.wells', 'select')
   and has_table_privilege('petro_api', 'petro.current_wells', 'select')

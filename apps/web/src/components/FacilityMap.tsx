@@ -18,6 +18,7 @@ import {
 } from '../lib/mapbox';
 import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
+import { highlightSt37, ST37_PICKABLE, syncSt37, type St37View } from '../lib/st37Map';
 import {
   isLayerPictureUrl,
   layerPictureStale,
@@ -58,6 +59,17 @@ const EMPTY: LaneAreas = {
   regions: { type: 'FeatureCollection', features: [] },
 };
 
+export interface St37Hover {
+  uwis: string[];
+  x: number;
+  y: number;
+}
+
+/** Wells read light on a light map, and the other way round on a dark or satellite one. */
+function st37Tone(basemap: Basemap, theme: Theme): 'light' | 'dark' {
+  return theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
+}
+
 export interface FacilityMapProps {
   token: string;
   basemap: Basemap;
@@ -89,6 +101,13 @@ export interface FacilityMapProps {
   areas?: LaneAreas | null;
   /** The visible box and zoom after every move; null when none of it is on the map. */
   onViewChange?: (bbox: Bbox | null, zoom: number) => void;
+  /** The AER's ST37 wells (F-243 part 4), drawn over the map layers and under the pins. */
+  st37?: St37View | null;
+  /**
+   * The wells under the pointer (or a tap), with where it is in the map's box; null when it
+   * leaves them. The first is drawn highlighted.
+   */
+  onSt37Hover?: (hover: St37Hover | null) => void;
   /** Map layers that are switched on, in order, drawn under the lanes and the pins. */
   overlays?: readonly MapOverlay[];
   /** The person's sign-in, sent with a layer's pictures (they come from the app's API). */
@@ -531,7 +550,54 @@ export default function FacilityMap(props: FacilityMapProps) {
         selectedData(latest.current.pins, latest.current.selectedId),
       );
       syncOverlays(instance, latest.current.overlays ?? []);
+      syncSt37(
+        instance,
+        latest.current.st37 ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       handlers.current.place();
+    });
+    // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
+    let hovered: string | null = null;
+    const wellsAt = (point: mapboxgl.Point): string[] => {
+      const layers = ST37_PICKABLE.filter((id) => instance.getLayer(id));
+      if (layers.length === 0) return [];
+      const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+        [point.x - 5, point.y - 5],
+        [point.x + 5, point.y + 5],
+      ];
+      const uwis = new Set<string>();
+      for (const feature of instance.queryRenderedFeatures(box, { layers })) {
+        const uwi: unknown = feature.properties?.uwi;
+        if (typeof uwi === 'string') uwis.add(uwi);
+      }
+      return [...uwis];
+    };
+    const hover = (point: mapboxgl.Point) => {
+      const onHover = latest.current.onSt37Hover;
+      if (!onHover) return;
+      const uwis = wellsAt(point);
+      const first = uwis[0] ?? null;
+      if (first !== hovered) {
+        hovered = first;
+        highlightSt37(instance, first);
+      }
+      instance.getCanvas().style.cursor = first ? 'pointer' : '';
+      onHover(first ? { uwis, x: point.x, y: point.y } : null);
+    };
+    instance.on('mousemove', (event) => {
+      hover(event.point);
+    });
+    // A tap shows the card too, on a phone where nothing hovers.
+    instance.on('click', (event) => {
+      hover(event.point);
+    });
+    instance.on('mouseout', () => {
+      if (hovered === null) return;
+      hovered = null;
+      highlightSt37(instance, null);
+      latest.current.onSt37Hover?.(null);
     });
     instance.on('move', () => {
       handlers.current.place();
@@ -658,6 +724,15 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the overlays as they are then.
     if (instance && styleReady.current) syncOverlays(instance, props.overlays ?? []);
   }, [props.overlays]);
+
+  const { st37 } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the wells as they are then.
+    if (instance && styleReady.current) {
+      syncSt37(instance, st37 ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [st37, basemap, theme]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

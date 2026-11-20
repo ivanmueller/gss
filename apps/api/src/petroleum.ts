@@ -3,6 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
 import type { Membership } from './db';
+import { parseSt37Box, ST37_MAX_WELLS, ST37_SCHEMA_VERSION, st37Answer } from './st37';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import type { MapLayerWrite } from './map-layers-db';
@@ -473,6 +474,40 @@ export function petroleumRoutes(
             rowsSaved: load.rowsSaved,
           },
         });
+      });
+    });
+  });
+
+  // /petroleum/st37/wells: the AER's ST37 wells whose surface hole is in the map's view
+  // (F-243 part 4). Membership first, as above. JSON for the map only, never another format
+  // (the AER's terms, docs/DECISIONS.md 2026-11-19).
+  routes.get('/st37/wells', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const box = parseSt37Box(c.req.query());
+    if (typeof box === 'string') return apiError(c, 400, 'VALIDATION_FAILED', box);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < ST37_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { load, wells } = await petroleum.st37Wells(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          box,
+          ST37_MAX_WELLS,
+        );
+        return c.json(st37Answer(load, wells));
       });
     });
   });

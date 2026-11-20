@@ -1,0 +1,373 @@
+/**
+ * Alberta's wells from the AER's ST37 list (F-243 part 4, docs/FEATURES_OIL_GAS.md): the four
+ * layers of its geodatabase (surface holes, bottom holes, production strings and drilled paths),
+ * cut to an area and turned into one row per well (per UWI, so each leg of a multi-leg well is
+ * its own row), ready to load. Data from the AER, used on the owner's decision
+ * (docs/DECISIONS.md, 2026-11-19): members only, never exported.
+ *
+ * Kept free of imports and of TypeScript-only syntax, so the manual loader
+ * (scripts/load-st37.js) can run it with Node's type stripping.
+ */
+
+/** What the map colours wells by, in the legend's order. */
+export const ST37_STATUS_CLASSES = [
+  'producing',
+  'awaiting',
+  'drilling',
+  'inactive',
+  'suspended',
+  'abandoned',
+  'licensed',
+] as const;
+export type St37StatusClass = (typeof ST37_STATUS_CLASSES)[number];
+
+export const ST37_STATUS_LABELS: Record<St37StatusClass, string> = {
+  producing: 'Producing or injecting',
+  awaiting: 'Drilled, awaiting production',
+  drilling: 'Drilling or completing',
+  inactive: 'Closed, not suspended',
+  suspended: 'Suspended',
+  abandoned: 'Abandoned',
+  licensed: 'Licensed, not drilled',
+};
+
+/**
+ * The AER's status modes (the two digits after the fluid in its status code), as the province's
+ * well service words them (read 2026-11-19 from its "Well Surface" layer): 01 Suspended,
+ * 02 Abandon, 03 Abandon Zone, 04 Abandoned Reentered, 06 Potential, 07 Drilled and Cased,
+ * 08 Junked and Abandoned, 09 Closed, 10 Flow, 11 Pumping, 12 Gas Lift, 13 Testing,
+ * 14 Abandoned Whipstock, 15 Drilling and Completing, 16 Test Completed, 17 Preset.
+ */
+const MODE_CLASS: Record<string, St37StatusClass> = {
+  '01': 'suspended',
+  '02': 'abandoned',
+  '03': 'abandoned',
+  '04': 'abandoned',
+  '06': 'awaiting',
+  '07': 'awaiting',
+  '08': 'abandoned',
+  '09': 'inactive',
+  '10': 'producing',
+  '11': 'producing',
+  '12': 'producing',
+  '13': 'awaiting',
+  '14': 'abandoned',
+  '15': 'drilling',
+  '16': 'awaiting',
+  '17': 'awaiting',
+};
+
+/** Licence statuses that mean the well is gone: abandoned, or its site reclaimed. */
+const ENDED_LICENCES = new Set(['abandoned', 'reccertified', 'recexempt', 'cancelled']);
+
+export interface St37StatusInput {
+  licenceStatus: string | null;
+  spudDate: string | null;
+  finalDrillDate: string | null;
+  /** The two-digit status mode, or null when the well has no production string. */
+  mode: string | null;
+  /** The status type in words (Injection, Disposal, Storage…), or null. */
+  type: string | null;
+}
+
+/** Which of the map's statuses a well is shown in. */
+export function st37StatusClass(input: St37StatusInput): St37StatusClass {
+  const licence = (input.licenceStatus ?? '').toLowerCase();
+  if (ENDED_LICENCES.has(licence)) return 'abandoned';
+  if (input.mode !== null) {
+    const byMode = MODE_CLASS[input.mode];
+    if (byMode) return byMode;
+    // Mode 00 on an injection, disposal or storage well: a service well in use.
+    if (input.mode === '00' && input.type !== null) return 'producing';
+  }
+  if (licence === 'suspension') return 'suspended';
+  if (input.spudDate === null) return 'licensed';
+  if (input.finalDrillDate === null) return 'drilling';
+  return 'awaiting';
+}
+
+/** When a well has several production strings, the one the map shows: the most active. */
+const CLASS_RANK: Record<St37StatusClass, number> = {
+  producing: 0,
+  drilling: 1,
+  awaiting: 2,
+  inactive: 3,
+  suspended: 4,
+  abandoned: 5,
+  licensed: 6,
+};
+
+export interface St37Area {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/** A GeoJSON feature as ogr2ogr writes it: properties, and a geometry or null. */
+export interface St37Feature {
+  properties: Record<string, unknown> | null;
+  geometry: { type: string; coordinates: unknown } | null;
+}
+
+export interface St37Layers {
+  surface: readonly St37Feature[];
+  bottom: readonly St37Feature[];
+  strings: readonly St37Feature[];
+  paths: readonly St37Feature[];
+}
+
+export interface St37Well {
+  uwi: string;
+  licenceNumber: string;
+  wellName: string | null;
+  licensee: string | null;
+  licenceStatus: string | null;
+  statusClass: St37StatusClass;
+  statusFluid: string | null;
+  statusMode: string | null;
+  statusType: string | null;
+  poolCode: number | null;
+  spudDate: string | null;
+  finalDrillDate: string | null;
+  totalDepthM: number | null;
+  trueVerticalDepthM: number | null;
+  surface: [number, number];
+  bottom: [number, number];
+  /** The drilled path from the surface down, or null when it runs less than 20 m sideways. */
+  path: [number, number][] | null;
+}
+
+export const ST37_UWI = /^[0-9A-Z]{2}\/[0-9]{2}-[0-9]{2}-[0-9]{3}-[0-9]{2}W[4-6]\/[0-9A-Z]$/;
+/** A path shorter than this sideways is drawn as a dot (a vertical well). */
+export const ST37_MIN_REACH_M = 20;
+
+function text(value: unknown, max: number): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  if (trimmed === '' || trimmed.toLowerCase() === 'not applicable') return null;
+  return trimmed.slice(0, max);
+}
+
+/** CRUDE OIL → Crude oil; words the AER writes in capitals, in sentence case. */
+function words(value: unknown, max: number): string | null {
+  const t = text(value, max);
+  if (t === null) return null;
+  if (t !== t.toUpperCase()) return t;
+  const lower = t.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function positive(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value < 1e6
+    ? Math.round(value * 100) / 100
+    : null;
+}
+
+/**
+ * A date in any of the forms the layers use (20230903, 09/03/2023, 2023-09-03T00:00:00Z), as
+ * YYYY-MM-DD, or null.
+ */
+export function st37Date(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  let y: string;
+  let m: string;
+  let d: string;
+  let match = /^(\d{4})(\d{2})(\d{2})$/.exec(v);
+  if (match) [, y, m, d] = match as unknown as [string, string, string, string];
+  else if ((match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v)))
+    [, m, d, y] = match as unknown as [string, string, string, string];
+  else if ((match = /^(\d{4})-(\d{2})-(\d{2})/.exec(v)))
+    [, y, m, d] = match as unknown as [string, string, string, string];
+  else return null;
+  const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() < 1880 ||
+    date.getUTCMonth() !== Number(m) - 1
+  ) {
+    return null;
+  }
+  return `${y}-${m}-${d}`;
+}
+
+function inAlberta(lon: number, lat: number): boolean {
+  return lon >= -120.1 && lon <= -109.9 && lat >= 48.9 && lat <= 60.1;
+}
+
+function point(lon: unknown, lat: unknown): [number, number] | null {
+  if (typeof lon !== 'number' || typeof lat !== 'number') return null;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat) || !inAlberta(lon, lat)) return null;
+  return [round6(lon), round6(lat)];
+}
+
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
+}
+
+function pointOf(feature: St37Feature): [number, number] | null {
+  const g = feature.geometry;
+  if (g?.type !== 'Point' || !Array.isArray(g.coordinates)) return null;
+  const [lon, lat] = g.coordinates as unknown[];
+  return point(lon, lat);
+}
+
+/** The path's vertices, from the surface down, without repeats; null when unusable. */
+function lineOf(feature: St37Feature): [number, number][] | null {
+  const g = feature.geometry;
+  if (!g || !Array.isArray(g.coordinates)) return null;
+  const parts =
+    g.type === 'LineString'
+      ? [g.coordinates as unknown[]]
+      : g.type === 'MultiLineString'
+        ? (g.coordinates as unknown[][])
+        : null;
+  if (!parts) return null;
+  const out: [number, number][] = [];
+  for (const part of parts) {
+    if (!Array.isArray(part)) return null;
+    for (const vertex of part) {
+      if (!Array.isArray(vertex)) return null;
+      const p = point(vertex[0], vertex[1]);
+      if (!p) return null;
+      const last = out[out.length - 1];
+      if (last?.[0] !== p[0] || last[1] !== p[1]) out.push(p);
+    }
+  }
+  return out.length >= 2 ? out : null;
+}
+
+/** The farthest any vertex lies from the first, in metres (flat-earth, fine at this scale). */
+export function st37Reach(path: readonly (readonly [number, number])[]): number {
+  const first = path[0];
+  if (!first) return 0;
+  const kx = 111_320 * Math.cos((first[1] * Math.PI) / 180);
+  let most = 0;
+  for (const [lon, lat] of path) {
+    const dx = (lon - first[0]) * kx;
+    const dy = (lat - first[1]) * 110_574;
+    most = Math.max(most, Math.hypot(dx, dy));
+  }
+  return most;
+}
+
+function inArea(p: readonly [number, number], area: St37Area): boolean {
+  return p[0] >= area.west && p[0] <= area.east && p[1] >= area.south && p[1] <= area.north;
+}
+
+function licenceOf(value: unknown): string | null {
+  const t = typeof value === 'string' ? value.trim() : null;
+  return t && /^[0-9A-Z]{1,9}$/.test(t) ? t : null;
+}
+
+/**
+ * One row per well whose surface or bottom hole lies in the area. A well is the bottom-hole
+ * record of a UWI; its surface location comes from its licence's surface hole, its status from
+ * its production string (the most active when it has several), its path from the drilled path
+ * of the same UWI. Records that cannot be read are counted in `skipped`, never guessed.
+ */
+export function buildSt37Wells(
+  layers: St37Layers,
+  area: St37Area,
+): { wells: St37Well[]; skipped: number } {
+  const surfaceByLicence = new Map<string, [number, number]>();
+  for (const f of layers.surface) {
+    const p = f.properties ?? {};
+    const licence = licenceOf(p.Well_Licence_Number);
+    const at = point(p.SH_Actual_Longitude, p.SH_Actual_Latitude) ?? pointOf(f);
+    if (licence && at && !surfaceByLicence.has(licence)) surfaceByLicence.set(licence, at);
+  }
+
+  const pathByUwi = new Map<string, [number, number][]>();
+  for (const f of layers.paths) {
+    const uwi = text(f.properties?.UWI_Label, 30);
+    const line = lineOf(f);
+    if (uwi && line && !pathByUwi.has(uwi)) pathByUwi.set(uwi, line);
+  }
+
+  interface Strung {
+    mode: string | null;
+    type: string | null;
+    fluid: string | null;
+    pool: number | null;
+  }
+  const stringsByUwi = new Map<string, Strung[]>();
+  for (const f of layers.strings) {
+    const p = f.properties ?? {};
+    const uwi = text(p.Prod_String_UWI, 30);
+    if (!uwi) continue;
+    const rawMode = typeof p.Status_Mode === 'string' ? p.Status_Mode.trim() : '';
+    const mode = /^\d{1,2}$/.test(rawMode) ? rawMode.padStart(2, '0') : null;
+    const pool =
+      typeof p.Pool_Code === 'number' && Number.isInteger(p.Pool_Code) ? p.Pool_Code : null;
+    const list = stringsByUwi.get(uwi) ?? [];
+    list.push({
+      mode,
+      type: words(p.Status_Type, 60),
+      fluid: words(p.Status_Fluid, 60),
+      pool,
+    });
+    stringsByUwi.set(uwi, list);
+  }
+
+  const wells: St37Well[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+  for (const f of layers.bottom) {
+    const p = f.properties ?? {};
+    const uwi = text(p.Well_UWI, 30);
+    const licence = licenceOf(p.Well_Licence_Number);
+    const bottom = point(p.BH_Longitude, p.BH_Latitude) ?? pointOf(f);
+    if (!uwi || !ST37_UWI.test(uwi) || !licence || !bottom || seen.has(uwi)) {
+      skipped += 1;
+      continue;
+    }
+    const line = pathByUwi.get(uwi) ?? null;
+    const surface = surfaceByLicence.get(licence) ?? line?.[0] ?? bottom;
+    if (!inArea(surface, area) && !inArea(bottom, area)) continue;
+    seen.add(uwi);
+
+    const licenceStatus = text(p.Licence_Status, 20);
+    const spudDate = st37Date(p.Spud_Date);
+    const finalDrillDate = st37Date(p.Final_Drill_Date);
+    const classify = (s: Strung | null) =>
+      st37StatusClass({
+        licenceStatus,
+        spudDate,
+        finalDrillDate,
+        mode: s?.mode ?? null,
+        type: s?.type ?? null,
+      });
+    let chosen: Strung | null = null;
+    let statusClass = classify(null);
+    for (const s of stringsByUwi.get(uwi) ?? []) {
+      const c = classify(s);
+      if (chosen === null || CLASS_RANK[c] < CLASS_RANK[statusClass]) {
+        chosen = s;
+        statusClass = c;
+      }
+    }
+
+    wells.push({
+      uwi,
+      licenceNumber: licence,
+      wellName: text(p.Well_Name, 60),
+      licensee: text(p.Licensee, 100),
+      licenceStatus,
+      statusClass,
+      statusFluid: chosen?.fluid ?? null,
+      statusMode: chosen?.mode ?? null,
+      statusType: chosen?.type ?? null,
+      poolCode: chosen?.pool ?? null,
+      spudDate,
+      finalDrillDate,
+      totalDepthM: positive(p.Final_Total_Depth),
+      trueVerticalDepthM: positive(p.Max_True_Vertical_Depth),
+      surface,
+      bottom,
+      path: line && st37Reach(line) >= ST37_MIN_REACH_M ? line : null,
+    });
+  }
+  return { wells, skipped };
+}

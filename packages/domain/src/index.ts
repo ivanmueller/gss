@@ -30,3 +30,4 @@ export * from './emailForward';
 export * from './forwarding';
 export * from './emailAttachments';
 export * from './wells';
+export * from './st37';
