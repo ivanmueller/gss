@@ -92,7 +92,15 @@ const lineCount = (commit, path) => {
   return text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
 };
 
-export function evaluate({ base, head, labels = [] }) {
+/**
+ * Which process the Merge policy applies (the owner's decision, 2026-11-19): 'light' needs no Codex
+ * review and no owner approval of the exact commit, only the automated database checks below and CI;
+ * 'strict' is the full review process (docs/AI_WORKFLOW.md §11.5, §11.6), kept for when the owner
+ * switches back.
+ */
+export const PROCESS = 'light';
+
+export function evaluate({ base, head, labels = [], process = 'strict' }) {
   const mergeBase = git(['merge-base', base, head]);
   const files = changedFiles(mergeBase, head);
   const { tier, because } = changeTier(files);
@@ -148,6 +156,13 @@ export function evaluate({ base, head, labels = [] }) {
         `A new migration without pgTAP tests: add or change a test in ${root}/tests/database/.`,
       );
   }
+
+  if (process === 'light')
+    return {
+      ...result,
+      evidence: result.blockers.length ? 'incomplete' : 'not-needed',
+      note: 'Light process (the owner, 2026-11-19): no Codex review needed.',
+    };
 
   const registers = files.filter(isRegisterPath);
   if (registers.length !== 1) {
@@ -388,9 +403,11 @@ export function evaluate({ base, head, labels = [] }) {
  * (F-150-R1-02): a new push is a new commit without approval. Required checks (CI) are GitHub's to
  * enforce beside this one.
  */
-export function mergeDecision(outcome, { ownerApprovedHead = false } = {}) {
+export function mergeDecision(outcome, { ownerApprovedHead = false, process = 'strict' } = {}) {
   if (outcome.evidence === 'incomplete')
     return { merge: false, reason: 'no: review evidence incomplete' };
+  if (process === 'light')
+    return { merge: true, reason: `yes (${outcome.tier} risk, light process)` };
   if (outcome.tier !== 'governance') return { merge: true, reason: `yes (${outcome.tier} risk)` };
   if (ownerApprovedHead)
     return { merge: true, reason: 'yes (governance, the owner approved this exact commit)' };
@@ -428,10 +445,15 @@ function main(argv) {
     return 2;
   }
   const labels = (option('labels') ?? '').split(',').filter(Boolean);
-  const options = { ownerApprovedHead: argv.includes('--owner-approved-head') };
+  const options = { ownerApprovedHead: argv.includes('--owner-approved-head'), process: PROCESS };
   let outcome;
   try {
-    outcome = evaluate({ base, head: git(['rev-parse', `${head}^{commit}`]), labels });
+    outcome = evaluate({
+      base,
+      head: git(['rev-parse', `${head}^{commit}`]),
+      labels,
+      process: PROCESS,
+    });
   } catch (error) {
     console.error(`Git error: ${error.message}`);
     return 2;

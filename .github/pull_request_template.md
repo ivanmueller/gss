@@ -17,7 +17,7 @@
 - [ ] Database and RLS tests if schema/auth touched
 - [ ] UI smoke or screenshot if front-end touched
 
-## Codex review (docs/AI_WORKFLOW.md §11.5)
+## Codex review (only if the owner asked for one; the light process needs none, `AGENTS.md`)
 - Register: `docs/reviews/<ID>.md` (none for documents only)
 - Risk tier (from `node scripts/review-gate.js --base origin/main --head HEAD`; `--base` is the branch this pull request merges into):
 - Rounds used (design / code; at most 5, more only with the owner's approval), whether Codex's last review approved, and any pre-existing findings moved to the tracker (F-251):
@@ -27,7 +27,7 @@
 
 ## Data provenance, permissions and user-impact warnings
 
-## Handoff for integration owner (after merge only)
+## Handoff
 - Merged commit (integration owner records after merge):
 - Verified commands/results:
 - Remaining blockers / next exact issue:
@@ -37,4 +37,4 @@
 - [ ] No cross-tenant data exposure
 - [ ] No quote history overwritten
 - [ ] Assumptions and calculation engine version documented
-- [ ] Handoff summary provided here for integration owner; `docs/HANDOFF.md` is updated **after merge**
+- [ ] This change's line added to `docs/HANDOFF.md`'s running list
