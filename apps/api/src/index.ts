@@ -21,6 +21,7 @@ import { handleEmail, replayPendingMail } from './receive-mail';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
 import { refreshAerLists } from './aer-lists';
+import { refreshWells } from './wells';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { mapLayerRoutes } from './map-layers';
@@ -210,6 +211,8 @@ export default {
     // The AER's daily licence and rig lists (F-243 part 1): its own waitUntil, catching its own
     // failures, so neither job stops the other.
     ctx.waitUntil(refreshAerLists(env, postgresPetroleum));
+    // Every Alberta well, under the shared size guard (F-243 part 3).
+    ctx.waitUntil(refreshWells(env, postgresDatabase, postgresPetroleum, new Date()));
   },
   // Cloudflare Email Routing: the business domain's mail (F-114 step 4a). Awaited, not
   // waitUntil: whether the message is rejected must be decided before the handler returns.

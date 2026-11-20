@@ -440,5 +440,32 @@ export function petroleumRoutes(
   routes.get('/aer/licences', aer('licences'));
   routes.get('/aer/rigs', aer('rigs'));
 
+  // /petroleum/wells/status: the wells load and how many wells are current (F-243 part 3), for
+  // the map to say "loading" or "stopped at the size limit". Membership first, as above.
+  routes.get('/wells/status', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        const { load, current } = await petroleum.wellsStatus({
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        });
+        return c.json({
+          current,
+          load: load && {
+            status: load.status,
+            startedAt: load.startedAt,
+            finishedAt: load.finishedAt,
+            rowsSaved: load.rowsSaved,
+          },
+        });
+      });
+    });
+  });
+
   return routes;
 }

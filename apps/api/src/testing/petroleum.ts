@@ -41,6 +41,15 @@ export function fakePetroleum() {
     aerRigs: vi.fn<PetroleumDatabase['aerRigs']>(() =>
       Promise.resolve({ rows: [], dates: { latestListDate: null, lastSeenAt: null } }),
     ),
+    databaseSize: vi.fn<PetroleumDatabase['databaseSize']>(() => Promise.resolve(20_000_000)),
+    latestWellLoad: vi.fn<PetroleumDatabase['latestWellLoad']>(() => Promise.resolve(null)),
+    lastDoneWellLoad: vi.fn<PetroleumDatabase['lastDoneWellLoad']>(() => Promise.resolve(null)),
+    startWellLoad: vi.fn<PetroleumDatabase['startWellLoad']>(() => Promise.resolve(null)),
+    saveWellPage: vi.fn<PetroleumDatabase['saveWellPage']>(() => Promise.resolve('saved')),
+    stopWellLoad: vi.fn<PetroleumDatabase['stopWellLoad']>(() => Promise.resolve('saved')),
+    wellsStatus: vi.fn<PetroleumDatabase['wellsStatus']>(() =>
+      Promise.resolve({ load: null, current: 0 }),
+    ),
     close: vi.fn<PetroleumDatabase['close']>(() => Promise.resolve()),
     abort: vi.fn<PetroleumDatabase['abort']>(() => Promise.resolve()),
   };
