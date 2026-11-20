@@ -20,13 +20,13 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | F-240 | Alberta reference layers: township grid and all 26 formation outlines | Planned (owner's answers 2026-11-19). Live layers added by admins in Settings meanwhile; the whole grid with its numbers at step 3 of the build order, the stored grid with step 5, the outlines with step 7 |
 | F-241 | Crown agreements, offset notices and freehold minerals: live layers added in Settings now, stored weekly later | Planned (step 4 of the build order) |
 | F-242 | Crown land sales: upcoming parcels and results | Planned (step 5 of the build order; how far back: since 2003, as Offset Signal shows) |
-| F-243 | Wells, new licences and rig activity (AER) | Part 4 live and checked by the owner 2026-11-20 (#282, #283: the ST37 wells of Leduc–Devon on the map; the new licences and rigs off the map for now). Part 4b, licensed wells as planned lines, built with F-252 step 2 (this pull request; owner check pending). Parts 1 and 2 live (#276, #277); part 3's province-service job built (#278) and switched off (#280) |
+| F-243 | Wells, new licences and rig activity (AER) | Part 4 live and checked by the owner 2026-11-20 (#282, #283: the ST37 wells of Leduc–Devon on the map; the new licences and rigs off the map for now). Part 4b, licensed wells as planned lines, built with F-252 step 2 (ivanmueller/gss#284; owner check pending). Parts 1 and 2 live (#276, #277); part 3's province-service job built (#278) and switched off (#280) |
 | F-244 | Companies across sources: buyers, holders and licensees | Planned (step 6 of the build order) |
 | F-245 | Company, formation and weekly summaries | Planned (steps 6 and 7 of the build order) |
 | F-246 | Other provinces: British Columbia, Saskatchewan, Manitoba and beyond | Needs owner input |
 | F-249 | Pipelines on the map | Needs owner input |
 | F-250 | Search by legal land description | Later (owner, 2026-11-19) |
-| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | In progress. Step 2 built (this pull request): the Duvernay's wells loaded whole by **Load ST37 wells**, a Duvernay button on the map, licensed wells as dashed planned lines; owner step: run the workflow once, then check the map. Next: step 3, monthly production from Petrinex (free years, from 2022) |
+| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | In progress. Step 2 built (ivanmueller/gss#284): the Duvernay's wells loaded whole by **Load ST37 wells**, a Duvernay button on the map, licensed wells as dashed planned lines; owner step: run the workflow once, then check the map. Next: step 3, monthly production from Petrinex (free years, from 2022) |
 | F-253 | Analysis on the stored data: type curves, decline curves, financial forecasts, Monte Carlo simulations | Planned after F-252 (the owner's inputs needed for the financial part) |
 | F-254 | A plain-language box that sets the map's filters and the charts | Later, after F-253 |
 
@@ -76,7 +76,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 **The owner's decisions (2026-11-20, recorded in `docs/DECISIONS.md`):** 1. Petrinex's files are used ("This isn't for commercial use at all"), on the AER's conditions, Crown copyright named. 2. The free years first.
 
-**Step 2 as built (this pull request):**
+**Step 2 as built (ivanmueller/gss#284):**
 - **Which wells:** every record of every licence that has a production string in a Duvernay pool (pool codes 728000 to 728899) or whose Petrinex licence names the Duvernay as its projected formation and was not cancelled. Run locally on the files of 2026-11-20: 2,811 licences, **3,075 wells** (each leg its own): 1,956 producing, 372 licensed, 340 abandoned, 333 drilled and awaiting production, 68 suspended, 6 drilling; 2,511 with drilled paths; 5.8 MB in the database.
 - **The load:** the workflow **Load ST37 wells** has a first choice, **duvernay** (the default) or **area** (the rectangle, as before). It replaces the copy in the database, so the Leduc–Devon wells go when the Duvernay is loaded. Oil and gas schema 6.
 - **Planned lines (part 4b):** a licensed or drilling well with no drilled path, not licensed as vertical, gets a dashed straight line from its surface hole to the centre of the legal subdivision in its UWI, asked of the province's township grid during the load (348 wells; lines under 300 m are not drawn). Its card says what the licence planned (operation, formation, measured depth, licence date, from Petrinex) and that the line is a plan.
