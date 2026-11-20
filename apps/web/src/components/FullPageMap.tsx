@@ -155,7 +155,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
         {wells.panel(tone, setFitTo)}
       </div>
-      <St37Card hover={hover} byUwi={wells.byUwi} />
+      <St37Card
+        hover={hover}
+        byUwi={wells.byUwi}
+        member={{ organizationId: session.organization.id, token: session.token }}
+      />
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />
       {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's
           details, so it never covers their fields or their close button (F-247-2-R3-02). */}

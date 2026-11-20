@@ -1,8 +1,10 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
 import type { Membership } from './db';
+import { parseUwi, PRODUCTION_SCHEMA_VERSION, productionAnswer } from './production';
+import type { ProductionLoad } from './production-db';
 import { parseSt37Box, ST37_MAX_WELLS, ST37_SCHEMA_VERSION, st37Answer } from './st37';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
@@ -510,6 +512,50 @@ export function petroleumRoutes(
         return c.json(st37Answer(load, wells));
       });
     });
+  });
+
+  // /petroleum/production/well and /formation: monthly production from Petrinex's public data
+  // (F-252 step 3). Membership first, as above. JSON for the charts only, never another format
+  // (Petrinex's terms and the owner's decision, docs/DECISIONS.md 2026-11-20).
+  const production = (
+    c: Context<ApiEnv>,
+    read: (
+      petroleum: PetroleumDatabase,
+      ctx: PetroleumContext,
+    ) => Promise<{ load: ProductionLoad | null; months: unknown[] }>,
+  ) =>
+    withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < PRODUCTION_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { load, months } = await read(petroleum, {
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        });
+        return c.json(productionAnswer(load, months));
+      });
+    });
+
+  routes.get('/production/well', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const asked = parseUwi(c.req.query('uwi'));
+    if (typeof asked === 'string') return apiError(c, 400, 'VALIDATION_FAILED', asked);
+    return production(c, (petroleum, ctx) => petroleum.wellProduction(ctx, asked.uwi));
+  });
+
+  routes.get('/production/formation', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return production(c, (petroleum, ctx) => petroleum.formationProduction(ctx));
   });
 
   return routes;
