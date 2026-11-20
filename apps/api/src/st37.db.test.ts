@@ -33,13 +33,15 @@ describe('the ST37 wells as petro_api', () => {
       await admin`
         insert into petro.st37_wells (uwi, licence_number, licensee, status_class, status_fluid,
           spud_date, total_depth_m, surface_longitude, surface_latitude, bottom_longitude,
-          bottom_latitude, path)
+          bottom_latitude, path, licence_date, planned_operation, planned_formation,
+          planned_depth_m, planned_bottom_longitude, planned_bottom_latitude)
         values
           (${ONE}, '0999001', 'Example Energy Ltd.', 'producing', 'Crude oil',
            '2023-09-03', 5846, -119.9, 59.95, -119.91, 59.95,
-           '[[-119.9, 59.95], [-119.91, 59.95]]'),
+           '[[-119.9, 59.95], [-119.91, 59.95]]', null, null, null, null, null, null),
           (${TWO}, '0999002', 'Example Energy Ltd.', 'abandoned', null,
-           null, null, -119.88, 59.96, -119.88, 59.96, null)`;
+           null, null, -119.88, 59.96, -119.88, 59.96, null, '2026-11-19', 'Horizontal',
+           'Duvernay Fm', 5300, -119.93, 59.97)`;
 
       const { wells } = await db.st37Wells(member(), BOX, 10);
       const ours = wells.filter((w) => UWIS.includes(w.uwi));
@@ -55,7 +57,16 @@ describe('the ST37 wells as petro_api', () => {
           [-119.91, 59.95],
         ],
       });
+      expect(ours.find((w) => w.statusClass === 'producing')?.plannedBottom).toBeNull();
       expect(ours.find((w) => w.statusClass === 'abandoned')?.path).toBeNull();
+      // What the licence planned, and the planned bottom hole (F-243 part 4b).
+      expect(ours.find((w) => w.statusClass === 'abandoned')).toMatchObject({
+        licenceDate: '2026-11-19',
+        plannedOperation: 'Horizontal',
+        plannedFormation: 'Duvernay Fm',
+        plannedDepthM: 5300,
+        plannedBottom: [-119.93, 59.97],
+      });
 
       // One more than the limit comes back, so the route can say the view holds more.
       expect((await db.st37Wells(member(), BOX, 1)).wells).toHaveLength(2);

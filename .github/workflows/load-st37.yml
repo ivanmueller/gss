@@ -1,29 +1,38 @@
 name: Load ST37 wells
 
 # Run by hand from the Actions tab (Actions → Load ST37 wells → Run workflow). Downloads the AER's
-# ST37 list of wells (its geodatabase, about 1.3 GB), cuts out one area and loads its wells, with
-# their status and drilled paths, into the oil and gas database (petroleum-staging), replacing the
-# copy there in one transaction (F-243 part 4, docs/FEATURES_OIL_GAS.md). The default area is
-# Leduc–Devon, the owner's first test area (2026-11-19).
+# ST37 list of wells (its geodatabase, about 1.3 GB), cuts out one formation whole (the Duvernay,
+# F-252) or one area (F-243 part 4) and loads its wells, with their status and drilled paths,
+# into the oil and gas database (petroleum-staging), replacing the copy there in one transaction
+# (docs/FEATURES_OIL_GAS.md). A formation's wells are those in its pools and those whose licence
+# aims at it (Petrinex's public Well Licence file); a well with no drilled path yet gets its
+# planned bottom hole from the province's township grid (F-243 part 4b).
 #
-# The AER's data is used on the owner's decision (docs/DECISIONS.md, 2026-11-19): it stays on the
-# runner and in that database, never in the repository or the run's logs or artifacts. The load
-# is refused if grain's and the oil and gas databases together would pass 400 MB (the free plan's
-# limit is shared by both).
+# The AER's and Petrinex's data is used on the owner's decisions (docs/DECISIONS.md, 2026-11-19
+# and 2026-11-20): it stays on the runner and in that database, never in the repository or the
+# run's logs or artifacts. The load is refused if grain's and the oil and gas databases together
+# would pass 400 MB (the free plan's limit is shared by both).
 on:
   workflow_dispatch:
     inputs:
+      formation:
+        description: Load one formation whole, or "area" for the rectangle below
+        type: choice
+        options:
+          - duvernay
+          - area
+        default: duvernay
       west:
-        description: West edge (longitude)
+        description: West edge (longitude), for "area" only
         default: '-113.95'
       south:
-        description: South edge (latitude)
+        description: South edge (latitude), for "area" only
         default: '53.12'
       east:
-        description: East edge (longitude)
+        description: East edge (longitude), for "area" only
         default: '-113.25'
       north:
-        description: North edge (latitude)
+        description: North edge (latitude), for "area" only
         default: '53.48'
 
 permissions:
@@ -78,8 +87,8 @@ jobs:
             exit 1
           fi
           version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
-          if [ "$version" -lt 5 ]; then
-            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 5)."
+          if [ "$version" -lt 6 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 6)."
             exit 1
           fi
           grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
@@ -100,6 +109,7 @@ jobs:
           unzip -q st37.zip -x '*/ST_37_Wells.gdb_zip.zip'
           rm st37.zip
       - name: Cut out the area
+        if: inputs.formation == 'area'
         env:
           WEST: ${{ inputs.west }}
           SOUTH: ${{ inputs.south }}
@@ -111,30 +121,77 @@ jobs:
           [ -n "$gdb" ] || { echo "::error::No geodatabase in the AER's file."; exit 1; }
           mkdir -p out
           cut_layer() {
-            # $1: layer, $2: output, then any extra options. Paths are simplified to about a metre
-            # in the source projection (metres) before they are turned into longitude and latitude.
-            local layer=$1 out=$2; shift 2
+            # $1: layer, $2: output. The loader thins the drilled paths.
             docker run --rm -v "$PWD:/data" ghcr.io/osgeo/gdal:alpine-small-3.10.0 \
               ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim XY \
               -spat "$WEST" "$SOUTH" "$EAST" "$NORTH" -spat_srs EPSG:4326 \
-              "$@" "/data/out/$out" "/data/$gdb" "$layer"
+              "/data/out/$2" "/data/$gdb" "$1"
           }
           cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson
           cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson
           cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson
-          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson -simplify 1
+          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson
+          ls -la out
+      - name: Cut out the formation
+        if: inputs.formation != 'area'
+        env:
+          # One of the workflow's own choices, never free text.
+          FORMATION: ${{ inputs.formation }}
+        run: |
+          cd "$RUNNER_TEMP/st37"
+          gdb=$(find . -maxdepth 2 -type d -name '*.gdb' | head -1)
+          [ -n "$gdb" ] || { echo "::error::No geodatabase in the AER's file."; exit 1; }
+          mkdir -p out
+          case "$FORMATION" in
+            # The AER's formation codes 7280 to 7288 (ST37_FORMATIONS, packages/domain/src/st37.ts).
+            duvernay) pools="Pool_Code >= 728000 AND Pool_Code <= 728899" ;;
+            *) echo "::error::Unknown formation."; exit 1 ;;
+          esac
+          gdal() {
+            docker run --rm -v "$PWD:/data" ghcr.io/osgeo/gdal:alpine-small-3.10.0 \
+              ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim XY "$@"
+          }
+          # 1. The production strings in the formation's pools.
+          gdal -where "$pools" /data/out/pool.geojson "/data/$gdb" \
+            ST37_Production_String_NAD83_10TM_AEP_Forest
+          # 2. Petrinex's public Well Licence file (a zip in a zip): the licences aimed at it.
+          curl -sSfL --retry 3 -o licence.zip \
+            'https://www.petrinex.gov.ab.ca/publicdata/API/Files/AB/Infra/Well%20Licence/CSV'
+          unzip -q -o licence.zip -d licence
+          unzip -q -o licence/*.zip -d licence
+          csv=$(find licence -maxdepth 1 -iname '*.csv' | head -1)
+          [ -n "$csv" ] || { echo "::error::No table in Petrinex's Well Licence file."; exit 1; }
+          node --experimental-strip-types "$GITHUB_WORKSPACE/scripts/load-st37.js" pick \
+            "$FORMATION" out/pool.geojson "$csv" out
+          # 3. Every record of those licences, from the four layers.
+          cut_layer() {
+            gdal -dialect SQLITE -sql "select * from $1 where trim(Well_Licence_Number) in (select licence from '/data/out/licences.csv'.licences)" \
+              "/data/out/$2" "/data/$gdb"
+          }
+          cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson
+          cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson
+          cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson
+          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson
           ls -la out
       - name: Load the wells
         env:
           PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          FORMATION: ${{ inputs.formation }}
           WEST: ${{ inputs.west }}
           SOUTH: ${{ inputs.south }}
           EAST: ${{ inputs.east }}
           NORTH: ${{ inputs.north }}
         run: |
-          node --experimental-strip-types scripts/load-st37.js "$RUNNER_TEMP/st37/out" \
-            "$WEST" "$SOUTH" "$EAST" "$NORTH" "$SOURCE_URL" "$SOURCE_DATE" "$GRAIN_BYTES" \
-            > "$RUNNER_TEMP/st37/load.sql"
+          if [ "$FORMATION" = area ]; then
+            node --experimental-strip-types scripts/load-st37.js "$RUNNER_TEMP/st37/out" \
+              "$WEST" "$SOUTH" "$EAST" "$NORTH" "$SOURCE_URL" "$SOURCE_DATE" "$GRAIN_BYTES" \
+              > "$RUNNER_TEMP/st37/load.sql"
+          else
+            # A formation is loaded whole: the edges are Alberta's.
+            node --experimental-strip-types scripts/load-st37.js "$RUNNER_TEMP/st37/out" \
+              -120.1 48.9 -109.9 60.1 "$SOURCE_URL" "$SOURCE_DATE" "$GRAIN_BYTES" "$FORMATION" \
+              > "$RUNNER_TEMP/st37/load.sql"
+          fi
           psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/st37/load.sql"
       - name: Remove the AER's files from the runner
         if: always()

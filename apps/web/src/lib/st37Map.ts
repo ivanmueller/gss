@@ -10,7 +10,9 @@ import type {
  * The AER's ST37 wells on the oil and gas map (F-243 part 4): how they are drawn at each zoom.
  * Zoomed out, a soft grey shading where wells are dense; from about 20 km across, each well's
  * drilled path as a line ending in a dot at its bottom hole, and a vertical well as a dot; past
- * about 10 km the shading is gone. Every well is coloured by its status. FacilityMap calls
+ * about 10 km the shading is gone. A well with no drilled path yet (licensed, or being drilled)
+ * is a dashed straight line from its surface hole to its planned bottom hole (F-243 part 4b).
+ * Every well is coloured by its status. FacilityMap calls
  * `syncSt37` and `highlightSt37`; the Mapbox calls stay in these two map files.
  */
 
@@ -29,6 +31,12 @@ export interface St37MapWell {
   surface: [number, number];
   bottom: [number, number];
   path: [number, number][] | null;
+  licenceDate: string | null;
+  plannedOperation: string | null;
+  plannedFormation: string | null;
+  plannedDepthM: number | null;
+  /** The planned bottom hole of a well with no drilled path yet, or null. */
+  plannedBottom: [number, number] | null;
 }
 
 /** What FacilityMap draws: the wells, and the statuses switched on. */
@@ -63,13 +71,19 @@ const SOURCE = 'st37-wells';
 export const ST37_LAYERS = {
   density: 'st37-density',
   paths: 'st37-paths',
+  planned: 'st37-planned',
   dots: 'st37-dots',
   pending: 'st37-pending',
   hoverPath: 'st37-hover-path',
   hoverSurface: 'st37-hover-surface',
 } as const;
 /** The layers a pointer can find a well on. */
-export const ST37_PICKABLE = [ST37_LAYERS.paths, ST37_LAYERS.dots, ST37_LAYERS.pending];
+export const ST37_PICKABLE = [
+  ST37_LAYERS.paths,
+  ST37_LAYERS.planned,
+  ST37_LAYERS.dots,
+  ST37_LAYERS.pending,
+];
 const SQUARE = 'st37-square';
 
 /** Wells that are only licensed or being drilled: shown as dots at every zoom, like new news. */
@@ -78,6 +92,7 @@ const PENDING: St37StatusClass[] = ['licensed', 'drilling'];
 /**
  * The wells as map features: each well's path (when it runs sideways), its bottom-hole dot and
  * its surface hole, all carrying its UWI and status, so a pointer on any of them finds the well.
+ * A well with a planned bottom hole gets a straight "planned" line to it, and its dot there.
  */
 export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
@@ -90,10 +105,17 @@ export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureColl
         geometry: { type: 'LineString', coordinates: w.path },
       });
     }
+    if (w.plannedBottom) {
+      features.push({
+        type: 'Feature',
+        properties: { ...properties, part: 'planned' },
+        geometry: { type: 'LineString', coordinates: [w.surface, w.plannedBottom] },
+      });
+    }
     features.push({
       type: 'Feature',
       properties: { ...properties, part: 'bottom' },
-      geometry: { type: 'Point', coordinates: w.bottom },
+      geometry: { type: 'Point', coordinates: w.plannedBottom ?? w.bottom },
     });
     features.push({
       type: 'Feature',
@@ -115,7 +137,7 @@ function colourBy(tone: 'light' | 'dark'): ExpressionSpecification {
 }
 
 function shownFilter(
-  part: 'path' | 'bottom' | 'surface',
+  part: 'path' | 'planned' | 'bottom' | 'surface',
   shown: readonly St37StatusClass[],
   only?: St37StatusClass[],
 ): FilterSpecification {
@@ -209,12 +231,37 @@ export function syncSt37(
     );
     map.addLayer(
       {
+        id: ST37_LAYERS.planned,
+        type: 'line',
+        source: SOURCE,
+        minzoom: 7,
+        paint: {
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.8, 11, 1.4, 14, 2],
+          'line-dasharray': [2, 2],
+        },
+      },
+      before,
+    );
+    // A well not yet drilled gets a larger dot: it has no path to be seen by.
+    const pending = ['in', ['get', 'status'], ['literal', PENDING]];
+    map.addLayer(
+      {
         id: ST37_LAYERS.dots,
         type: 'circle',
         source: SOURCE,
         minzoom: 9.5,
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 9.5, 0.8, 11, 1.4, 14, 2.8],
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9.5,
+            ['case', pending, 3, 0.8],
+            11,
+            ['case', pending, 3.5, 1.4],
+            14,
+            ['case', pending, 4.5, 2.8],
+          ],
           'circle-opacity': ['interpolate', ['linear'], ['zoom'], 9.5, 0.4, 10.5, 1],
         },
       },
@@ -280,6 +327,8 @@ export function syncSt37(
   map.setFilter(ST37_LAYERS.density, shownFilter('surface', view.shown));
   map.setPaintProperty(ST37_LAYERS.paths, 'line-color', colour);
   map.setFilter(ST37_LAYERS.paths, shownFilter('path', view.shown));
+  map.setPaintProperty(ST37_LAYERS.planned, 'line-color', colour);
+  map.setFilter(ST37_LAYERS.planned, shownFilter('planned', view.shown));
   map.setPaintProperty(ST37_LAYERS.dots, 'circle-color', colour);
   map.setFilter(ST37_LAYERS.dots, shownFilter('bottom', view.shown));
   map.setPaintProperty(ST37_LAYERS.pending, 'circle-color', colour);
@@ -294,7 +343,7 @@ export function highlightSt37(map: MapboxMap, uwi: string | null) {
   map.setFilter(ST37_LAYERS.hoverPath, [
     'all',
     ['==', ['get', 'uwi'], id],
-    ['==', ['get', 'part'], 'path'],
+    ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
   ]);
   map.setFilter(ST37_LAYERS.hoverSurface, [
     'all',

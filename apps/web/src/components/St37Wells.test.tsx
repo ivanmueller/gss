@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { st37Features, type St37MapWell } from '../lib/st37Map';
-import { St37Card, st37Covers, st37Request } from './St37Wells';
+import { St37Card, st37Covers, st37Plan, st37Request } from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -23,6 +23,11 @@ const well = (uwi: string, extra: Partial<St37MapWell> = {}): St37MapWell => ({
     [-113.6, 53.3],
     [-113.62, 53.3],
   ],
+  licenceDate: null,
+  plannedOperation: null,
+  plannedFormation: null,
+  plannedDepthM: null,
+  plannedBottom: null,
   ...extra,
 });
 
@@ -76,6 +81,64 @@ describe('st37Features', () => {
       uwi: '00/09-07-030-26W4/0',
       status: 'producing',
     });
+  });
+});
+
+const LICENSED: Partial<St37MapWell> = {
+  statusClass: 'licensed',
+  statusFluid: null,
+  spudDate: null,
+  totalDepthM: null,
+  trueVerticalDepthM: null,
+  bottom: [-113.6, 53.3],
+  path: null,
+  licenceDate: '2026-11-19',
+  plannedOperation: 'Horizontal',
+  plannedFormation: 'Duvernay Fm',
+  plannedDepthM: 5300,
+  plannedBottom: [-113.63, 53.32],
+};
+
+describe('a well not drilled yet', () => {
+  it('is drawn as a planned line to its planned bottom hole, with its dot there', () => {
+    const { features } = st37Features([well('00/01-29-049-26W4/0', LICENSED)]);
+    expect(features.map((f): unknown => f.properties?.part)).toEqual([
+      'planned',
+      'bottom',
+      'surface',
+    ]);
+    expect(features[0]?.geometry).toEqual({
+      type: 'LineString',
+      coordinates: [
+        [-113.6, 53.3],
+        [-113.63, 53.32],
+      ],
+    });
+    expect(features[1]?.geometry).toEqual({ type: 'Point', coordinates: [-113.63, 53.32] });
+  });
+
+  it('says what its licence planned', () => {
+    expect(st37Plan(well('00/01-29-049-26W4/0', LICENSED))).toBe(
+      'Planned horizontal in the Duvernay Fm, 5,300 m measured depth · Licensed 2026-11-19',
+    );
+    expect(st37Plan(well('00/01-29-049-26W4/0'))).toBeNull();
+  });
+
+  it('shows the plan on its card, and that the line is not the drilled path', () => {
+    const uwi = '00/01-29-049-26W4/0';
+    render(
+      <St37Card
+        hover={{ uwis: [uwi], x: 10, y: 10 }}
+        byUwi={new Map([[uwi, well(uwi, LICENSED)]])}
+      />,
+    );
+    expect(screen.getByText('Licensed, not drilled')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Planned horizontal in the Duvernay Fm, 5,300 m measured depth · Licensed 2026-11-19',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/The dashed line is the plan/)).toBeInTheDocument();
   });
 });
 

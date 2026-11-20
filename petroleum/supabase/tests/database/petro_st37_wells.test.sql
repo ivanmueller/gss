@@ -5,9 +5,9 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public;
 
-select plan(14);
+select plan(18);
 
-select ok((select petro.schema_version()) >= 5, 'the schema is at version 5 or later');
+select ok((select petro.schema_version()) >= 6, 'the schema is at version 6 or later');
 select ok(
   has_table_privilege('petro_api', 'petro.st37_wells', 'select')
   and has_table_privilege('petro_api', 'petro.st37_loads', 'select'),
@@ -69,6 +69,33 @@ select throws_ok(
   '23514', null, 'a well lies in Alberta'
 );
 
+-- One formation whole, and what a licence planned (20261123010000_petro_st37_formation.sql).
+insert into petro.st37_loads (source_url, west, south, east, north, wells, formation)
+values ('https://static.aer.ca/prd/documents/sts/st37/ST_37_GeoDB.zip', -118.75, 51.57, -112.9, 55.28, 1, 'duvernay');
+update petro.st37_wells
+set licence_date = '2026-11-19', planned_operation = 'Horizontal', planned_formation = 'Duvernay Fm',
+    planned_depth_m = 5300, planned_bottom_longitude = -113.52, planned_bottom_latitude = 53.21
+where uwi = '00/01-27-030-27W4/0';
+select is(
+  (select planned_bottom_longitude::text || ' ' || planned_formation from petro.st37_wells
+   where uwi = '00/01-27-030-27W4/0'),
+  '-113.520000 Duvernay Fm',
+  'a well keeps what its licence planned and its planned bottom hole'
+);
+select throws_ok(
+  $$update petro.st37_wells set planned_bottom_latitude = null where uwi = '00/01-27-030-27W4/0'$$,
+  '23514', null, 'a planned bottom hole has both its longitude and its latitude'
+);
+select throws_ok(
+  $$update petro.st37_wells set planned_bottom_longitude = -100 where uwi = '00/01-27-030-27W4/0'$$,
+  '23514', null, 'a planned bottom hole lies in Alberta'
+);
+select throws_ok(
+  $$insert into petro.st37_loads (source_url, west, south, east, north, wells, formation)
+    values ('https://static.aer.ca/x', -114, 53, -113, 54, 1, 'Not A Key')$$,
+  '23514', null, 'a formation is named by its key'
+);
+
 grant petro_api to current_user;
 
 create function pg_temp.as_petro(query text) returns text
@@ -98,7 +125,7 @@ $fn$;
 select pg_temp.be('00000000-0000-4000-8000-0000000000a1',
                   '00000000-0000-4000-8000-0000000000b1', 'viewer', '');
 select is(pg_temp.as_petro('select count(*)::text from petro.st37_wells'), '2', 'a member reads the wells');
-select is(pg_temp.as_petro('select count(*)::text from petro.st37_loads'), '1', 'a member reads the loads');
+select is(pg_temp.as_petro('select count(*)::text from petro.st37_loads'), '2', 'a member reads the loads');
 select throws_ok(
   pg_temp.try('with u as (update petro.st37_wells set licensee = ''x'' returning 1) select count(*)::text from u'),
   '42501', null, 'a member changes no well'

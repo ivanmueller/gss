@@ -55,6 +55,11 @@ const WELLS = st37Features([
       [-113.6, 53.3],
       [-113.62, 53.3],
     ],
+    licenceDate: null,
+    plannedOperation: null,
+    plannedFormation: null,
+    plannedDepthM: null,
+    plannedBottom: null,
   },
 ]);
 
