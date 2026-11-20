@@ -39,11 +39,27 @@ export interface St37MapWell {
   plannedBottom: [number, number] | null;
 }
 
-/** What FacilityMap draws: the wells, and the statuses switched on. */
+/** What FacilityMap draws: the wells, the statuses switched on, and the formation's outline. */
 export interface St37View {
   wells: GeoJSON.FeatureCollection;
   shown: readonly St37StatusClass[];
+  /** The address of the outline (GeoJSON) of the formation loaded whole, or null. */
+  outline: string | null;
 }
+
+/**
+ * The outlines of the formations a load can hold whole, by the formation's key (F-252). Files in
+ * the web app's public folder, made once from the Alberta Geological Survey's Digital Dataset
+ * 2013-0024 (Rokosh et al., 2013: the areas its 2012 shale report evaluated), which the AER/AGS
+ * licenses under the Open Government Licence – Alberta; the credit is shown with the wells.
+ */
+export const ST37_OUTLINES: Record<string, { url: string; credit: string }> = {
+  duvernay: {
+    url: '/outlines/duvernay.geojson',
+    credit:
+      'Outline: Alberta Energy Regulator / Alberta Geological Survey, Digital Dataset 2013-0024 (the area evaluated in its 2012 shale report). Contains information licensed under the Open Government Licence – Alberta.',
+  },
+};
 
 /** The colour of each status, on a light map and on a dark or satellite one. */
 export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, string>> = {
@@ -68,7 +84,10 @@ export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, stri
 };
 
 const SOURCE = 'st37-wells';
+const OUTLINE_SOURCE = 'st37-outline';
 export const ST37_LAYERS = {
+  outlineFill: 'st37-outline-fill',
+  outlineLine: 'st37-outline-line',
   density: 'st37-density',
   paths: 'st37-paths',
   planned: 'st37-planned',
@@ -187,9 +206,11 @@ export function syncSt37(
   if (view === null) {
     for (const id of layers) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+    if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
     return;
   }
   const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+  syncOutline(map, view.outline, tone, before);
   const existing = map.getSource<GeoJSONSource>(SOURCE);
   if (existing) existing.setData(view.wells);
   else map.addSource(SOURCE, { type: 'geojson', data: view.wells });
@@ -334,6 +355,59 @@ export function syncSt37(
   map.setPaintProperty(ST37_LAYERS.pending, 'circle-color', colour);
   map.setFilter(ST37_LAYERS.pending, shownFilter('bottom', view.shown, PENDING));
   map.setPaintProperty(ST37_LAYERS.hoverPath, 'line-color', ink);
+}
+
+/**
+ * The formation's outline, under the wells: a faint fill and a line, as the Survey drew the
+ * area (holes where the formation is absent). Removed when there is none.
+ */
+function syncOutline(
+  map: MapboxMap,
+  url: string | null,
+  tone: 'light' | 'dark',
+  before: string | undefined,
+) {
+  const ids = [ST37_LAYERS.outlineFill, ST37_LAYERS.outlineLine];
+  if (url === null) {
+    for (const id of ids) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
+    return;
+  }
+  const existing = map.getSource<GeoJSONSource>(OUTLINE_SOURCE);
+  if (existing) existing.setData(url);
+  else map.addSource(OUTLINE_SOURCE, { type: 'geojson', data: url });
+  // Under the wells' own layers when they exist already, else under the pins.
+  const under = map.getLayer(ST37_LAYERS.density) ? ST37_LAYERS.density : before;
+  if (!map.getLayer(ST37_LAYERS.outlineFill)) {
+    map.addLayer(
+      {
+        id: ST37_LAYERS.outlineFill,
+        type: 'fill',
+        source: OUTLINE_SOURCE,
+        paint: {
+          // Fades as the map closes in, where the wells themselves show the formation.
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.07, 10, 0.03],
+        },
+      },
+      under,
+    );
+    map.addLayer(
+      {
+        id: ST37_LAYERS.outlineLine,
+        type: 'line',
+        source: OUTLINE_SOURCE,
+        layout: { 'line-join': 'round' },
+        paint: {
+          'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.2, 10, 1.8],
+          'line-opacity': 0.75,
+        },
+      },
+      under,
+    );
+  }
+  const ink = tone === 'light' ? '#44403c' : '#e7e5e4';
+  map.setPaintProperty(ST37_LAYERS.outlineFill, 'fill-color', ink);
+  map.setPaintProperty(ST37_LAYERS.outlineLine, 'line-color', ink);
 }
 
 /** Draws the hovered well's path thicker and a square on its surface hole; null clears it. */
