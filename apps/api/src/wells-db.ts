@@ -33,13 +33,15 @@ export interface WellsDatabase {
   /**
    * Job: saves one page and moves the cursor, only while the load runs with the cursor this run
    * fetched from (F-243-3-D1-03); `moved` when another run changed it first (nothing written).
-   * A last page finishes the load: done, or done_unclean when any row could not be identified.
+   * `ending` finishes the load: `complete` (every well the service counts was seen) makes it done
+   * unless a row could not be identified; `incomplete` makes it done_unclean; null keeps it
+   * running (F-243-3-R2-02).
    */
   saveWellPage(
     loadId: number,
     fromObjectId: number,
     page: WellPage,
-    complete: boolean,
+    ending: 'complete' | 'incomplete' | null,
   ): Promise<'saved' | 'moved'>;
   /** Job: stops a running load (the size guard, or a failure); `moved` when it no longer runs. */
   stopWellLoad(loadId: number, status: 'stopped_size' | 'failed'): Promise<'saved' | 'moved'>;
@@ -121,7 +123,7 @@ export function wellsQueries(sql: postgres.Sql): WellsDatabase {
       });
     },
 
-    saveWellPage(loadId, fromObjectId, page, complete) {
+    saveWellPage(loadId, fromObjectId, page, ending) {
       return asJob(sql, async (tx) => {
         // The load row is locked for the whole page: one run at a time moves it (D1-03).
         const [load] = await tx<{ status: string; last_object_id: string }[]>`
@@ -186,7 +188,8 @@ export function wellsQueries(sql: postgres.Sql): WellsDatabase {
         }
         const invalid = page.rows.filter((r) => r.invalid.length > 0).length;
         const last = page.lastObjectId ?? fromObjectId;
-        const finished = !page.more;
+        const finished = ending !== null;
+        const complete = ending === 'complete';
         await tx`
           update petro.well_loads set
             last_object_id = ${last},

@@ -61,6 +61,8 @@ export interface WellPage {
 }
 
 const UWI = /^[0-9A-Z]{13,16}$/;
+/** Half of a character pair standing alone: Postgres refuses it in jsonb (F-243-3-R2-04). */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ALBERTA = { west: -120.1, east: -109.9, south: 48.9, north: 60.1 };
 
@@ -75,7 +77,9 @@ function record(value: unknown): Record<string, unknown> | null {
  */
 function text(value: unknown, max: number): string | undefined {
   if (value === null) return '';
-  if (typeof value !== 'string' || value.includes('\u0000')) return undefined;
+  if (typeof value !== 'string' || value.includes('\u0000') || LONE_SURROGATE.test(value)) {
+    return undefined;
+  }
   const trimmed = value.trim();
   return trimmed.length <= max ? trimmed : undefined;
 }

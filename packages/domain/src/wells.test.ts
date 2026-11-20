@@ -67,7 +67,10 @@ describe('parseWellPage', () => {
     delete attributes.SURFACE_LONGITUDE;
     delete attributes.SURFACE_LATITUDE;
     const nul = well(2, { UWI: '0514250908001', WELL_NAME: 'BAD\u0000NAME' });
-    const page = parseWellPage({ features: [missing, nul] }, 2000);
+    const lone = well(3, { UWI: '0514250908002', OPERATOR_NAME: 'BAD \ud800' });
+    const page = parseWellPage({ features: [missing, nul, lone] }, 2000);
+    // F-243-3-R2-04: half of a character pair alone, refused by Postgres.
+    expect(page.rows[2]?.invalid).toEqual(['operatorName']);
     expect([...(page.rows[0]?.invalid ?? [])].sort()).toEqual([
       'finalDrillDate',
       'location',

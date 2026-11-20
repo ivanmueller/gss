@@ -26,12 +26,6 @@ export const WELLS_SERVICE =
  */
 export const WELLS_SCHEMA_VERSION = 4;
 
-/**
- * A load is complete only when it saw at least this share of the wells the service counts, so an
- * empty or cut-short answer never retires the catalogue (F-243-3-R1-01).
- */
-const COMPLETE_SHARE = 0.98;
-
 /** Grain's and the oil and gas databases together never pass this (the shared limit is 500 MB). */
 export const WELLS_SIZE_BUDGET_BYTES = 400 * 1024 * 1024;
 const PAGE_SIZE = 2000;
@@ -41,6 +35,8 @@ const FETCH_TIMEOUT_MS = 30_000;
 const PAGE_MAX_BYTES = 5_000_000;
 /** A new monthly load starts this long after the last clean one finished. */
 const REFRESH_AFTER_MS = 28 * 24 * 3600 * 1000;
+/** After a load that could not retire anything (unclean or incomplete), a new one starts sooner. */
+const RETRY_AFTER_MS = 7 * 24 * 3600 * 1000;
 
 const mb = (bytes: number) => `${String(Math.round(bytes / (1024 * 1024)))} MB`;
 
@@ -131,10 +127,11 @@ async function loadToRun(db: PetroleumDatabase, now: Date): Promise<WellLoad | '
   if (latest?.status === 'stopped_size') return 'stopped';
   // The monthly rhythm follows the latest finished load, clean or not, so an unclean one is not
   // redone twice a day (F-243-3-R1-03); only a clean one retires wells.
+  const wait = latest?.status === 'done' ? REFRESH_AFTER_MS : RETRY_AFTER_MS;
   const due =
     latest === null ||
     latest.status === 'failed' ||
-    now.getTime() - Date.parse(latest.finishedAt ?? latest.startedAt) > REFRESH_AFTER_MS;
+    now.getTime() - Date.parse(latest.finishedAt ?? latest.startedAt) > wait;
   if (!due) return 'idle';
   return (await db.startWellLoad()) ?? 'idle';
 }
@@ -216,18 +213,26 @@ export async function refreshWells(
         break;
       }
       seen += page.rows.length + page.unidentified;
-      // The last page: complete only if the load saw (nearly) every well the service counts.
-      let complete = false;
+      // The last page: the load retires wells only when it saw every well the service counts
+      // (F-243-3-R1-01, R2-01); without a count it stays open and checks again next run
+      // (F-243-3-R2-02).
+      let ending: 'complete' | 'incomplete' | null = null;
       if (!page.more) {
         const counted = await countWells(fetchImpl);
-        complete = counted !== null && counted > 0 && seen >= counted * COMPLETE_SHARE;
-        if (!complete) {
+        if (counted === null) {
           console.warn(
-            `Wells load ${String(load.id)}: saw ${String(seen)} of ${counted === null ? 'an unknown number' : String(counted)}; finished without retiring any well`,
+            `Wells load ${String(load.id)}: the service's count did not answer; next run`,
           );
+        } else {
+          ending = counted > 0 && seen >= counted ? 'complete' : 'incomplete';
+          if (ending === 'incomplete') {
+            console.warn(
+              `Wells load ${String(load.id)}: saw ${String(seen)} of ${String(counted)}; finished without retiring any well`,
+            );
+          }
         }
       }
-      if ((await petroleum.saveWellPage(load.id, cursor, page, complete)) === 'moved') {
+      if ((await petroleum.saveWellPage(load.id, cursor, page, ending)) === 'moved') {
         console.log(`Wells load ${String(load.id)}: another run moved on; this one stops`);
         break;
       }
@@ -235,7 +240,7 @@ export async function refreshWells(
       cursor = page.lastObjectId ?? cursor;
       if (!page.more) {
         pages += 1;
-        console.log(`Wells load ${String(load.id)} finished`);
+        if (ending !== null) console.log(`Wells load ${String(load.id)} finished`);
         break;
       }
     }
