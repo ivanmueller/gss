@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { eligibility, evaluate, mergeDecision } from './review-gate.js';
+import { eligibility, evaluate, mergeDecision, PROCESS } from './review-gate.js';
 import {
   changeTier,
   documentsOnly,
@@ -249,6 +249,27 @@ describe('review evidence check', () => {
     assert.equal(outcome.tier, 'high');
     assert.equal(mergeDecision(outcome).merge, true);
     assert.equal(eligibility(outcome), 'yes (high risk)');
+  });
+
+  // The light process (the owner, 2026-11-19): no register and no owner approval, but the database
+  // checks still block.
+  test('the light process merges code and governance without a register', () => {
+    branch('light');
+    const head = commit(
+      { 'AGENTS.md': 'lighter\n', 'apps/web/src/a.ts': 'export const a = 2;\n' },
+      'x',
+    );
+    assert.equal(PROCESS, 'light');
+    const outcome = evaluate({ base: main, head, process: 'light' });
+    assert.equal(outcome.tier, 'governance');
+    assert.deepEqual(outcome.blockers, []);
+    assert.equal(mergeDecision(outcome, { process: 'light' }).merge, true);
+    // The strict process still holds the same change.
+    assert.equal(mergeDecision(evaluate({ base: main, head })).merge, false);
+    const migration = commit({ 'supabase/migrations/9_x.sql': 'select 1;\n' }, 'migration');
+    const blocked = evaluate({ base: main, head: migration, process: 'light' });
+    assert.ok(blocked.blockers.some((b) => /new migration without pgTAP/.test(b)));
+    assert.equal(mergeDecision(blocked, { process: 'light' }).merge, false);
   });
 
   // F-150-R4-01: git quotes non-ASCII paths by default; a quoted path matched no tier rule.

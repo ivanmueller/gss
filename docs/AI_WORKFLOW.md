@@ -46,6 +46,8 @@ These are process assignments, not claims about permanent model superiority. Rot
 - `docs/AI_CODING_SYSTEM.md`: recommended tools and operational multi-model coding process; no competing domain rules.
 - `docs/reviews/`: one Codex review findings register per pull request, and `ACCEPTED.md` for project-wide accepted limits (§11.5).
 
+> **Light process in force (the owner, 2026-11-19).** The owner switched the project to a lighter, faster process: a short plan in chat, build, check on staging, merge. Sections 11.5 and 11.6 below describe the strict process, kept for when the owner switches back; until then: no Codex reviews unless the owner asks, no owner approval of each exact commit, no risk tier holding a merge (`PROCESS = 'light'` in `scripts/review-gate.js`: the Merge policy checks only that migrations are added, never edited, with pgTAP tests), and merge records go in the next ordinary pull request. Kept: the AER/ST37 licence conditions, the Supabase free-plan size guard, a quick staging check before production, `gh pr merge <n> --auto --squash` only, and every security rule in `AGENTS.md`.
+
 ## 11.5 Claude + Codex review loop (F-149)
 
 Claude runs this loop itself with the `codex-review` skill (`.claude/skills/codex-review/SKILL.md`, the exact procedure); the owner does not copy prompts between tools. The register format is in `docs/reviews/README.md`.

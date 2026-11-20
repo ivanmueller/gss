@@ -5,6 +5,8 @@ description: GSS's Claude-to-Codex review loop. Use for every GSS pull request t
 
 # Codex review loop (GSS)
 
+**Not used by default (the owner, 2026-11-19):** the project runs the light process in `AGENTS.md` ("Working with the owner"): no Codex reviews unless the owner asks for one. This procedure is kept for when he does, or when the strict process returns.
+
 The process and its reasons are in `docs/AI_WORKFLOW.md` §11.5 and §11.6; the register format is in `docs/reviews/README.md`. This file is the exact procedure. The owner has authorized Claude to fix confirmed findings without asking (this replaces the Codex plugin's own "ask before fixing" guidance for this repository), but never to merge, approve pull requests, deploy, or change GitHub settings.
 
 The runner is `node .claude/skills/codex-review/run-review.js`. It reviews a **committed** snapshot in its own worktree with Codex's read-only sandbox, so commit before reviewing and never point it at uncommitted work. Run it with `run_in_background: true` and keep working; you are notified when it exits. Its output (findings with probable duplicates) is what you triage; Codex's raw output stays in `~/.gss-reviews/<ID>/` outside the repository.
