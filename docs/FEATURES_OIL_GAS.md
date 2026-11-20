@@ -26,7 +26,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 | F-246 | Other provinces: British Columbia, Saskatchewan, Manitoba and beyond | Needs owner input |
 | F-249 | Pipelines on the map | Needs owner input |
 | F-250 | Search by legal land description | Later (owner, 2026-11-19) |
-| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | Planned: step 1 next, the count of the Duvernay, Exshaw and Rock Creek for the owner's final choice (the owner's answers 2026-11-20, "Fastest MVP" below) |
+| F-252 | One formation, whole: every well with its history and its monthly production, shown from a formation button | Needs owner input: the Duvernay chosen (the owner, 2026-11-20), about 1,990 wells counted; two decisions before the build (Petrinex's terms; production before 2022), "Fastest MVP" below |
 | F-253 | Analysis on the stored data: type curves, decline curves, financial forecasts, Monte Carlo simulations | Planned after F-252 (the owner's inputs needed for the financial part) |
 | F-254 | A plain-language box that sets the map's filters and the charts | Later, after F-253 |
 
@@ -64,6 +64,19 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 3. **Download:** no file for the person to save; the data is loaded into our database only.
 4. **Financial forecasts:** recommended values are loaded beforehand and each person can type their own over them. Each recommended value is shown with its source and date and is proposed to the owner before it is loaded, never made up by an agent (`AGENTS.md` rule 1). Results to show first (left to the agent): the forecast volumes and the estimated ultimate recovery, then net present value at a discount rate the person can change, payout time and rate of return.
 5. **Part 4b:** folded into step 2.
+
+**The owner, 2026-11-20: "Let's just start with the Duvernay."** No count of other formations first.
+
+**Found on 2026-11-20 (an agent, from the AER's and Petrinex's own pages and files; nothing built on it yet):**
+- **Which wells are Duvernay.** ST37's production strings carry a pool code; the AER's ST103 lists (`https://www.aer.ca/data-and-performance-reports/statistical-reports/st103`, monthly; `FieldPoolList.txt` and `FormationCodes_NumericSort.txt` under `https://www.aer.ca/data/codes/`) show that a pool code is a four-digit formation code followed by the pool's number, and that formation codes 7280 to 7288 are the Duvernay (7285 "Duvernay-Majeau Lake"; 7190 "Duvernay (old)" has no wells in ST37). Counted in the ST37 file downloaded that day: **about 1,990 wells** in Duvernay pools, in 47 fields: about 1,910 producing, about 50 suspended, about 25 abandoned, the rest drilled or testing; none confidential; first drilled 2010, about 700 of them since 2022.
+- **Licensed and drilling Duvernay wells cannot be told from ST37 alone:** a well has a pool code only once it has a production string. The formation a licence aims at is in the AER's daily licence list (ST1, kept since 2026-11-19 only) and in Petrinex's public **Well Licence** file (every licence, with its projected and terminating formation, drilling operation and projected depth; made nightly). So the planned lines of part 4b, for the Duvernay, need that file.
+- **Monthly production by well: Petrinex's public data** (`https://www.petrinex.ca/public-data/apd/`): **Conventional Volumetric Data**, one file a month (about 8 MB zipped, 128 MB as a table), at `https://www.petrinex.gov.ab.ca/publicdata/API/Files/AB/Vol/<year>-<month>/CSV`; each line is a facility, month, activity and product, and a well's own production appears as lines whose "from" is the well (oil, gas, water, condensate, with hours); wells are tied to their pool by Petrinex's **Well Infrastructure** file. Too large for the Worker: loaded by a GitHub workflow, as ST37 is.
+- **Only five years are free.** Petrinex gives "current production year plus the past four production years" (the earliest month that answered: 2022-01); older months "can be requested from the AER … Applicable AER Fees apply". The AER's catalogue (`https://www1.aer.ca/ProductCatalogue/514.html`, "Well Production Data", from 1962): CAD 10 for one well, CAD 74 for one field and pool or one township, CAD 750 for the whole province's file of one month, CAD 6,000 for 12 issues. So free data gives the full history of the roughly 700 Duvernay wells drilled since 2022, and only the later years of the roughly 1,300 drilled before: their first years, which a type curve needs most, are missing unless bought.
+- **Petrinex's terms** (`https://www.petrinex.ca/terms`, read 2026-11-20): the material "is owned by the Government of Alberta"; it "may be used, reproduced, stored or transmitted for non-commercial purposes", Crown copyright acknowledged; for commercial purposes, "arrange first for consent". Not the Open Government Licence. The same question as the AER's terms: the owner's decision, to record in `docs/DECISIONS.md` before any Petrinex file is used.
+
+**Decisions for the owner before the build:**
+1. **Petrinex's public files** (production, well infrastructure, well licences) used on the same footing as the AER's lists (an internal tool for members only, nothing exported, the source named), or consent asked first?
+2. **Production before 2022:** start with the free five years (type curves then drawn first from the wells drilled since 2022, the older wells shown from 2022 on and marked incomplete), or buy the earlier history from the AER (a price to confirm with the AER for the Duvernay's pools)?
 
 ## Two things that shape the order
 
