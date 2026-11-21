@@ -44,10 +44,26 @@ export interface St37MapWell {
   poolName?: string | null;
 }
 
+/**
+ * The parts of a well that can be switched on and off (F-257). A well is every leg drilled under
+ * one licence: its main leg (the most active one), its other legs (an earlier hole, a sidetrack,
+ * an extra leg), and, before it is drilled, its planned line. With the main legs off, a well is
+ * one dot at its surface location.
+ */
+export interface St37Parts {
+  legs: boolean;
+  otherLegs: boolean;
+  planned: boolean;
+}
+
+export const ST37_ALL_PARTS: St37Parts = { legs: true, otherLegs: true, planned: true };
+
 /** What FacilityMap draws: the wells, the statuses switched on, and the formation's outline. */
 export interface St37View {
   wells: GeoJSON.FeatureCollection;
   shown: readonly St37StatusClass[];
+  /** The parts switched on; all of them when left out. */
+  parts?: St37Parts;
   /** The address of the outline (GeoJSON) of the formation loaded whole, or null. */
   outline: string | null;
   /** The zones where the formation's drilled wells cluster (F-255), or null. */
@@ -119,7 +135,9 @@ export const ST37_LAYERS = {
   planned: 'st37-planned',
   dots: 'st37-dots',
   pending: 'st37-pending',
+  wells: 'st37-wells-dots',
   hoverPath: 'st37-hover-path',
+  hoverDots: 'st37-hover-dots',
   hoverSurface: 'st37-hover-surface',
 } as const;
 /** The layers a pointer can find a well on. */
@@ -128,21 +146,82 @@ export const ST37_PICKABLE = [
   ST37_LAYERS.planned,
   ST37_LAYERS.dots,
   ST37_LAYERS.pending,
+  ST37_LAYERS.wells,
 ];
 const SQUARE = 'st37-square';
 
 /** Wells that are only licensed or being drilled: shown as dots at every zoom, like new news. */
 const PENDING: St37StatusClass[] = ['licensed', 'drilling'];
 
+/** Which leg of a well is its main one: the most active, as the loader ranks statuses. */
+const RANK: Record<St37StatusClass, number> = {
+  producing: 0,
+  drilling: 1,
+  awaiting: 2,
+  inactive: 3,
+  suspended: 4,
+  abandoned: 5,
+  licensed: 6,
+};
+
 /**
- * The wells as map features: each well's path (when it runs sideways), its bottom-hole dot and
- * its surface hole, all carrying its UWI and status, so a pointer on any of them finds the well.
- * A well with a planned bottom hole gets a straight "planned" line to it, and its dot there.
+ * The wells by licence (F-257): a well is every leg drilled under one licence, each leg a UWI of
+ * its own. The main leg comes first: the most active; between equals, the one in a pool, then
+ * the one with a drilled path, then the latest drilled (the UWI's last character).
+ */
+export function st37Legs(wells: readonly St37MapWell[]): Map<string, St37MapWell[]> {
+  const out = new Map<string, St37MapWell[]>();
+  for (const w of wells) {
+    const legs = out.get(w.licenceNumber);
+    if (legs) legs.push(w);
+    else out.set(w.licenceNumber, [w]);
+  }
+  for (const legs of out.values()) {
+    legs.sort(
+      (a, b) =>
+        RANK[a.statusClass] - RANK[b.statusClass] ||
+        Number(b.poolCode != null) - Number(a.poolCode != null) ||
+        Number(b.path !== null) - Number(a.path !== null) ||
+        b.uwi.slice(-1).localeCompare(a.uwi.slice(-1)) ||
+        a.uwi.localeCompare(b.uwi),
+    );
+  }
+  return out;
+}
+
+/**
+ * The wells as map features: each leg's path (when it runs sideways), its bottom-hole dot and
+ * its surface hole, all carrying its UWI, licence, status and whether it is the well's main leg,
+ * so a pointer on any of them finds the well. A leg with a planned bottom hole gets a straight
+ * "planned" line to it, and its dot there (`at: 'plan'`; a second dot where it starts, `at:
+ * 'start'`, is drawn when planned lines are off). Each well also gets one "well" dot at its
+ * surface location, in its main leg's status, drawn when the main legs are off.
  */
 export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
+  const main = new Set<string>();
+  for (const [first] of st37Legs(wells).values()) {
+    if (!first) continue;
+    main.add(first.uwi);
+    features.push({
+      type: 'Feature',
+      properties: {
+        uwi: first.uwi,
+        licence: first.licenceNumber,
+        status: first.statusClass,
+        leg: 'main',
+        part: 'well',
+      },
+      geometry: { type: 'Point', coordinates: first.surface },
+    });
+  }
   for (const w of wells) {
-    const properties = { uwi: w.uwi, status: w.statusClass };
+    const properties = {
+      uwi: w.uwi,
+      licence: w.licenceNumber,
+      status: w.statusClass,
+      leg: main.has(w.uwi) ? 'main' : 'other',
+    };
     if (w.path) {
       features.push({
         type: 'Feature',
@@ -157,9 +236,16 @@ export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureColl
         geometry: { type: 'LineString', coordinates: [w.surface, w.plannedBottom] },
       });
     }
+    if (w.plannedBottom) {
+      features.push({
+        type: 'Feature',
+        properties: { ...properties, part: 'bottom', at: 'start' },
+        geometry: { type: 'Point', coordinates: w.bottom },
+      });
+    }
     features.push({
       type: 'Feature',
-      properties: { ...properties, part: 'bottom' },
+      properties: { ...properties, part: 'bottom', at: w.plannedBottom ? 'plan' : 'hole' },
       geometry: { type: 'Point', coordinates: w.plannedBottom ?? w.bottom },
     });
     features.push({
@@ -182,16 +268,26 @@ function colourBy(tone: 'light' | 'dark'): ExpressionSpecification {
 }
 
 function shownFilter(
-  part: 'path' | 'planned' | 'bottom' | 'surface',
+  part: 'path' | 'planned' | 'bottom' | 'surface' | 'well',
   shown: readonly St37StatusClass[],
   only?: St37StatusClass[],
+  parts?: St37Parts,
 ): FilterSpecification {
   const statuses = only ? shown.filter((s) => only.includes(s)) : shown;
-  return [
+  const filter: unknown[] = [
     'all',
     ['==', ['get', 'part'], part],
     ['in', ['get', 'status'], ['literal', statuses]],
-  ] as FilterSpecification;
+  ];
+  if (parts) {
+    const legs = [...(parts.legs ? ['main'] : []), ...(parts.otherLegs ? ['other'] : [])];
+    filter.push(['in', ['get', 'leg'], ['literal', legs]]);
+    // A leg not drilled yet: its dot at the planned bottom hole with its line, else at its start.
+    if (part === 'bottom') {
+      filter.push(['in', ['get', 'at'], ['literal', ['hole', parts.planned ? 'plan' : 'start']]]);
+    }
+  }
+  return filter as FilterSpecification;
 }
 
 /** A small hollow square for the hovered well's surface hole, drawn without a canvas. */
@@ -330,14 +426,55 @@ export function syncSt37(
       },
       before,
     );
+    // One dot a well at its surface location, drawn when the main legs are off (F-257). A well
+    // not yet drilled shows from far out, as its larger dot does with the legs on.
+    map.addLayer(
+      {
+        id: ST37_LAYERS.wells,
+        type: 'circle',
+        source: SOURCE,
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            5,
+            ['case', pending, 2, 0],
+            8,
+            ['case', pending, 3, 0],
+            9.5,
+            ['case', pending, 3, 1.2],
+            11,
+            ['case', pending, 3.5, 2.2],
+            14,
+            ['case', pending, 4.5, 3.6],
+          ],
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9.5, 0, 11, 0.75],
+          'circle-stroke-color': '#ffffff',
+        },
+      },
+      before,
+    );
+    // The well under the pointer, whole (F-257): every leg drilled under its licence, whatever
+    // is switched off; the main leg thickest, each bottom hole a dot.
     map.addLayer(
       {
         id: ST37_LAYERS.hoverPath,
         type: 'line',
         source: SOURCE,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': 3 },
-        filter: ['==', ['get', 'uwi'], ''],
+        paint: { 'line-width': ['case', ['==', ['get', 'leg'], 'main'], 3, 2] },
+        filter: ['==', ['get', 'licence'], ''],
+      },
+      before,
+    );
+    map.addLayer(
+      {
+        id: ST37_LAYERS.hoverDots,
+        type: 'circle',
+        source: SOURCE,
+        paint: { 'circle-radius': 3.5, 'circle-stroke-width': 1, 'circle-stroke-color': '#ffffff' },
+        filter: ['==', ['get', 'licence'], ''],
       },
       before,
     );
@@ -351,11 +488,13 @@ export function syncSt37(
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
         },
-        filter: ['==', ['get', 'uwi'], ''],
+        filter: ['==', ['get', 'licence'], ''],
       },
       before,
     );
   }
+  const parts = view.parts ?? ST37_ALL_PARTS;
+  const none: readonly St37StatusClass[] = [];
 
   const colour = colourBy(tone);
   // Wells are dense where they count: zoomed out, a grey shading of how many there are.
@@ -375,14 +514,26 @@ export function syncSt37(
   ]);
   map.setFilter(ST37_LAYERS.density, shownFilter('surface', view.shown));
   map.setPaintProperty(ST37_LAYERS.paths, 'line-color', colour);
-  map.setFilter(ST37_LAYERS.paths, shownFilter('path', view.shown));
+  map.setFilter(ST37_LAYERS.paths, shownFilter('path', view.shown, undefined, parts));
   map.setPaintProperty(ST37_LAYERS.planned, 'line-color', colour);
-  map.setFilter(ST37_LAYERS.planned, shownFilter('planned', view.shown));
+  map.setFilter(
+    ST37_LAYERS.planned,
+    shownFilter('planned', parts.planned ? view.shown : none, undefined, parts),
+  );
   map.setPaintProperty(ST37_LAYERS.dots, 'circle-color', colour);
-  map.setFilter(ST37_LAYERS.dots, shownFilter('bottom', view.shown));
+  map.setFilter(ST37_LAYERS.dots, shownFilter('bottom', view.shown, undefined, parts));
   map.setPaintProperty(ST37_LAYERS.pending, 'circle-color', colour);
-  map.setFilter(ST37_LAYERS.pending, shownFilter('bottom', view.shown, PENDING));
-  map.setPaintProperty(ST37_LAYERS.hoverPath, 'line-color', ink);
+  map.setFilter(ST37_LAYERS.pending, shownFilter('bottom', view.shown, PENDING, parts));
+  map.setPaintProperty(ST37_LAYERS.wells, 'circle-color', colour);
+  map.setFilter(ST37_LAYERS.wells, shownFilter('well', parts.legs ? none : view.shown));
+  // The hovered well's main leg in ink, its other legs in their own status colour.
+  map.setPaintProperty(ST37_LAYERS.hoverPath, 'line-color', [
+    'case',
+    ['==', ['get', 'leg'], 'main'],
+    ink,
+    colour,
+  ]);
+  map.setPaintProperty(ST37_LAYERS.hoverDots, 'circle-color', colour);
 }
 
 /**
@@ -473,18 +624,28 @@ function syncZones(
   map.setPaintProperty(ST37_LAYERS.zones, 'fill-color', tone === 'light' ? '#44403c' : '#e7e5e4');
 }
 
-/** Draws the hovered well's path thicker and a square on its surface hole; null clears it. */
-export function highlightSt37(map: MapboxMap, uwi: string | null) {
+/**
+ * Draws the hovered well whole (F-257): every leg under its licence thicker, a dot on each
+ * bottom hole and a square on its surface location, whatever parts are switched off; null
+ * clears it.
+ */
+export function highlightSt37(map: MapboxMap, licence: string | null) {
   if (!map.getLayer(ST37_LAYERS.hoverPath)) return;
-  const id = uwi ?? '';
+  const id = licence ?? '';
   map.setFilter(ST37_LAYERS.hoverPath, [
     'all',
-    ['==', ['get', 'uwi'], id],
+    ['==', ['get', 'licence'], id],
     ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
+  ]);
+  map.setFilter(ST37_LAYERS.hoverDots, [
+    'all',
+    ['==', ['get', 'licence'], id],
+    ['==', ['get', 'part'], 'bottom'],
+    ['in', ['get', 'at'], ['literal', ['hole', 'plan']]],
   ]);
   map.setFilter(ST37_LAYERS.hoverSurface, [
     'all',
-    ['==', ['get', 'uwi'], id],
-    ['==', ['get', 'part'], 'surface'],
+    ['==', ['get', 'licence'], id],
+    ['==', ['get', 'part'], 'well'],
   ]);
 }

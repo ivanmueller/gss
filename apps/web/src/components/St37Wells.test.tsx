@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { st37Features, type St37MapWell } from '../lib/st37Map';
+import { st37Features, st37Legs, type St37MapWell } from '../lib/st37Map';
 import { St37Card, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
@@ -68,19 +68,66 @@ describe('st37Features', () => {
   it('draws a path, a bottom-hole dot and a surface hole per well, and no path for a vertical one', () => {
     const { features } = st37Features([
       well('00/09-07-030-26W4/0'),
-      well('00/01-27-030-27W4/0', { path: null }),
+      well('00/01-27-030-27W4/0', { path: null, licenceNumber: '0509396' }),
     ]);
     expect(features.map((f): unknown => f.properties?.part)).toEqual([
+      // One dot a well first, for when the main legs are off (F-257).
+      'well',
+      'well',
       'path',
       'bottom',
       'surface',
       'bottom',
       'surface',
     ]);
-    expect(features[0]?.properties).toMatchObject({
+    expect(features[2]?.properties).toMatchObject({
       uwi: '00/09-07-030-26W4/0',
+      licence: '0509395',
       status: 'producing',
+      leg: 'main',
     });
+  });
+
+  it("marks a well's main leg and its other legs, and gives the well one dot (F-257)", () => {
+    const first = well('00/09-07-030-26W4/0', { statusClass: 'abandoned', poolCode: null });
+    const second = well('00/09-07-030-26W4/2', { poolCode: 728001 });
+    const legs = st37Legs([first, second]);
+    // The producing leg is the main one, whatever the order they came in.
+    expect(legs.get('0509395')?.map((w) => w.uwi)).toEqual([second.uwi, first.uwi]);
+    const { features } = st37Features([first, second]);
+    expect(features.filter((f) => f.properties?.part === 'well')).toEqual([
+      {
+        type: 'Feature',
+        properties: {
+          uwi: second.uwi,
+          licence: '0509395',
+          status: 'producing',
+          leg: 'main',
+          part: 'well',
+        },
+        geometry: { type: 'Point', coordinates: [-113.6, 53.3] },
+      },
+    ]);
+    expect(
+      features
+        .filter((f) => f.properties?.part === 'path')
+        .map((f): unknown => [f.properties?.uwi, f.properties?.leg]),
+    ).toEqual([
+      [first.uwi, 'other'],
+      [second.uwi, 'main'],
+    ]);
+  });
+
+  it('ranks equal legs: the one in a pool, then the one with a path, then the latest', () => {
+    const uwis = (list: St37MapWell[]) =>
+      st37Legs(list)
+        .get('0509395')
+        ?.map((w) => w.uwi.slice(-1));
+    const a = (event: string, extra: Partial<St37MapWell>) =>
+      well(`00/09-07-030-26W4/${event}`, { statusClass: 'abandoned', ...extra });
+    expect(uwis([a('0', {}), a('2', { poolCode: 728001, path: null })])).toEqual(['2', '0']);
+    expect(uwis([a('0', { path: null }), a('2', {})])).toEqual(['2', '0']);
+    expect(uwis([a('0', {}), a('3', {}), a('2', {})])).toEqual(['3', '2', '0']);
   });
 });
 
@@ -102,11 +149,16 @@ const LICENSED: Partial<St37MapWell> = {
 describe('a well not drilled yet', () => {
   it('is drawn as a planned line to its planned bottom hole, with its dot there', () => {
     const { features } = st37Features([well('00/01-29-049-26W4/0', LICENSED)]);
-    expect(features.map((f): unknown => f.properties?.part)).toEqual([
-      'planned',
-      'bottom',
-      'surface',
+    expect(features.map((f): unknown => [f.properties?.part, f.properties?.at])).toEqual([
+      ['well', undefined],
+      ['planned', undefined],
+      // Where it starts, drawn when planned lines are off (F-257); then the planned bottom hole.
+      ['bottom', 'start'],
+      ['bottom', 'plan'],
+      ['surface', undefined],
     ]);
+    features.shift();
+    features.splice(1, 1);
     expect(features[0]?.geometry).toEqual({
       type: 'LineString',
       coordinates: [
@@ -145,7 +197,7 @@ describe('a well not drilled yet', () => {
 describe('St37Card', () => {
   const byUwi = new Map([
     ['00/09-07-030-26W4/0', well('00/09-07-030-26W4/0')],
-    ['02/09-07-030-26W4/0', well('02/09-07-030-26W4/0')],
+    ['02/09-07-030-26W4/0', well('02/09-07-030-26W4/0', { licenceNumber: '0509396' })],
   ]);
 
   it('shows the well under the pointer and how many more share the place', () => {
@@ -160,6 +212,33 @@ describe('St37Card', () => {
     expect(screen.getByText('Producing or injecting · Crude oil')).toBeInTheDocument();
     expect(screen.getByText('Spud 2023-09-03 · TD 5,846 m (TVD 2,233 m)')).toBeInTheDocument();
     expect(screen.getByText('+1 more well here')).toBeInTheDocument();
+  });
+
+  it('shows the well whole: its main leg in full and every leg under its licence (F-257)', () => {
+    const first = well('00/09-07-030-26W4/0', {
+      statusClass: 'abandoned',
+      statusFluid: null,
+      totalDepthM: 3100,
+    });
+    const second = well('00/09-07-030-26W4/2');
+    const wells = [first, second];
+    render(
+      <St37Card
+        // The pointer is on the abandoned leg: the card is still the well's.
+        hover={{ uwis: [first.uwi, second.uwi], x: 10, y: 10 }}
+        byUwi={new Map(wells.map((w) => [w.uwi, w]))}
+        legsOf={st37Legs(wells)}
+      />,
+    );
+    expect(screen.getByText('Producing or injecting · Crude oil')).toBeInTheDocument();
+    expect(screen.getByText('2 legs')).toBeInTheDocument();
+    const legs = screen.getByRole('list', { name: 'Legs of this well' });
+    expect([...legs.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      '00/09-07-030-26W4/2main leg · Producing or injecting · TD 5,846 m',
+      '00/09-07-030-26W4/0Abandoned · TD 3,100 m',
+    ]);
+    // Its own legs are not counted as other wells.
+    expect(screen.queryByText(/more well/)).not.toBeInTheDocument();
   });
 
   it("names the well's field and pool, and a pool the list does not name by its code", () => {
