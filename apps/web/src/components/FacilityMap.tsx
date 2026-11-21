@@ -19,6 +19,7 @@ import {
 } from '../lib/mapbox';
 import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
+import { LAND_PICKABLE, syncLand, type LandView } from '../lib/landMap';
 import { highlightSt37, ST37_PICKABLE, syncSt37, type St37View } from '../lib/st37Map';
 import {
   isLayerPictureUrl,
@@ -120,6 +121,13 @@ export interface FacilityMapProps {
    * pointer shows no other well, until this is null again.
    */
   st37Locked?: string | null;
+  /** Land held today (F-241), drawn under the wells. */
+  land?: LandView | null;
+  /**
+   * The land clicked, by its keys, with where the click is in the map's box; null for a click
+   * on none, or on a well (the well's card comes first).
+   */
+  onLandClick?: (pick: { keys: string[]; x: number; y: number } | null) => void;
   /** Map layers that are switched on, in order, drawn under the lanes and the pins. */
   overlays?: readonly MapOverlay[];
   /** The person's sign-in, sent with a layer's pictures (they come from the app's API). */
@@ -582,6 +590,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncLand(
+        instance,
+        latest.current.land ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
@@ -628,6 +642,18 @@ export default function FacilityMap(props: FacilityMapProps) {
     instance.on('click', (event) => {
       const found = hover(event.point);
       latest.current.onSt37Click?.(found);
+      // Land under the click, when no well is: every shape there, agreements first (F-241).
+      const onLand = latest.current.onLandClick;
+      if (!onLand) return;
+      const layers = LAND_PICKABLE.filter((id) => instance.getLayer(id));
+      const keys = new Set<string>();
+      if (!found && layers.length > 0) {
+        for (const feature of instance.queryRenderedFeatures(event.point, { layers })) {
+          const key: unknown = feature.properties?.key;
+          if (typeof key === 'string') keys.add(key);
+        }
+      }
+      onLand(keys.size > 0 ? { keys: [...keys], x: event.point.x, y: event.point.y } : null);
     });
     instance.on('mouseout', () => {
       if (st37Hovered.current === null || latest.current.st37Locked) return;
@@ -779,6 +805,15 @@ export default function FacilityMap(props: FacilityMapProps) {
       syncSt37(instance, st37 ?? null, st37Tone(basemap, theme), PINS);
     }
   }, [st37, basemap, theme]);
+
+  const { land } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the land as it is then.
+    if (instance && styleReady.current) {
+      syncLand(instance, land ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [land, basemap, theme]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

@@ -22,6 +22,7 @@ import {
 import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
+import { LandCard, useLand, type LandPick } from './Land';
 import { St37Card, useSt37Wells } from './St37Wells';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
@@ -74,6 +75,13 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [clicked, setClicked] = useState<St37Hover | null>(null);
   const kept = clicked && wells.byUwi.has(clicked.uwis[0] ?? '') ? clicked : null;
   const locked = kept ? (wells.byUwi.get(kept.uwis[0] ?? '')?.licenceNumber ?? null) : null;
+  // Land held today, under the wells (F-241); a click on land with no well opens its card.
+  const land = useLand(session.organization.id, session.token);
+  const [landPick, setLandPick] = useState<LandPick | null>(null);
+  const pickLand = (pick: LandPick | null) => {
+    setLandPick(pick);
+    land.setPicked(pick?.keys ?? []);
+  };
   const [fitTo, setFitTo] = useState<MapBounds | null>(null);
   const admin = session.organization.role === 'org_admin';
   const tone = theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
@@ -110,10 +118,13 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           onSt37Hover={setHover}
           onSt37Click={setClicked}
           st37Locked={locked}
+          land={land.view}
+          onLandClick={pickLand}
           fitTo={fitTo}
           onViewChange={(bbox, zoom) => {
             layers.onViewChange(bbox, zoom);
             wells.onViewChange(bbox);
+            land.onViewChange(bbox, zoom);
           }}
           onOverlayClick={layers.setPicked}
           onLayersStale={layers.onStale}
@@ -159,8 +170,18 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <MapLayersPanel state={layers} side="right" />
       {/* The wells: under the controls, top left (F-243 part 4). */}
       <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
-        {wells.panel(tone, setFitTo)}
+        <div className="flex flex-col gap-2">
+          {wells.panel(tone, setFitTo)}
+          {land.panel(tone)}
+        </div>
       </div>
+      <LandCard
+        pick={kept ? null : landPick}
+        land={land}
+        onClose={() => {
+          pickLand(null);
+        }}
+      />
       <St37Card
         // A card of its own for each click: the leg clicked is the one it starts on (F-258).
         key={kept ? `${kept.uwis[0] ?? ''}@${String(kept.x)},${String(kept.y)}` : 'pointer'}

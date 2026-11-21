@@ -60,6 +60,9 @@ export function fakePetroleum() {
     formationProduction: vi.fn<PetroleumDatabase['formationProduction']>(() =>
       Promise.resolve({ load: null, months: [] }),
     ),
+    land: vi.fn<PetroleumDatabase['land']>(() =>
+      Promise.resolve({ loads: [], agreements: [], offsets: [], freehold: [] }),
+    ),
     close: vi.fn<PetroleumDatabase['close']>(() => Promise.resolve()),
     abort: vi.fn<PetroleumDatabase['abort']>(() => Promise.resolve()),
   };
