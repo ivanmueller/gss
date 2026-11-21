@@ -124,12 +124,14 @@ export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, stri
 };
 
 /**
- * The colour of the main leg of the well under the pointer (F-258): one no status uses, so it
- * stands out from the well's other legs, which are drawn as bold in the map's ink.
+ * The colour of the main leg of the well under the pointer (F-258), when the well has other
+ * legs: an orange no status uses (the owner, 2026-11-20: red reads as an error), so it stands
+ * out from the other legs, which are drawn bold in the map's ink. A well of one leg is bold in
+ * ink: there is nothing to tell it from.
  */
 export const ST37_MAIN_LEG: Record<'light' | 'dark', string> = {
-  light: '#e11d48',
-  dark: '#fb7185',
+  light: '#ea580c',
+  dark: '#fb923c',
 };
 
 const SOURCE = 'st37-wells';
@@ -209,9 +211,13 @@ export function st37Legs(wells: readonly St37MapWell[]): Map<string, St37MapWell
 export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   const main = new Set<string>();
-  for (const [first] of st37Legs(wells).values()) {
+  // How many legs each well has: a main leg is told apart only when there are others.
+  const count = new Map<string, number>();
+  for (const [licence, legs] of st37Legs(wells)) {
+    const [first] = legs;
     if (!first) continue;
     main.add(first.uwi);
+    count.set(licence, legs.length);
     features.push({
       type: 'Feature',
       properties: {
@@ -219,6 +225,7 @@ export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureColl
         licence: first.licenceNumber,
         status: first.statusClass,
         leg: 'main',
+        legs: legs.length,
         part: 'well',
       },
       geometry: { type: 'Point', coordinates: first.surface },
@@ -230,6 +237,7 @@ export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureColl
       licence: w.licenceNumber,
       status: w.statusClass,
       leg: main.has(w.uwi) ? 'main' : 'other',
+      legs: count.get(w.licenceNumber) ?? 1,
     };
     if (w.path) {
       features.push({
@@ -536,10 +544,10 @@ export function syncSt37(
   map.setFilter(ST37_LAYERS.pending, shownFilter('bottom', view.shown, PENDING, parts));
   map.setPaintProperty(ST37_LAYERS.wells, 'circle-color', colour);
   map.setFilter(ST37_LAYERS.wells, shownFilter('well', parts.legs ? none : view.shown));
-  // The hovered well's main leg in its own colour, its other legs in ink.
+  // The hovered well's main leg in its own colour when it has other legs, the rest in ink.
   map.setPaintProperty(ST37_LAYERS.hoverPath, 'line-color', [
     'case',
-    ['==', ['get', 'leg'], 'main'],
+    ['all', ['==', ['get', 'leg'], 'main'], ['>', ['get', 'legs'], 1]],
     ST37_MAIN_LEG[tone],
     ink,
   ]);
