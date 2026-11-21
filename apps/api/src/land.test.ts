@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
 import { createApp } from './index';
-import { LAND_MAX, LAND_SCHEMA_VERSION, landAnswer, landLimits, parseLandKinds } from './land';
+import {
+  LAND_MAX,
+  LAND_SCHEMA_VERSION,
+  landAnswer,
+  landLimits,
+  parseLandKinds,
+  parseLandRights,
+} from './land';
 import type { LandAgreementRow, LandFreeholdRow } from './land-db';
 import type { PetroleumFactory } from './petroleum-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
@@ -81,6 +88,20 @@ describe('parseLandKinds', () => {
   });
 });
 
+describe('parseLandRights', () => {
+  it('reads a play, or none', () => {
+    expect(parseLandRights(undefined)).toEqual({ pattern: null });
+    expect(parseLandRights('duvernay')).toEqual({
+      pattern: expect.stringContaining('IN THE DUVERNAY') as string,
+    });
+  });
+
+  it('refuses a play it does not know', () => {
+    expect(typeof parseLandRights('montney')).toBe('string');
+    expect(typeof parseLandRights('constructor')).toBe('string');
+  });
+});
+
 describe('landLimits and landAnswer', () => {
   it('asks only for the kinds named', () => {
     expect(landLimits(['offsets'])).toEqual({
@@ -126,6 +147,7 @@ describe('GET /api/v1/petroleum/land', () => {
     expect((await get('west=1&south=2&layers=agreements')).status).toBe(400);
     expect((await get(BOX)).status).toBe(400);
     expect((await get(`${BOX}&layers=coal`)).status).toBe(400);
+    expect((await get(`${BOX}&layers=agreements&rights=montney`)).status).toBe(400);
     expect(openPetroleum).not.toHaveBeenCalled();
   });
 
@@ -162,6 +184,14 @@ describe('GET /api/v1/petroleum/land', () => {
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -117, south: 54, east: -116, north: 55 },
       { agreements: LAND_MAX.agreements, offsets: LAND_MAX.offsets, freehold: 0 },
+      null,
+    );
+    await get(`${BOX}&layers=agreements&rights=duvernay`);
+    expect(petroleum.land).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.stringContaining('TO THE BASE OF THE DUVERNAY'),
     );
   });
 });

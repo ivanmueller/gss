@@ -1,4 +1,4 @@
-import { LAND_SOURCE_NAME } from '@grain/domain';
+import { LAND_RIGHTS, LAND_SOURCE_NAME } from '@grain/domain';
 
 import { LAND_KINDS, type LandKind, type LandRows } from './land-db';
 
@@ -33,6 +33,19 @@ export function parseLandKinds(raw: string | undefined): LandKind[] | string {
     return `layers must name one or more of: ${LAND_KINDS.join(', ')}.`;
   }
   return kinds;
+}
+
+/**
+ * The play the agreements' rights must include (`rights=duvernay`), as its zone pattern; null
+ * when none is asked for; a sentence saying what is wrong otherwise.
+ */
+export function parseLandRights(raw: string | undefined): { pattern: string | null } | string {
+  const key = raw?.trim() ?? '';
+  if (key === '') return { pattern: null };
+  const rights = Object.hasOwn(LAND_RIGHTS, key) ? LAND_RIGHTS[key] : undefined;
+  return rights
+    ? { pattern: rights.pattern }
+    : `rights must be one of: ${Object.keys(LAND_RIGHTS).join(', ')}.`;
 }
 
 /** The limits of a request: the kinds asked for at their most, the others at none. */

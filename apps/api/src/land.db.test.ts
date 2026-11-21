@@ -94,6 +94,13 @@ describe('land held today as petro_api', () => {
       expect(all.offsets).toMatchObject([{ offsetNumber: 'ZZTEST1', expiryDate: '2027-05-08' }]);
       expect(all.freehold).toHaveLength(2);
 
+      // Only the agreements whose zone matches, when a play's rights are asked for.
+      const play = await db.land(member(), VIEW, ALL, '(IN THE EXAMPLE|FROM SURFACE TO BASEMENT)');
+      expect(play.agreements).toEqual([]);
+      const named = await db.land(member(), VIEW, ALL, 'TO BASE EXAMPLE');
+      expect(named.agreements.map((a) => a.agreementNumber)).toEqual(['1']);
+      expect(named.freehold).toHaveLength(2);
+
       // A kind not asked for is not read; a limit gives one more row, to say there is more.
       const some = await db.land(member(), VIEW, { agreements: 0, offsets: 0, freehold: 1 });
       expect(some.agreements).toEqual([]);
