@@ -365,16 +365,19 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               <p>
                 Zoomed out: how dense the wells are. Zoom in for each well and its drilled path;
                 point at one for its details. A dashed line is a plan: straight from the surface
-                location to the planned bottom hole of a well not drilled yet.
+                location to the planned bottom hole of a well not drilled yet; zoomed out, where the
+                line is too short to see, it is one dot where it starts.
               </p>
               <p>
                 A well is every leg drilled under one licence. Its main leg is the most active one;
                 its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
                 does not say which kind. With main legs off, a well is one dot at its surface
-                location; point at it to see all its legs: the main leg in orange, the others in
-                bold. A well's production is its legs' added together; a dashed line on its charts
-                marks the month a later leg starts. Click a leg to keep the card open with that
-                leg's own production under the well's.
+                location; point at it to see all its legs. Point at a well: its main leg turns
+                orange, its other legs and the other wells on its pad (wells that start within 100 m
+                of one another) bold; the card is the pointed well's. A well's production is its
+                legs' added together; a dashed line on its charts marks the month a later leg
+                starts. Click a leg to keep the card open with that leg's own production under the
+                well's.
               </p>
               {outline && <p>{outline.credit}</p>}
               {answer && (

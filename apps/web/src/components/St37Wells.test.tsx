@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { st37Features, st37Legs, type St37MapWell } from '../lib/st37Map';
+import { st37Features, st37Legs, st37Pads, type St37MapWell } from '../lib/st37Map';
 import { St37Card, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
@@ -84,9 +84,8 @@ describe('st37Features', () => {
       uwi: '00/09-07-030-26W4/0',
       licence: '0509395',
       status: 'producing',
+      pad: '0509395',
       leg: 'main',
-      // A well of one leg: nothing to tell its main leg from (F-258).
-      legs: 1,
     });
   });
 
@@ -104,8 +103,8 @@ describe('st37Features', () => {
           uwi: second.uwi,
           licence: '0509395',
           status: 'producing',
+          pad: '0509395',
           leg: 'main',
-          legs: 2,
           part: 'well',
         },
         geometry: { type: 'Point', coordinates: [-113.6, 53.3] },
@@ -114,11 +113,35 @@ describe('st37Features', () => {
     expect(
       features
         .filter((f) => f.properties?.part === 'path')
-        .map((f): unknown => [f.properties?.uwi, f.properties?.leg, f.properties?.legs]),
+        .map((f): unknown => [f.properties?.uwi, f.properties?.leg]),
     ).toEqual([
-      [first.uwi, 'other', 2],
-      [second.uwi, 'main', 2],
+      [first.uwi, 'other'],
+      [second.uwi, 'main'],
     ]);
+  });
+
+  it('groups wells drilled from one surface spot into a pad (F-259)', () => {
+    // About 55 m apart each, in a row: one pad, though its ends are 110 m apart.
+    const row = ['0509397', '0509395', '0509396'].map((licenceNumber, i) =>
+      well(`0${String(i)}/09-07-030-26W4/0`, {
+        licenceNumber,
+        surface: [-113.6, 53.3 + i * 0.0005],
+      }),
+    );
+    // A second leg of a well on the pad, and a well a kilometre away.
+    const leg = well('00/09-07-030-26W4/2', { licenceNumber: '0509397' });
+    const far = well('00/01-08-030-26W4/0', { licenceNumber: '0400000', surface: [-113.6, 53.31] });
+    const pads = st37Pads([...row, leg, far]);
+    expect(Object.fromEntries(pads)).toEqual({
+      '0509395': '0509395',
+      '0509396': '0509395',
+      '0509397': '0509395',
+      '0400000': '0400000',
+    });
+    const { features } = st37Features([...row, leg, far]);
+    expect(
+      features.filter((f) => f.properties?.part === 'path').map((f): unknown => f.properties?.pad),
+    ).toEqual(['0509395', '0509395', '0509395', '0509395', '0400000']);
   });
 
   it('ranks equal legs: the one in a pool, then the one with a path, then the latest', () => {
@@ -150,18 +173,17 @@ const LICENSED: Partial<St37MapWell> = {
 };
 
 describe('a well not drilled yet', () => {
-  it('is drawn as a planned line to its planned bottom hole, with its dot there', () => {
+  it('is drawn as a planned line to its planned bottom hole, with one dot where it starts', () => {
     const { features } = st37Features([well('00/01-29-049-26W4/0', LICENSED)]);
     expect(features.map((f): unknown => [f.properties?.part, f.properties?.at])).toEqual([
       ['well', undefined],
       ['planned', undefined],
-      // Where it starts, drawn when planned lines are off (F-257); then the planned bottom hole.
+      // One dot, where it starts, for far out or when planned lines are off; none at the planned
+      // bottom hole (F-259).
       ['bottom', 'start'],
-      ['bottom', 'plan'],
       ['surface', undefined],
     ]);
     features.shift();
-    features.splice(1, 1);
     expect(features[0]?.geometry).toEqual({
       type: 'LineString',
       coordinates: [
@@ -169,7 +191,7 @@ describe('a well not drilled yet', () => {
         [-113.63, 53.32],
       ],
     });
-    expect(features[1]?.geometry).toEqual({ type: 'Point', coordinates: [-113.63, 53.32] });
+    expect(features[1]?.geometry).toEqual({ type: 'Point', coordinates: [-113.6, 53.3] });
   });
 
   it('says what its licence planned', () => {
