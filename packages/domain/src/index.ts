@@ -33,3 +33,4 @@ export * from './wells';
 export * from './petrinex';
 export * from './st37';
 export * from './st37Zones';
+export * from './land';
