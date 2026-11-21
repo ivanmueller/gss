@@ -70,6 +70,10 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // 2026-11-19); their code and daily job stay. The ST37 wells take their place (F-243 part 4).
   const wells = useSt37Wells(session.organization.id, session.token);
   const [hover, setHover] = useState<St37Hover | null>(null);
+  // A clicked well's card is kept open, to choose a leg on it (F-258), while the well is loaded.
+  const [clicked, setClicked] = useState<St37Hover | null>(null);
+  const kept = clicked && wells.byUwi.has(clicked.uwis[0] ?? '') ? clicked : null;
+  const locked = kept ? (wells.byUwi.get(kept.uwis[0] ?? '')?.licenceNumber ?? null) : null;
   const [fitTo, setFitTo] = useState<MapBounds | null>(null);
   const admin = session.organization.role === 'org_admin';
   const tone = theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
@@ -104,6 +108,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           authToken={session.token}
           st37={wells.view}
           onSt37Hover={setHover}
+          onSt37Click={setClicked}
+          st37Locked={locked}
           fitTo={fitTo}
           onViewChange={(bbox, zoom) => {
             layers.onViewChange(bbox, zoom);
@@ -156,7 +162,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         {wells.panel(tone, setFitTo)}
       </div>
       <St37Card
-        hover={hover}
+        hover={kept ?? hover}
+        kept={kept !== null}
+        onClose={() => {
+          setClicked(null);
+        }}
         byUwi={wells.byUwi}
         legsOf={wells.legsOf}
         member={{ organizationId: session.organization.id, token: session.token }}

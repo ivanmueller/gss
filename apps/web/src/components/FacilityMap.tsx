@@ -113,6 +113,13 @@ export interface FacilityMapProps {
    * leaves them. The first is drawn highlighted.
    */
   onSt37Hover?: (hover: St37Hover | null) => void;
+  /** The wells clicked (or tapped), or null for a click on none (F-258). */
+  onSt37Click?: (hover: St37Hover | null) => void;
+  /**
+   * The licence of the well whose card is kept open (F-258): it stays highlighted, and the
+   * pointer shows no other well, until this is null again.
+   */
+  st37Locked?: string | null;
   /** Map layers that are switched on, in order, drawn under the lanes and the pins. */
   overlays?: readonly MapOverlay[];
   /** The person's sign-in, sent with a layer's pictures (they come from the app's API). */
@@ -449,6 +456,8 @@ export default function FacilityMap(props: FacilityMapProps) {
   const pictureSignIns = useRef(new PictureSignIns());
   // The latest props, read by map event handlers that are registered once.
   const latest = useRef({ ...props, data: pinFeatures(pins) });
+  /** The licence of the well highlighted under the pointer, or kept open. */
+  const st37Hovered = useRef<string | null>(null);
   // The box on the map: where the chosen pin is on screen, and the pin whose box was closed.
   const [anchor, setAnchor] = useState<PinAnchor | null>(null);
   const [closedId, setClosedId] = useState<string | null>(null);
@@ -576,7 +585,6 @@ export default function FacilityMap(props: FacilityMapProps) {
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
-    let hovered: string | null = null;
     const wellsAt = (point: mapboxgl.Point): { uwis: string[]; licence: string | null } => {
       const layers = ST37_PICKABLE.filter((id) => instance.getLayer(id));
       if (layers.length === 0) return { uwis: [], licence: null };
@@ -598,26 +606,32 @@ export default function FacilityMap(props: FacilityMapProps) {
     };
     const hover = (point: mapboxgl.Point) => {
       const onHover = latest.current.onSt37Hover;
-      if (!onHover) return;
+      if (!onHover) return null;
       const { uwis, licence } = wellsAt(point);
       const first = uwis[0] ?? null;
-      if (licence !== hovered) {
-        hovered = licence;
+      instance.getCanvas().style.cursor = first ? 'pointer' : '';
+      const found = first ? { uwis, x: point.x, y: point.y } : null;
+      // While a well's card is kept open, that well stays the one shown.
+      if (latest.current.st37Locked) return found;
+      if (licence !== st37Hovered.current) {
+        st37Hovered.current = licence;
         highlightSt37(instance, licence);
       }
-      instance.getCanvas().style.cursor = first ? 'pointer' : '';
-      onHover(first ? { uwis, x: point.x, y: point.y } : null);
+      onHover(found);
+      return found;
     };
     instance.on('mousemove', (event) => {
       hover(event.point);
     });
-    // A tap shows the card too, on a phone where nothing hovers.
+    // A click keeps the well's card open (F-258); a tap shows it, on a phone where nothing
+    // hovers; a click on no well lets it go.
     instance.on('click', (event) => {
-      hover(event.point);
+      const found = hover(event.point);
+      latest.current.onSt37Click?.(found);
     });
     instance.on('mouseout', () => {
-      if (hovered === null) return;
-      hovered = null;
+      if (st37Hovered.current === null || latest.current.st37Locked) return;
+      st37Hovered.current = null;
       highlightSt37(instance, null);
       latest.current.onSt37Hover?.(null);
     });
@@ -746,6 +760,16 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the overlays as they are then.
     if (instance && styleReady.current) syncOverlays(instance, props.overlays ?? []);
   }, [props.overlays]);
+
+  // The well whose card is kept open stays highlighted; letting it go clears the highlight
+  // until the pointer finds a well again.
+  const locked = props.st37Locked ?? null;
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !styleReady.current) return;
+    st37Hovered.current = locked;
+    highlightSt37(instance, locked);
+  }, [locked]);
 
   const { st37 } = props;
   useEffect(() => {

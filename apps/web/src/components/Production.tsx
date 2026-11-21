@@ -120,6 +120,7 @@ function MiniSeries({
   values,
   at,
   onAt,
+  marks = [],
 }: {
   label: string;
   unit: string;
@@ -128,6 +129,8 @@ function MiniSeries({
   /** The month pointed at, shared by the charts of one group; null when none. */
   at: number | null;
   onAt?: (index: number | null) => void;
+  /** Months marked with a thin dashed line: where another leg of the well starts (F-258). */
+  marks?: readonly number[];
 }) {
   const max = Math.max(0, ...values.map((v) => v ?? 0));
   const last = values.reduce<number>((found, v, i) => (v === null ? found : i), -1);
@@ -170,6 +173,20 @@ function MiniSeries({
         }
       >
         <line x1="0" x2={W} y1={H - 0.5} y2={H - 0.5} stroke="currentColor" strokeOpacity="0.2" />
+        {marks.map((index) => (
+          <line
+            key={index}
+            data-leg-start={months[index]}
+            x1={index * step}
+            x2={index * step}
+            y1="0"
+            y2={H}
+            stroke="currentColor"
+            strokeOpacity="0.45"
+            strokeDasharray="2 2"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
         <path
           d={seriesPath(values, max)}
           fill="none"
@@ -200,9 +217,12 @@ function MiniSeries({
 export function ProductionCharts({
   answer,
   interactive,
+  starts = [],
 }: {
   answer: ProductionAnswer;
   interactive: boolean;
+  /** The months another leg of the well starts producing, marked on every chart (F-258). */
+  starts?: readonly string[];
 }) {
   const [at, setAt] = useState<number | null>(null);
   const series = useMemo(
@@ -211,6 +231,7 @@ export function ProductionCharts({
   );
   if (series.length === 0) return null;
   const months = series[0]?.months ?? [];
+  const marks = starts.map((month) => months.indexOf(month)).filter((index) => index > 0);
   return (
     <div className="flex flex-col gap-2">
       {series.map((s) => (
@@ -221,6 +242,7 @@ export function ProductionCharts({
           months={s.months}
           values={s.values}
           at={interactive ? at : null}
+          marks={marks}
           {...(interactive && { onAt: setAt })}
         />
       ))}
@@ -234,42 +256,99 @@ export function ProductionCharts({
 
 interface Loaded {
   key: string;
-  answer: ProductionAnswer | null;
+  failed: boolean;
 }
 
 /** Answers already read in this visit, by address: pointing at a well again asks nothing. */
 const cache = new Map<string, ProductionAnswer>();
 
-/** Reads a production answer after a short wait, so passing over wells asks for none of them. */
-function useProduction(path: string | null, token: string, waitMs: number) {
+/**
+ * Reads production answers (one address each) after a short wait, so passing over wells asks for
+ * none of them. All of them, or none: a well's total is never shown with a leg missing.
+ */
+function useProductions(paths: readonly string[], token: string, waitMs: number) {
+  const key = paths.join('\n');
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   useEffect(() => {
-    if (path === null || cache.has(path)) return;
+    const missing = key === '' ? [] : key.split('\n').filter((path) => !cache.has(path));
+    if (missing.length === 0) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      apiJson<ProductionAnswer>(path, token, { signal: controller.signal })
-        .then((answer) => {
-          cache.set(path, answer);
-          setLoaded({ key: path, answer });
+      Promise.all(
+        missing.map((path) =>
+          apiJson<ProductionAnswer>(path, token, { signal: controller.signal }).then((answer) => {
+            cache.set(path, answer);
+          }),
+        ),
+      )
+        .then(() => {
+          setLoaded({ key, failed: false });
         })
         .catch(() => {
-          if (!controller.signal.aborted) setLoaded({ key: path, answer: null });
+          if (!controller.signal.aborted) setLoaded({ key, failed: true });
         });
     }, waitMs);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [path, token, waitMs]);
-  if (path === null) return { answer: null, state: 'idle' as const };
-  const cached = cache.get(path);
-  if (cached) return { answer: cached, state: 'ok' as const };
-  if (loaded?.key === path) {
-    return loaded.answer
-      ? { answer: loaded.answer, state: 'ok' as const }
-      : { answer: null, state: 'failed' as const };
+  }, [key, token, waitMs]);
+  if (paths.length === 0) return { answers: null, state: 'idle' as const };
+  const answers = paths.flatMap((path) => cache.get(path) ?? []);
+  if (answers.length === paths.length) return { answers, state: 'ok' as const };
+  if (loaded?.key === key && loaded.failed) return { answers: null, state: 'failed' as const };
+  return { answers: null, state: 'loading' as const };
+}
+
+function useProduction(path: string | null, token: string, waitMs: number) {
+  const { answers, state } = useProductions(path === null ? [] : [path], token, waitMs);
+  const answer = answers?.[0];
+  if (answer) return { answer, state: 'ok' as const };
+  return { answer: null, state: state === 'ok' ? ('loading' as const) : state };
+}
+
+/**
+ * A well's production: its legs' months added together (F-258). A month is empty only when no
+ * leg has a line; `starts` are the months a leg begins producing after another already has.
+ */
+export function productionTotal(answers: readonly ProductionAnswer[]): {
+  answer: ProductionAnswer | null;
+  starts: string[];
+} {
+  const [first] = answers;
+  if (!first) return { answer: null, starts: [] };
+  const add = (a: number | null, b: number | null) =>
+    a === null ? b : b === null ? a : Math.round((a + b) * 1000) / 1000;
+  const byMonth = new Map<string, ProductionMonth>();
+  const begins: string[] = [];
+  for (const { months } of answers) {
+    const begin = months.map((m) => m.month).sort()[0];
+    if (begin !== undefined) begins.push(begin);
+    for (const m of months) {
+      const sum = byMonth.get(m.month);
+      byMonth.set(
+        m.month,
+        sum
+          ? {
+              month: m.month,
+              oil: add(sum.oil, m.oil),
+              gas: add(sum.gas, m.gas),
+              water: add(sum.water, m.water),
+              condensate: add(sum.condensate, m.condensate),
+            }
+          : { month: m.month, oil: m.oil, gas: m.gas, water: m.water, condensate: m.condensate },
+      );
+    }
   }
-  return { answer: null, state: 'loading' as const };
+  begins.sort();
+  return {
+    answer: {
+      source: first.source,
+      months: [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)),
+    },
+    // The first leg to produce starts the well; each later one is a new leg starting.
+    starts: [...new Set(begins.slice(1))].filter((month) => month !== begins[0]),
+  };
 }
 
 /** For tests: forget the answers read. */
@@ -277,22 +356,32 @@ export function clearProductionCache() {
   cache.clear();
 }
 
-/** A well's monthly production, on its card. */
+/**
+ * A well's monthly production, on its card: one leg's, or several legs' added together with a
+ * mark where a later leg starts (F-258).
+ */
 export function WellProduction({
-  uwi,
+  uwis,
   organizationId,
   token,
+  interactive = false,
 }: {
-  uwi: string;
+  /** The legs to add together: every leg of the well, or the one chosen. */
+  uwis: readonly string[];
   organizationId: string;
   token: string;
+  /** Whether pointing at a chart shows that month (a card kept open). */
+  interactive?: boolean;
 }) {
-  const query = new URLSearchParams({ organization_id: organizationId, uwi });
-  const { answer, state } = useProduction(
-    `/petroleum/production/well?${query.toString()}`,
+  const { answers, state } = useProductions(
+    uwis.map(
+      (uwi) =>
+        `/petroleum/production/well?${new URLSearchParams({ organization_id: organizationId, uwi }).toString()}`,
+    ),
     token,
     250,
   );
+  const { answer, starts } = useMemo(() => productionTotal(answers ?? []), [answers]);
   if (state === 'loading') {
     return <p className="mt-2 text-xs text-muted-foreground">Production: loading…</p>;
   }
@@ -310,7 +399,7 @@ export function WellProduction({
   }
   return (
     <div className="mt-2 border-t pt-2">
-      <ProductionCharts answer={answer} interactive={false} />
+      <ProductionCharts answer={answer} interactive={interactive} starts={starts} />
     </div>
   );
 }

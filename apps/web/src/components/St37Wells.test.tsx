@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { st37Features, st37Legs, type St37MapWell } from '../lib/st37Map';
 import { St37Card, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
@@ -239,6 +239,38 @@ describe('St37Card', () => {
     ]);
     // Its own legs are not counted as other wells.
     expect(screen.queryByText(/more well/)).not.toBeInTheDocument();
+  });
+
+  it('kept open after a click, lets a leg be chosen and can be closed (F-258)', () => {
+    const first = well('00/09-07-030-26W4/0', { statusClass: 'abandoned' });
+    const second = well('00/09-07-030-26W4/2');
+    const wells = [first, second];
+    const onClose = vi.fn();
+    const card = (kept: boolean) => (
+      <St37Card
+        hover={{ uwis: [second.uwi], x: 10, y: 10 }}
+        byUwi={new Map(wells.map((w) => [w.uwi, w]))}
+        legsOf={st37Legs(wells)}
+        kept={kept}
+        onClose={onClose}
+      />
+    );
+    // Under the pointer only: nothing on it can be clicked.
+    const { rerender } = render(card(false));
+    expect(screen.getByRole('status')).toHaveClass('pointer-events-none');
+    expect(screen.getByRole('button', { name: /26W4\/0/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+
+    rerender(card(true));
+    expect(screen.getByRole('status')).not.toHaveClass('pointer-events-none');
+    const leg = screen.getByRole('button', { name: /26W4\/0/ });
+    expect(leg).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(leg);
+    expect(leg).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(leg);
+    expect(leg).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("names the well's field and pool, and a pool the list does not name by its code", () => {

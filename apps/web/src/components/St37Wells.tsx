@@ -371,7 +371,9 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                 A well is every leg drilled under one licence. Its main leg is the most active one;
                 its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
                 does not say which kind. With main legs off, a well is one dot at its surface
-                location; point at it to see all its legs.
+                location; point at it to see all its legs. A well's production is its legs' added
+                together; a dashed line on its charts marks the month a later leg starts. Click a
+                well to keep its card open, then a leg for its production alone.
               </p>
               {outline && <p>{outline.credit}</p>}
               {answer && (
@@ -464,14 +466,24 @@ export function St37Card({
   byUwi,
   legsOf,
   member,
+  kept = false,
+  onClose,
 }: {
   hover: St37Hover | null;
+  /**
+   * Whether the card is kept open after a click (F-258): it can then be pointed at and clicked,
+   * to see one leg's production instead of the well's total, and closed.
+   */
+  kept?: boolean;
+  onClose?: () => void;
   byUwi: ReadonlyMap<string, St37MapWell>;
   /** Each well's legs by licence number, the main leg first; without it, the leg alone. */
   legsOf?: ReadonlyMap<string, St37MapWell[]>;
   /** Whose sign-in reads the well's monthly production (F-252 step 3); none shows no chart. */
   member?: { organizationId: string; token: string };
 }) {
+  // The leg whose production is shown alone; another well's leg counts as none.
+  const [chosen, setChosen] = useState<string | null>(null);
   if (!hover) return null;
   const [first] = hover.uwis;
   const pointed = first === undefined ? undefined : byUwi.get(first);
@@ -484,6 +496,7 @@ export function St37Card({
       .map((uwi) => byUwi.get(uwi)?.licenceNumber)
       .filter((licence) => licence !== undefined && licence !== well.licenceNumber),
   ).size;
+  const alone = kept ? legs.find((leg) => leg.uwi === chosen) : undefined;
   const status = [ST37_STATUS_LABELS[well.statusClass], well.statusFluid, well.statusType]
     .filter((part): part is string => Boolean(part))
     .join(' · ');
@@ -502,13 +515,25 @@ export function St37Card({
   return (
     <div
       role="status"
-      className="pointer-events-none absolute z-30 w-72 rounded-card border bg-card p-3 text-sm shadow-md"
+      className={`absolute z-30 w-72 rounded-card border bg-card p-3 text-sm shadow-md ${
+        kept ? '' : 'pointer-events-none'
+      }`}
       style={{
         left: hover.x,
         top: hover.y,
         transform: `translate(${left ? 'calc(-100% - 14px)' : '14px'}, ${up ? 'calc(-100% - 14px)' : '14px'})`,
       }}
     >
+      {kept && onClose && (
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="absolute top-1.5 right-1.5 rounded-sm px-1.5 text-base leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          ×
+        </button>
+      )}
       <p className="font-semibold">{well.uwi}</p>
       <p className="font-mono text-xs text-muted-foreground">
         Licence {well.licenceNumber}
@@ -533,33 +558,55 @@ export function St37Card({
           </p>
           <ul className="text-xs" aria-label="Legs of this well">
             {legs.map((leg, i) => (
-              <li key={leg.uwi} className="flex items-baseline gap-1.5">
-                <span
-                  aria-hidden="true"
-                  className="inline-block size-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: ST37_COLOURS.light[leg.statusClass] }}
-                />
-                <span className="font-mono">{leg.uwi}</span>
-                <span className="text-muted-foreground">
-                  {[
-                    i === 0 ? 'main leg' : null,
-                    ST37_STATUS_LABELS[leg.statusClass],
-                    leg.totalDepthM !== null ? `TD ${metres(leg.totalDepthM)}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
+              <li key={leg.uwi}>
+                <button
+                  type="button"
+                  disabled={!kept}
+                  aria-pressed={kept ? leg.uwi === alone?.uwi : undefined}
+                  onClick={() => {
+                    setChosen(leg.uwi === alone?.uwi ? null : leg.uwi);
+                  }}
+                  className="flex w-full items-baseline gap-1.5 rounded-sm px-1 text-left enabled:hover:bg-muted aria-pressed:bg-muted"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="inline-block size-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: ST37_COLOURS.light[leg.statusClass] }}
+                  />
+                  <span className="font-mono">{leg.uwi}</span>
+                  <span className="text-muted-foreground">
+                    {[
+                      i === 0 ? 'main leg' : null,
+                      ST37_STATUS_LABELS[leg.statusClass],
+                      leg.totalDepthM !== null ? `TD ${metres(leg.totalDepthM)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
         </div>
       )}
       {member && well.statusClass !== 'licensed' && (
-        <WellProduction
-          uwi={well.uwi}
-          organizationId={member.organizationId}
-          token={member.token}
-        />
+        <>
+          {legs.length > 1 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {alone
+                ? `Production of leg ${alone.uwi} alone. Click it again for the well's total.`
+                : kept
+                  ? 'Production of all legs together. Click a leg for its own.'
+                  : 'Production of all legs together. Click the well to choose a leg.'}
+            </p>
+          )}
+          <WellProduction
+            uwis={alone ? [alone.uwi] : legs.map((leg) => leg.uwi)}
+            organizationId={member.organizationId}
+            token={member.token}
+            interactive={kept}
+          />
+        </>
       )}
       {others > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">
