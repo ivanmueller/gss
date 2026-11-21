@@ -372,12 +372,11 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                 A well is every leg drilled under one licence. Its main leg is the most active one;
                 its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
                 does not say which kind. With main legs off, a well is one dot at its surface
-                location; point at it to see all its legs. Point at a well: its main leg turns
-                orange, its other legs and the other wells on its pad (wells that start within 100 m
-                of one another) bold; the card is the pointed well's. A well's production is its
-                legs' added together; a dashed line on its charts marks the month a later leg
-                starts. Click a leg to keep the card open with that leg's own production under the
-                well's.
+                location; point at it to see all its legs. Point at a well, from about the 10 km
+                distance bar and closer: its legs are drawn a little bolder and its card opens. A
+                well's production is its legs' added together; a dashed line on its charts marks the
+                month a later leg starts. Click a leg to keep the card open with that leg's own
+                production under the well's.
               </p>
               {outline && <p>{outline.credit}</p>}
               {answer && (
