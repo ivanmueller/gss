@@ -4,7 +4,13 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
 import type { Membership } from './db';
-import { LAND_SCHEMA_VERSION, landAnswer, landLimits, parseLandKinds } from './land';
+import {
+  LAND_SCHEMA_VERSION,
+  landAnswer,
+  landLimits,
+  parseLandKinds,
+  parseLandRights,
+} from './land';
 import {
   parseFormation,
   parseUwi,
@@ -541,6 +547,8 @@ export function petroleumRoutes(
     if (typeof box === 'string') return apiError(c, 400, 'VALIDATION_FAILED', box);
     const kinds = parseLandKinds(c.req.query('layers'));
     if (typeof kinds === 'string') return apiError(c, 400, 'VALIDATION_FAILED', kinds);
+    const rights = parseLandRights(c.req.query('rights'));
+    if (typeof rights === 'string') return apiError(c, 400, 'VALIDATION_FAILED', rights);
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const membership = membershipOf(c, await db.memberships(ctx.userId));
       if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
@@ -562,6 +570,7 @@ export function petroleumRoutes(
           },
           box,
           landLimits(kinds),
+          rights.pattern,
         );
         return c.json(landAnswer(rows));
       });

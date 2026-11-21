@@ -172,9 +172,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
         <div className="flex flex-col gap-2">
           {wells.panel(tone, setFitTo)}
-          {land.panel(tone)}
+          {land.panel()}
         </div>
       </div>
+      {/* The holders in view and what each mark means: bottom left, beside the panels. */}
+      <div className="absolute bottom-8 left-[19.75rem] z-10 hidden md:block">{land.legend()}</div>
       <LandCard
         pick={kept ? null : landPick}
         land={land}

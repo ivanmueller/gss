@@ -4,7 +4,16 @@ import type { Map as MapboxMap } from 'mapbox-gl';
 import { validate } from 'mapbox-gl/dist/style-spec/index.es.js';
 import { describe, expect, it } from 'vitest';
 
-import { LAND_LAYERS, landFeatures, syncLand, type LandShape } from './landMap';
+import {
+  LAND_HOLDER_COLOURS,
+  LAND_LAYERS,
+  LAND_PLAIN,
+  landExpiring,
+  landFeatures,
+  landHolderColour,
+  syncLand,
+  type LandShape,
+} from './landMap';
 import { ST37_LAYERS } from './st37Map';
 
 // Land held today on the oil and gas map (F-241). Made-up land only.
@@ -15,6 +24,7 @@ function fakeMap(already: string[] = []) {
   const order: string[] = [...already];
   for (const id of already) layers.set(id, { id, paint: {} });
   const sources = new Map<string, unknown>();
+  const images = new Set<string>();
   const map = {
     getLayer: (id: string) => layers.get(id),
     getSource: (id: string) => sources.get(id),
@@ -37,6 +47,8 @@ function fakeMap(already: string[] = []) {
       layers.delete(id);
       order.splice(order.indexOf(id), 1);
     },
+    hasImage: (id: string) => images.has(id),
+    addImage: (id: string) => images.add(id),
     setPaintProperty: (id: string, name: string, value: unknown) => {
       const layer = layers.get(id);
       if (layer) layer.paint[name] = value;
@@ -46,7 +58,7 @@ function fakeMap(already: string[] = []) {
       if (layer) layer.filter = filter;
     },
   };
-  return { map: map as unknown as MapboxMap, layers, sources, order };
+  return { map: map as unknown as MapboxMap, layers, sources, order, images };
 }
 
 const SHAPE: LandShape = [
@@ -59,6 +71,7 @@ const SHAPE: LandShape = [
     ],
   ],
 ];
+const TODAY = '2026-11-21';
 const agreement = {
   id: '7',
   rights: 'png' as const,
@@ -74,51 +87,94 @@ const agreement = {
   areaHa: 256,
   termDate: null,
   continuationDate: null,
-  expiryText: null,
+  expiryText: 'INDEFINITE' as string | null,
   shape: SHAPE,
 };
-const LAND = landFeatures({
-  agreements: [agreement, { ...agreement, id: '8', rights: 'oil_sands' }],
-  offsets: [
-    {
-      id: '3',
-      offsetType: null,
-      offsetNumber: '2050843E02',
-      tract: null,
-      holder: null,
-      expiryDate: null,
-      zone: null,
-      shape: SHAPE,
-    },
-  ],
-  freehold: [
-    {
-      id: '5',
-      substances: null,
-      nationalPark: null,
-      reserveNumber: null,
-      reserveName: null,
-      shape: SHAPE,
-    },
-  ],
+const offset = {
+  id: '3',
+  offsetType: null,
+  offsetNumber: '2050843E02',
+  tract: null,
+  holder: null,
+  expiryDate: '2027-05-08' as string | null,
+  zone: null,
+  shape: SHAPE,
+};
+const freehold = {
+  id: '5',
+  substances: null,
+  nationalPark: null as string | null,
+  reserveNumber: null,
+  reserveName: null,
+  shape: SHAPE,
+};
+const LAND = landFeatures(
+  {
+    agreements: [
+      agreement,
+      { ...agreement, id: '8', rights: 'oil_sands', holder: null, expiryText: '2027/01/28' },
+    ],
+    offsets: [offset, { ...offset, id: '4', expiryDate: '2026-05-08' }],
+    freehold: [freehold, { ...freehold, id: '6', nationalPark: 'EXAMPLE PARK' }],
+  },
+  { today: TODAY },
+);
+
+describe('landHolderColour', () => {
+  it('gives a holder the same colour every time, from the holders’ colours', () => {
+    const colour = landHolderColour('EXAMPLE ENERGY LTD.');
+    expect(LAND_HOLDER_COLOURS).toContain(colour);
+    expect(landHolderColour('EXAMPLE ENERGY LTD.')).toBe(colour);
+    expect(landHolderColour(null)).toBe(LAND_PLAIN);
+  });
+});
+
+describe('landExpiring', () => {
+  it('is an expiry within the 12 months after today, as the province writes it', () => {
+    expect(landExpiring('2026/11/21', TODAY)).toBe(true);
+    expect(landExpiring('2027/11/21', TODAY)).toBe(true);
+    expect(landExpiring('2027/11/22', TODAY)).toBe(false);
+    expect(landExpiring('2026/11/20', TODAY)).toBe(false);
+  });
+
+  it('is never a word, or nothing', () => {
+    expect(landExpiring('INDEFINITE', TODAY)).toBe(false);
+    expect(landExpiring('MULTIPLE', TODAY)).toBe(false);
+    expect(landExpiring(null, TODAY)).toBe(false);
+  });
 });
 
 describe('landFeatures', () => {
-  it('gives each shape its class and its key, the freehold underneath', () => {
+  it('gives each shape its key and how it is drawn, the land that is not the Crown’s underneath', () => {
     expect(LAND.features.map((f) => f.properties)).toEqual([
-      { class: 'freehold', key: 'freehold:5' },
-      { class: 'png', key: 'png:7' },
-      { class: 'oil_sands', key: 'oil_sands:8' },
-      { class: 'offset', key: 'offset:3' },
+      { key: 'freehold:5', look: 'freehold' },
+      { key: 'freehold:6', look: 'reserve' },
+      {
+        key: 'png:7',
+        look: 'agreement',
+        colour: landHolderColour('EXAMPLE ENERGY LTD.'),
+        expiring: false,
+      },
+      { key: 'oil_sands:8', look: 'agreement', colour: LAND_PLAIN, expiring: true },
+      { key: 'offset:3', look: 'offset' },
+      { key: 'offset:4', look: 'offset_passed' },
     ]);
     expect(LAND.features[0]?.geometry).toEqual({ type: 'MultiPolygon', coordinates: SHAPE });
+  });
+
+  it('draws every agreement in one colour when not coloured by holder', () => {
+    const plain = landFeatures(
+      { agreements: [agreement], offsets: [], freehold: [] },
+      { byHolder: false, today: TODAY },
+    );
+    expect(plain.features[0]?.properties?.colour).toBe(LAND_PLAIN);
   });
 });
 
 describe('syncLand', () => {
   it('draws layers Mapbox accepts, in both tones', () => {
     for (const tone of ['light', 'dark'] as const) {
-      const { map, layers } = fakeMap();
+      const { map, layers, images } = fakeMap();
       syncLand(map, { land: LAND, picked: ['png:7'] }, tone);
       const style = {
         version: 8,
@@ -127,7 +183,20 @@ describe('syncLand', () => {
       };
       expect(validate(style)).toEqual([]);
       expect([...layers.keys()].sort()).toEqual(Object.values(LAND_LAYERS).sort());
+      // The three hatches: expiring agreements, freehold, parks and reserves.
+      expect(images.size).toBe(3);
     }
+  });
+
+  it('colours agreements by their own colour and hatches the expiring ones', () => {
+    const { map, layers } = fakeMap();
+    syncLand(map, { land: LAND, picked: [] }, 'light');
+    expect(layers.get(LAND_LAYERS.agreementFill)?.paint['fill-color']).toEqual(['get', 'colour']);
+    expect(layers.get(LAND_LAYERS.expiring)?.filter).toEqual([
+      'all',
+      ['match', ['get', 'look'], ['agreement'], true, false],
+      ['==', ['get', 'expiring'], true],
+    ]);
   });
 
   it('outlines the land whose card is open, and lets it go', () => {

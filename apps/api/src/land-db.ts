@@ -73,7 +73,13 @@ export interface LandDatabase {
    * that many shapes whose box touches the view, plus one more to tell the caller the view
    * holds more.
    */
-  land(ctx: PetroleumContext, box: St37Box, limits: Record<LandKind, number>): Promise<LandRows>;
+  land(
+    ctx: PetroleumContext,
+    box: St37Box,
+    limits: Record<LandKind, number>,
+    /** Only agreements whose zone matches this pattern (LAND_RIGHTS); null for every one. */
+    zonePattern?: string | null,
+  ): Promise<LandRows>;
 }
 
 interface LoadDbRow {
@@ -90,7 +96,7 @@ const num = (value: string | null) => (value === null ? null : Number(value));
 
 export function landQueries(sql: postgres.Sql): LandDatabase {
   return {
-    land(ctx, box, limits) {
+    land(ctx, box, limits, zonePattern = null) {
       return sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', '10s', true),
                         set_config('petro.user_id', ${ctx.userId}, true),
@@ -130,6 +136,7 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                        continuation_date::text as continuation_date, expiry_text, shape
                 from petro.land_agreements
                 where bounds && ${view}
+                  and (${zonePattern}::text is null or zone ~ ${zonePattern}::text)
                 order by id
                 limit ${limits.agreements + 1}`
             : [];
