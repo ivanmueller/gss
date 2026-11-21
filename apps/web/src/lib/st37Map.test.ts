@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   highlightSt37,
+  ST37_HOVER_FROM,
   ST37_LAYERS,
-  ST37_MAIN_LEG,
   ST37_OUTLINES,
   st37Features,
   st37ZoneFeatures,
@@ -126,33 +126,24 @@ describe('syncSt37', () => {
     }
   });
 
-  it('highlights the well under the pointer with its pad (F-257, F-259)', () => {
+  it('highlights the well under the pointer, and only that well (F-257)', () => {
     const { map, layers } = fakeMap();
     syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
     highlightSt37(map, '0509395');
-    // Every leg of every well on the pad bold, in the map's ink.
+    // Every leg under its licence a little bolder, in the map's ink: not its pad's other
+    // wells, and no colour of its own for the main leg (the owner, 2026-11-21).
     expect(layers.get(ST37_LAYERS.hoverPath)?.filter).toEqual([
       'all',
-      ['==', ['get', 'pad'], '0509395'],
+      ['==', ['get', 'licence'], '0509395'],
       ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
     ]);
     expect(layers.get(ST37_LAYERS.hoverPath)?.paint).toMatchObject({
-      'line-width': 3,
+      'line-width': 2.2,
       'line-color': '#1c1917',
     });
-    // Over them, the pointed well's main leg in a colour of its own (orange, not an error's
-    // red).
-    expect(layers.get(ST37_LAYERS.hoverMain)?.filter).toEqual([
-      'all',
-      ['==', ['get', 'licence'], '0509395'],
-      ['==', ['get', 'leg'], 'main'],
-      ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
-    ]);
-    expect(layers.get(ST37_LAYERS.hoverMain)?.paint).toMatchObject({
-      'line-width': 3,
-      'line-color': ST37_MAIN_LEG.light,
-    });
-    expect(ST37_MAIN_LEG.light).toBe('#ea580c');
+    // Only from the zoom where wells answer the pointer.
+    expect(layers.get(ST37_LAYERS.hoverPath)?.minzoom).toBe(ST37_HOVER_FROM);
+    expect(Object.keys(ST37_LAYERS)).not.toContain('hoverMain');
     highlightSt37(map, null);
     expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
       '==',

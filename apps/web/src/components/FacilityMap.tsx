@@ -21,7 +21,13 @@ import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
 import { LAND_PICKABLE, syncLand, type LandView } from '../lib/landMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
-import { highlightSt37, ST37_PICKABLE, syncSt37, type St37View } from '../lib/st37Map';
+import {
+  highlightSt37,
+  ST37_HOVER_FROM,
+  ST37_PICKABLE,
+  syncSt37,
+  type St37View,
+} from '../lib/st37Map';
 import {
   isLayerPictureUrl,
   layerPictureStale,
@@ -610,10 +616,15 @@ export default function FacilityMap(props: FacilityMapProps) {
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
     const wellsAt = (point: mapboxgl.Point): { uwis: string[]; licence: string | null } => {
       const layers = ST37_PICKABLE.filter((id) => instance.getLayer(id));
-      if (layers.length === 0) return { uwis: [], licence: null };
+      // Farther out the wells are faint and packed together: none answers the pointer there
+      // (the owner, 2026-11-21).
+      if (layers.length === 0 || instance.getZoom() < ST37_HOVER_FROM) {
+        return { uwis: [], licence: null };
+      }
+      // Three pixels about the pointer: near enough to catch a thin line, not its neighbours.
       const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
-        [point.x - 5, point.y - 5],
-        [point.x + 5, point.y + 5],
+        [point.x - 3, point.y - 3],
+        [point.x + 3, point.y + 3],
       ];
       const uwis = new Set<string>();
       let licence: string | null = null;
@@ -643,8 +654,16 @@ export default function FacilityMap(props: FacilityMapProps) {
       onHover(found);
       return found;
     };
+    // Where the pointer last was over the map; null once it has left.
+    let pointer: mapboxgl.Point | null = null;
     instance.on('mousemove', (event) => {
+      pointer = event.point;
       hover(event.point);
+    });
+    // The map can move or zoom under a still pointer (the wheel, the zoom buttons, an eased
+    // move): the well under it is looked for again, so one it has left never stays lit.
+    instance.on('moveend', () => {
+      if (pointer) hover(pointer);
     });
     // A click keeps the well's card open (F-258); a tap shows it, on a phone where nothing
     // hovers; a click on no well lets it go.
@@ -666,6 +685,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       onLand(keys.size > 0 ? { keys: [...keys], x: event.point.x, y: event.point.y } : null);
     });
     instance.on('mouseout', () => {
+      pointer = null;
       if (st37Hovered.current === null || latest.current.st37Locked) return;
       st37Hovered.current = null;
       highlightSt37(instance, null);

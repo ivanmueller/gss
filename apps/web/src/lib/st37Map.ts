@@ -125,14 +125,11 @@ export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, stri
 };
 
 /**
- * The colour of the main leg of the well under the pointer (F-258, F-259): an orange no status
- * uses (the owner, 2026-11-20: red reads as an error), so it stands out from the well's other
- * legs and the other wells on its pad, which are drawn bold in the map's ink.
+ * The zoom from which a well answers the pointer (the owner, 2026-11-21: "around 10 km and
+ * closer", the distance bar's reading from about this zoom): farther out the wells are faint
+ * and packed together, and a highlight there jumps from one to the next.
  */
-export const ST37_MAIN_LEG: Record<'light' | 'dark', string> = {
-  light: '#ea580c',
-  dark: '#fb923c',
-};
+export const ST37_HOVER_FROM = 8;
 
 const SOURCE = 'st37-wells';
 const OUTLINE_SOURCE = 'st37-outline';
@@ -148,7 +145,6 @@ export const ST37_LAYERS = {
   pending: 'st37-pending',
   wells: 'st37-wells-dots',
   hoverPath: 'st37-hover-path',
-  hoverMain: 'st37-hover-main',
   hoverDots: 'st37-hover-dots',
   hoverSurface: 'st37-hover-surface',
 } as const;
@@ -543,27 +539,17 @@ export function syncSt37(
       },
       before,
     );
-    // The well under the pointer, whole (F-257), with the other wells on its pad (F-259),
-    // whatever is switched off: every leg bold, the pointed well's main leg in a colour of its
-    // own over them, each of its bottom holes a dot.
+    // The well under the pointer, whole (F-257), whatever is switched off: each of its legs a
+    // little bolder in the map's ink, each of its bottom holes a dot. Only that well: not the
+    // others on its pad, and no colour of its own for the main leg (the owner, 2026-11-21).
     map.addLayer(
       {
         id: ST37_LAYERS.hoverPath,
         type: 'line',
         source: SOURCE,
+        minzoom: ST37_HOVER_FROM,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': 3 },
-        filter: ['==', ['get', 'licence'], ''],
-      },
-      before,
-    );
-    map.addLayer(
-      {
-        id: ST37_LAYERS.hoverMain,
-        type: 'line',
-        source: SOURCE,
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': 3 },
+        paint: { 'line-width': 2.2 },
         filter: ['==', ['get', 'licence'], ''],
       },
       before,
@@ -573,6 +559,7 @@ export function syncSt37(
         id: ST37_LAYERS.hoverDots,
         type: 'circle',
         source: SOURCE,
+        minzoom: ST37_HOVER_FROM,
         paint: { 'circle-radius': 3.5, 'circle-stroke-width': 1, 'circle-stroke-color': '#ffffff' },
         filter: ['==', ['get', 'licence'], ''],
       },
@@ -583,6 +570,7 @@ export function syncSt37(
         id: ST37_LAYERS.hoverSurface,
         type: 'symbol',
         source: SOURCE,
+        minzoom: ST37_HOVER_FROM,
         layout: {
           'icon-image': SQUARE,
           'icon-allow-overlap': true,
@@ -595,11 +583,6 @@ export function syncSt37(
   }
   const parts = view.parts ?? ST37_ALL_PARTS;
   const none: readonly St37StatusClass[] = [];
-  const pads = new Map<string, string>();
-  for (const { properties } of view.wells.features) {
-    if (properties?.part === 'well') pads.set(String(properties.licence), String(properties.pad));
-  }
-  PADS.set(map, pads);
 
   const colour = colourBy(tone);
   // Wells are dense where they count: zoomed out, a grey shading of how many there are. On the
@@ -639,9 +622,8 @@ export function syncSt37(
   map.setFilter(ST37_LAYERS.pending, shownFilter('bottom', view.shown, PENDING, parts));
   map.setPaintProperty(ST37_LAYERS.wells, 'circle-color', colour);
   map.setFilter(ST37_LAYERS.wells, shownFilter('well', parts.legs ? none : view.shown));
-  // The hovered pad in ink, the pointed well's main leg over it in its own colour.
+  // The hovered well in ink.
   map.setPaintProperty(ST37_LAYERS.hoverPath, 'line-color', ink);
-  map.setPaintProperty(ST37_LAYERS.hoverMain, 'line-color', ST37_MAIN_LEG[tone]);
   map.setPaintProperty(ST37_LAYERS.hoverDots, 'circle-color', colour);
 }
 
@@ -733,28 +715,18 @@ function syncZones(
   map.setPaintProperty(ST37_LAYERS.zones, 'fill-color', tone === 'light' ? '#44403c' : '#e7e5e4');
 }
 
-/** Each map's wells' pads by licence, as last drawn, for the highlight. */
-const PADS = new WeakMap<object, Map<string, string>>();
-
 /**
- * Draws the hovered well whole (F-257) with its pad (F-259): every leg of every well on the pad
- * thicker, the pointed well's main leg in its own colour, a dot on each of its bottom holes and
- * a square on its surface location, whatever parts are switched off; null clears it.
+ * Draws the hovered well whole (F-257): every leg under its licence a little bolder, a dot on
+ * each of its bottom holes and a square on its surface location, whatever parts are switched
+ * off; null clears it.
  */
 export function highlightSt37(map: MapboxMap, licence: string | null) {
   if (!map.getLayer(ST37_LAYERS.hoverPath)) return;
   const id = licence ?? '';
-  const lines = ['in', ['get', 'part'], ['literal', ['path', 'planned']]];
   map.setFilter(ST37_LAYERS.hoverPath, [
     'all',
-    ['==', ['get', 'pad'], PADS.get(map)?.get(id) ?? id],
-    lines,
-  ] as FilterSpecification);
-  map.setFilter(ST37_LAYERS.hoverMain, [
-    'all',
     ['==', ['get', 'licence'], id],
-    ['==', ['get', 'leg'], 'main'],
-    lines,
+    ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
   ] as FilterSpecification);
   map.setFilter(ST37_LAYERS.hoverDots, [
     'all',
