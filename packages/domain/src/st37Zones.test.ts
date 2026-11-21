@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { contourRings, insideRing, st37Zones, type ZoneWell } from './st37Zones';
+import { contourRings, insideRing, softenRings, st37Zones, type ZoneWell } from './st37Zones';
 
 /** Synthetic wells: a grid of n by n surface holes about 1 km apart, from a corner. */
 function block(lon: number, lat: number, n: number): ZoneWell[] {
@@ -65,8 +65,82 @@ describe('contourRings', () => {
   });
 });
 
+describe('softenRings', () => {
+  // A square of 40 km with a bay cut into its east side, `width` km wide and 20 km deep.
+  const withBay = (width: number): [number, number][] => [
+    [0, 0],
+    [40, 0],
+    [40, 20 - width / 2],
+    [20, 20 - width / 2],
+    [20, 20 + width / 2],
+    [40, 20 + width / 2],
+    [40, 40],
+    [0, 40],
+    [0, 0],
+  ];
+  const inBay: [number, number] = [30, 20];
+
+  it('fills a narrow bay, rounds the corners and keeps the outer reach', () => {
+    expect(insideRing(inBay, withBay(8))).toBe(false);
+    const [soft, ...rest] = softenRings([withBay(8)], 1, 9, 2);
+    if (!soft) throw new Error('no ring');
+    expect(rest).toEqual([]);
+    expect(soft[0]).toEqual(soft[soft.length - 1]);
+    expect(insideRing(inBay, soft)).toBe(true);
+    // The middle of each side stays where it was, to within a square; the corners are rounded.
+    const xs = soft.map((p) => p[0]);
+    const ys = soft.map((p) => p[1]);
+    expect(Math.abs(Math.min(...xs) - 0)).toBeLessThan(2);
+    expect(Math.abs(Math.max(...xs) - 40)).toBeLessThan(2);
+    expect(Math.abs(Math.min(...ys) - 0)).toBeLessThan(2);
+    expect(Math.abs(Math.max(...ys) - 40)).toBeLessThan(2);
+    expect(insideRing([-1.2, -1.2], soft)).toBe(false);
+    expect(insideRing([3, 3], soft)).toBe(true);
+  });
+
+  it('keeps a strip only a few kilometres wide', () => {
+    const strip: [number, number][] = [
+      [0, 0],
+      [50, 0],
+      [50, 2.5],
+      [0, 2.5],
+      [0, 0],
+    ];
+    const [soft, ...rest] = softenRings([strip], 1, 9, 2);
+    expect(rest).toEqual([]);
+    expect(soft && insideRing([25, 1.2], soft)).toBe(true);
+  });
+
+  it('leaves a wide bay open', () => {
+    const [soft] = softenRings([withBay(30)], 1, 9, 2);
+    if (!soft) throw new Error('no ring');
+    expect(insideRing(inBay, soft)).toBe(false);
+  });
+
+  it('joins two areas a short way apart into one, and gives nothing for no rings', () => {
+    const square = (x: number): [number, number][] => [
+      [x, 0],
+      [x + 20, 0],
+      [x + 20, 20],
+      [x, 20],
+      [x, 0],
+    ];
+    expect(softenRings([square(0), square(26)], 1, 9, 2)).toHaveLength(1);
+    expect(softenRings([square(0), square(60)], 1, 9, 2)).toHaveLength(2);
+    expect(softenRings([], 1, 9, 2)).toEqual([]);
+  });
+});
+
 describe('st37Zones', () => {
-  const options = { spreadKm: 4, level: 1.5, minWells: 25, share: 1, cellKm: 1 };
+  const options = {
+    spreadKm: 4,
+    level: 1.5,
+    minWells: 25,
+    share: 1,
+    closeKm: 0,
+    roundKm: 0,
+    cellKm: 1,
+  };
 
   it('draws one smooth zone around each cluster of enough wells, largest first', () => {
     const north = block(-117, 54.4, 6);

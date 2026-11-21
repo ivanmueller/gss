@@ -28,6 +28,13 @@ export interface ZoneOptions {
    * the whole cluster.
    */
   share: number;
+  /**
+   * Softening: a bay in a zone's outline narrower than about twice this is filled in, so the
+   * zone reads as a general area. 0 leaves the outline as the density draws it.
+   */
+  closeKm: number;
+  /** Softening: how far corners are rounded after the bays are filled. */
+  roundKm: number;
   /** The size of the grid's squares; the outline is drawn between their corners. */
   cellKm: number;
 }
@@ -38,6 +45,8 @@ export const ST37_ZONE_OPTIONS: ZoneOptions = {
   level: 1.5,
   minWells: 50,
   share: 0.8,
+  closeKm: 9,
+  roundKm: 2,
   cellKm: 1,
 };
 
@@ -157,6 +166,108 @@ export function contourRings(
   return rings;
 }
 
+/**
+ * The rings as general areas (points in kilometres): drawn onto a grid, bays narrower than about
+ * twice `closeKm` filled in (the shape grown by `closeKm`, then shrunk back by as much, so its
+ * outer reach stays where it was), corners rounded over `roundKm`, and the outline traced again.
+ * Rings that come to touch are returned as one.
+ */
+export function softenRings(
+  rings: readonly Point[][],
+  cellKm: number,
+  closeKm: number,
+  roundKm: number,
+): Point[][] {
+  const reach = Math.ceil(closeKm / cellKm);
+  const round = Math.max(1, Math.round(roundKm / cellKm));
+  const pad = reach + 2 * round + 2;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const ring of rings) {
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (minX > maxX) return [];
+  minX -= pad * cellKm;
+  minY -= pad * cellKm;
+  const nx = Math.ceil((maxX - minX) / cellKm) + pad + 1;
+  const ny = Math.ceil((maxY - minY) / cellKm) + pad + 1;
+  let mask = new Uint8Array(nx * ny);
+  for (let j = 0; j < ny; j += 1) {
+    for (let i = 0; i < nx; i += 1) {
+      const p: Point = [minX + i * cellKm, minY + j * cellKm];
+      if (rings.some((ring) => insideRing(p, ring))) mask[j * nx + i] = 1;
+    }
+  }
+  // The squares within `closeKm` of a square, as steps on the grid.
+  const disc: [number, number][] = [];
+  for (let dj = -reach; dj <= reach; dj += 1) {
+    for (let di = -reach; di <= reach; di += 1) {
+      if (Math.hypot(di, dj) * cellKm <= closeKm) disc.push([di, dj]);
+    }
+  }
+  /** Grown (a square is in when any square of the disc around it is) or shrunk (when all are). */
+  const pass = (from: Uint8Array, grow: boolean, steps: readonly [number, number][] = disc) => {
+    const to = new Uint8Array(nx * ny);
+    for (let j = 0; j < ny; j += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        let found = !grow;
+        for (const [di, dj] of steps) {
+          const [x, y] = [i + di, j + dj];
+          const inside = x >= 0 && x < nx && y >= 0 && y < ny && from[y * nx + x] === 1;
+          if (inside === grow) {
+            found = grow;
+            break;
+          }
+        }
+        if (found) to[j * nx + i] = 1;
+      }
+    }
+    return to;
+  };
+  if (reach > 0) mask = pass(pass(mask, true), false);
+  // One square wider all round before rounding, so that the rounding, which takes a thin strip
+  // below the half it is traced at, never makes a narrow zone vanish.
+  mask = pass(mask, true, [
+    [0, 0],
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ]);
+  // Rounded: each square becomes the average of those around it, twice along each direction.
+  let field = Float64Array.from(mask);
+  const average = (from: Float64Array, stepI: number, stepJ: number) => {
+    const to = new Float64Array(nx * ny);
+    for (let j = 0; j < ny; j += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        let sum = 0;
+        for (let k = -round; k <= round; k += 1) {
+          const [x, y] = [i + k * stepI, j + k * stepJ];
+          if (x >= 0 && x < nx && y >= 0 && y < ny) sum += from[y * nx + x] ?? 0;
+        }
+        to[j * nx + i] = sum / (2 * round + 1);
+      }
+    }
+    return to;
+  };
+  for (let n = 0; n < 2; n += 1) field = average(average(field, 1, 0), 0, 1);
+  const traced = contourRings(field, nx, ny, 0.5).map((ring) =>
+    ring.map((p): Point => [minX + p[0] * cellKm, minY + p[1] * cellKm]),
+  );
+  // A line inside another is a gap: areas are drawn whole.
+  return traced.filter((ring) => {
+    const [first] = ring;
+    return first && !traced.some((other) => other !== ring && insideRing(first, other));
+  });
+}
+
 /** The zones of these drilled wells, largest first. */
 export function st37Zones(
   wells: readonly ZoneWell[],
@@ -255,20 +366,23 @@ export function st37Zones(
   for (const cluster of outlines(options.level)) {
     const members = places.filter((p) => insideRing(p.middle, cluster));
     if (members.length < options.minWells) continue;
-    if (options.share >= 1) {
-      add(cluster, members.length);
-      continue;
+    let kept = [cluster];
+    if (options.share < 1) {
+      // The level that the densest `share` of the cluster's wells stand at or above.
+      const densities = members.map((p) => densityAt(p.middle)).sort((a, b) => b - a);
+      const cut = densities[Math.ceil(members.length * options.share) - 1] ?? options.level;
+      kept = outlines(Math.max(cut, options.level)).filter((ring) => {
+        const [first] = ring;
+        return first && insideRing(first, cluster);
+      });
     }
-    // The level that the densest `share` of the cluster's wells stand at or above.
-    const densities = members.map((p) => densityAt(p.middle)).sort((a, b) => b - a);
-    const cut = densities[Math.ceil(members.length * options.share) - 1] ?? options.level;
-    for (const ring of outlines(Math.max(cut, options.level))) {
-      const [first] = ring;
-      if (!first || !insideRing(first, cluster)) continue;
-      const held = members.filter((p) => insideRing(p.middle, ring)).length;
-      // A small separate patch of a cluster (under a tenth of its wells) is left out.
-      if (held * 10 >= members.length) add(ring, held);
+    // A small separate patch of a cluster (under a tenth of its wells) is left out.
+    const holds = (ring: Point[]) => members.filter((p) => insideRing(p.middle, ring)).length;
+    kept = kept.filter((ring) => holds(ring) * 10 >= members.length);
+    if (options.closeKm > 0 || options.roundKm > 0) {
+      kept = softenRings(kept, cell, options.closeKm, options.roundKm);
     }
+    for (const ring of kept) add(ring, holds(ring));
   }
   return zones.sort((a, b) => b.wells - a.wells);
 }
