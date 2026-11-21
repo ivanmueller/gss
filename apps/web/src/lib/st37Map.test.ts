@@ -126,27 +126,33 @@ describe('syncSt37', () => {
     }
   });
 
-  it('highlights the whole well under the pointer: every leg under its licence (F-257)', () => {
+  it('highlights the well under the pointer with its pad (F-257, F-259)', () => {
     const { map, layers } = fakeMap();
     syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
     highlightSt37(map, '0509395');
+    // Every leg of every well on the pad bold, in the map's ink.
     expect(layers.get(ST37_LAYERS.hoverPath)?.filter).toEqual([
       'all',
-      ['==', ['get', 'licence'], '0509395'],
+      ['==', ['get', 'pad'], '0509395'],
       ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
     ]);
-    // Every leg bold; the main leg of a well with other legs in a colour of its own (orange,
-    // not an error's red), everything else in the map's ink.
-    expect(ST37_MAIN_LEG.light).toBe('#ea580c');
     expect(layers.get(ST37_LAYERS.hoverPath)?.paint).toMatchObject({
       'line-width': 3,
-      'line-color': [
-        'case',
-        ['all', ['==', ['get', 'leg'], 'main'], ['>', ['get', 'legs'], 1]],
-        ST37_MAIN_LEG.light,
-        '#1c1917',
-      ],
+      'line-color': '#1c1917',
     });
+    // Over them, the pointed well's main leg in a colour of its own (orange, not an error's
+    // red).
+    expect(layers.get(ST37_LAYERS.hoverMain)?.filter).toEqual([
+      'all',
+      ['==', ['get', 'licence'], '0509395'],
+      ['==', ['get', 'leg'], 'main'],
+      ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
+    ]);
+    expect(layers.get(ST37_LAYERS.hoverMain)?.paint).toMatchObject({
+      'line-width': 3,
+      'line-color': ST37_MAIN_LEG.light,
+    });
+    expect(ST37_MAIN_LEG.light).toBe('#ea580c');
     highlightSt37(map, null);
     expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
       '==',
@@ -175,11 +181,19 @@ describe('syncSt37', () => {
       ['literal', ['main', 'other']],
     ]);
     expect(statusesOf(ST37_LAYERS.wells)).toEqual(['in', ['get', 'status'], ['literal', []]]);
+    // Close in, a leg not drilled yet is its planned line alone; far out, one dot where it
+    // starts (F-259).
     expect(layers.get(ST37_LAYERS.dots)?.filter).toContainEqual([
       'in',
       ['get', 'at'],
-      ['literal', ['hole', 'plan']],
+      ['literal', ['hole']],
     ]);
+    expect(layers.get(ST37_LAYERS.pending)?.filter).toContainEqual([
+      'in',
+      ['get', 'at'],
+      ['literal', ['hole', 'start']],
+    ]);
+    expect(layers.get(ST37_LAYERS.planned)?.minzoom).toBe(layers.get(ST37_LAYERS.pending)?.maxzoom);
 
     // Main legs and planned lines off: other legs only, a dot a well, and a leg not drilled
     // yet has its dot where it starts.
