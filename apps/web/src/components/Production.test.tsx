@@ -7,6 +7,7 @@ import {
   FormationProduction,
   FormationProductionAbout,
   monthLabel,
+  productionTotal,
   productSeries,
   seriesPath,
   volumeText,
@@ -72,7 +73,7 @@ describe('reading the months', () => {
 });
 
 describe('WellProduction', () => {
-  const props = { uwi: UWI, organizationId: 'org-a', token: 'token' };
+  const props = { uwis: [UWI], organizationId: 'org-a', token: 'token' };
 
   it("shows a chart per product the well has, its latest month, and Petrinex's credit", async () => {
     mockApi({ [WELL_PATH]: () => Response.json(WELL) });
@@ -108,6 +109,55 @@ describe('WellProduction', () => {
     mockApi({});
     render(<WellProduction {...props} />);
     expect(await screen.findByText('Production could not be loaded.')).toBeInTheDocument();
+  });
+
+  it("adds a well's legs together and marks the month a later leg starts (F-258)", async () => {
+    const EARLIER = '00/11-23-030-27W4/0';
+    const earlier: ProductionAnswer = {
+      source: SOURCE,
+      months: [
+        { month: '2026-06', oil: 100.25, gas: null, water: 5, condensate: null },
+        { month: '2026-07', oil: 50, gas: null, water: null, condensate: null },
+      ],
+    };
+    const later: ProductionAnswer = { source: SOURCE, months: WELL.months.slice(1) };
+    const total = productionTotal([later, earlier]);
+    expect(total.answer?.months).toEqual([
+      { month: '2026-06', oil: 100.25, gas: null, water: 5, condensate: null },
+      { month: '2026-07', oil: 50, gas: null, water: null, condensate: null },
+      { month: '2026-08', oil: 310.5, gas: 80, water: null, condensate: null },
+      { month: '2026-09', oil: 250, gas: 70, water: null, condensate: null },
+    ]);
+    expect(total.starts).toEqual(['2026-08']);
+    // Two legs in the same month are added; legs that start together mark nothing.
+    expect(productionTotal([WELL, earlier]).answer?.months[0]).toMatchObject({
+      oil: 500.25,
+      gas: 90.5,
+      water: 5,
+    });
+    expect(productionTotal([WELL, earlier]).starts).toEqual([]);
+    expect(productionTotal([])).toEqual({ answer: null, starts: [] });
+
+    const path = (uwi: string) =>
+      `GET /petroleum/production/well?organization_id=org-a&uwi=${encodeURIComponent(uwi)}`;
+    mockApi({
+      [path(UWI)]: () => Response.json(later),
+      [path(EARLIER)]: () => Response.json(earlier),
+    });
+    const { container } = render(<WellProduction {...props} uwis={[UWI, EARLIER]} />);
+    await screen.findByRole('img', { name: /^Oil, m³ a month.*highest month 311/ });
+    expect(
+      [...container.querySelectorAll('[data-leg-start]')].map((line) =>
+        line.getAttribute('data-leg-start'),
+      ),
+    ).toEqual(['2026-08', '2026-08', '2026-08']);
+  });
+
+  it('shows no total when one leg cannot be loaded', async () => {
+    mockApi({ [WELL_PATH]: () => Response.json(WELL) });
+    render(<WellProduction {...props} uwis={[UWI, '00/11-23-030-27W4/0']} />);
+    expect(await screen.findByText('Production could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 });
 
