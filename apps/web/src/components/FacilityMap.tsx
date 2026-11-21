@@ -577,28 +577,33 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
     let hovered: string | null = null;
-    const wellsAt = (point: mapboxgl.Point): string[] => {
+    const wellsAt = (point: mapboxgl.Point): { uwis: string[]; licence: string | null } => {
       const layers = ST37_PICKABLE.filter((id) => instance.getLayer(id));
-      if (layers.length === 0) return [];
+      if (layers.length === 0) return { uwis: [], licence: null };
       const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
         [point.x - 5, point.y - 5],
         [point.x + 5, point.y + 5],
       ];
       const uwis = new Set<string>();
+      let licence: string | null = null;
       for (const feature of instance.queryRenderedFeatures(box, { layers })) {
         const uwi: unknown = feature.properties?.uwi;
-        if (typeof uwi === 'string') uwis.add(uwi);
+        if (typeof uwi !== 'string') continue;
+        // The first well found is the one highlighted, whole: every leg under its licence.
+        const of: unknown = feature.properties?.licence;
+        if (uwis.size === 0 && typeof of === 'string') licence = of;
+        uwis.add(uwi);
       }
-      return [...uwis];
+      return { uwis: [...uwis], licence };
     };
     const hover = (point: mapboxgl.Point) => {
       const onHover = latest.current.onSt37Hover;
       if (!onHover) return;
-      const uwis = wellsAt(point);
+      const { uwis, licence } = wellsAt(point);
       const first = uwis[0] ?? null;
-      if (first !== hovered) {
-        hovered = first;
-        highlightSt37(instance, first);
+      if (licence !== hovered) {
+        hovered = licence;
+        highlightSt37(instance, licence);
       }
       instance.getCanvas().style.cursor = first ? 'pointer' : '';
       onHover(first ? { uwis, x: point.x, y: point.y } : null);

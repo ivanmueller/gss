@@ -10,12 +10,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiJson } from '../lib/api';
 import type { MapBounds } from '../lib/mapbox';
 import {
+  ST37_ALL_PARTS,
   ST37_COLOURS,
   ST37_OUTLINES,
   st37Features,
+  st37Legs,
   st37ZoneFeatures,
   type St37MapWell,
   type St37MapZone,
+  type St37Parts,
   type St37View,
 } from '../lib/st37Map';
 import type { St37Hover } from './FacilityMap';
@@ -98,6 +101,8 @@ export interface St37State {
   on: boolean;
   view: St37View | null;
   byUwi: ReadonlyMap<string, St37MapWell>;
+  /** Each well's legs by licence number, the main leg first (F-257). */
+  legsOf: ReadonlyMap<string, St37MapWell[]>;
   onViewChange: (bbox: Bbox | null) => void;
   panel: (tone: 'light' | 'dark', goTo: (bounds: MapBounds) => void) => React.ReactNode;
 }
@@ -106,6 +111,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   const [on, setOn] = useState(true);
   const [hidden, setHidden] = useState<ReadonlySet<St37StatusClass>>(new Set());
   const [chosen, setChosen] = useState<string | null>(null);
+  const [parts, setParts] = useState<St37Parts>(ST37_ALL_PARTS);
   const [view, setView] = useState<Bbox | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
 
@@ -151,6 +157,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   const wells = useMemo(() => answer?.wells ?? [], [answer]);
   const features = useMemo(() => st37Features(wells), [wells]);
   const byUwi = useMemo(() => new Map(wells.map((w) => [w.uwi, w])), [wells]);
+  const legsOf = useMemo(() => st37Legs(wells), [wells]);
   const shown = useMemo(
     () => ST37_STATUS_CLASSES.filter((status) => !hidden.has(status)),
     [hidden],
@@ -167,8 +174,17 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     return list.length > 0 ? st37ZoneFeatures(list) : null;
   }, [zonesKey]);
   const mapView = useMemo<St37View | null>(
-    () => (on ? { wells: features, shown, outline: outlineUrl, zones } : null),
-    [on, features, shown, outlineUrl, zones],
+    () => (on ? { wells: features, shown, parts, outline: outlineUrl, zones } : null),
+    [on, features, shown, parts, outlineUrl, zones],
+  );
+  // How many of each part are in view, beside its switch.
+  const partCounts = useMemo(
+    () => ({
+      legs: legsOf.size,
+      otherLegs: wells.length - legsOf.size,
+      planned: wells.filter((w) => w.plannedBottom !== null).length,
+    }),
+    [wells, legsOf],
   );
   const counts = useMemo(() => {
     const out = new Map<St37StatusClass, number>();
@@ -279,6 +295,30 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               })}
             </ul>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Show
+            </p>
+            <ul className="flex flex-col gap-0.5" aria-label="Parts of a well shown">
+              {PARTS.map(({ key, label }) => (
+                <li key={key}>
+                  <label className="flex items-center gap-2 rounded-sm px-1 py-0.5 text-sm hover:bg-muted">
+                    <input
+                      type="checkbox"
+                      checked={parts[key]}
+                      onChange={(event) => {
+                        setParts((before) => ({ ...before, [key]: event.target.checked }));
+                      }}
+                    />
+                    <span className="grow">{label}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {partCounts[key].toLocaleString('en-CA')}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
           {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
           {failed && (
             <p className="text-xs text-destructive">
@@ -327,6 +367,12 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                 point at one for its details. A dashed line is a plan: straight from the surface
                 location to the planned bottom hole of a well not drilled yet.
               </p>
+              <p>
+                A well is every leg drilled under one licence. Its main leg is the most active one;
+                its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
+                does not say which kind. With main legs off, a well is one dot at its surface
+                location; point at it to see all its legs.
+              </p>
               {outline && <p>{outline.credit}</p>}
               {answer && (
                 <p>
@@ -348,8 +394,15 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     </div>
   );
 
-  return { on, view: mapView, byUwi, onViewChange, panel };
+  return { on, view: mapView, byUwi, legsOf, onViewChange, panel };
 }
+
+/** The parts of a well the panel switches on and off (F-257), in its order. */
+const PARTS: { key: keyof St37Parts; label: string }[] = [
+  { key: 'legs', label: 'Main legs' },
+  { key: 'otherLegs', label: 'Other legs' },
+  { key: 'planned', label: 'Planned lines' },
+];
 
 function formationTotal(totals: Partial<Record<St37StatusClass, number>>): number {
   return Object.values(totals).reduce((sum, n) => sum + n, 0);
@@ -402,21 +455,35 @@ export function st37Place(well: St37MapWell): string | null {
 
 const metres = (n: number) => `${n.toLocaleString('en-CA', { maximumFractionDigits: 0 })} m`;
 
-/** The card of the wells under the pointer: the first in full, how many more share the place. */
+/**
+ * The card of the wells under the pointer: the first well whole (its main leg in full, then
+ * every leg under its licence, F-257), and how many more wells share the place.
+ */
 export function St37Card({
   hover,
   byUwi,
+  legsOf,
   member,
 }: {
   hover: St37Hover | null;
   byUwi: ReadonlyMap<string, St37MapWell>;
+  /** Each well's legs by licence number, the main leg first; without it, the leg alone. */
+  legsOf?: ReadonlyMap<string, St37MapWell[]>;
   /** Whose sign-in reads the well's monthly production (F-252 step 3); none shows no chart. */
   member?: { organizationId: string; token: string };
 }) {
   if (!hover) return null;
-  const [first, ...rest] = hover.uwis;
-  const well = first === undefined ? undefined : byUwi.get(first);
-  if (!well) return null;
+  const [first] = hover.uwis;
+  const pointed = first === undefined ? undefined : byUwi.get(first);
+  if (!pointed) return null;
+  const legs = legsOf?.get(pointed.licenceNumber) ?? [pointed];
+  const well = legs[0] ?? pointed;
+  // The other wells under the pointer: other licences, not this well's own legs.
+  const others = new Set(
+    hover.uwis
+      .map((uwi) => byUwi.get(uwi)?.licenceNumber)
+      .filter((licence) => licence !== undefined && licence !== well.licenceNumber),
+  ).size;
   const status = [ST37_STATUS_LABELS[well.statusClass], well.statusFluid, well.statusType]
     .filter((part): part is string => Boolean(part))
     .join(' · ');
@@ -431,7 +498,7 @@ export function St37Card({
     .join(' · ');
   // Opens to the left of the pointer near the window's right edge, and above it near the bottom.
   const left = hover.x > window.innerWidth - 340;
-  const up = hover.y > window.innerHeight - (member ? 380 : 180);
+  const up = hover.y > window.innerHeight - (member ? 380 : 180) - (legs.length > 1 ? 80 : 0);
   return (
     <div
       role="status"
@@ -459,6 +526,34 @@ export function St37Card({
           hole. The drilled path comes once the well is drilled.
         </p>
       )}
+      {legs.length > 1 && (
+        <div className="mt-1.5">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            {legs.length} legs
+          </p>
+          <ul className="text-xs" aria-label="Legs of this well">
+            {legs.map((leg, i) => (
+              <li key={leg.uwi} className="flex items-baseline gap-1.5">
+                <span
+                  aria-hidden="true"
+                  className="inline-block size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: ST37_COLOURS.light[leg.statusClass] }}
+                />
+                <span className="font-mono">{leg.uwi}</span>
+                <span className="text-muted-foreground">
+                  {[
+                    i === 0 ? 'main leg' : null,
+                    ST37_STATUS_LABELS[leg.statusClass],
+                    leg.totalDepthM !== null ? `TD ${metres(leg.totalDepthM)}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {member && well.statusClass !== 'licensed' && (
         <WellProduction
           uwi={well.uwi}
@@ -466,9 +561,9 @@ export function St37Card({
           token={member.token}
         />
       )}
-      {rest.length > 0 && (
+      {others > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">
-          +{rest.length} more {rest.length === 1 ? 'well' : 'wells'} here
+          +{others} more {others === 1 ? 'well' : 'wells'} here
         </p>
       )}
     </div>

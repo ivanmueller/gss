@@ -158,6 +158,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <St37Card
         hover={hover}
         byUwi={wells.byUwi}
+        legsOf={wells.legsOf}
         member={{ organizationId: session.organization.id, token: session.token }}
       />
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />

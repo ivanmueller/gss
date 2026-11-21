@@ -106,7 +106,7 @@ describe('syncSt37', () => {
         },
         tone,
       );
-      highlightSt37(map, '00/09-07-030-26W4/0');
+      highlightSt37(map, '0509395');
       const style = {
         version: 8,
         sources: {
@@ -119,6 +119,75 @@ describe('syncSt37', () => {
       expect(validate(style)).toEqual([]);
       expect([...layers.keys()].sort()).toEqual(Object.values(ST37_LAYERS).sort());
     }
+  });
+
+  it('highlights the whole well under the pointer: every leg under its licence (F-257)', () => {
+    const { map, layers } = fakeMap();
+    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
+    highlightSt37(map, '0509395');
+    expect(layers.get(ST37_LAYERS.hoverPath)?.filter).toEqual([
+      'all',
+      ['==', ['get', 'licence'], '0509395'],
+      ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
+    ]);
+    highlightSt37(map, null);
+    expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
+      '==',
+      ['get', 'licence'],
+      '',
+    ]);
+  });
+
+  it('draws the parts switched on: a dot a well when the main legs are off (F-257)', () => {
+    const { map, layers } = fakeMap();
+    const view = { wells: WELLS, shown: ['producing' as const], outline: null, zones: null };
+    const legsOf = (id: string) =>
+      (layers.get(id)?.filter as unknown[]).find((f) =>
+        JSON.stringify(f).startsWith('["in",["get","leg"]'),
+      );
+    const statusesOf = (id: string) =>
+      (layers.get(id)?.filter as unknown[]).find((f) =>
+        JSON.stringify(f).startsWith('["in",["get","status"]'),
+      );
+
+    // Everything on: every leg, and no dot a well.
+    syncSt37(map, view, 'light');
+    expect(legsOf(ST37_LAYERS.paths)).toEqual([
+      'in',
+      ['get', 'leg'],
+      ['literal', ['main', 'other']],
+    ]);
+    expect(statusesOf(ST37_LAYERS.wells)).toEqual(['in', ['get', 'status'], ['literal', []]]);
+    expect(layers.get(ST37_LAYERS.dots)?.filter).toContainEqual([
+      'in',
+      ['get', 'at'],
+      ['literal', ['hole', 'plan']],
+    ]);
+
+    // Main legs and planned lines off: other legs only, a dot a well, and a leg not drilled
+    // yet has its dot where it starts.
+    syncSt37(map, { ...view, parts: { legs: false, otherLegs: true, planned: false } }, 'light');
+    for (const id of [ST37_LAYERS.paths, ST37_LAYERS.dots, ST37_LAYERS.pending]) {
+      expect(legsOf(id)).toEqual(['in', ['get', 'leg'], ['literal', ['other']]]);
+    }
+    expect(statusesOf(ST37_LAYERS.wells)).toEqual([
+      'in',
+      ['get', 'status'],
+      ['literal', ['producing']],
+    ]);
+    expect(statusesOf(ST37_LAYERS.planned)).toEqual(['in', ['get', 'status'], ['literal', []]]);
+    expect(layers.get(ST37_LAYERS.dots)?.filter).toContainEqual([
+      'in',
+      ['get', 'at'],
+      ['literal', ['hole', 'start']],
+    ]);
+    expect(
+      validate({
+        version: 8,
+        sources: { 'st37-wells': { type: 'geojson', data: WELLS } },
+        layers: [...layers.values()],
+      }),
+    ).toEqual([]);
   });
 
   it('removes everything when the wells are switched off', () => {
