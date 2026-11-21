@@ -317,15 +317,18 @@ export function WellProduction({
 
 /** The formation's total production by month, in the Wells panel. */
 export function FormationProduction({
+  formation,
   name,
   organizationId,
   token,
 }: {
+  /** The play's key ("duvernay"). */
+  formation: string;
   name: string;
   organizationId: string;
   token: string;
 }) {
-  const query = new URLSearchParams({ organization_id: organizationId });
+  const query = new URLSearchParams({ organization_id: organizationId, formation });
   const { answer, state } = useProduction(
     `/petroleum/production/formation?${query.toString()}`,
     token,
@@ -347,13 +350,15 @@ export function FormationProduction({
  * data" (Petrinex's terms ask that Crown copyright be acknowledged). Nothing before a load.
  */
 export function FormationProductionAbout({
+  formation,
   organizationId,
   token,
 }: {
+  formation: string;
   organizationId: string;
   token: string;
 }) {
-  const query = new URLSearchParams({ organization_id: organizationId });
+  const query = new URLSearchParams({ organization_id: organizationId, formation });
   const { answer, state } = useProduction(
     `/petroleum/production/formation?${query.toString()}`,
     token,
@@ -364,7 +369,7 @@ export function FormationProductionAbout({
   const wells = answer.months.at(-1)?.wells;
   return (
     <p>
-      Production: the total of the wells loaded, by month
+      Production: the total of the formation's wells, by month
       {firstMonth && lastMonth ? `, ${monthLabel(firstMonth)} to ${monthLabel(lastMonth)}` : ''}
       {wells !== undefined ? `; ${wells.toLocaleString('en-CA')} wells in the last month` : ''}.
       Point at a chart for a month.

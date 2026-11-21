@@ -34,6 +34,7 @@ import { URLSearchParams } from 'node:url';
 import {
   buildSt37Wells,
   ST37_FORMATIONS,
+  st37FieldPools,
   st37FormationLicences,
   st37LsdCentres,
   st37LsdKey,
@@ -53,6 +54,7 @@ export function usage() {
   return [
     'usage: load-st37.js <dir> <west> <south> <east> <north> <source-url> <source-date|-> <grain-bytes> [formation]',
     '       load-st37.js pick <formation> <pool-strings.geojson> <well-licence.csv> <dir>',
+    '       load-st37.js codes <FieldPoolList.txt> <source-url> <source-date|->',
   ].join('\n');
 }
 
@@ -97,6 +99,7 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     'status_mode',
     'status_type',
     'pool_code',
+    'field_code',
     'spud_date',
     'final_drill_date',
     'total_depth_m',
@@ -112,6 +115,7 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     'planned_depth_m',
     'planned_bottom_longitude',
     'planned_bottom_latitude',
+    'formation',
   ];
   const rows = wells.map((w) =>
     [
@@ -125,6 +129,7 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
       w.statusMode,
       w.statusType,
       w.poolCode,
+      w.fieldCode,
       w.spudDate,
       w.finalDrillDate,
       w.totalDepthM,
@@ -140,6 +145,7 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
       w.plannedDepthM,
       w.plannedBottom?.[0] ?? null,
       w.plannedBottom?.[1] ?? null,
+      formation,
     ]
       .map(csv)
       .join(','),
@@ -148,10 +154,14 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     '\\set ON_ERROR_STOP on',
     'begin;',
     "select set_config('statement_timeout', '10min', true);",
-    'delete from petro.st37_wells;',
-    `copy petro.st37_wells (${columns.join(', ')}) from stdin with (format csv);`,
+    // Only this play's wells are replaced (or, for a rectangle, the wells of no play): the other
+    // plays stay as they are. A well another play already holds stays with that play.
+    'create temporary table st37_incoming (like petro.st37_wells) on commit drop;',
+    `copy st37_incoming (${columns.join(', ')}) from stdin with (format csv);`,
     ...rows,
     '\\.',
+    `delete from petro.st37_wells where formation is not distinct from ${formation ? literal(formation) : 'null'};`,
+    `insert into petro.st37_wells (${columns.join(', ')}) select ${columns.join(', ')} from st37_incoming on conflict (uwi) do nothing;`,
     'insert into petro.st37_loads (source_url, source_date, west, south, east, north, wells, formation)',
     `values (${literal(sourceUrl)}, ${sourceDate ? `${literal(sourceDate)}::date` : 'null'}, ${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}, ${String(wells.length)}, ${formation ? literal(formation) : 'null'});`,
     // Measured inside the transaction, with the new rows written: over the guard, nothing stays.
@@ -166,6 +176,53 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     "select count(*) as wells, count(path) as with_paths, count(planned_bottom_longitude) as planned_lines, pg_size_pretty(pg_total_relation_size('petro.st37_wells')) as size from petro.st37_wells;",
     '',
   ].join('\n');
+}
+
+/**
+ * The SQL that replaces the AER's fields and pools (ST103's list) in one transaction (F-256).
+ */
+export function codesSql(list, sourceUrl, sourceDate) {
+  const fields = [...list.fields.entries()].sort(([a], [b]) => a - b);
+  return [
+    '\\set ON_ERROR_STOP on',
+    'begin;',
+    "select set_config('statement_timeout', '10min', true);",
+    'delete from petro.fields;',
+    'copy petro.fields (field_code, name) from stdin with (format csv);',
+    ...fields.map(([code, name]) => `${String(code)},${csv(name)}`),
+    '\\.',
+    'copy petro.pools (field_code, pool_code, name) from stdin with (format csv);',
+    ...list.pools.map((p) => `${String(p.fieldCode)},${String(p.poolCode)},${csv(p.name)}`),
+    '\\.',
+    'insert into petro.field_pool_loads (source_url, source_date, fields, pools)',
+    `values (${literal(sourceUrl)}, ${sourceDate ? `${literal(sourceDate)}::date` : 'null'}, ${String(fields.length)}, ${String(list.pools.length)});`,
+    'commit;',
+    'select (select count(*) from petro.fields) as fields, (select count(*) from petro.pools) as pools;',
+    '',
+  ].join('\n');
+}
+
+function mainCodes(argv) {
+  const [file, sourceUrl, sourceDate] = argv;
+  const date = sourceDate && sourceDate !== '-' ? sourceDate : null;
+  if (
+    !file ||
+    !sourceUrl ||
+    !/^https:\/\/[a-z.]*aer\.ca\//.test(sourceUrl) ||
+    (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date))
+  ) {
+    console.error(usage());
+    process.exit(2);
+  }
+  const list = st37FieldPools(readFileSync(file, 'latin1'));
+  console.error(
+    `ST103: ${String(list.fields.size)} fields, ${String(list.pools.length)} pools, ${String(list.skipped)} lines skipped as unreadable.`,
+  );
+  if (list.fields.size === 0) {
+    console.error('No fields read: nothing to load.');
+    process.exit(1);
+  }
+  process.stdout.write(codesSql(list, sourceUrl, date));
 }
 
 const readFeatures = (file) => JSON.parse(readFileSync(file, 'utf8')).features ?? [];
@@ -253,6 +310,10 @@ function mainPick(argv) {
 }
 
 async function main(argv) {
+  if (argv[0] === 'codes') {
+    mainCodes(argv.slice(1));
+    return;
+  }
   if (argv[0] === 'pick') {
     mainPick(argv.slice(1));
     return;

@@ -79,4 +79,67 @@ describe('the ST37 wells as petro_api', () => {
       await db.close();
     }
   });
+
+  it("reads each play's latest load, a well's field and pool by name, and a play's drilled wells", async () => {
+    const admin = postgres(ADMIN, { max: 1 });
+    const db = postgresPetroleum(PETRO_URL);
+    const PLAY = 'example_play';
+    try {
+      await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
+      await admin`delete from petro.st37_loads where formation = ${PLAY}`;
+      await admin`delete from petro.fields where field_code = 990002`;
+      await admin`insert into petro.fields (field_code, name) values (990002, 'EXAMPLE SOUTH')`;
+      await admin`
+        insert into petro.pools (field_code, pool_code, name) values (990002, 728001, 'EXAMPLE A')`;
+      // Two loads of the play: the later one is the one named.
+      await admin`
+        insert into petro.st37_loads (source_url, west, south, east, north, wells, formation)
+        values ('https://static.aer.ca/x', -119.99, 59.9, -119.8, 60, 1, ${PLAY}),
+               ('https://static.aer.ca/x', -119.95, 59.9, -119.85, 60, 2, ${PLAY})`;
+      await admin`
+        insert into petro.st37_wells (uwi, licence_number, status_class, pool_code, field_code,
+          formation, surface_longitude, surface_latitude, bottom_longitude, bottom_latitude)
+        values (${ONE}, '0999001', 'producing', 728001, 990002, ${PLAY}, -119.9, 59.95, -119.91, 59.95),
+               (${TWO}, '0999002', 'licensed', 728099, 990002, ${PLAY}, -119.88, 59.96, -119.88, 59.96)`;
+
+      const { loads, wells } = await db.st37Wells(member(), BOX, 10);
+      const ours = loads.filter((load) => load.formation === PLAY);
+      expect(ours).toHaveLength(1);
+      expect(ours[0]).toMatchObject({
+        area: { west: -119.95, south: 59.9, east: -119.85, north: 60 },
+        totals: { producing: 1, licensed: 1 },
+      });
+      expect(wells.find((w) => w.uwi === ONE)).toMatchObject({
+        formation: PLAY,
+        fieldCode: 990002,
+        fieldName: 'EXAMPLE SOUTH',
+        poolCode: 728001,
+        poolName: 'EXAMPLE A',
+      });
+      // A pool the list does not name: its field is still named, the pool by its code only.
+      expect(wells.find((w) => w.uwi === TWO)).toMatchObject({
+        fieldName: 'EXAMPLE SOUTH',
+        poolCode: 728099,
+        poolName: null,
+      });
+
+      // The drilled wells of the play: not the licensed one, and none of another play.
+      expect(await db.st37Drilled(member(), PLAY)).toEqual([
+        { surface: [-119.9, 59.95], bottom: [-119.91, 59.95] },
+      ]);
+      expect(await db.st37Drilled(member(), 'another_play')).toEqual([]);
+      expect(await db.st37Drilled({ ...member(), role: 'stranger' }, PLAY)).toEqual([]);
+
+      // A play whose wells are gone is no longer listed.
+      await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
+      const after = await db.st37Wells(member(), BOX, 10);
+      expect(after.loads.some((load) => load.formation === PLAY)).toBe(false);
+    } finally {
+      await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
+      await admin`delete from petro.st37_loads where formation = ${PLAY}`;
+      await admin`delete from petro.fields where field_code = 990002`;
+      await admin.end();
+      await db.close();
+    }
+  });
 });

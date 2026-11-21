@@ -37,6 +37,11 @@ export interface St37MapWell {
   plannedDepthM: number | null;
   /** The planned bottom hole of a well with no drilled path yet, or null. */
   plannedBottom: [number, number] | null;
+  /** The play the well was loaded for, and its field and pool (F-256). */
+  formation?: string | null;
+  fieldName?: string | null;
+  poolCode?: number | null;
+  poolName?: string | null;
 }
 
 /** What FacilityMap draws: the wells, the statuses switched on, and the formation's outline. */

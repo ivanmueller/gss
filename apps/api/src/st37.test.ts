@@ -3,8 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database } from './db';
 import { createApp } from './index';
 import type { PetroleumFactory } from './petroleum-db';
-import { parseSt37Box, ST37_MAX_WELLS, ST37_SCHEMA_VERSION, st37Answer } from './st37';
-import type { St37WellRow } from './st37-db';
+import {
+  clearSt37Zones,
+  parseSt37Box,
+  ST37_MAX_WELLS,
+  ST37_SCHEMA_VERSION,
+  st37Answer,
+  st37LoadZones,
+} from './st37';
+import type { St37Load, St37WellRow } from './st37-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
 import { fakePetroleum } from './testing/petroleum';
 
@@ -40,6 +47,11 @@ const well = (uwi: string): St37WellRow => ({
   plannedFormation: null,
   plannedDepthM: null,
   plannedBottom: null,
+  formation: 'duvernay',
+  fieldCode: 990002,
+  fieldName: 'EXAMPLE SOUTH',
+  poolCode: 728001,
+  poolName: 'EXAMPLE A',
 });
 
 let grain = fakeDatabase();
@@ -51,6 +63,7 @@ beforeEach(() => {
   grain = fakeDatabase();
   petroleum = fakePetroleum();
   petroleum.schemaVersion.mockResolvedValue(ST37_SCHEMA_VERSION);
+  clearSt37Zones();
   openPetroleum.mockClear();
   mockAuthServer(Response.json({ id: USER_ID, email: 'adam@example.test' }));
 });
@@ -77,42 +90,81 @@ describe('parseSt37Box', () => {
   });
 });
 
+const DUVERNAY: St37Load = {
+  id: '7',
+  loadedAt: '2026-11-20T06:00:00.000Z',
+  sourceDate: '2026-11-01',
+  area: { west: -118.75, south: 51.57, east: -112.9, north: 55.28 },
+  formation: 'duvernay',
+  totals: { producing: 3, licensed: 2 },
+};
+/** Sixty made-up wells about 1 km apart: one zone. */
+const DRILLED = Array.from({ length: 60 }, (_, i) => ({
+  surface: [-116 + i * 0.015, 54] as const,
+  bottom: [-116 + i * 0.015, 54.02] as const,
+}));
+
 describe('st37Answer', () => {
   it('names the source and cuts a full view', () => {
     const rows = Array.from({ length: ST37_MAX_WELLS + 1 }, (_, i) => well(`u${String(i)}`));
-    const answer = st37Answer(null, rows);
+    const answer = st37Answer([], new Map(), rows);
     expect(answer.truncated).toBe(true);
     expect(answer.wells).toHaveLength(ST37_MAX_WELLS);
     expect(answer.source.name).toMatch(/Alberta Energy Regulator/);
-    expect(answer.formation).toBeNull();
+    expect(answer.formations).toEqual([]);
     expect(answer.source.licenceSource).toBeNull();
   });
 
-  it("names a formation loaded whole, with its wells by status and the licences' source", () => {
-    const answer = st37Answer(
+  it('names each play loaded whole, with its area, its wells by status and its zones', () => {
+    const other: St37Load = { ...DUVERNAY, id: '9', formation: 'example_play', totals: {} };
+    const rectangle: St37Load = {
+      ...DUVERNAY,
+      id: '3',
+      formation: null,
+      area: { west: -114, south: 53, east: -113, north: 54 },
+    };
+    const zone = { wells: 50, ring: [] };
+    const answer = st37Answer([other, DUVERNAY, rectangle], new Map([['duvernay', [zone]]]), []);
+    expect(answer.formations).toEqual([
+      // A play the code has no name for is shown by its key.
+      expect.objectContaining({ key: 'example_play', name: 'example_play', zones: [] }),
       {
-        loadedAt: '2026-11-20T06:00:00.000Z',
-        sourceDate: '2026-11-01',
-        area: { west: -118.75, south: 51.57, east: -112.9, north: 55.28 },
-        formation: 'duvernay',
+        key: 'duvernay',
+        name: 'Duvernay',
+        area: DUVERNAY.area,
+        loadedAt: DUVERNAY.loadedAt,
         totals: { producing: 3, licensed: 2 },
-        // Sixty made-up wells about 1 km apart: one zone; nothing for a rectangle's load.
-        drilled: Array.from({ length: 60 }, (_, i) => ({
-          surface: [-116 + i * 0.015, 54] as const,
-          bottom: [-116 + i * 0.015, 54.02] as const,
-        })),
+        zones: [zone],
       },
-      [],
-    );
-    expect(answer.formation).toMatchObject({
-      key: 'duvernay',
-      name: 'Duvernay',
-      totals: { producing: 3, licensed: 2 },
-    });
-    // The smallest area holding about four in five of the cluster's wells.
-    expect(answer.formation?.zones).toHaveLength(1);
-    expect(answer.formation?.zones[0]?.wells).toBeGreaterThan(40);
+    ]);
+    // The rectangle beside the plays keeps its own area.
+    expect(answer.source.area).toEqual(rectangle.area);
     expect(answer.source.licenceSource).toMatch(/Petrinex.*Government of Alberta/);
+  });
+});
+
+describe('st37LoadZones', () => {
+  beforeEach(() => {
+    clearSt37Zones();
+  });
+
+  it("works a play's zones out once for a load, and again for its next load", async () => {
+    const drilled = vi.fn(() => Promise.resolve(DRILLED));
+    const first = await st37LoadZones(DUVERNAY, drilled);
+    // The smallest area holding about four in five of the cluster's wells.
+    expect(first).toHaveLength(1);
+    expect(first[0]?.wells).toBeGreaterThan(40);
+    expect(await st37LoadZones(DUVERNAY, drilled)).toBe(first);
+    expect(drilled).toHaveBeenCalledTimes(1);
+    expect(drilled).toHaveBeenCalledWith('duvernay');
+    await st37LoadZones({ ...DUVERNAY, id: '8' }, drilled);
+    expect(drilled).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives a rectangle no zones and reads nothing for it', async () => {
+    const drilled = vi.fn(() => Promise.resolve(DRILLED));
+    expect(await st37LoadZones({ ...DUVERNAY, formation: null }, drilled)).toEqual([]);
+    expect(drilled).not.toHaveBeenCalled();
   });
 });
 
@@ -152,15 +204,10 @@ describe('GET /api/v1/petroleum/st37/wells', () => {
   it('gives a viewer the wells in the box, asked as that member', async () => {
     viewer();
     petroleum.st37Wells.mockResolvedValue({
-      load: {
-        loadedAt: '2026-11-20T06:00:00.000Z',
-        sourceDate: '2026-11-01',
-        area: { west: -113.95, south: 53.12, east: -113.25, north: 53.48 },
-        formation: null,
-        totals: { producing: 1 },
-      },
+      loads: [DUVERNAY],
       wells: [well('00/09-07-030-26W4/0')],
     });
+    petroleum.st37Drilled.mockResolvedValue(DRILLED);
     const res = await app.request(`/api/v1/petroleum/st37/wells?${BOX}`, { headers: AUTH }, env);
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
@@ -168,6 +215,12 @@ describe('GET /api/v1/petroleum/st37/wells', () => {
     expect(body.truncated).toBe(false);
     expect(body.wells).toEqual([well('00/09-07-030-26W4/0')]);
     expect(body.source).toMatchObject({ sourceDate: '2026-11-01' });
+    // The play's zones, worked out from its drilled wells, read as the same member.
+    expect(body.formations.map((f) => [f.key, f.zones.length])).toEqual([['duvernay', 1]]);
+    expect(petroleum.st37Drilled).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
+      'duvernay',
+    );
     expect(petroleum.st37Wells).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -114, south: 53, east: -113, north: 54 },

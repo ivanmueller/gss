@@ -7,8 +7,11 @@ import type { ProductionLoad } from './production-db';
  * download.
  */
 
-/** The oil and gas schema version production needs (20261124010000_petro_well_production.sql). */
-export const PRODUCTION_SCHEMA_VERSION = 7;
+/**
+ * The oil and gas schema version production needs: a play's total reads each well's play
+ * (20261125010000_petro_plays_fields_pools.sql).
+ */
+export const PRODUCTION_SCHEMA_VERSION = 8;
 
 export const PRODUCTION_SOURCE_NAME =
   'Petrinex public data, Conventional Volumetric Data, © Government of Alberta';
@@ -22,6 +25,14 @@ const UWI = /^[0-9A-Z]{2}\/[0-9]{2}-[0-9]{2}-[0-9]{3}-[0-9]{2}W[4-6]\/[0-9A-Z]$/
 export function parseUwi(raw: string | undefined): { uwi: string } | string {
   const uwi = raw?.trim() ?? '';
   return UWI.test(uwi) ? { uwi } : 'uwi must be a well identifier such as 00/11-23-030-27W4/2.';
+}
+
+/** The play asked for ("duvernay"), or a sentence saying what is wrong. */
+export function parseFormation(raw: string | undefined): { formation: string } | string {
+  const formation = raw?.trim() ?? '';
+  return /^[a-z][a-z_]{1,39}$/.test(formation)
+    ? { formation }
+    : 'formation must be the key of a play, such as duvernay.';
 }
 
 export function productionAnswer<M>(load: ProductionLoad | null, months: M[]) {

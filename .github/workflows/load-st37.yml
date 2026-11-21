@@ -3,7 +3,8 @@ name: Load ST37 wells
 # Run by hand from the Actions tab (Actions → Load ST37 wells → Run workflow). Downloads the AER's
 # ST37 list of wells (its geodatabase, about 1.3 GB), cuts out one formation whole (the Duvernay,
 # F-252) or one area (F-243 part 4) and loads its wells, with their status and drilled paths,
-# into the oil and gas database (petroleum-staging), replacing the copy there in one transaction
+# into the oil and gas database (petroleum-staging), replacing that play's wells in one transaction
+# (the wells of other plays stay; F-256), with the names of fields and pools from the AER's ST103 list
 # (docs/FEATURES_OIL_GAS.md). A formation's wells are those in its pools and those whose licence
 # aims at it (Petrinex's public Well Licence file); a well with no drilled path yet gets its
 # planned bottom hole from the province's township grid (F-243 part 4b).
@@ -87,8 +88,8 @@ jobs:
             exit 1
           fi
           version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
-          if [ "$version" -lt 6 ]; then
-            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 6)."
+          if [ "$version" -lt 8 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 8)."
             exit 1
           fi
           grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
@@ -193,6 +194,19 @@ jobs:
               > "$RUNNER_TEMP/st37/load.sql"
           fi
           psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/st37/load.sql"
+      - name: Load the names of fields and pools
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          # The AER's ST103 field and pool list: a well's field code and pool code name its field
+          # and pool (F-256). Replaced whole in one transaction.
+          cd "$RUNNER_TEMP/st37"
+          url=https://static.aer.ca/prd/data/codes/FieldPoolList.txt
+          curl -sSfL --retry 3 -D codes-headers.txt -o FieldPoolList.txt "$url"
+          modified=$(grep -i '^last-modified:' codes-headers.txt | cut -d' ' -f2- | tr -d '\r' || true)
+          date=$(date -u -d "$modified" +%F 2>/dev/null || echo -)
+          node --experimental-strip-types "$GITHUB_WORKSPACE/scripts/load-st37.js" codes             FieldPoolList.txt "$url" "$date" > codes.sql
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f codes.sql
       - name: Remove the AER's files from the runner
         if: always()
         run: rm -rf "$RUNNER_TEMP/st37"

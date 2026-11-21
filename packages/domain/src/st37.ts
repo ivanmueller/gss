@@ -128,6 +128,8 @@ export interface St37Well {
   statusMode: string | null;
   statusType: string | null;
   poolCode: number | null;
+  /** The field of the string its status comes from; with the pool code it names the pool. */
+  fieldCode: number | null;
   spudDate: string | null;
   finalDrillDate: string | null;
   totalDepthM: number | null;
@@ -348,6 +350,7 @@ export function buildSt37Wells(
     type: string | null;
     fluid: string | null;
     pool: number | null;
+    field: number | null;
   }
   const stringsByUwi = new Map<string, Strung[]>();
   for (const f of layers.strings) {
@@ -358,12 +361,17 @@ export function buildSt37Wells(
     const mode = /^\d{1,2}$/.test(rawMode) ? rawMode.padStart(2, '0') : null;
     const pool =
       typeof p.Pool_Code === 'number' && Number.isInteger(p.Pool_Code) ? p.Pool_Code : null;
+    const field =
+      typeof p.Field_Code === 'number' && Number.isInteger(p.Field_Code) && p.Field_Code >= 0
+        ? p.Field_Code
+        : null;
     const list = stringsByUwi.get(uwi) ?? [];
     list.push({
       mode,
       type: words(p.Status_Type, 60),
       fluid: words(p.Status_Fluid, 60),
       pool,
+      field,
     });
     stringsByUwi.set(uwi, list);
   }
@@ -417,6 +425,7 @@ export function buildSt37Wells(
       statusMode: chosen?.mode ?? null,
       statusType: chosen?.type ?? null,
       poolCode: chosen?.pool ?? null,
+      fieldCode: chosen?.field ?? null,
       spudDate,
       finalDrillDate,
       totalDepthM: positive(p.Final_Total_Depth),
@@ -432,6 +441,61 @@ export function buildSt37Wells(
     });
   }
   return { wells, skipped };
+}
+
+/** The AER's fields and pools by their codes (ST103's field and pool list). */
+export interface St37FieldPools {
+  fields: Map<number, string>;
+  /** Each pool once, the first line of the list that names it. */
+  pools: { fieldCode: number; poolCode: number; name: string }[];
+  /** Lines without a field code or a field name: counted, never guessed. */
+  skipped: number;
+}
+
+/**
+ * Reads ST103's `FieldPoolList.txt` (F-256): tab-separated, a header line naming "Field Name",
+ * "Production Pool Name", "Field Code" and "Production Pool Code". A pool is a field code and a
+ * pool code together: the same pool code is used in many fields.
+ */
+export function st37FieldPools(file: string): St37FieldPools {
+  const lines = file.split(/\r?\n/);
+  const header = (lines.shift() ?? '').replace(/^\uFEFF/, '').split('\t');
+  const at = (name: string) => header.findIndex((h) => h.trim() === name);
+  const columns = {
+    field: at('Field Name'),
+    pool: at('Production Pool Name'),
+    fieldCode: at('Field Code'),
+    poolCode: at('Production Pool Code'),
+  };
+  const missing = Object.entries(columns).find(([, index]) => index < 0);
+  if (missing) throw new Error(`The field and pool list has no "${missing[0]}" column.`);
+  const code = (value: string | undefined) => {
+    const t = (value ?? '').trim();
+    return /^\d{1,9}$/.test(t) ? Number(t) : null;
+  };
+  const fields = new Map<number, string>();
+  const pools: St37FieldPools['pools'] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+  for (const line of lines) {
+    if (line.trim() === '') continue;
+    const cells = line.split('\t');
+    const fieldCode = code(cells[columns.fieldCode]);
+    const fieldName = text(cells[columns.field], 60);
+    if (fieldCode === null || fieldName === null) {
+      skipped += 1;
+      continue;
+    }
+    if (!fields.has(fieldCode)) fields.set(fieldCode, fieldName);
+    const poolCode = code(cells[columns.poolCode]);
+    const poolName = text(cells[columns.pool], 60);
+    if (poolCode === null || poolName === null) continue;
+    const key = `${String(fieldCode)}:${String(poolCode)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pools.push({ fieldCode, poolCode, name: poolName });
+  }
+  return { fields, pools, skipped };
 }
 
 /**
