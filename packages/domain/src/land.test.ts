@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  landAgreement,
-  landDate,
-  landFreehold,
-  landOffset,
-  landRightsInclude,
-  landRows,
-  landShape,
-} from './land';
+import { landAgreement, landDate, landFreehold, landOffset, landRows, landShape } from './land';
 
 // Made-up land only.
 const square = (west: number, south: number) => [
@@ -159,33 +151,5 @@ describe('landRows', () => {
     ]);
     expect(read.rows).toHaveLength(1);
     expect(read.skipped).toBe(1);
-  });
-});
-
-describe('landRightsInclude', () => {
-  const PNG = 'PETROLEUM AND NATURAL GAS';
-  it('counts rights in the formation, down to its base, below its top, or to basement', () => {
-    for (const zone of [
-      `${PNG} IN THE DUVERNAY FM(D286)`,
-      `${PNG} IN THE DUVERNAY-MAJEAU LAKE FM(D287)`,
-      `${PNG} BELOW THE BASE OF THE EXAMPLE GRP(D4) TO THE BASE OF THE DUVERNAY-MAJEAU LAKE FM(D287)`,
-      `${PNG} BELOW THE TOP OF THE DUVERNAY-MAJEAU LAKE FM(D287) TO BASEMENT`,
-      `${PNG} FROM SURFACE TO BASEMENT`,
-      `${PNG} FROM SURFACE TO THE BASE OF THE EXAMPLE FM(D3) ${PNG} IN THE DUVERNAY FM(D286)`,
-    ]) {
-      expect(landRightsInclude(zone, 'duvernay'), zone).toBe(true);
-    }
-  });
-
-  it('leaves out rights that stop at its top, start below its base, or name it nowhere', () => {
-    for (const zone of [
-      `${PNG} BELOW THE BASE OF THE EXAMPLE GRP(D39) TO THE TOP OF THE DUVERNAY FM(D286)`,
-      `${PNG} BELOW THE BASE OF THE DUVERNAY-MAJEAU LAKE FM(D287) TO BASEMENT`,
-      `${PNG} FROM SURFACE TO THE BASE OF THE EXAMPLE FM(D3)`,
-      null,
-    ]) {
-      expect(landRightsInclude(zone, 'duvernay'), String(zone)).toBe(false);
-    }
-    expect(landRightsInclude(`${PNG} FROM SURFACE TO BASEMENT`, 'another')).toBe(false);
   });
 });

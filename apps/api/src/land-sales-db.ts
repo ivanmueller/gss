@@ -36,9 +36,12 @@ export interface LandSaleLoad {
   area: St37Box;
 }
 
-/** What narrows the parcels: a play's rights (a zone pattern), and sales from a date on. */
+/**
+ * What narrows the parcels: the hashes (md5) of the zones that include a play's rights, and
+ * sales from a date on.
+ */
 export interface LandSaleFilter {
-  zonePattern: string | null;
+  zones: readonly string[] | null;
   since: string | null;
 }
 
@@ -123,7 +126,9 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
           from petro.land_sale_parcels
           where bounds && box(point(${box.west}::float8, ${box.south}::float8),
                               point(${box.east}::float8, ${box.north}::float8))
-            and (${filter.zonePattern}::text is null or zone ~ ${filter.zonePattern}::text)
+            and (${filter.zones === null}::boolean
+                 or md5(zone) in (select jsonb_array_elements_text(
+                   (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
             and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
           order by sale_date desc, contract_no
           limit ${limit + 1}`;
@@ -163,7 +168,9 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
     landSaleSummary(ctx, filter) {
       return sql.begin(async (tx) => {
         await asMember(tx, ctx);
-        const rights = tx`(${filter.zonePattern}::text is null or zone ~ ${filter.zonePattern}::text)`;
+        const rights = tx`(${filter.zones === null}::boolean
+                           or md5(zone) in (select jsonb_array_elements_text(
+                   (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))`;
         const [totals] = await tx<
           {
             offered: number;

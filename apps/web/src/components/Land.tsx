@@ -517,10 +517,11 @@ export function useLand(organizationId: string, token: string): LandState {
               </p>
               <p>
                 Rights include: read from each agreement’s zone as the province writes it. An
-                agreement counts when its rights are in the formation, run down to its base, start
-                below its top, or run from surface to basement. Rights that reach past it to a
-                deeper named base, or start below a shallower formation and run to basement, are not
-                counted yet.
+                agreement counts when any of its rights reach into the formation: in it, across it,
+                down into it from above, or from within it down. Which formation lies above which is
+                taken from the zones themselves (“below the base of the Cardium to the base of the
+                Duvernay” places the Cardium above), from every agreement and sale parcel loaded,
+                and from nowhere else. Where those do not settle it, the agreement is not counted.
               </p>
               <p>
                 Freehold minerals: land whose petroleum and natural gas is not the Crown’s; the

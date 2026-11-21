@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db';
+import { clearLandRightsZones } from './land';
 import { createApp } from './index';
 import {
   LAND_SALES_MAX,
@@ -59,6 +60,7 @@ beforeEach(() => {
   grain = fakeDatabase();
   petroleum = fakePetroleum();
   petroleum.schemaVersion.mockResolvedValue(LAND_SALES_SCHEMA_VERSION);
+  clearLandRightsZones();
   openPetroleum.mockClear();
   mockAuthServer(Response.json({ id: USER_ID, email: 'adam@example.test' }));
 });
@@ -127,6 +129,11 @@ describe('GET /api/v1/petroleum/land-sales', () => {
       },
       parcels: [parcel('7')],
     });
+    const zone = 'PETROLEUM AND NATURAL GAS IN THE DUVERNAY FM';
+    petroleum.landZones.mockResolvedValue([
+      { zone, hash: 'abc' },
+      { zone: 'PETROLEUM AND NATURAL GAS IN THE EXAMPLE FM', hash: 'def' },
+    ]);
     const res = await get(`land-sales?${BOX}&rights=duvernay&since=2024-11-22`);
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
@@ -136,7 +143,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     expect(petroleum.landSales).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -117, south: 54, east: -116, north: 55 },
-      { zonePattern: expect.stringContaining('IN THE DUVERNAY') as string, since: '2024-11-22' },
+      { zones: ['abc'], since: '2024-11-22' },
       LAND_SALES_MAX,
     );
   });
@@ -165,7 +172,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     });
     expect(petroleum.landSaleSummary).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a' }),
-      { zonePattern: null, since: null },
+      { zones: null, since: null },
     );
   });
 });

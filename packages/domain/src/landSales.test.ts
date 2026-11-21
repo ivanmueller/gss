@@ -134,6 +134,25 @@ const NOTICE = `<?xml version="1.0" encoding="utf-8"?>
 </PublicOfferingNotice>`;
 
 describe('parseSaleNotice', () => {
+  it('keeps each clause of the rights whole, once, over a contract of several tracts', () => {
+    const line = (substance: string | null, qualifier: string, zone: string) =>
+      `<Line>${substance ? `<Substance>${substance}</Substance>` : ''}<Qualifier>${qualifier}</Qualifier><ZoneName>${zone}</ZoneName></Line>`;
+    const png = 'PETROLEUM AND NATURAL GAS';
+    const tract = (lines: string) =>
+      `<Tract><LandDescription><Land><LandKey>41203424</LandKey></Land></LandDescription><ZoneDescription>${lines}</ZoneDescription></Tract>`;
+    const xml = NOTICE.replace(
+      /<Contract>[\s\S]*?<\/Contract>/,
+      `<Contract><ContractNo>A0001</ContractNo><Hectares>64</Hectares>${tract(
+        line(png, 'FROM', 'SURFACE') + line(null, 'TO', 'BASEMENT'),
+      )}${tract(
+        line(png, 'FROM', 'SURFACE') + line(null, 'TO THE BASE OF THE', 'EXAMPLE FM'),
+      )}${tract(line(png, 'FROM', 'SURFACE') + line(null, 'TO', 'BASEMENT'))}</Contract>`,
+    );
+    expect(parseSaleNotice(xml)?.parcels[0]?.zone).toBe(
+      `${png} FROM SURFACE TO BASEMENT ${png} FROM SURFACE TO THE BASE OF THE EXAMPLE FM`,
+    );
+  });
+
   it('reads each contract with its land and its rights, and not the addenda', () => {
     expect(parseSaleNotice(NOTICE)).toEqual({
       saleDate: '2026-12-02',

@@ -94,12 +94,18 @@ describe('land held today as petro_api', () => {
       expect(all.offsets).toMatchObject([{ offsetNumber: 'ZZTEST1', expiryDate: '2027-05-08' }]);
       expect(all.freehold).toHaveLength(2);
 
-      // Only the agreements whose zone matches, when a play's rights are asked for.
-      const play = await db.land(member(), VIEW, ALL, '(IN THE EXAMPLE|FROM SURFACE TO BASEMENT)');
-      expect(play.agreements).toEqual([]);
-      const named = await db.land(member(), VIEW, ALL, 'TO BASE EXAMPLE');
+      // Only the agreements with one of the zones given, when a play's rights are asked for.
+      expect((await db.land(member(), VIEW, ALL, [])).agreements).toEqual([]);
+      const zones = await db.landZones(member());
+      const hash = zones.find((z) => z.zone === 'PNG TO BASE EXAMPLE')?.hash ?? '';
+      expect(hash).toMatch(/^[0-9a-f]{32}$/);
+      const named = await db.land(member(), VIEW, ALL, [hash, 'another']);
       expect(named.agreements.map((a) => a.agreementNumber)).toEqual(['1']);
       expect(named.freehold).toHaveLength(2);
+
+      // Every zone written, each once, and a stamp of the loads; nothing without a member.
+      expect(await db.landZoneStamp(member())).toMatch(/^\d+:\d+$/);
+      expect(await db.landZones({ ...member(), role: 'stranger' })).toEqual([]);
 
       // A kind not asked for is not read; a limit gives one more row, to say there is more.
       const some = await db.land(member(), VIEW, { agreements: 0, offsets: 0, freehold: 1 });
