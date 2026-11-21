@@ -1,0 +1,99 @@
+name: Load land
+
+# Run by hand from the Actions tab (Actions → Load land → Run workflow), after "Load ST37 wells".
+# Reads land held today from the Government of Alberta's public map services, for the area of
+# one play's wells (the Duvernay first; the owner, 2026-11-21): Crown petroleum and natural gas
+# and oil sands agreements, active offset notices, and land whose petroleum and natural gas is
+# not the Crown's. Loads them into the oil and gas database (petroleum-staging), replacing the
+# whole copy in one transaction (F-241, docs/FEATURES_OIL_GAS.md).
+#
+# Agreements and non-Crown minerals are Alberta Energy and Minerals' data under the Open
+# Government Licence - Alberta (docs/DECISIONS.md, 2026-11-21). The data stays on the runner and
+# in that database, never in the repository or the run's logs or artifacts. The load is refused
+# if grain's and the oil and gas databases together would pass 400 MB (the free plan's limit is
+# shared by both).
+on:
+  workflow_dispatch:
+    inputs:
+      formation:
+        description: The play whose wells mark the area
+        type: choice
+        options:
+          - duvernay
+        default: duvernay
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-land
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+          # One of the workflow's own choices, never free text.
+          FORMATION: ${{ inputs.formation }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 9 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 9)."
+            exit 1
+          fi
+          [[ "$FORMATION" =~ ^[a-z][a-z_]{1,39}$ ]] || { echo "::error::Unexpected formation name."; exit 1; }
+          # The box around the play's wells, as its latest load recorded it.
+          box=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -F ' ' -c "select west, south, east, north from petro.st37_loads where formation = '$FORMATION' order by id desc limit 1")
+          if [ -z "$box" ]; then
+            echo "::error::No wells of that play in the oil and gas database: run Load ST37 wells first."
+            exit 1
+          fi
+          read -r west south east north <<< "$box"
+          {
+            echo "WEST=$west"
+            echo "SOUTH=$south"
+            echo "EAST=$east"
+            echo "NORTH=$north"
+          } >> "$GITHUB_ENV"
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Area: $west $south $east $north. Grain's database: $((grain / 1048576)) MB."
+      - name: Read the province's map services
+        run: |
+          mkdir -p "$RUNNER_TEMP/land"
+          for layer in png_agreements oil_sands_agreements offset_notices freehold; do
+            node --experimental-strip-types scripts/load-land.js fetch "$layer" \
+              "$WEST" "$SOUTH" "$EAST" "$NORTH" "$RUNNER_TEMP/land/$layer.ndjson"
+          done
+      - name: Load the land
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          node --experimental-strip-types scripts/load-land.js sql "$RUNNER_TEMP/land" \
+            "$WEST" "$SOUTH" "$EAST" "$NORTH" "$GRAIN_BYTES" > "$RUNNER_TEMP/land/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/land/load.sql"
+      - name: Remove the province's files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/land"
