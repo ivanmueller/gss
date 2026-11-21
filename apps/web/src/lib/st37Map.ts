@@ -8,9 +8,10 @@ import type {
 
 /**
  * The AER's ST37 wells on the oil and gas map (F-243 part 4): how they are drawn at each zoom.
- * Zoomed out, a soft grey shading where wells are dense; from about 20 km across, each well's
- * drilled path as a line ending in a dot at its bottom hole, and a vertical well as a dot; past
- * about 10 km the shading is gone. A well with no drilled path yet (licensed, or being drilled)
+ * Zoomed out, a soft grey shading where wells are dense; as the distance bar nears 30 km
+ * (zoom 7) each well's drilled path comes in faintly as a line, a vertical well as a dot, and
+ * by a 10 km bar (zoom 8) the shading is gone and every well is drawn (F-260). A well with no
+ * drilled path yet (licensed, or being drilled)
  * is a dashed straight line from its surface hole to its planned bottom hole (F-243 part 4b).
  * Every well is coloured by its status. FacilityMap calls
  * `syncSt37` and `highlightSt37`; the Mapbox calls stay in these two map files.
@@ -351,6 +352,13 @@ function shownFilter(
   return filter as FilterSpecification;
 }
 
+/** The zoom from which drilled paths are drawn, faint at first (F-260). */
+const PATHS_FROM = 7;
+/** The zoom by which the shading is gone and the paths are at full strength (F-260). */
+const SHADING_GONE = 8;
+/** The zoom from which a well not drilled yet is its planned line, and before which one dot. */
+const PLANNED_FROM = 7.5;
+
 /** A small hollow square for the hovered well's surface hole, drawn without a canvas. */
 function squareImage(colour: string) {
   const size = 11;
@@ -411,12 +419,20 @@ export function syncSt37(
         id: ST37_LAYERS.density,
         type: 'heatmap',
         source: SOURCE,
-        maxzoom: 11,
+        maxzoom: SHADING_GONE,
         paint: {
           'heatmap-weight': 1,
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.2],
-          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 3, 8, 10, 10, 24],
-          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.85, 10.6, 0],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.6, SHADING_GONE, 1.2],
+          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 3, SHADING_GONE, 14],
+          'heatmap-opacity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            PATHS_FROM,
+            0.85,
+            SHADING_GONE,
+            0,
+          ],
         },
       },
       before,
@@ -426,11 +442,19 @@ export function syncSt37(
         id: ST37_LAYERS.paths,
         type: 'line',
         source: SOURCE,
-        minzoom: 8.5,
+        minzoom: PATHS_FROM,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-width': ['interpolate', ['linear'], ['zoom'], 8.5, 0.5, 11, 1, 14, 1.8],
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 8.5, 0.35, 10, 0.9],
+          'line-width': ['interpolate', ['linear'], ['zoom'], PATHS_FROM, 0.5, 11, 1, 14, 1.8],
+          'line-opacity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            PATHS_FROM,
+            0.25,
+            SHADING_GONE,
+            0.9,
+          ],
         },
       },
       before,
@@ -441,9 +465,9 @@ export function syncSt37(
         type: 'line',
         source: SOURCE,
         // From where the far-out dots stop (F-259): a line or a dot, never both.
-        minzoom: 9.5,
+        minzoom: PLANNED_FROM,
         paint: {
-          'line-width': ['interpolate', ['linear'], ['zoom'], 9.5, 1, 11, 1.4, 14, 2],
+          'line-width': ['interpolate', ['linear'], ['zoom'], PLANNED_FROM, 1, 11, 1.4, 14, 2],
           'line-dasharray': [2, 2],
         },
       },
@@ -456,20 +480,20 @@ export function syncSt37(
         id: ST37_LAYERS.dots,
         type: 'circle',
         source: SOURCE,
-        minzoom: 9.5,
+        minzoom: PLANNED_FROM,
         paint: {
           'circle-radius': [
             'interpolate',
             ['linear'],
             ['zoom'],
-            9.5,
+            PLANNED_FROM,
             ['case', pending, 3, 0.8],
             11,
             ['case', pending, 3.5, 1.4],
             14,
             ['case', pending, 4.5, 2.8],
           ],
-          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 9.5, 0.4, 10.5, 1],
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], PLANNED_FROM, 0.4, 8.5, 1],
         },
       },
       before,
@@ -479,9 +503,9 @@ export function syncSt37(
         id: ST37_LAYERS.pending,
         type: 'circle',
         source: SOURCE,
-        maxzoom: 9.5,
+        maxzoom: PLANNED_FROM,
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, 9.5, 3],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, PLANNED_FROM, 3],
           'circle-stroke-width': 1,
           'circle-stroke-color': '#ffffff',
         },
@@ -502,16 +526,16 @@ export function syncSt37(
             ['zoom'],
             5,
             ['case', pending, 2, 0],
-            8,
+            PATHS_FROM,
             ['case', pending, 3, 0],
-            9.5,
+            PLANNED_FROM,
             ['case', pending, 3, 1.2],
             11,
             ['case', pending, 3.5, 2.2],
             14,
             ['case', pending, 4.5, 3.6],
           ],
-          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9.5, 0, 11, 0.75],
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], PLANNED_FROM, 0, 11, 0.75],
           'circle-stroke-color': '#ffffff',
         },
       },
