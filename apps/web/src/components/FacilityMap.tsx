@@ -20,6 +20,7 @@ import {
 import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
 import { LAND_PICKABLE, syncLand, type LandView } from '../lib/landMap';
+import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
 import { highlightSt37, ST37_PICKABLE, syncSt37, type St37View } from '../lib/st37Map';
 import {
   isLayerPictureUrl,
@@ -123,6 +124,8 @@ export interface FacilityMapProps {
   st37Locked?: string | null;
   /** Land held today (F-241), drawn under the wells. */
   land?: LandView | null;
+  /** The parcels of Crown land sales (F-242), drawn over the land held and under the wells. */
+  landSales?: LandSalesView | null;
   /**
    * The land clicked, by its keys, with where the click is in the map's box; null for a click
    * on none, or on a well (the well's card comes first).
@@ -590,6 +593,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncLandSales(
+        instance,
+        latest.current.landSales ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       syncLand(
         instance,
         latest.current.land ?? null,
@@ -645,7 +654,8 @@ export default function FacilityMap(props: FacilityMapProps) {
       // Land under the click, when no well is: every shape there, agreements first (F-241).
       const onLand = latest.current.onLandClick;
       if (!onLand) return;
-      const layers = LAND_PICKABLE.filter((id) => instance.getLayer(id));
+      // Sale parcels first: they are drawn over the land held.
+      const layers = [...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) => instance.getLayer(id));
       const keys = new Set<string>();
       if (!found && layers.length > 0) {
         for (const feature of instance.queryRenderedFeatures(event.point, { layers })) {
@@ -805,6 +815,15 @@ export default function FacilityMap(props: FacilityMapProps) {
       syncSt37(instance, st37 ?? null, st37Tone(basemap, theme), PINS);
     }
   }, [st37, basemap, theme]);
+
+  const { landSales } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the parcels as they are then.
+    if (instance && styleReady.current) {
+      syncLandSales(instance, landSales ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [landSales, basemap, theme]);
 
   const { land } = props;
   useEffect(() => {

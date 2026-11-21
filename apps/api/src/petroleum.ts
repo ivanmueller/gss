@@ -12,6 +12,13 @@ import {
   parseLandRights,
 } from './land';
 import {
+  LAND_SALES_MAX,
+  LAND_SALES_SCHEMA_VERSION,
+  landSalesAnswer,
+  landSaleSummaryAnswer,
+  parseSince,
+} from './land-sales';
+import {
   parseFormation,
   parseUwi,
   PRODUCTION_SCHEMA_VERSION,
@@ -576,6 +583,66 @@ export function petroleumRoutes(
       });
     });
   });
+
+  // /petroleum/land-sales and /land-sales/summary: the parcels of the province's public
+  // offerings of petroleum and natural gas rights, with their results (F-242): those whose
+  // shape touches the map's view, and the totals of every parcel loaded. `rights` keeps the
+  // parcels whose rights include a play; `since` the sales from a date on. Membership first.
+  const landSales = (
+    c: Context<ApiEnv>,
+    read: (
+      petroleum: PetroleumDatabase,
+      ctx: PetroleumContext,
+      filter: { zonePattern: string | null; since: string | null },
+    ) => Promise<unknown>,
+  ) => {
+    c.header('Cache-Control', 'no-store');
+    const rights = parseLandRights(c.req.query('rights'));
+    if (typeof rights === 'string') return apiError(c, 400, 'VALIDATION_FAILED', rights);
+    const since = parseSince(c.req.query('since'));
+    if (typeof since === 'string') return apiError(c, 400, 'VALIDATION_FAILED', since);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < LAND_SALES_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        return c.json(
+          await read(
+            petroleum,
+            {
+              userId: ctx.userId,
+              organizationId: membership.organizationId,
+              role: membership.role,
+              requestId: ctx.requestId,
+            },
+            { zonePattern: rights.pattern, since: since.since },
+          ),
+        );
+      });
+    });
+  };
+
+  routes.get('/land-sales', (c) => {
+    const box = parseSt37Box(c.req.query());
+    if (typeof box === 'string') return apiError(c, 400, 'VALIDATION_FAILED', box);
+    return landSales(c, async (petroleum, ctx, filter) => {
+      const { load, parcels } = await petroleum.landSales(ctx, box, filter, LAND_SALES_MAX);
+      return landSalesAnswer(load, parcels);
+    });
+  });
+
+  routes.get('/land-sales/summary', (c) =>
+    landSales(c, async (petroleum, ctx, filter) =>
+      landSaleSummaryAnswer(await petroleum.landSaleSummary(ctx, filter)),
+    ),
+  );
 
   // /petroleum/production/well and /formation: monthly production from Petrinex's public data
   // (F-252 step 3). Membership first, as above. JSON for the charts only, never another format

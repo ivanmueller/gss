@@ -34,3 +34,4 @@ export * from './petrinex';
 export * from './st37';
 export * from './st37Zones';
 export * from './land';
+export * from './landSales';

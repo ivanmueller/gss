@@ -1,5 +1,6 @@
 import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
+import { SALE_LAYERS } from './landSalesMap';
 import { ST37_LAYERS } from './st37Map';
 
 /**
@@ -248,10 +249,11 @@ export function syncLand(
   }
 
   if (!map.getLayer(LAND_LAYERS.agreementFill)) {
-    // Under the wells' lowest layer when they are on the map, so a well is never covered.
+    // Under the sale parcels when they are on the map, else under the wells' lowest layer, so
+    // neither a parcel nor a well is covered.
     const under =
-      [ST37_LAYERS.outlineFill, ST37_LAYERS.zones, ST37_LAYERS.density].find((id) =>
-        map.getLayer(id),
+      [SALE_LAYERS.fill, ST37_LAYERS.outlineFill, ST37_LAYERS.zones, ST37_LAYERS.density].find(
+        (id) => map.getLayer(id),
       ) ?? (beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     const thin: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 7, 0.3, 12, 0.9];
     // Land that is not the Crown's: hatched, sand for freehold and grey for parks and reserves.
