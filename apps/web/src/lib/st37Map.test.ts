@@ -135,10 +135,17 @@ describe('syncSt37', () => {
       ['==', ['get', 'licence'], '0509395'],
       ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
     ]);
-    // Every leg bold; the main leg in a colour of its own, the others in the map's ink.
+    // Every leg bold; the main leg of a well with other legs in a colour of its own (orange,
+    // not an error's red), everything else in the map's ink.
+    expect(ST37_MAIN_LEG.light).toBe('#ea580c');
     expect(layers.get(ST37_LAYERS.hoverPath)?.paint).toMatchObject({
       'line-width': 3,
-      'line-color': ['case', ['==', ['get', 'leg'], 'main'], ST37_MAIN_LEG.light, '#1c1917'],
+      'line-color': [
+        'case',
+        ['all', ['==', ['get', 'leg'], 'main'], ['>', ['get', 'legs'], 1]],
+        ST37_MAIN_LEG.light,
+        '#1c1917',
+      ],
     });
     highlightSt37(map, null);
     expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([

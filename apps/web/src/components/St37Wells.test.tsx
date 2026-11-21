@@ -85,6 +85,8 @@ describe('st37Features', () => {
       licence: '0509395',
       status: 'producing',
       leg: 'main',
+      // A well of one leg: nothing to tell its main leg from (F-258).
+      legs: 1,
     });
   });
 
@@ -103,6 +105,7 @@ describe('st37Features', () => {
           licence: '0509395',
           status: 'producing',
           leg: 'main',
+          legs: 2,
           part: 'well',
         },
         geometry: { type: 'Point', coordinates: [-113.6, 53.3] },
@@ -111,10 +114,10 @@ describe('st37Features', () => {
     expect(
       features
         .filter((f) => f.properties?.part === 'path')
-        .map((f): unknown => [f.properties?.uwi, f.properties?.leg]),
+        .map((f): unknown => [f.properties?.uwi, f.properties?.leg, f.properties?.legs]),
     ).toEqual([
-      [first.uwi, 'other'],
-      [second.uwi, 'main'],
+      [first.uwi, 'other', 2],
+      [second.uwi, 'main', 2],
     ]);
   });
 
