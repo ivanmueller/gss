@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   highlightSt37,
   ST37_LAYERS,
+  ST37_MAIN_LEG,
   ST37_OUTLINES,
   st37Features,
   st37ZoneFeatures,
@@ -43,6 +44,10 @@ function fakeMap() {
     setPaintProperty: (id: string, name: string, value: unknown) => {
       const layer = layers.get(id);
       if (layer) layer.paint[name] = value;
+    },
+    setLayoutProperty: (id: string, name: string, value: unknown) => {
+      const layer = layers.get(id);
+      if (layer) layer.layout = { ...(layer.layout as object | undefined), [name]: value };
     },
     setFilter: (id: string, filter: unknown) => {
       const layer = layers.get(id);
@@ -130,6 +135,11 @@ describe('syncSt37', () => {
       ['==', ['get', 'licence'], '0509395'],
       ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
     ]);
+    // Every leg bold; the main leg in a colour of its own, the others in the map's ink.
+    expect(layers.get(ST37_LAYERS.hoverPath)?.paint).toMatchObject({
+      'line-width': 3,
+      'line-color': ['case', ['==', ['get', 'leg'], 'main'], ST37_MAIN_LEG.light, '#1c1917'],
+    });
     highlightSt37(map, null);
     expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
       '==',

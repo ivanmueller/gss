@@ -123,6 +123,15 @@ export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, stri
   },
 };
 
+/**
+ * The colour of the main leg of the well under the pointer (F-258): one no status uses, so it
+ * stands out from the well's other legs, which are drawn as bold in the map's ink.
+ */
+export const ST37_MAIN_LEG: Record<'light' | 'dark', string> = {
+  light: '#e11d48',
+  dark: '#fb7185',
+};
+
 const SOURCE = 'st37-wells';
 const OUTLINE_SOURCE = 'st37-outline';
 const ZONES_SOURCE = 'st37-zones';
@@ -456,14 +465,15 @@ export function syncSt37(
       before,
     );
     // The well under the pointer, whole (F-257): every leg drilled under its licence, whatever
-    // is switched off; the main leg thickest, each bottom hole a dot.
+    // is switched off; every leg bold, the main leg in a colour of its own, each bottom hole
+    // a dot.
     map.addLayer(
       {
         id: ST37_LAYERS.hoverPath,
         type: 'line',
         source: SOURCE,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': ['case', ['==', ['get', 'leg'], 'main'], 3, 2] },
+        paint: { 'line-width': 3 },
         filter: ['==', ['get', 'licence'], ''],
       },
       before,
@@ -526,12 +536,19 @@ export function syncSt37(
   map.setFilter(ST37_LAYERS.pending, shownFilter('bottom', view.shown, PENDING, parts));
   map.setPaintProperty(ST37_LAYERS.wells, 'circle-color', colour);
   map.setFilter(ST37_LAYERS.wells, shownFilter('well', parts.legs ? none : view.shown));
-  // The hovered well's main leg in ink, its other legs in their own status colour.
+  // The hovered well's main leg in its own colour, its other legs in ink.
   map.setPaintProperty(ST37_LAYERS.hoverPath, 'line-color', [
     'case',
     ['==', ['get', 'leg'], 'main'],
+    ST37_MAIN_LEG[tone],
     ink,
-    colour,
+  ]);
+  // The main leg over the others where they run together.
+  map.setLayoutProperty(ST37_LAYERS.hoverPath, 'line-sort-key', [
+    'case',
+    ['==', ['get', 'leg'], 'main'],
+    1,
+    0,
   ]);
   map.setPaintProperty(ST37_LAYERS.hoverDots, 'circle-color', colour);
 }

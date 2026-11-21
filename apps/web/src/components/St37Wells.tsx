@@ -371,9 +371,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                 A well is every leg drilled under one licence. Its main leg is the most active one;
                 its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
                 does not say which kind. With main legs off, a well is one dot at its surface
-                location; point at it to see all its legs. A well's production is its legs' added
-                together; a dashed line on its charts marks the month a later leg starts. Click a
-                well to keep its card open, then a leg for its production alone.
+                location; point at it to see all its legs: the main leg in red, the others in bold.
+                A well's production is its legs' added together; a dashed line on its charts marks
+                the month a later leg starts. Click a leg to keep the card open with that leg's own
+                production under the well's.
               </p>
               {outline && <p>{outline.credit}</p>}
               {answer && (
@@ -482,8 +483,10 @@ export function St37Card({
   /** Whose sign-in reads the well's monthly production (F-252 step 3); none shows no chart. */
   member?: { organizationId: string; token: string };
 }) {
-  // The leg whose production is shown alone; another well's leg counts as none.
-  const [chosen, setChosen] = useState<string | null>(null);
+  // The leg whose own production is shown under the well's total: not chosen yet (the leg
+  // clicked on the map, unless it is the main one), none, or the leg clicked on the card. The
+  // map page gives each kept card a key of its own, so a new click starts afresh.
+  const [chosen, setChosen] = useState<string | null | undefined>(undefined);
   if (!hover) return null;
   const [first] = hover.uwis;
   const pointed = first === undefined ? undefined : byUwi.get(first);
@@ -496,7 +499,13 @@ export function St37Card({
       .map((uwi) => byUwi.get(uwi)?.licenceNumber)
       .filter((licence) => licence !== undefined && licence !== well.licenceNumber),
   ).size;
-  const alone = kept ? legs.find((leg) => leg.uwi === chosen) : undefined;
+  const alone = !kept
+    ? undefined
+    : chosen === undefined
+      ? pointed.uwi === well.uwi
+        ? undefined
+        : pointed
+      : legs.find((leg) => leg.uwi === chosen);
   const status = [ST37_STATUS_LABELS[well.statusClass], well.statusFluid, well.statusType]
     .filter((part): part is string => Boolean(part))
     .join(' · ');
@@ -511,12 +520,14 @@ export function St37Card({
     .join(' · ');
   // Opens to the left of the pointer near the window's right edge, and above it near the bottom.
   const left = hover.x > window.innerWidth - 340;
-  const up = hover.y > window.innerHeight - (member ? 380 : 180) - (legs.length > 1 ? 80 : 0);
+  const up =
+    hover.y >
+    window.innerHeight - (member ? 380 : 180) - (legs.length > 1 ? 80 : 0) - (alone ? 200 : 0);
   return (
     <div
       role="status"
       className={`absolute z-30 w-72 rounded-card border bg-card p-3 text-sm shadow-md ${
-        kept ? '' : 'pointer-events-none'
+        kept ? 'max-h-[calc(100%-1rem)] overflow-y-auto' : 'pointer-events-none'
       }`}
       style={{
         left: hover.x,
@@ -593,19 +604,31 @@ export function St37Card({
         <>
           {legs.length > 1 && (
             <p className="mt-2 text-xs text-muted-foreground">
-              {alone
-                ? `Production of leg ${alone.uwi} alone. Click it again for the well's total.`
-                : kept
-                  ? 'Production of all legs together. Click a leg for its own.'
-                  : 'Production of all legs together. Click the well to choose a leg.'}
+              {kept
+                ? 'Production of all legs together. Click a leg, on the map or above, for its own below.'
+                : 'Production of all legs together. Click a leg for its own below.'}
             </p>
           )}
           <WellProduction
-            uwis={alone ? [alone.uwi] : legs.map((leg) => leg.uwi)}
+            uwis={legs.map((leg) => leg.uwi)}
             organizationId={member.organizationId}
             token={member.token}
             interactive={kept}
           />
+          {alone && (
+            <div aria-label={`Production of leg ${alone.uwi}`} role="group">
+              <p className="mt-2 text-xs text-muted-foreground">
+                Leg <span className="font-mono text-foreground">{alone.uwi}</span> alone
+                {alone.uwi === well.uwi ? ' (the main leg)' : ''}.
+              </p>
+              <WellProduction
+                uwis={[alone.uwi]}
+                organizationId={member.organizationId}
+                token={member.token}
+                interactive
+              />
+            </div>
+          )}
         </>
       )}
       {others > 0 && (

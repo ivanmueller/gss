@@ -162,6 +162,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         {wells.panel(tone, setFitTo)}
       </div>
       <St37Card
+        // A card of its own for each click: the leg clicked is the one it starts on (F-258).
+        key={kept ? `${kept.uwis[0] ?? ''}@${String(kept.x)},${String(kept.y)}` : 'pointer'}
         hover={kept ?? hover}
         kept={kept !== null}
         onClose={() => {
