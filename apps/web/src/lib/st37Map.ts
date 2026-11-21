@@ -422,8 +422,10 @@ export function syncSt37(
         maxzoom: SHADING_GONE,
         paint: {
           'heatmap-weight': 1,
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.6, SHADING_GONE, 1.2],
-          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 3, SHADING_GONE, 14],
+          // A wide, weak spread per well, so a cluster reads as one soft shadow and a lone
+          // well barely shows (F-260).
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.25, SHADING_GONE, 0.45],
+          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 7, SHADING_GONE, 30],
           'heatmap-opacity': [
             'interpolate',
             ['linear'],
@@ -608,10 +610,12 @@ export function syncSt37(
     ['heatmap-density'],
     0,
     `rgba(${shade}, 0)`,
-    0.15,
-    `rgba(${shade}, 0.12)`,
-    0.5,
-    `rgba(${shade}, 0.3)`,
+    0.1,
+    `rgba(${shade}, 0.05)`,
+    0.3,
+    `rgba(${shade}, 0.16)`,
+    0.6,
+    `rgba(${shade}, 0.32)`,
     1,
     `rgba(${shade}, 0.5)`,
   ]);
