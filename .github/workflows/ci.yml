@@ -39,7 +39,7 @@ jobs:
       # to the gate is tested in its own pull request. A file pattern: Node 22 takes globs, not folders.
       - name: Tests of the merge gate
         run: node --test 'scripts/*.test.js'
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 2.122.0
       # Throwaway local Supabase with its sign-in service: every migration is applied
