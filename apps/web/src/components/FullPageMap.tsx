@@ -23,6 +23,7 @@ import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { LandCard, useLand, type LandPick } from './Land';
+import { useLandSales } from './LandSales';
 import { St37Card, useSt37Wells } from './St37Wells';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
@@ -78,9 +79,12 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // Land held today, under the wells (F-241); a click on land with no well opens its card.
   const land = useLand(session.organization.id, session.token);
   const [landPick, setLandPick] = useState<LandPick | null>(null);
+  // Crown land sales, over the land held (F-242); a clicked parcel leads the same card.
+  const sales = useLandSales(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {
     setLandPick(pick);
     land.setPicked(pick?.keys ?? []);
+    sales.setPicked(pick?.keys ?? []);
   };
   const [fitTo, setFitTo] = useState<MapBounds | null>(null);
   const admin = session.organization.role === 'org_admin';
@@ -119,12 +123,14 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           onSt37Click={setClicked}
           st37Locked={locked}
           land={land.view}
+          landSales={sales.view}
           onLandClick={pickLand}
           fitTo={fitTo}
           onViewChange={(bbox, zoom) => {
             layers.onViewChange(bbox, zoom);
             wells.onViewChange(bbox);
             land.onViewChange(bbox, zoom);
+            sales.onViewChange(bbox, zoom);
           }}
           onOverlayClick={layers.setPicked}
           onLayersStale={layers.onStale}
@@ -172,14 +178,19 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
         <div className="flex flex-col gap-2">
           {wells.panel(tone, setFitTo)}
+          {sales.panel()}
           {land.panel()}
         </div>
       </div>
       {/* The holders in view and what each mark means: bottom left, beside the panels. */}
-      <div className="absolute bottom-8 left-[19.75rem] z-10 hidden md:block">{land.legend()}</div>
+      <div className="absolute bottom-8 left-[19.75rem] z-10 hidden max-h-[calc(100%-6rem)] flex-col gap-2 overflow-y-auto md:flex">
+        {sales.legend()}
+        {land.legend()}
+      </div>
       <LandCard
         pick={kept ? null : landPick}
         land={land}
+        saleRow={sales.cardRow}
         onClose={() => {
           pickLand(null);
         }}

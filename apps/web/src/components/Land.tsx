@@ -670,10 +670,13 @@ const CARD_MAX = 6;
 export function LandCard({
   pick,
   land,
+  saleRow,
   onClose,
 }: {
   pick: LandPick | null;
   land: Pick<LandState, 'agreements' | 'offsets' | 'freehold'>;
+  /** A sale parcel's lines (F-242), by its id; they come first on the card. */
+  saleRow?: (id: string) => React.ReactNode;
   onClose: () => void;
 }) {
   if (!pick) return null;
@@ -686,7 +689,10 @@ export function LandCard({
     const agreement = of === 'png' || of === 'oil_sands' ? land.agreements.get(id) : undefined;
     const offset = of === 'offset' ? land.offsets.get(id) : undefined;
     const freehold = of === 'freehold' ? land.freehold.get(id) : undefined;
-    if (agreement) {
+    const sale = of === 'sale' ? saleRow?.(id) : null;
+    if (sale) {
+      rows.push(sale);
+    } else if (agreement) {
       rows.push(
         <li key={landKey(agreement.rights, id)}>
           <p className="flex items-center gap-1.5 font-semibold">
