@@ -8,6 +8,7 @@ import {
   LAND_SCHEMA_VERSION,
   landAnswer,
   landLimits,
+  landRightsZones,
   parseLandKinds,
   parseLandRights,
 } from './land';
@@ -568,17 +569,17 @@ export function petroleumRoutes(
             'The oil and gas database is being updated. Try again in a few minutes.',
           );
         }
-        const rows = await petroleum.land(
-          {
-            userId: ctx.userId,
-            organizationId: membership.organizationId,
-            role: membership.role,
-            requestId: ctx.requestId,
-          },
-          box,
-          landLimits(kinds),
-          rights.pattern,
-        );
+        const who: PetroleumContext = {
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        };
+        const zones = await landRightsZones(rights.play, {
+          stamp: () => petroleum.landZoneStamp(who),
+          zones: () => petroleum.landZones(who),
+        });
+        const rows = await petroleum.land(who, box, landLimits(kinds), zones);
         return c.json(landAnswer(rows));
       });
     });
@@ -593,7 +594,7 @@ export function petroleumRoutes(
     read: (
       petroleum: PetroleumDatabase,
       ctx: PetroleumContext,
-      filter: { zonePattern: string | null; since: string | null },
+      filter: { zones: readonly string[] | null; since: string | null },
     ) => Promise<unknown>,
   ) => {
     c.header('Cache-Control', 'no-store');
@@ -613,18 +614,17 @@ export function petroleumRoutes(
             'The oil and gas database is being updated. Try again in a few minutes.',
           );
         }
-        return c.json(
-          await read(
-            petroleum,
-            {
-              userId: ctx.userId,
-              organizationId: membership.organizationId,
-              role: membership.role,
-              requestId: ctx.requestId,
-            },
-            { zonePattern: rights.pattern, since: since.since },
-          ),
-        );
+        const who: PetroleumContext = {
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        };
+        const zones = await landRightsZones(rights.play, {
+          stamp: () => petroleum.landZoneStamp(who),
+          zones: () => petroleum.landZones(who),
+        });
+        return c.json(await read(petroleum, who, { zones, since: since.since }));
       });
     });
   };

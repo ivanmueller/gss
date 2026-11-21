@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 
@@ -38,7 +40,10 @@ const square = (west: number, south: number) => ({
 const VIEW = { west: -120.05, south: 59.9, east: -119.9, north: 60.05 };
 // Only this test's rights, so the totals count none of a local load's parcels.
 const PLAY = 'IN THE TEST ONLY FM';
-const ALL = { zonePattern: PLAY, since: null };
+const ZONE = `PETROLEUM AND NATURAL GAS ${PLAY}`;
+// The zone's md5, as the database works it out.
+const HASH = createHash('md5').update(ZONE).digest('hex');
+const ALL = { zones: [HASH], since: null };
 
 describe('land sales as petro_api', () => {
   it('reads the parcels touching the view and sums the money in the database', async () => {
@@ -51,7 +56,7 @@ describe('land sales as petro_api', () => {
       const a = square(-120, 59.95);
       const b = square(-119.98, 59.95);
       const far = square(-119.5, 59.5);
-      const zone = `PETROLEUM AND NATURAL GAS ${PLAY}`;
+      const zone = ZONE;
       await admin`
         insert into petro.land_sale_parcels
           (sale_date, contract_no, contract_type, region, hectares, zone, land, status, bonus,

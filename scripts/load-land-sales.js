@@ -306,7 +306,9 @@ function mainSql(argv) {
     '\\set ON_ERROR_STOP on',
     'begin;',
     "select set_config('statement_timeout', '15min', true);",
-    'delete from petro.land_sale_parcels;',
+    // Emptied at once (and put back if the load fails): a delete would leave the old rows
+    // as dead weight that the size guard counts.
+    'truncate petro.land_sale_parcels;',
     `copy petro.land_sale_parcels (${columns}) from stdin with (format csv);`,
   ];
   const flush = () => {

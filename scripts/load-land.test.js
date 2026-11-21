@@ -85,9 +85,9 @@ describe('load-land.js', () => {
     assert.equal(out.status, 0, out.stderr);
     const sql = out.stdout;
     assert.match(sql, /^\\set ON_ERROR_STOP on\nbegin;/);
-    assert.match(sql, /delete from petro\.land_agreements;\ncopy petro\.land_agreements \(rights,/);
-    assert.match(sql, /delete from petro\.land_offsets;\ncopy petro\.land_offsets/);
-    assert.match(sql, /delete from petro\.land_freehold;\ncopy petro\.land_freehold/);
+    assert.match(sql, /truncate petro\.land_agreements;\ncopy petro\.land_agreements \(rights,/);
+    assert.match(sql, /truncate petro\.land_offsets;\ncopy petro\.land_offsets/);
+    assert.match(sql, /truncate petro\.land_freehold;\ncopy petro\.land_freehold/);
     // Quotes are doubled, so a holder's or party's text stays one value of the row.
     assert.ok(
       sql.includes('"EXAMPLE ""ENERGY"" LTD.","EXAMPLE ENERGY LTD. 100%\'); drop table x; --"'),

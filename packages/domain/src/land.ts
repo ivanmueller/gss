@@ -52,29 +52,6 @@ export const LAND_LAYERS: Record<LandLayerKey, LandLayer> = {
 /** Named on screen, as the Open Government Licence - Alberta asks. */
 export const LAND_SOURCE_NAME = 'Alberta Energy and Minerals, Government of Alberta';
 
-/**
- * The plays an agreement's rights can be asked to include (F-241): read from the zone as the
- * province writes it, with no knowledge of which formation lies above which. An agreement counts
- * when a clause of its zone is in the formation, runs down to its base, starts below its top, or
- * runs from surface to basement. Rights that reach past the formation to a deeper named base, or
- * start below a shallower one and run to basement, are not recognised yet: that needs the
- * province's order of zones.
- */
-export const LAND_RIGHTS: Record<string, { key: string; name: string; pattern: string }> = {
-  duvernay: {
-    key: 'duvernay',
-    name: 'Duvernay',
-    pattern:
-      '(IN THE DUVERNAY|TO THE BASE OF THE DUVERNAY|BELOW THE TOP OF THE DUVERNAY|FROM SURFACE TO BASEMENT)',
-  },
-};
-
-/** Whether a zone, as the province writes it, includes the play's rights (see LAND_RIGHTS). */
-export function landRightsInclude(zone: string | null, play: string): boolean {
-  const rights = Object.hasOwn(LAND_RIGHTS, play) ? LAND_RIGHTS[play] : undefined;
-  return zone !== null && rights !== undefined && new RegExp(rights.pattern).test(zone);
-}
-
 /** West, south, east, north, in degrees. */
 export type LandBounds = [number, number, number, number];
 /** A GeoJSON MultiPolygon's coordinates. */

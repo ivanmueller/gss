@@ -63,6 +63,8 @@ export function fakePetroleum() {
     land: vi.fn<PetroleumDatabase['land']>(() =>
       Promise.resolve({ loads: [], agreements: [], offsets: [], freehold: [] }),
     ),
+    landZoneStamp: vi.fn<PetroleumDatabase['landZoneStamp']>(() => Promise.resolve('1:1')),
+    landZones: vi.fn<PetroleumDatabase['landZones']>(() => Promise.resolve([])),
     landSales: vi.fn<PetroleumDatabase['landSales']>(() =>
       Promise.resolve({ load: null, parcels: [] }),
     ),

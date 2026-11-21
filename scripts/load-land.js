@@ -277,7 +277,9 @@ function mainSql(argv) {
   );
   for (const kind of ['agreements', 'offsets', 'freehold']) {
     const { table, columns } = TABLES[kind];
-    out.push(`delete from ${table};`, `copy ${table} (${columns}) from stdin with (format csv);`);
+    // Emptied at once (and put back if the load fails): a delete would leave the old rows as
+    // dead weight that the size guard counts.
+    out.push(`truncate ${table};`, `copy ${table} (${columns}) from stdin with (format csv);`);
     flush();
     for (let i = 0; i < lines[kind].length; i += 2000) {
       out.push(...lines[kind].slice(i, i + 2000));

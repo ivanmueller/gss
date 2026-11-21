@@ -73,7 +73,7 @@ describe('load-land-sales.js', () => {
     assert.match(sql, /^\\set ON_ERROR_STOP on\nbegin;/);
     assert.match(
       sql,
-      /delete from petro\.land_sale_parcels;\ncopy petro\.land_sale_parcels \(sale_date,/,
+      /truncate petro\.land_sale_parcels;\ncopy petro\.land_sale_parcels \(sale_date,/,
     );
     // The sold parcel: its money as published, its buyer's quotes doubled so it stays one value.
     assert.ok(

@@ -77,9 +77,19 @@ export interface LandDatabase {
     ctx: PetroleumContext,
     box: St37Box,
     limits: Record<LandKind, number>,
-    /** Only agreements whose zone matches this pattern (LAND_RIGHTS); null for every one. */
-    zonePattern?: string | null,
+    /**
+     * Only agreements whose zone has one of these hashes (md5, those including a play); null
+     * for every one.
+     */
+    zones?: readonly string[] | null,
   ): Promise<LandRows>;
+  /**
+   * Members: what the loads now hold, as a stamp that changes with each load of the land held
+   * or of the land sales.
+   */
+  landZoneStamp(ctx: PetroleumContext): Promise<string>;
+  /** Members: every zone written on an agreement or a sale parcel, each once, with its md5. */
+  landZones(ctx: PetroleumContext): Promise<{ zone: string; hash: string }[]>;
 }
 
 interface LoadDbRow {
@@ -94,9 +104,37 @@ interface LoadDbRow {
 
 const num = (value: string | null) => (value === null ? null : Number(value));
 
+async function asMember(tx: postgres.TransactionSql, ctx: PetroleumContext) {
+  await tx`select set_config('statement_timeout', '10s', true),
+                  set_config('petro.user_id', ${ctx.userId}, true),
+                  set_config('petro.organization_id', ${ctx.organizationId}, true),
+                  set_config('petro.member_role', ${ctx.role}, true),
+                  set_config('petro.request_id', ${ctx.requestId}, true)`;
+}
+
 export function landQueries(sql: postgres.Sql): LandDatabase {
   return {
-    land(ctx, box, limits, zonePattern = null) {
+    landZoneStamp(ctx) {
+      return sql.begin(async (tx) => {
+        await asMember(tx, ctx);
+        const [row] = await tx<{ stamp: string }[]>`
+          select coalesce((select max(id) from petro.land_loads), 0)::text || ':' ||
+                 coalesce((select max(id) from petro.land_sale_loads), 0)::text as stamp`;
+        return row?.stamp ?? '0:0';
+      });
+    },
+    landZones(ctx) {
+      return sql.begin(async (tx) => {
+        await asMember(tx, ctx);
+        return await tx<{ zone: string; hash: string }[]>`
+          select zone, md5(zone) as hash from (
+            select zone from petro.land_agreements where zone is not null
+            union
+            select zone from petro.land_sale_parcels where zone is not null
+          ) z`;
+      });
+    },
+    land(ctx, box, limits, zones = null) {
       return sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', '10s', true),
                         set_config('petro.user_id', ${ctx.userId}, true),
@@ -136,7 +174,8 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                        continuation_date::text as continuation_date, expiry_text, shape
                 from petro.land_agreements
                 where bounds && ${view}
-                  and (${zonePattern}::text is null or zone ~ ${zonePattern}::text)
+                  and (${zones === null}::boolean
+                       or md5(zone) in (select jsonb_array_elements_text((${JSON.stringify(zones ?? [])}::text)::jsonb)))
                 order by id
                 limit ${limits.agreements + 1}`
             : [];

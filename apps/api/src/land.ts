@@ -1,4 +1,4 @@
-import { LAND_RIGHTS, LAND_SOURCE_NAME } from '@grain/domain';
+import { LAND_RIGHTS, LAND_SOURCE_NAME, rightsZones } from '@grain/domain';
 
 import { LAND_KINDS, type LandKind, type LandRows } from './land-db';
 
@@ -9,8 +9,11 @@ import { LAND_KINDS, type LandKind, type LandRows } from './land-db';
  * is named with every answer, as the Open Government Licence - Alberta asks.
  */
 
-/** The oil and gas schema version the land needs (20261126010000_petro_land.sql). */
-export const LAND_SCHEMA_VERSION = 9;
+/**
+ * The oil and gas schema version the land needs: the order of formations is read from the
+ * zones of the sale parcels too (20261127010000_petro_land_sales.sql).
+ */
+export const LAND_SCHEMA_VERSION = 10;
 
 /**
  * At most this many shapes of each kind per answer; a view holding more is drawn from the
@@ -36,16 +39,49 @@ export function parseLandKinds(raw: string | undefined): LandKind[] | string {
 }
 
 /**
- * The play the agreements' rights must include (`rights=duvernay`), as its zone pattern; null
- * when none is asked for; a sentence saying what is wrong otherwise.
+ * The play the rights must include (`rights=duvernay`); null when none is asked for; a
+ * sentence saying what is wrong otherwise.
  */
-export function parseLandRights(raw: string | undefined): { pattern: string | null } | string {
+export function parseLandRights(raw: string | undefined): { play: string | null } | string {
   const key = raw?.trim() ?? '';
-  if (key === '') return { pattern: null };
-  const rights = Object.hasOwn(LAND_RIGHTS, key) ? LAND_RIGHTS[key] : undefined;
-  return rights
-    ? { pattern: rights.pattern }
+  if (key === '') return { play: null };
+  return Object.hasOwn(LAND_RIGHTS, key)
+    ? { play: key }
     : `rights must be one of: ${Object.keys(LAND_RIGHTS).join(', ')}.`;
+}
+
+/**
+ * The zones that include each play's rights, kept between requests: they change only when the
+ * land or the land sales are loaded again, and reading every zone and ordering the formations
+ * takes a moment otherwise. Held by this Worker instance only.
+ */
+const zonesKept = new Map<string, { stamp: string; zones: string[] }>();
+
+/**
+ * The zones including a play's rights, of every zone the loads hold (rightsZones: the order of
+ * formations is read from those same zones), as the hashes the database gave them: a zone can
+ * be a thousand characters, and thousands are kept. Null when no play is asked for.
+ */
+export async function landRightsZones(
+  play: string | null,
+  read: {
+    stamp: () => Promise<string>;
+    zones: () => Promise<{ zone: string; hash: string }[]>;
+  },
+): Promise<string[] | null> {
+  if (play === null) return null;
+  const stamp = await read.stamp();
+  const kept = zonesKept.get(play);
+  if (kept?.stamp === stamp) return kept.zones;
+  const hashOf = new Map((await read.zones()).map((z) => [z.zone, z.hash]));
+  const zones = rightsZones([...hashOf.keys()], play).flatMap((zone) => hashOf.get(zone) ?? []);
+  zonesKept.set(play, { stamp, zones });
+  return zones;
+}
+
+/** For tests: forget the zones kept. */
+export function clearLandRightsZones() {
+  zonesKept.clear();
 }
 
 /** The limits of a request: the kinds asked for at their most, the others at none. */

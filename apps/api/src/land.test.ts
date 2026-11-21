@@ -6,7 +6,9 @@ import {
   LAND_MAX,
   LAND_SCHEMA_VERSION,
   landAnswer,
+  clearLandRightsZones,
   landLimits,
+  landRightsZones,
   parseLandKinds,
   parseLandRights,
 } from './land';
@@ -71,6 +73,7 @@ beforeEach(() => {
   grain = fakeDatabase();
   petroleum = fakePetroleum();
   petroleum.schemaVersion.mockResolvedValue(LAND_SCHEMA_VERSION);
+  clearLandRightsZones();
   openPetroleum.mockClear();
   mockAuthServer(Response.json({ id: USER_ID, email: 'adam@example.test' }));
 });
@@ -88,17 +91,47 @@ describe('parseLandKinds', () => {
   });
 });
 
+const PNG = 'PETROLEUM AND NATURAL GAS';
+const ZONE_TEXTS = [
+  `${PNG} IN THE DUVERNAY FM(D286)`,
+  `${PNG} BELOW THE BASE OF THE EXAMPLE GRP(D4) TO THE BASE OF THE DUVERNAY FM(D286)`,
+  `${PNG} BELOW THE BASE OF THE EXAMPLE GRP(D4) TO BASEMENT`,
+  `${PNG} FROM SURFACE TO THE BASE OF THE EXAMPLE GRP(D4)`,
+];
+const ZONES = ZONE_TEXTS.map((zone, i) => ({ zone, hash: `hash-${String(i)}` }));
+const INCLUDING = ['hash-0', 'hash-1', 'hash-2'];
+
 describe('parseLandRights', () => {
   it('reads a play, or none', () => {
-    expect(parseLandRights(undefined)).toEqual({ pattern: null });
-    expect(parseLandRights('duvernay')).toEqual({
-      pattern: expect.stringContaining('IN THE DUVERNAY') as string,
-    });
+    expect(parseLandRights(undefined)).toEqual({ play: null });
+    expect(parseLandRights('duvernay')).toEqual({ play: 'duvernay' });
   });
 
   it('refuses a play it does not know', () => {
     expect(typeof parseLandRights('montney')).toBe('string');
     expect(typeof parseLandRights('constructor')).toBe('string');
+  });
+});
+
+describe('landRightsZones', () => {
+  it('reads nothing when no play is asked for', async () => {
+    const stamp = vi.fn(() => Promise.resolve('1:1'));
+    expect(await landRightsZones(null, { stamp, zones: () => Promise.resolve(ZONES) })).toBeNull();
+    expect(stamp).not.toHaveBeenCalled();
+  });
+
+  it('works the zones out once for the loads held, and again after a new load', async () => {
+    const zones = vi.fn(() => Promise.resolve(ZONES));
+    let stamp = '1:1';
+    const read = { stamp: () => Promise.resolve(stamp), zones };
+    const first = await landRightsZones('duvernay', read);
+    // In the formation, down to its base, and from a formation the zones place above it.
+    expect(first).toEqual(INCLUDING);
+    expect(await landRightsZones('duvernay', read)).toBe(first);
+    expect(zones).toHaveBeenCalledTimes(1);
+    stamp = '2:1';
+    await landRightsZones('duvernay', read);
+    expect(zones).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -186,12 +219,17 @@ describe('GET /api/v1/petroleum/land', () => {
       { agreements: LAND_MAX.agreements, offsets: LAND_MAX.offsets, freehold: 0 },
       null,
     );
+    // With a play: the zones that include it, read as the same member.
+    petroleum.landZones.mockResolvedValue(ZONES);
     await get(`${BOX}&layers=agreements&rights=duvernay`);
     expect(petroleum.land).toHaveBeenLastCalledWith(
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      expect.stringContaining('TO THE BASE OF THE DUVERNAY'),
+      INCLUDING,
+    );
+    expect(petroleum.landZones).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
     );
   });
 });

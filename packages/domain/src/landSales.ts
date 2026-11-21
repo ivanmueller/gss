@@ -183,6 +183,17 @@ export interface SaleNoticeParcel {
   portion: boolean;
 }
 
+/** The clauses as one zone: as many whole clauses as fit in the 1,000 characters kept. */
+function zoneOf(clauses: readonly string[]): string | null {
+  let zone = '';
+  for (const clause of clauses) {
+    const next = zone === '' ? clause : `${zone} ${clause}`;
+    if (next.length > 1000) break;
+    zone = next;
+  }
+  return zone === '' ? null : zone;
+}
+
 export interface SaleNotice {
   saleDate: string;
   parcels: SaleNoticeParcel[];
@@ -214,19 +225,31 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
           if (key) lands.push(key);
           if (tag(land, 'Portion') || tag(land, 'MetesBoundsIndicator')) portion = true;
         }
+        // A clause is a substance and its interval, written over one or more lines; the same
+        // clause repeated for each tract is kept once.
         const clauses: string[] = [];
-        for (const line of blocks(contract, 'Line')) {
-          const words = [tag(line, 'Substance'), tag(line, 'Qualifier'), tag(line, 'ZoneName')]
-            .filter((w): w is string => w !== null)
-            .join(' ');
-          if (words !== '') clauses.push(words);
+        for (const description of blocks(contract, 'ZoneDescription')) {
+          let clause = '';
+          const end = () => {
+            if (clause !== '' && !clauses.includes(clause)) clauses.push(clause);
+            clause = '';
+          };
+          for (const line of blocks(description, 'Line')) {
+            const substance = tag(line, 'Substance');
+            if (substance) end();
+            const words = [substance, tag(line, 'Qualifier'), tag(line, 'ZoneName')]
+              .filter((w): w is string => w !== null)
+              .join(' ');
+            if (words !== '') clause = clause === '' ? words : `${clause} ${words}`;
+          }
+          end();
         }
         parcels.push({
           contractNo,
           contractType,
           region: regionName,
           hectares: decimal(tag(contract, 'Hectares')),
-          zone: clauses.length > 0 ? [...new Set(clauses)].join(' ').slice(0, 1000) : null,
+          zone: zoneOf(clauses),
           lands,
           portion,
         });
