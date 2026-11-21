@@ -602,8 +602,9 @@ export function syncSt37(
   PADS.set(map, pads);
 
   const colour = colourBy(tone);
-  // Wells are dense where they count: zoomed out, a grey shading of how many there are.
-  const shade = tone === 'light' ? '0, 0, 0' : '230, 228, 226';
+  // Wells are dense where they count: zoomed out, a grey shading of how many there are. On the
+  // light map's land (#f2f0e8) its darkest part reads as about #9b9790 (the owner, 2026-11-21).
+  const shade = tone === 'light' ? '13, 6, 0' : '230, 228, 226';
   map.setPaintProperty(ST37_LAYERS.density, 'heatmap-color', [
     'interpolate',
     ['linear'],
@@ -611,13 +612,13 @@ export function syncSt37(
     0,
     `rgba(${shade}, 0)`,
     0.1,
-    `rgba(${shade}, 0.03)`,
+    `rgba(${shade}, 0.04)`,
     0.3,
-    `rgba(${shade}, 0.1)`,
+    `rgba(${shade}, 0.13)`,
     0.6,
-    `rgba(${shade}, 0.2)`,
+    `rgba(${shade}, 0.25)`,
     1,
-    `rgba(${shade}, 0.32)`,
+    `rgba(${shade}, 0.4)`,
   ]);
   map.setFilter(ST37_LAYERS.density, shownFilter('surface', view.shown));
   map.setPaintProperty(ST37_LAYERS.paths, 'line-color', colour);
