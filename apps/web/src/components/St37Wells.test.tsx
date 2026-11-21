@@ -273,6 +273,35 @@ describe('St37Card', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it('starts on the leg clicked on the map, unless it is the main one (F-258)', () => {
+    const first = well('00/09-07-030-26W4/0', { statusClass: 'abandoned' });
+    const second = well('00/09-07-030-26W4/2');
+    const wells = [first, second];
+    const card = (clicked: string) => (
+      <St37Card
+        hover={{ uwis: [clicked], x: 10, y: 10 }}
+        byUwi={new Map(wells.map((w) => [w.uwi, w]))}
+        legsOf={st37Legs(wells)}
+        member={{ organizationId: 'org-a', token: 'token' }}
+        kept
+      />
+    );
+    const other = render(card(first.uwi));
+    expect(screen.getByRole('button', { name: /26W4\/0/ })).toHaveAttribute('aria-pressed', 'true');
+    // Its own production comes under the well's, which stays.
+    expect(screen.getByText(/Production of all legs together/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('group', { name: 'Production of leg 00/09-07-030-26W4/0' }),
+    ).toBeInTheDocument();
+    other.unmount();
+    render(card(second.uwi));
+    expect(screen.getByRole('button', { name: /26W4\/0/ })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.queryByRole('group', { name: /Production of leg/ })).not.toBeInTheDocument();
+  });
+
   it("names the well's field and pool, and a pool the list does not name by its code", () => {
     const uwi = '00/09-07-030-26W4/0';
     const named = well(uwi, {
