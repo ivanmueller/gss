@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { st37Features, type St37MapWell } from '../lib/st37Map';
-import { St37Card, st37Covers, st37Plan, st37Request } from './St37Wells';
+import { St37Card, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -160,6 +160,22 @@ describe('St37Card', () => {
     expect(screen.getByText('Producing or injecting · Crude oil')).toBeInTheDocument();
     expect(screen.getByText('Spud 2023-09-03 · TD 5,846 m (TVD 2,233 m)')).toBeInTheDocument();
     expect(screen.getByText('+1 more well here')).toBeInTheDocument();
+  });
+
+  it("names the well's field and pool, and a pool the list does not name by its code", () => {
+    const uwi = '00/09-07-030-26W4/0';
+    const named = well(uwi, {
+      fieldName: 'EXAMPLE SOUTH',
+      poolCode: 728001,
+      poolName: 'EXAMPLE A',
+    });
+    expect(st37Place(named)).toBe('Example South field · Example A pool');
+    expect(st37Place(well(uwi, { fieldName: "O'EXAMPLE-WEST", poolCode: 728098 }))).toBe(
+      "O'Example-West field · pool 728098",
+    );
+    expect(st37Place(well(uwi))).toBeNull();
+    render(<St37Card hover={{ uwis: [uwi], x: 10, y: 10 }} byUwi={new Map([[uwi, named]])} />);
+    expect(screen.getByText('Example South field · Example A pool')).toBeInTheDocument();
   });
 
   it('shows nothing when no well is under the pointer', () => {

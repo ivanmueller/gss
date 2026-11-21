@@ -51,8 +51,9 @@ export function fakePetroleum() {
       Promise.resolve({ load: null, current: 0 }),
     ),
     st37Wells: vi.fn<PetroleumDatabase['st37Wells']>(() =>
-      Promise.resolve({ load: null, wells: [] }),
+      Promise.resolve({ loads: [], wells: [] }),
     ),
+    st37Drilled: vi.fn<PetroleumDatabase['st37Drilled']>(() => Promise.resolve([])),
     wellProduction: vi.fn<PetroleumDatabase['wellProduction']>(() =>
       Promise.resolve({ load: null, months: [] }),
     ),

@@ -20,40 +20,52 @@ const member = () => ({
   requestId: crypto.randomUUID(),
 });
 
-const [ONE, TWO] = ['00/01-01-125-01W6/0', '00/02-01-125-01W6/2'];
-const UWIS = [ONE, TWO];
+const [ONE, TWO, THREE] = ['00/01-01-126-01W6/0', '00/02-01-126-01W6/2', '00/04-01-126-01W6/0'];
+const UWIS = [ONE, TWO, THREE];
+const PLAY = 'example_play';
 
 describe('monthly production as petro_api', () => {
-  it("reads a well's months in order and the total of all wells by month", async () => {
+  it("reads a well's months in order and the total of one play's wells by month", async () => {
     const admin = postgres(ADMIN, { max: 1 });
     const db = postgresPetroleum(PETRO_URL);
     try {
       await admin`delete from petro.well_production where uwi in ${admin(UWIS)}`;
+      await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
+      // Both wells belong to a play of their own; a third well's production to no play.
+      await admin`
+        insert into petro.st37_wells (uwi, licence_number, status_class, formation,
+          surface_longitude, surface_latitude, bottom_longitude, bottom_latitude)
+        values (${ONE}, '0999001', 'producing', ${PLAY}, -119.9, 59.95, -119.91, 59.95),
+               (${TWO}, '0999002', 'producing', ${PLAY}, -119.9, 59.96, -119.91, 59.96)`;
       await admin`
         insert into petro.well_production (uwi, month, oil_m3, gas_e3m3, water_m3, condensate_m3, hours)
         values
           (${ONE}, '1990-02-01', 280, 110.125, null, 12.5, 600),
           (${ONE}, '1990-01-01', 310.5, 120.25, 80, null, 744),
-          (${TWO}, '1990-01-01', 100.25, null, 20, null, null)`;
+          (${TWO}, '1990-01-01', 100.25, null, 20, null, null),
+          (${THREE}, '1990-01-01', 999, 999, 999, 999, 1)`;
 
       const well = await db.wellProduction(member(), ONE);
       expect(well.months).toEqual([
         { month: '1990-01', oil: 310.5, gas: 120.25, water: 80, condensate: null, hours: 744 },
         { month: '1990-02', oil: 280, gas: 110.125, water: null, condensate: 12.5, hours: 600 },
       ]);
-      expect((await db.wellProduction(member(), '00/03-01-125-01W6/0')).months).toEqual([]);
+      expect((await db.wellProduction(member(), '00/03-01-126-01W6/0')).months).toEqual([]);
 
-      const formation = await db.formationProduction(member());
-      expect(formation.months.filter((m) => m.month.startsWith('1990-'))).toEqual([
+      const formation = await db.formationProduction(member(), PLAY);
+      expect(formation.months).toEqual([
         { month: '1990-01', oil: 410.75, gas: 120.25, water: 100, condensate: null, wells: 2 },
         { month: '1990-02', oil: 280, gas: 110.125, water: null, condensate: 12.5, wells: 1 },
       ]);
+
+      expect((await db.formationProduction(member(), 'another_play')).months).toEqual([]);
 
       // Without a member the rows are not read at all.
       const nobody = { ...member(), role: 'stranger' };
       expect((await db.wellProduction(nobody, ONE)).months).toEqual([]);
     } finally {
       await admin`delete from petro.well_production where uwi in ${admin(UWIS)}`;
+      await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
       await admin.end();
       await db.close();
     }

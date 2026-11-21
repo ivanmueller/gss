@@ -37,14 +37,15 @@ interface Answer {
     area: Bbox | null;
     licenceSource: string | null;
   };
-  /** The formation loaded whole, with its wells by status; null for a rectangle. */
-  formation: {
+  /** Each play loaded whole (F-256): where it lies, its wells by status, its zones. */
+  formations?: {
     key: string;
     name: string;
+    area: Bbox;
     totals: Partial<Record<St37StatusClass, number>>;
     /** Where its drilled wells cluster (F-255). */
     zones?: St37MapZone[];
-  } | null;
+  }[];
   truncated: boolean;
   wells: St37MapWell[];
 }
@@ -104,6 +105,7 @@ export interface St37State {
 export function useSt37Wells(organizationId: string, token: string): St37State {
   const [on, setOn] = useState(true);
   const [hidden, setHidden] = useState<ReadonlySet<St37StatusClass>>(new Set());
+  const [chosen, setChosen] = useState<string | null>(null);
   const [view, setView] = useState<Bbox | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
 
@@ -153,13 +155,16 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     () => ST37_STATUS_CLASSES.filter((status) => !hidden.has(status)),
     [hidden],
   );
-  const outline = answer?.formation ? (ST37_OUTLINES[answer.formation.key] ?? null) : null;
+  const formations = useMemo(() => answer?.formations ?? [], [answer]);
+  // The play the panel is about: the one chosen, or the first (the latest loaded).
+  const formation = formations.find((f) => f.key === chosen) ?? formations[0] ?? null;
+  const outline = formation ? (ST37_OUTLINES[formation.key] ?? null) : null;
   const outlineUrl = outline?.url ?? null;
   // The same zones come with every answer: kept as one object while they do not change.
-  const zonesKey = JSON.stringify(answer?.formation?.zones ?? null);
+  const zonesKey = JSON.stringify(formations.flatMap((f) => f.zones ?? []));
   const zones = useMemo(() => {
-    const list = JSON.parse(zonesKey) as St37MapZone[] | null;
-    return list ? st37ZoneFeatures(list) : null;
+    const list = JSON.parse(zonesKey) as St37MapZone[];
+    return list.length > 0 ? st37ZoneFeatures(list) : null;
   }, [zonesKey]);
   const mapView = useMemo<St37View | null>(
     () => (on ? { wells: features, shown, outline: outlineUrl, zones } : null),
@@ -202,30 +207,35 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
       </label>
       {on && (
         <>
-          {answer?.formation && answer.source.area && (
+          {formations.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                Formation
+                {formations.length === 1 ? 'Formation' : 'Formations'}
               </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="justify-between"
-                onClick={() => {
-                  const a = answer.source.area;
-                  if (a) goTo([a.west, a.south, a.east, a.north]);
-                }}
-              >
-                <span>{answer.formation.name}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {formationTotal(answer.formation.totals).toLocaleString('en-CA')} wells
-                </span>
-              </Button>
+              {formations.map((f) => (
+                <Button
+                  key={f.key}
+                  size="sm"
+                  variant="outline"
+                  className="justify-between"
+                  aria-pressed={formations.length > 1 ? f.key === formation?.key : undefined}
+                  onClick={() => {
+                    setChosen(f.key);
+                    goTo([f.area.west, f.area.south, f.area.east, f.area.north]);
+                  }}
+                >
+                  <span>{f.name}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {formationTotal(f.totals).toLocaleString('en-CA')} wells
+                  </span>
+                </Button>
+              ))}
             </div>
           )}
-          {answer?.formation && (
+          {formation && (
             <FormationProduction
-              name={answer.formation.name}
+              formation={formation.key}
+              name={formation.name}
               organizationId={organizationId}
               token={token}
             />
@@ -280,7 +290,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               More wells than can be drawn at once here: zoom in to see every one.
             </p>
           )}
-          {answer?.source.area && !answer.formation && (
+          {answer?.source.area && (
             <Button
               size="sm"
               variant="outline"
@@ -299,14 +309,18 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               About this data
             </summary>
             <div className="mt-1.5 flex flex-col gap-1.5">
-              {answer?.formation && (
+              {formation && (
                 <p>
-                  Every well of the formation, whatever its status. The counts are those of the
-                  wells in view. Shaded zones: where its drilled wells cluster.
+                  Every well of a formation, whatever its status. The counts are those of the wells
+                  in view. Shaded zones: where its drilled wells cluster.
                 </p>
               )}
-              {answer?.formation && (
-                <FormationProductionAbout organizationId={organizationId} token={token} />
+              {formation && (
+                <FormationProductionAbout
+                  formation={formation.key}
+                  organizationId={organizationId}
+                  token={token}
+                />
               )}
               <p>
                 Zoomed out: how dense the wells are. Zoom in for each well and its drilled path;
@@ -320,8 +334,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                     ? `${answer.source.name}${
                         answer.source.sourceDate ? `, list of ${answer.source.sourceDate}` : ''
                       }${answer.source.licenceSource ? `; ${answer.source.licenceSource}` : ''}; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for ${
-                        answer.formation ? `the ${answer.formation.name} only` : 'one area'
-                      } so far. Not an official record.`
+                        formations.length > 0
+                          ? `the ${formations.map((f) => f.name).join(', ')} only`
+                          : 'one area'
+                      } so far. Fields and pools named from the Alberta Energy Regulator's ST103 list. Not an official record.`
                     : 'No wells loaded yet.'}
                 </p>
               )}
@@ -357,6 +373,30 @@ export function st37Plan(well: St37MapWell): string | null {
     );
   }
   if (well.licenceDate) parts.push(`Licensed ${well.licenceDate}`);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/** KAYBOB SOUTH → Kaybob South: a field's or pool's name as the AER writes it, for reading. */
+function readable(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(
+      /(^|[^a-z])([a-z])/g,
+      (_, before: string, letter: string) => `${before}${letter.toUpperCase()}`,
+    );
+}
+
+/**
+ * A well's field and pool: "Kaybob South field · Duvernay A pool"; a pool the AER's list does
+ * not name is shown by its code; null for a well with neither.
+ */
+export function st37Place(well: St37MapWell): string | null {
+  const parts = [
+    well.fieldName && `${readable(well.fieldName)} field`,
+    well.poolName
+      ? `${readable(well.poolName)} pool`
+      : well.poolCode != null && `pool ${String(well.poolCode)}`,
+  ].filter((part): part is string => Boolean(part));
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
@@ -408,6 +448,7 @@ export function St37Card({
         {well.licensee ? ` · ${well.licensee}` : ''}
       </p>
       <p className="mt-1">{status}</p>
+      {st37Place(well) && <p className="text-muted-foreground">{st37Place(well)}</p>}
       {depth && <p className="text-muted-foreground">{depth}</p>}
       {(well.statusClass === 'licensed' || well.statusClass === 'drilling') && st37Plan(well) && (
         <p className="text-muted-foreground">{st37Plan(well)}</p>

@@ -40,9 +40,10 @@ export interface ProductionDatabase {
     ctx: PetroleumContext,
     uwi: string,
   ): Promise<{ load: ProductionLoad | null; months: WellProductionMonth[] }>;
-  /** Members: the latest load and every loaded well's production added up, by month. */
+  /** Members: the latest load and the production of one play's wells added up, by month. */
   formationProduction(
     ctx: PetroleumContext,
+    formation: string,
   ): Promise<{ load: ProductionLoad | null; months: FormationProductionMonth[] }>;
 }
 
@@ -107,14 +108,16 @@ export function productionQueries(sql: postgres.Sql): ProductionDatabase {
         return { load, months: rows.map((r) => ({ ...volumes(r), hours: r.hours })) };
       });
     },
-    formationProduction(ctx) {
+    formationProduction(ctx, formation) {
       return sql.begin(async (tx) => {
         await asMember(tx, ctx);
         const load = await latestLoad(tx);
         const rows = await tx<(MonthRow & { wells: number })[]>`
           select to_char(month, 'YYYY-MM') as month, sum(oil_m3) as oil, sum(gas_e3m3) as gas,
                  sum(water_m3) as water, sum(condensate_m3) as condensate, count(*)::int as wells
-          from petro.well_production group by month order by month`;
+          from petro.well_production
+          where uwi in (select uwi from petro.st37_wells where formation = ${formation})
+          group by month order by month`;
         return { load, months: rows.map((r) => ({ ...volumes(r), wells: r.wells })) };
       });
     },

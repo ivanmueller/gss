@@ -1,11 +1,23 @@
+import type { St37Zone } from '@grain/domain';
 import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
 import type { Membership } from './db';
-import { parseUwi, PRODUCTION_SCHEMA_VERSION, productionAnswer } from './production';
+import {
+  parseFormation,
+  parseUwi,
+  PRODUCTION_SCHEMA_VERSION,
+  productionAnswer,
+} from './production';
 import type { ProductionLoad } from './production-db';
-import { parseSt37Box, ST37_MAX_WELLS, ST37_SCHEMA_VERSION, st37Answer } from './st37';
+import {
+  parseSt37Box,
+  ST37_MAX_WELLS,
+  ST37_SCHEMA_VERSION,
+  st37Answer,
+  st37LoadZones,
+} from './st37';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import type { MapLayerWrite } from './map-layers-db';
@@ -499,17 +511,22 @@ export function petroleumRoutes(
             'The oil and gas database is being updated. Try again in a few minutes.',
           );
         }
-        const { load, wells } = await petroleum.st37Wells(
-          {
-            userId: ctx.userId,
-            organizationId: membership.organizationId,
-            role: membership.role,
-            requestId: ctx.requestId,
-          },
-          box,
-          ST37_MAX_WELLS,
-        );
-        return c.json(st37Answer(load, wells));
+        const who: PetroleumContext = {
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        };
+        const { loads, wells } = await petroleum.st37Wells(who, box, ST37_MAX_WELLS);
+        const zones = new Map<string, St37Zone[]>();
+        for (const load of loads) {
+          if (!load.formation) continue;
+          zones.set(
+            load.formation,
+            await st37LoadZones(load, (formation) => petroleum.st37Drilled(who, formation)),
+          );
+        }
+        return c.json(st37Answer(loads, zones, wells));
       });
     });
   });
@@ -555,7 +572,9 @@ export function petroleumRoutes(
 
   routes.get('/production/formation', (c) => {
     c.header('Cache-Control', 'no-store');
-    return production(c, (petroleum, ctx) => petroleum.formationProduction(ctx));
+    const asked = parseFormation(c.req.query('formation'));
+    if (typeof asked === 'string') return apiError(c, 400, 'VALIDATION_FAILED', asked);
+    return production(c, (petroleum, ctx) => petroleum.formationProduction(ctx, asked.formation));
   });
 
   return routes;

@@ -1,4 +1,4 @@
-import { ST37_FORMATIONS, st37Zones } from '@grain/domain';
+import { ST37_FORMATIONS, st37Zones, type St37Zone, type ZoneWell } from '@grain/domain';
 
 import type { St37Box, St37Load, St37WellRow } from './st37-db';
 
@@ -8,8 +8,8 @@ import type { St37Box, St37Load, St37WellRow } from './st37-db';
  * shown with its source, never offered as a download.
  */
 
-/** The oil and gas schema version the ST37 wells need (20261123010000_petro_st37_formation.sql). */
-export const ST37_SCHEMA_VERSION = 6;
+/** The oil and gas schema version the ST37 wells need (20261125010000_petro_plays_fields_pools.sql). */
+export const ST37_SCHEMA_VERSION = 8;
 
 /** At most this many wells per answer; a view holding more is drawn from the first ones. */
 export const ST37_MAX_WELLS = 20_000;
@@ -40,26 +40,68 @@ export function parseSt37Box(query: Record<string, string>): St37Box | string {
   return { west, south, east, north };
 }
 
-export function st37Answer(load: St37Load | null, rows: St37WellRow[]) {
+/**
+ * The zones of each play's latest load, kept between requests (F-255): they change only when
+ * the play is loaded again, and working them out takes a moment on every wells request
+ * otherwise. Held by this Worker instance only; a new instance works them out once.
+ */
+const zonesKept = new Map<string, St37Zone[]>();
+
+/** The zones of a load's play, from those kept or worked out from its drilled wells. */
+export async function st37LoadZones(
+  load: St37Load,
+  drilled: (formation: string) => Promise<ZoneWell[]>,
+): Promise<St37Zone[]> {
+  if (!load.formation) return [];
+  const key = `${load.formation}:${load.id}`;
+  const kept = zonesKept.get(key);
+  if (kept) return kept;
+  const zones = st37Zones(await drilled(load.formation));
+  // One entry a play: an earlier load's zones are let go.
+  for (const k of zonesKept.keys()) {
+    if (k.startsWith(`${load.formation}:`)) zonesKept.delete(k);
+  }
+  zonesKept.set(key, zones);
+  return zones;
+}
+
+/** For tests: forget the zones kept. */
+export function clearSt37Zones() {
+  zonesKept.clear();
+}
+
+export function st37Answer(
+  loads: readonly St37Load[],
+  zones: ReadonlyMap<string, St37Zone[]>,
+  rows: St37WellRow[],
+) {
   const truncated = rows.length > ST37_MAX_WELLS;
+  // The newest load of all: its date and source describe the copy.
+  const [latest] = loads;
   return {
     source: {
       name: ST37_SOURCE_NAME,
-      loadedAt: load?.loadedAt ?? null,
-      sourceDate: load?.sourceDate ?? null,
-      area: load?.area ?? null,
-      licenceSource: load?.formation ? ST37_LICENCE_SOURCE_NAME : null,
+      loadedAt: latest?.loadedAt ?? null,
+      sourceDate: latest?.sourceDate ?? null,
+      // The rectangle loaded, when there is one beside the plays.
+      area: loads.find((load) => load.formation === null)?.area ?? null,
+      licenceSource: loads.some((load) => load.formation) ? ST37_LICENCE_SOURCE_NAME : null,
     },
-    // The formation loaded whole, with its wells by status; null when the load was a rectangle.
-    formation: load?.formation
-      ? {
-          key: load.formation,
-          name: FORMATION_NAMES[load.formation] ?? load.formation,
-          totals: load.totals,
-          // Where its drilled wells cluster (F-255): computed here from the stored wells.
-          zones: st37Zones(load.drilled ?? []),
-        }
-      : null,
+    // Each play loaded whole, with where it lies, its wells by status and its zones.
+    formations: loads.flatMap((load) =>
+      load.formation
+        ? [
+            {
+              key: load.formation,
+              name: FORMATION_NAMES[load.formation] ?? load.formation,
+              area: load.area,
+              loadedAt: load.loadedAt,
+              totals: load.totals,
+              zones: zones.get(load.formation) ?? [],
+            },
+          ]
+        : [],
+    ),
     truncated,
     wells: truncated ? rows.slice(0, ST37_MAX_WELLS) : rows,
   };

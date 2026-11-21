@@ -17,7 +17,7 @@ const env = {
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}` };
 const UWI = '00/11-23-030-27W4/2';
 const WELL = `/api/v1/petroleum/production/well?uwi=${encodeURIComponent(UWI)}`;
-const FORMATION = '/api/v1/petroleum/production/formation';
+const FORMATION = '/api/v1/petroleum/production/formation?formation=duvernay';
 const LOAD = {
   loadedAt: '2026-11-20T22:00:00.000Z',
   formation: 'duvernay',
@@ -119,5 +119,21 @@ describe('GET /api/v1/petroleum/production', () => {
     const res = await app.request(FORMATION, { headers: AUTH }, env);
     expect(res.status).toBe(200);
     expect((await res.json<ReturnType<typeof productionAnswer>>()).months).toEqual(months);
+    expect(petroleum.formationProduction).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-a' }),
+      'duvernay',
+    );
+  });
+
+  it('refuses a total without the key of a play', async () => {
+    for (const query of ['', '?formation=Not%20A%20Key']) {
+      const res = await app.request(
+        `/api/v1/petroleum/production/formation${query}`,
+        { headers: AUTH },
+        env,
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(openPetroleum).not.toHaveBeenCalled();
   });
 });

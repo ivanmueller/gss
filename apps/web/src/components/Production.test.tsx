@@ -33,7 +33,8 @@ const WELL: ProductionAnswer = {
 };
 const UWI = '00/11-23-030-27W4/2';
 const WELL_PATH = `GET /petroleum/production/well?organization_id=org-a&uwi=${encodeURIComponent(UWI)}`;
-const FORMATION_PATH = 'GET /petroleum/production/formation?organization_id=org-a';
+const FORMATION_PATH =
+  'GET /petroleum/production/formation?organization_id=org-a&formation=duvernay';
 
 afterEach(() => {
   clearProductionCache();
@@ -124,15 +125,22 @@ describe('FormationProduction', () => {
           ],
         }),
     });
-    render(<FormationProduction name="Duvernay" organizationId="org-a" token="token" />);
+    render(
+      <FormationProduction
+        formation="duvernay"
+        name="Duvernay"
+        organizationId="org-a"
+        token="token"
+      />,
+    );
     const oil = await screen.findByRole('img', { name: /^Oil, m³ a month/ });
     expect(screen.getByText('Duvernay production')).toBeInTheDocument();
     // What it shows and its source are in the panel's About this data.
     expect(screen.queryByText(/Petrinex/)).not.toBeInTheDocument();
-    render(<FormationProductionAbout organizationId="org-a" token="token" />);
+    render(<FormationProductionAbout formation="duvernay" organizationId="org-a" token="token" />);
     expect(
       screen.getByText(
-        /Production: the total of the wells loaded, by month, Jun 2026 to Sep 2026; 12 wells in the last month\. Point at a chart for a month\. A well drilled before Jun 2026 shows only its production since then\. Petrinex public data, Conventional Volumetric Data, © Government of Alberta\. Not an official record\./,
+        /Production: the total of the formation's wells, by month, Jun 2026 to Sep 2026; 12 wells in the last month\. Point at a chart for a month\. A well drilled before Jun 2026 shows only its production since then\. Petrinex public data, Conventional Volumetric Data, © Government of Alberta\. Not an official record\./,
       ),
     ).toBeInTheDocument();
     // The latest month until a month is pointed at.
@@ -150,7 +158,12 @@ describe('FormationProduction', () => {
       [FORMATION_PATH]: () => Response.json({ source: { ...SOURCE, loadedAt: null }, months: [] }),
     });
     const { container } = render(
-      <FormationProduction name="Duvernay" organizationId="org-a" token="token" />,
+      <FormationProduction
+        formation="duvernay"
+        name="Duvernay"
+        organizationId="org-a"
+        token="token"
+      />,
     );
     await vi.waitFor(() => {
       expect(calls).toHaveLength(1);
