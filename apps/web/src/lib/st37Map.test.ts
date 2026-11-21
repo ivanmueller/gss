@@ -194,6 +194,9 @@ describe('syncSt37', () => {
       ['literal', ['hole', 'start']],
     ]);
     expect(layers.get(ST37_LAYERS.planned)?.minzoom).toBe(layers.get(ST37_LAYERS.pending)?.maxzoom);
+    // The shading is gone by a 10 km distance bar (zoom 8), the paths in from a 30 km one (F-260).
+    expect(layers.get(ST37_LAYERS.density)?.maxzoom).toBe(8);
+    expect(layers.get(ST37_LAYERS.paths)?.minzoom).toBe(7);
 
     // Main legs and planned lines off: other legs only, a dot a well, and a leg not drilled
     // yet has its dot where it starts.
