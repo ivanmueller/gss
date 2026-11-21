@@ -539,9 +539,10 @@ export function syncSt37(
       },
       before,
     );
-    // The well under the pointer, whole (F-257), whatever is switched off: each of its legs a
-    // little bolder in the map's ink, each of its bottom holes a dot. Only that well: not the
-    // others on its pad, and no colour of its own for the main leg (the owner, 2026-11-21).
+    // The leg under the pointer (F-259), whatever is switched off: a little bolder in the
+    // map's ink, its bottom hole a dot. Only that leg: not the well's other legs, not the
+    // others on its pad, and no colour of its own (the owner, 2026-11-21). A well pointed at
+    // by its surface dot is shown whole (F-257).
     map.addLayer(
       {
         id: ST37_LAYERS.hoverPath,
@@ -716,21 +717,25 @@ function syncZones(
 }
 
 /**
- * Draws the hovered well whole (F-257): every leg under its licence a little bolder, a dot on
- * each of its bottom holes and a square on its surface location, whatever parts are switched
- * off; null clears it.
+ * Draws the hovered leg (F-259; the owner, 2026-11-21: "only highlight the single leg under
+ * the pointer"): the leg with this UWI a little bolder, a dot on its bottom hole and a square
+ * on its well's surface location, whatever parts are switched off. Without a UWI the well is
+ * drawn whole, every leg under its licence (F-257: a well pointed at by its surface dot); a
+ * null licence clears it.
  */
-export function highlightSt37(map: MapboxMap, licence: string | null) {
+export function highlightSt37(map: MapboxMap, licence: string | null, uwi: string | null = null) {
   if (!map.getLayer(ST37_LAYERS.hoverPath)) return;
   const id = licence ?? '';
+  const legs: FilterSpecification =
+    licence !== null && uwi !== null ? ['==', ['get', 'uwi'], uwi] : ['==', ['get', 'licence'], id];
   map.setFilter(ST37_LAYERS.hoverPath, [
     'all',
-    ['==', ['get', 'licence'], id],
+    legs,
     ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
   ] as FilterSpecification);
   map.setFilter(ST37_LAYERS.hoverDots, [
     'all',
-    ['==', ['get', 'licence'], id],
+    legs,
     ['==', ['get', 'part'], 'bottom'],
     ['==', ['get', 'at'], 'hole'],
   ]);

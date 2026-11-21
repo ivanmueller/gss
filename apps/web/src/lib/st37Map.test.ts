@@ -126,7 +126,7 @@ describe('syncSt37', () => {
     }
   });
 
-  it('highlights the well under the pointer, and only that well (F-257)', () => {
+  it('highlights the well under the pointer, or the one leg pointed at (F-257, F-259)', () => {
     const { map, layers } = fakeMap();
     syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
     highlightSt37(map, '0509395');
@@ -144,7 +144,25 @@ describe('syncSt37', () => {
     // Only from the zoom where wells answer the pointer.
     expect(layers.get(ST37_LAYERS.hoverPath)?.minzoom).toBe(ST37_HOVER_FROM);
     expect(Object.keys(ST37_LAYERS)).not.toContain('hoverMain');
-    highlightSt37(map, null);
+    // A leg pointed at: that leg alone, its own bottom hole, its well's surface square (the
+    // owner, 2026-11-21: "only highlight the single leg under the pointer").
+    highlightSt37(map, '0509395', 'UWI-OF-ONE-LEG');
+    expect(layers.get(ST37_LAYERS.hoverPath)?.filter).toEqual([
+      'all',
+      ['==', ['get', 'uwi'], 'UWI-OF-ONE-LEG'],
+      ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
+    ]);
+    expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
+      '==',
+      ['get', 'uwi'],
+      'UWI-OF-ONE-LEG',
+    ]);
+    expect(layers.get(ST37_LAYERS.hoverSurface)?.filter).toContainEqual([
+      '==',
+      ['get', 'licence'],
+      '0509395',
+    ]);
+    highlightSt37(map, null, 'UWI-OF-ONE-LEG');
     expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
       '==',
       ['get', 'licence'],
