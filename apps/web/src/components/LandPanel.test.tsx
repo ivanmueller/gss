@@ -130,6 +130,73 @@ const sales = {
   ]),
 };
 
+describe('a parcel’s codes and documents (F-265 part 2)', () => {
+  const SITE = 'https://content2.energy.alberta.ca/download/?s=png&id=';
+  const coded = {
+    parcels: new Map([
+      [
+        '20',
+        parcel('20', { restrictions: 'SHA010301 SHA010401', reversionZones: 'D00039 D00004' }),
+      ],
+      ['21', parcel('21', { saleDate: '2099-01-13', status: null, bonus: null, buyers: null })],
+    ]),
+    documents: {
+      '2026-08-19': { notice: `${SITE}20260819PON&ft=.pdf`, results: `${SITE}20260819PSR&ft=.pdf` },
+      '2099-01-13': { notice: `${SITE}20990113PON&ft=.pdf`, results: `${SITE}20990113PSR&ft=.pdf` },
+    },
+  };
+
+  it('lists the restriction and reversion zone codes, and links the notice and the results', () => {
+    render(
+      <LandPanel
+        pick={{ keys: ['sale:20'], x: 1, y: 1 }}
+        land={land}
+        sales={coded}
+        onClose={vi.fn()}
+      />,
+    );
+    const codes = (name: string) =>
+      [...screen.getByRole('region', { name }).querySelectorAll('li')].map((li) => li.textContent);
+    expect(codes('Restriction codes')).toEqual(['SHA010301', 'SHA010401']);
+    expect(codes('Deeper rights reversion zones')).toEqual(['D00039', 'D00004']);
+    const notice = screen.getByRole('link', { name: 'Notice PDF' });
+    expect(notice).toHaveAttribute('href', `${SITE}20260819PON&ft=.pdf`);
+    // Opens beside the map, not in its place.
+    expect(notice).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('link', { name: 'Results PDF' })).toHaveAttribute(
+      'href',
+      `${SITE}20260819PSR&ft=.pdf`,
+    );
+  });
+
+  it('shows neither codes nor links for a parcel that has none, and no results before the sale', () => {
+    const { unmount } = render(
+      <LandPanel
+        pick={{ keys: ['sale:10'], x: 1, y: 1 }}
+        land={land}
+        sales={sales}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('region', { name: 'Restriction codes' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Deeper rights reversion zones' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    unmount();
+    render(
+      <LandPanel
+        pick={{ keys: ['sale:21'], x: 1, y: 1 }}
+        land={land}
+        sales={coded}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('link', { name: 'Notice PDF' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Results PDF' })).not.toBeInTheDocument();
+  });
+});
+
 describe('reading a parcel', () => {
   it('writes a date, dollars and land for reading', () => {
     expect(landDay('2026-08-19')).toBe('Aug 19, 2026');

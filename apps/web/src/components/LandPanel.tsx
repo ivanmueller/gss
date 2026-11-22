@@ -38,7 +38,7 @@ import { Button } from './ui/button';
  */
 
 type Land = Pick<LandState, 'agreements' | 'offsets' | 'freehold' | 'issuedFrom'>;
-type Sales = Pick<LandSalesState, 'parcels'>;
+type Sales = Pick<LandSalesState, 'parcels'> & Partial<Pick<LandSalesState, 'documents'>>;
 
 /** One piece of land under the pointer or a click. */
 export type LandEntry =
@@ -322,6 +322,22 @@ function Rights({ zone }: { zone: string }) {
   );
 }
 
+/** Codes kept as one text, separated by spaces, as a list; none for null. */
+function codeList(text: string | null | undefined): string[] {
+  return (text ?? '').split(/\s+/).filter((code) => code !== '');
+}
+
+/** Codes side by side, as published. */
+function Codes({ codes }: { codes: readonly string[] }) {
+  return (
+    <ul className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs">
+      {codes.map((code) => (
+        <li key={code}>{code}</li>
+      ))}
+    </ul>
+  );
+}
+
 /** At most this many other pieces of land are listed under the one shown. */
 const OTHERS_MAX = 8;
 
@@ -356,18 +372,28 @@ export function LandPanel({
   const today = landToday();
   const others = entries.filter((entry) => entry !== lead);
   const bounds = goTo ? landZoom(shapeOf(lead)) : null;
-  const zoom = (label: string) =>
-    bounds &&
-    goTo && (
+  const canZoom = bounds !== null && goTo !== undefined;
+  // The Zoom button, and beside it links to the province's own documents, each in a new tab.
+  const zoom = (label: string, links: readonly { label: string; href: string }[] = []) =>
+    (canZoom || links.length > 0) && (
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          onClick={() => {
-            goTo(bounds);
-          }}
-        >
-          {label}
-        </Button>
+        {bounds && goTo && (
+          <Button
+            size="sm"
+            onClick={() => {
+              goTo(bounds);
+            }}
+          >
+            {label}
+          </Button>
+        )}
+        {links.map((link) => (
+          <Button key={link.label} size="sm" variant="outline" asChild>
+            <a href={link.href} target="_blank" rel="noreferrer">
+              {link.label}
+            </a>
+          </Button>
+        ))}
       </div>
     );
   const foot = (
@@ -416,6 +442,16 @@ export function LandPanel({
     const buyers = saleBuyers(p.buyers);
     const issued = state === 'sold' ? land.issuedFrom(p.saleDate, p.contractNo) : null;
     const township = landKeyTownship(p.land.split(/\s+/)[0] ?? '');
+    const documents = sales.documents?.[p.saleDate];
+    // The results exist once the sale is held.
+    const links = [
+      documents?.notice ? { label: 'Notice PDF', href: documents.notice } : null,
+      documents?.results && state !== 'upcoming'
+        ? { label: 'Results PDF', href: documents.results }
+        : null,
+    ].filter((link): link is { label: string; href: string } => link !== null);
+    const restrictions = codeList(p.restrictions);
+    const reversionZones = codeList(p.reversionZones);
     return (
       <MapPanel
         label={`Sale parcel ${p.contractNo}`}
@@ -441,7 +477,7 @@ export function LandPanel({
             { label: 'Area', value: p.hectares !== null ? saleHectares(p.hectares) : '—' },
           ]}
         />
-        {zoom('Zoom to parcel')}
+        {zoom('Zoom to parcel', links)}
         {buyers.length > 0 && (
           <PanelSection title={buyers.length === 1 ? 'Buyer' : 'Buyers'}>
             <ul className="flex flex-col gap-0.5">
@@ -488,6 +524,19 @@ export function LandPanel({
             </p>
           )}
         </PanelSection>
+        {restrictions.length > 0 && (
+          <PanelSection title="Restriction codes">
+            <Codes codes={restrictions} />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              What each restriction says is in the sale’s notice.
+            </p>
+          </PanelSection>
+        )}
+        {reversionZones.length > 0 && (
+          <PanelSection title="Deeper rights reversion zones">
+            <Codes codes={reversionZones} />
+          </PanelSection>
+        )}
         <p className="mt-4 font-mono text-xs text-muted-foreground">
           {[township && `MRT ${township}`, `Sale ${landDay(p.saleDate)}`]
             .filter(Boolean)

@@ -9,6 +9,7 @@ import {
   landSalesAnswer,
   type landSaleSummaryAnswer,
   parseSince,
+  saleDocuments,
 } from './land-sales';
 import type { LandSaleParcelRow } from './land-sales-db';
 import type { PetroleumFactory } from './petroleum-db';
@@ -40,6 +41,8 @@ const parcel = (id: string): LandSaleParcelRow => ({
   bonus: '56888.32',
   dollarsPerHectare: '222.22',
   buyers: 'EXAMPLE LAND LTD. 100%',
+  restrictions: 'SHA010301 SHA010401',
+  reversionZones: 'D00004',
   shape: [
     [
       [
@@ -89,6 +92,49 @@ describe('landSalesAnswer', () => {
   });
 });
 
+describe('saleDocuments (F-265)', () => {
+  const kept = {
+    '2026-11-04': {
+      notice: '/download/?s=png&id=20261104PON&ft=.pdf',
+      results: '/download/?s=png&id=20261104PSR&ft=.pdf',
+    },
+    '2004-01-07': { notice: '/download/?s=png&id=20040107PON&ft=.PDF&y=2004' },
+    '2026-12-02': { notice: 'https://example.test/notice.pdf', results: 7 },
+    '2020-01-08': { notice: '/download/?s=png&id=20200108PON&ft=.pdf&y=2020' },
+  };
+
+  it('gives the addresses of the sales asked for, on the department\u2019s site', () => {
+    expect(saleDocuments(kept, ['2026-11-04', '2026-11-04', '2004-01-07'])).toEqual({
+      '2026-11-04': {
+        notice: 'https://content2.energy.alberta.ca/download/?s=png&id=20261104PON&ft=.pdf',
+        results: 'https://content2.energy.alberta.ca/download/?s=png&id=20261104PSR&ft=.pdf',
+      },
+      '2004-01-07': {
+        notice: 'https://content2.energy.alberta.ca/download/?s=png&id=20040107PON&ft=.PDF&y=2004',
+        results: null,
+      },
+    });
+  });
+
+  it('links nothing in another form, and nothing when the load kept no documents', () => {
+    expect(saleDocuments(kept, ['2026-12-02', '1999-01-01', 'toString'])).toEqual({});
+    expect(saleDocuments(null, ['2026-11-04'])).toEqual({});
+    expect(saleDocuments('x', ['2026-11-04'])).toEqual({});
+  });
+
+  it('goes with the parcels sent: the documents of their sales only', () => {
+    const load = {
+      loadedAt: '2026-11-22T00:00:00.000Z',
+      firstSale: '2003-01-08',
+      lastSale: '2026-12-02',
+      area: { west: -117, south: 53, east: -115, north: 55 },
+      documents: kept,
+    };
+    expect(Object.keys(landSalesAnswer(load, [parcel('1')]).documents)).toEqual(['2026-11-04']);
+    expect(landSalesAnswer(null, [parcel('1')]).documents).toEqual({});
+  });
+});
+
 describe('GET /api/v1/petroleum/land-sales', () => {
   const app = createApp(openDatabase, { petroleum: openPetroleum, petroleumReadyCacheMs: 0 });
   const viewer = () => {
@@ -128,6 +174,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
         firstSale: '2003-01-08',
         lastSale: '2026-12-16',
         area: { west: -118.75, south: 51.57, east: -112.9, north: 55.28 },
+        documents: { '2026-11-04': { notice: '/download/?s=png&id=20261104PON&ft=.pdf' } },
       },
       parcels: [parcel('7')],
     });
@@ -142,6 +189,13 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     const body = await res.json<ReturnType<typeof landSalesAnswer>>();
     expect(body.parcels).toEqual([parcel('7')]);
     expect(body.source).toMatchObject({ firstSale: '2003-01-08', lastSale: '2026-12-16' });
+    // The sale's notice as a link to the department's own site (F-265).
+    expect(body.documents).toEqual({
+      '2026-11-04': {
+        notice: 'https://content2.energy.alberta.ca/download/?s=png&id=20261104PON&ft=.pdf',
+        results: null,
+      },
+    });
     expect(petroleum.landSales).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -117, south: 54, east: -116, north: 55 },

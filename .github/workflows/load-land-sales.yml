@@ -68,8 +68,8 @@ jobs:
           [[ "$FIRST_YEAR" =~ ^20[0-9]{2}$ ]] || { echo "::error::The first year must be a year such as 2003."; exit 1; }
           echo "FIRST_YEAR=$FIRST_YEAR" >> "$GITHUB_ENV"
           version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
-          if [ "$version" -lt 10 ]; then
-            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 10)."
+          if [ "$version" -lt 11 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 11)."
             exit 1
           fi
           [[ "$FORMATION" =~ ^[a-z][a-z_]{1,39}$ ]] || { echo "::error::Unexpected formation name."; exit 1; }

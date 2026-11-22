@@ -27,6 +27,10 @@ export interface LandSaleParcelRow {
   bonus: string | null;
   dollarsPerHectare: string | null;
   buyers: string | null;
+  /** The restriction codes that apply to it, separated by spaces (F-265); null for none. */
+  restrictions: string | null;
+  /** Its deeper rights reversion zone codes, the same way; null for none. */
+  reversionZones: string | null;
   shape: LandShape;
 }
 
@@ -35,6 +39,11 @@ export interface LandSaleLoad {
   firstSale: string;
   lastSale: string;
   area: St37Box;
+  /**
+   * Each sale's documents by sale date, as the load kept them from the department's page
+   * (F-265): whatever the column holds, checked before any of it is sent on.
+   */
+  documents: unknown;
 }
 
 /**
@@ -123,10 +132,11 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             south: string;
             east: string;
             north: string;
+            documents: unknown;
           }[]
         >`
           select loaded_at, first_sale::text as first_sale, last_sale::text as last_sale,
-                 west, south, east, north
+                 west, south, east, north, documents
           from petro.land_sale_loads order by id desc limit 1`;
         const rows = await tx<
           {
@@ -143,13 +153,16 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             bonus: string | null;
             dollars_per_hectare: string | null;
             buyers: string | null;
+            restrictions: string | null;
+            reversion_zones: string | null;
             shape: LandShape;
           }[]
         >`
           with ${outlineRings(tx, filter)}
           select id::text as id, sale_date::text as sale_date, contract_no, contract_type, region,
                  hectares::text as hectares, zone, land, inexact, status, bonus::text as bonus,
-                 dollars_per_hectare::text as dollars_per_hectare, buyers, shape
+                 dollars_per_hectare::text as dollars_per_hectare, buyers, restrictions,
+                 reversion_zones, shape
           from petro.land_sale_parcels
           where bounds && box(point(${box.west}::float8, ${box.south}::float8),
                               point(${box.east}::float8, ${box.north}::float8))
@@ -173,6 +186,7 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
                   east: Number(load.east),
                   north: Number(load.north),
                 },
+                documents: load.documents,
               }
             : null,
           parcels: rows.map((r) => ({
@@ -189,6 +203,8 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             bonus: r.bonus,
             dollarsPerHectare: r.dollars_per_hectare,
             buyers: r.buyers,
+            restrictions: r.restrictions,
+            reversionZones: r.reversion_zones,
             shape: r.shape,
           })),
         };

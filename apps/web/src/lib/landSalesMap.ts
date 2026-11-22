@@ -50,7 +50,17 @@ export interface LandSaleParcel {
   bonus: string | null;
   dollarsPerHectare: string | null;
   buyers: string | null;
+  /** The restriction codes that apply to it, separated by spaces (F-265); none until loaded. */
+  restrictions?: string | null;
+  /** Its deeper rights reversion zone codes, the same way. */
+  reversionZones?: string | null;
   shape: LandShape;
+}
+
+/** A sale's notice and results as PDF files on the department's site (F-265); null for none. */
+export interface LandSaleDocuments {
+  notice: string | null;
+  results: string | null;
 }
 
 /** How a parcel stands: sold, offered with no taker (or any other result), or not sold yet. */
