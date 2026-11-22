@@ -212,13 +212,13 @@ describe('syncSt37', () => {
     expect(layers.get(ST37_LAYERS.pending)?.maxzoom).toBe(DETAIL_FULL);
     expect(layers.get(ST37_LAYERS.paths)?.paint['line-opacity']).toEqual(fadeIn(0.9));
     expect(layers.get(ST37_LAYERS.planned)?.paint['line-opacity']).toEqual(fadeIn(1));
-    // Much fainter than it was (0.85; the owner, 2026-11-21).
+    // At full strength far out; its tone is set by the colours (the owner, 2026-11-21).
     expect(layers.get(ST37_LAYERS.density)?.paint['heatmap-opacity']).toEqual([
       'interpolate',
       ['linear'],
       ['zoom'],
       DETAIL_GONE,
-      0.4,
+      1,
       DETAIL_FULL,
       0,
     ]);
