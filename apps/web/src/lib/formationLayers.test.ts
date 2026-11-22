@@ -6,9 +6,10 @@ import {
   layerScene,
   pickLayer,
   wallIsBehind,
+  wallsShown,
   type FormationAnswer,
 } from './formationLayers';
-import { lens, sceneZ, well3dScene, type Camera, type Well3dAnswer } from './well3d';
+import { lens, sceneLonLat, sceneZ, well3dScene, type Camera, type Well3dAnswer } from './well3d';
 
 // The ground's layers in a well's 3D view (F-261 part 2): the geometry. Made-up layers only.
 
@@ -119,70 +120,121 @@ describe('layerField', () => {
   });
 });
 
-describe('the block cut open', () => {
+describe('the block of ground', () => {
   const field = layerField(layers());
   const answer = well();
   const plain = well3dScene(answer, true);
   if (!field || !plain) throw new Error('no scene');
-  const scene = well3dScene(answer, true, { stretch: 2, floor: -2400 });
+  // The floor low enough to hold the lower part when the block is opened (500 scene metres).
+  const scene = well3dScene(answer, true, { stretch: 2, floor: -2700 });
   if (!scene) throw new Error('no scene');
+  // From the south, level: the south face is the near one, the north face the far one.
+  const camera: Camera = { target: scene.centre, yaw: 0, pitch: 0, distance: scene.radius * 6 };
+  const view = lens(camera, { width: 800, height: 600 });
 
   it('holds the layers down to the floor asked for, depths stretched about the ground', () => {
     expect(scene.stretch).toBe(2);
-    // -2400 m is 3,300 m under the ground: drawn 6,600 m under it.
-    expect(scene.min[2]).toBeLessThanOrEqual(900 - 6600);
+    // -2700 m is 3,600 m under the ground: drawn 7,200 m under it.
+    expect(scene.min[2]).toBeLessThanOrEqual(900 - 7200);
     expect(sceneZ(scene, -2400)).toBe(900 - 6600);
     expect(sceneZ(plain, -2400)).toBe(-2400);
   });
 
-  it('reads the layers along each face and lays the play top as a sheet', () => {
-    const cut = layerScene(scene, field, 68);
-    expect(cut.walls).toHaveLength(4);
-    expect(cut.walls.map((wall) => wall.normal)).toEqual([
+  it('whole: four faces with the layers along each, the ground on top, the legs as they are', () => {
+    const block = layerScene(scene, field, { playZone: 68, open: false, drop: 500 });
+    expect(block.cut).toBe(-1);
+    expect(block.drop).toBe(0);
+    expect(block.opened).toBeNull();
+    expect(block.underside).toBeNull();
+    expect(block.walls.map((wall) => wall.normal)).toEqual([
       [0, -1],
       [1, 0],
       [0, 1],
       [-1, 0],
     ]);
-    const south = cut.walls[0];
-    expect(south?.samples[0]).toMatchObject({ x: scene.min[0], y: scene.min[1] });
-    expect(south?.samples.at(-1)).toMatchObject({ x: scene.max[0], y: scene.min[1] });
-    expect(south?.samples.every((sample) => sample.stack !== null)).toBe(true);
-    // The sheet: the Duvernay's top, drawn at the scene's stretched height.
-    expect(cut.sheet?.zone).toBe(68);
-    const [first] = cut.sheet?.points ?? [];
-    expect(first?.[2]).toBeLessThan(900 - 2 * 3000);
-    expect(layerScene(scene, field, null).sheet).toBeNull();
-    expect(layerScene(scene, field, 12).sheet).toBeNull();
+    const [south, , north] = block.walls;
+    if (!south || !north) throw new Error('no walls');
+    expect(south.samples[0]).toMatchObject({ x: scene.min[0], y: scene.min[1] });
+    expect(south.samples.at(-1)).toMatchObject({ x: scene.max[0], y: scene.min[1] });
+    expect(south.samples.every((sample) => sample.stack !== null)).toBe(true);
+    // The faces turned toward the eye are shown: the south one, not the north one.
+    expect(wallIsBehind(north, view.eye)).toBe(true);
+    expect(wallsShown(block, view.eye)).toContain(south);
+    expect(wallsShown(block, view.eye)).not.toContain(north);
+    // The ground: the top of the first layer, where the scene draws it.
+    const corner = block.terrain.points[0];
+    expect(block.terrain.points).toHaveLength((block.terrain.side + 1) ** 2);
+    expect(corner?.[0]).toBe(scene.min[0]);
+    expect(corner?.[2]).toBeGreaterThan(sceneZ(scene, 850));
+    // Every leg whole, at the scene's own heights, and all of it shows through the faces.
+    expect(block.lines).toHaveLength(1);
+    expect(block.lines[0]?.points).toHaveLength(3);
+    block.lines[0]?.points.forEach((point, i) => {
+      expect(point[2]).toBeCloseTo(scene.lines[0]?.points[i]?.[2] ?? 0, 6);
+    });
+    expect(block.upper).toHaveLength(1);
+    expect(block.place(0, 0, -2400)).toBe(sceneZ(scene, -2400));
+    expect(block.elevation(0, 0, sceneZ(scene, -2400))).toBeCloseTo(-2400, 6);
+    // A play that is not under the block cannot be opened at.
+    expect(layerScene(scene, field, { playZone: 12, open: true, drop: 500 }).cut).toBe(-1);
+    expect(layerScene(scene, field, { playZone: null, open: true, drop: 500 }).cut).toBe(-1);
   });
 
-  it('shows the faces behind the wells and names the layer under the pointer', () => {
-    const cut = layerScene(scene, field, 68);
-    // From the south, level: the north face is the far one, the south face the near one.
-    const camera: Camera = { target: scene.centre, yaw: 0, pitch: 0, distance: scene.radius * 6 };
-    const size = { width: 800, height: 600 };
-    const view = lens(camera, size);
-    const [south, , north] = cut.walls;
-    if (!south || !north) throw new Error('no walls');
-    expect(wallIsBehind(north, view.eye)).toBe(true);
-    expect(wallIsBehind(south, view.eye)).toBe(false);
+  it('opened at the play: what lies under its top is drawn lower, the legs cut there', () => {
+    const block = layerScene(scene, field, { playZone: 68, open: true, drop: 500 });
+    // The Duvernay is the third of the field's zones.
+    expect(block.cut).toBe(2);
+    expect(block.drop).toBe(500);
+    // Under the well the Duvernay's top is at -2210: above it as it is, under it 500 lower.
+    const top = sceneZ(scene, -2210);
+    expect(block.place(0, 0, -2000)).toBe(sceneZ(scene, -2000));
+    expect(block.place(0, 0, -2210)).toBeCloseTo(top - 500, 6);
+    expect(block.place(0, 0, -2300)).toBe(sceneZ(scene, -2300) - 500);
+    expect(block.elevation(0, 0, top + 10)).toBeCloseTo(-2205, 6);
+    expect(block.elevation(0, 0, top - 500 - 10)).toBeCloseTo(-2215, 6);
+    // Between the two parts there is no ground.
+    expect(block.elevation(0, 0, top - 250)).toBeNull();
+    // The lower part's top and the upper part's underside: the same surface, 500 apart.
+    const [low, high] = [block.opened?.points[0], block.underside?.points[0]];
+    expect((high?.[2] ?? 0) - (low?.[2] ?? 0)).toBeCloseTo(500, 6);
+    // The leg (down to -2230, then level): cut where it meets the Duvernay's top, with an
+    // upright stretch across the opening.
+    const points = block.lines[0]?.points ?? [];
+    expect(points).toHaveLength(5);
+    expect(points[0]?.[2]).toBeCloseTo(sceneZ(scene, 905), 6);
+    expect(points[1]?.[2]).toBeCloseTo(top, 6);
+    expect(points[2]?.[2]).toBeCloseTo(top - 500, 6);
+    expect([points[1]?.[0], points[1]?.[1], points[2]?.[0], points[2]?.[1]]).toEqual([0, 0, 0, 0]);
+    expect(points[3]?.[2]).toBeCloseTo(sceneZ(scene, -2230) - 500, 6);
+    expect(points[4]?.[2]).toBeCloseTo(sceneZ(scene, -2230) - 500, 6);
+    // Only the stretch above the opening shows through the upper part's faces.
+    expect(block.upper).toHaveLength(1);
+    expect(block.upper[0]?.points).toEqual([points[0], points[1]]);
+  });
 
-    // A point of the north face in the thick of zone 8, and one in the Duvernay.
-    const middle = north.samples[Math.floor(north.samples.length / 2)];
-    if (!middle?.stack) throw new Error('no stack');
-    const [top8, top68, top90] = [middle.stack.tops[1], middle.stack.tops[2], middle.stack.tops[3]];
-    const at = (elevation: number) =>
-      view.place(view.see([middle.x, middle.y, sceneZ(scene, elevation)]));
-    const [x8, y8] = at(((top8 ?? 0) + (top68 ?? 0)) / 2);
-    expect(pickLayer(scene, cut, view, x8, y8)).toMatchObject({ zone: 8 });
-    const [x68, y68] = at(((top68 ?? 0) + (top90 ?? 0)) / 2);
-    const hit = pickLayer(scene, cut, view, x68, y68);
-    expect(hit?.zone).toBe(68);
-    expect(hit?.top).toBeCloseTo(top68 ?? 0, 0);
-    expect((hit?.top ?? 0) - (hit?.base ?? 0)).toBeGreaterThan(0);
-    expect(hit?.surface).toBeCloseTo(middle.stack.tops[0] ?? 0, 0);
-    // Above the ground and beside the block: no layer.
-    expect(pickLayer(scene, cut, view, 400, 2)).toBeNull();
-    expect(pickLayer(scene, cut, view, 2, 300)).toBeNull();
+  it('names the layer under the pointer on a face, and none in the opening', () => {
+    const [x, y] = [(scene.min[0] + scene.max[0]) / 2, scene.min[1]];
+    for (const open of [false, true]) {
+      const block = layerScene(scene, field, { playZone: 68, open, drop: 500 });
+      const stack = field.stackAt(...sceneLonLat(scene, x, y));
+      if (!stack) throw new Error('no stack');
+      const [surface, top8, top68, top90] = [...stack.tops];
+      const at = (elevation: number) => view.place(view.see([x, y, block.place(x, y, elevation)]));
+      // In the thick of zone 8, and in the Duvernay (lower on the canvas when opened).
+      expect(pickLayer(scene, block, view, ...at(((top8 ?? 0) + (top68 ?? 0)) / 2))).toMatchObject({
+        zone: 8,
+      });
+      const hit = pickLayer(scene, block, view, ...at(((top68 ?? 0) + (top90 ?? 0)) / 2));
+      expect(hit?.zone).toBe(68);
+      expect(hit?.top).toBeCloseTo(top68 ?? 0, 0);
+      expect(hit?.base).toBeCloseTo(top90 ?? 0, 0);
+      expect(hit?.surface).toBeCloseTo(surface ?? 0, 0);
+      // In the opening itself, and beside the block: no layer.
+      if (open) {
+        const [px, py] = view.place(view.see([x, y, sceneZ(scene, top68 ?? 0) - 250]));
+        expect(pickLayer(scene, block, view, px, py)).toBeNull();
+      }
+      expect(pickLayer(scene, block, view, 2, 300)).toBeNull();
+    }
   });
 });

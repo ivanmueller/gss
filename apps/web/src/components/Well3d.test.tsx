@@ -237,10 +237,22 @@ describe('Well3d, the Layers view', () => {
       screen.getByRole('img', { name: /with 1 wells nearby, through 4 layers of the ground$/ }),
     ).toBeInTheDocument();
 
-    // Depths as they are, or drawn deeper so thin layers show; the numbers do not change.
-    expect(screen.getByText(/True scale · grid/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Depth ×3' }));
-    expect(screen.getByText(/Depths drawn ×3 · grid/)).toBeInTheDocument();
+    // The block opens as the owner's pictures show such blocks: opened at the play, the depths
+    // drawn deeper so every layer reads. Both can be switched; the numbers never change.
+    expect(screen.getByRole('button', { name: 'Opened' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Depth ×3' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(
+      screen.getByText('Depths drawn ×3 · opened at the top of the Duvernay'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/the block is opened at its top, where the legs/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Whole' }));
+    expect(screen.getByText('Depths drawn ×3', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.queryByText(/the block is opened at its top/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'True scale' }));
+    expect(screen.getByText('True scale', { selector: 'p' })).toBeInTheDocument();
     expect(
       screen.getByText(/Deepest point 1,995 m below the surface · longest leg 3,106 m along/),
     ).toBeInTheDocument();
@@ -250,6 +262,7 @@ describe('Well3d, the Layers view', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Wells' }));
     expect(screen.queryByRole('list', { name: 'Layers under this well' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Depth ×3' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Opened' })).not.toBeInTheDocument();
     expect(screen.getByText(/True scale · grid/)).toBeInTheDocument();
   });
 
