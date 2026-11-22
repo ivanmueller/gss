@@ -91,6 +91,10 @@ describe('land sales as petro_api', () => {
       // From a date on, and one more than the limit to say there is more.
       const later = await db.landSales(member(), VIEW, { ...ALL, since: '1990-03-01' }, 10);
       expect(later.parcels.map((p) => p.contractNo)).toEqual(['A0002']);
+      // Before a date: the page reads every year a few years at a time (F-263).
+      const earlier = await db.landSales(member(), VIEW, { ...ALL, until: '1990-03-01' }, 10);
+      expect(earlier.parcels.length).toBeGreaterThan(0);
+      expect(earlier.parcels.map((p) => p.contractNo)).not.toContain('A0002');
       expect((await db.landSales(member(), VIEW, ALL, 1)).parcels).toHaveLength(2);
 
       const summary = await db.landSaleSummary(member(), ALL);

@@ -37,12 +37,14 @@ export interface LandSaleLoad {
 }
 
 /**
- * What narrows the parcels: the hashes (md5) of the zones that include a play's rights, and
- * sales from a date on.
+ * What narrows the parcels: the hashes (md5) of the zones that include a play's rights, sales
+ * from a date on and, for the parcels (not their totals), sales before a date: the page reads
+ * every year a few years at a time (F-263).
  */
 export interface LandSaleFilter {
   zones: readonly string[] | null;
   since: string | null;
+  until?: string | null;
 }
 
 export interface LandSaleSummary {
@@ -130,6 +132,7 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
                  or md5(zone) in (select jsonb_array_elements_text(
                    (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
             and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
+            and (${filter.until ?? null}::date is null or sale_date < ${filter.until ?? null}::date)
           order by sale_date desc, contract_no
           limit ${limit + 1}`;
         return {

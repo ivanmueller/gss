@@ -161,8 +161,11 @@ export function landFiltered(
   });
 }
 
-/** The box around a shape. */
+/** The box around a shape, worked out once: the holders in view are counted at every move. */
+const boxes = new WeakMap<LandShape, Bbox>();
 function boundsOf(shape: LandShape): Bbox {
+  const kept = boxes.get(shape);
+  if (kept) return kept;
   const box = { west: Infinity, south: Infinity, east: -Infinity, north: -Infinity };
   for (const polygon of shape) {
     for (const [x, y] of polygon[0] ?? []) {
@@ -173,6 +176,7 @@ function boundsOf(shape: LandShape): Bbox {
       box.north = Math.max(box.north, y);
     }
   }
+  boxes.set(shape, box);
   return box;
 }
 
@@ -248,42 +252,38 @@ export interface LandState {
 const NONE: readonly string[] = [];
 const LABEL = 'text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase';
 
-export function useLand(organizationId: string, token: string): LandState {
-  const [all, setAll] = useState(true);
-  const [kinds, setKinds] = useState<Record<LandKind, boolean>>({
-    agreements: true,
-    offsets: true,
-    freehold: true,
-  });
-  // The play the agreements' rights must include; null for every agreement.
-  const [rights, setRights] = useState<string | null>('duvernay');
-  const [holder, setHolder] = useState('');
-  const [terms, setTerms] = useState<ReadonlySet<LandTerm>>(new Set());
-  const [byHolder, setByHolder] = useState(true);
-  const [open, setOpen] = useState(true);
-  const [legendOpen, setLegendOpen] = useState(true);
-  const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
+/**
+ * One request for land and what came back. `ground` is the map's view (the box asked for is
+ * that view and some more, and a view that leaves it asks again), or "all" for every shape
+ * loaded, asked for once whatever the view; null asks for nothing. A request that failed is
+ * made again when `moved`, the map's place, next changes.
+ */
+function useLandAnswer(
+  organizationId: string,
+  token: string,
+  kinds: readonly LandKind[],
+  rights: string | null,
+  ground: Bbox | 'all' | null,
+  moved: string,
+) {
   const [settled, setSettled] = useState<Settled | null>(null);
-  const [picked, setPicked] = useState<readonly string[]>(NONE);
-  const today = useMemo(() => landToday(), []);
-
-  const on = useMemo(
-    () => ({
-      agreements: all && kinds.agreements,
-      offsets: all && kinds.offsets,
-      freehold: all && kinds.freehold,
-    }),
-    [all, kinds],
-  );
-  const wanted = useMemo(() => (at ? landWanted(on, at.zoom, rights) : []), [on, at, rights]);
   const covered =
     settled !== null &&
     !settled.failed &&
-    at !== null &&
-    landCovers(settled, at.view, wanted, rights);
-  const box = at !== null && wanted.length > 0 && !covered ? landRequest(at.view) : null;
+    (ground === 'all'
+      ? settled.answer !== null &&
+        kinds.every((kind) => settled.kinds.includes(kind)) &&
+        (!kinds.includes('agreements') || settled.rights === rights)
+      : ground !== null && landCovers(settled, ground, kinds, rights));
+  const box =
+    kinds.length === 0 || covered || ground === null
+      ? null
+      : ground === 'all'
+        ? ALBERTA
+        : landRequest(ground);
+  const again = ground === 'all' && settled?.failed === true ? `@${moved}` : '';
   const key = box
-    ? `${wanted.join(',')}:${rights ?? ''}:${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}`
+    ? `${kinds.join(',')}:${rights ?? ''}:${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}${again}`
     : null;
   const loading = key !== null && settled?.key !== key;
   const failed = settled?.failed === true && settled.key === key;
@@ -291,7 +291,7 @@ export function useLand(organizationId: string, token: string): LandState {
   useEffect(() => {
     if (key === null || box === null) return;
     const controller = new AbortController();
-    const asked = [...wanted];
+    const asked = [...kinds];
     const query = new URLSearchParams({
       organization_id: organizationId,
       west: String(round(box.west)),
@@ -320,24 +320,88 @@ export function useLand(organizationId: string, token: string): LandState {
     return () => {
       controller.abort();
     };
-    // `box`, `wanted` and `rights` are described by `key`; asking again for the same would loop.
+    // `box`, `kinds` and `rights` are described by `key`; asking again for the same would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, organizationId, token]);
 
-  const answer = settled?.answer ?? null;
-  // Only what is wanted now is drawn: a kind switched off, or too far out, is let go, and so
-  // are agreements read for other rights than those now asked for.
+  return { settled, loading, failed };
+}
+
+export function useLand(organizationId: string, token: string): LandState {
+  const [all, setAll] = useState(true);
+  const [kinds, setKinds] = useState<Record<LandKind, boolean>>({
+    agreements: true,
+    offsets: true,
+    freehold: true,
+  });
+  // The play the agreements' rights must include; null for every agreement.
+  const [rights, setRights] = useState<string | null>('duvernay');
+  const [holder, setHolder] = useState('');
+  const [terms, setTerms] = useState<ReadonlySet<LandTerm>>(new Set());
+  const [byHolder, setByHolder] = useState(true);
+  const [open, setOpen] = useState(true);
+  const [legendOpen, setLegendOpen] = useState(true);
+  const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
+  const [picked, setPicked] = useState<readonly string[]>(NONE);
+  const today = useMemo(() => landToday(), []);
+
+  const on = useMemo(
+    () => ({
+      agreements: all && kinds.agreements,
+      offsets: all && kinds.offsets,
+      freehold: all && kinds.freehold,
+    }),
+    [all, kinds],
+  );
+  // Held whole, asked for once and kept at every zoom (F-263): the offset notices, and the
+  // agreements with one play's rights. By the map's view, close in: land that is not the
+  // Crown's, and every agreement when no play narrows them (both too many to hold at once).
+  const wholeKey = [
+    on.agreements && rights !== null ? 'agreements' : '',
+    on.offsets ? 'offsets' : '',
+  ]
+    .filter(Boolean)
+    .join(',');
+  const viewKey = (at ? landWanted(on, at.zoom, rights) : [])
+    .filter((kind) => kind === 'freehold' || (kind === 'agreements' && rights === null))
+    .join(',');
+  // By their text, so a move of the map that changes neither makes no new list (and so no
+  // new features for the map to read again).
+  const wholeKinds = useMemo(() => (wholeKey ? wholeKey.split(',') : []) as LandKind[], [wholeKey]);
+  const viewKinds = useMemo(() => (viewKey ? viewKey.split(',') : []) as LandKind[], [viewKey]);
+  const moved = at
+    ? `${String(round(at.view.west))},${String(round(at.view.south))},${String(round(at.zoom))}`
+    : '';
+  const held = useLandAnswer(organizationId, token, wholeKinds, rights, 'all', moved);
+  const seen = useLandAnswer(organizationId, token, viewKinds, null, at?.view ?? null, moved);
+  const loading = held.loading || seen.loading;
+  const failed = held.failed || seen.failed;
+
+  const heldAnswer = held.settled?.answer ?? null;
+  const heldRights = held.settled?.rights ?? null;
+  const seenAnswer = seen.settled?.answer ?? null;
+  const answer = heldAnswer ?? seenAnswer;
+  // Only what is switched on is drawn, and agreements read for other rights than those now
+  // asked for are let go. What is held whole is drawn whatever the zoom: the map's layers fade
+  // it out far out, with nothing to read again.
   const shown = useMemo(() => {
     const agreementsNow =
-      wanted.includes('agreements') && settled?.rights === rights
-        ? (answer?.agreements.items ?? [])
-        : [];
+      rights !== null
+        ? on.agreements && heldRights === rights
+          ? (heldAnswer?.agreements.items ?? [])
+          : []
+        : viewKinds.includes('agreements')
+          ? (seenAnswer?.agreements.items ?? [])
+          : [];
     return {
       agreements: landFiltered(agreementsNow, { holder, terms, today }),
-      offsets: wanted.includes('offsets') ? (answer?.offsets.items ?? []) : [],
-      freehold: wanted.includes('freehold') ? (answer?.freehold.items ?? []) : [],
+      offsets: on.offsets ? (heldAnswer?.offsets.items ?? []) : [],
+      freehold: viewKinds.includes('freehold') ? (seenAnswer?.freehold.items ?? []) : [],
     };
-  }, [answer, wanted, settled?.rights, rights, holder, terms, today]);
+  }, [heldAnswer, heldRights, seenAnswer, on, viewKinds, rights, holder, terms, today]);
+  const truncated =
+    wholeKinds.some((kind) => heldAnswer?.[kind].truncated) ||
+    viewKinds.some((kind) => seenAnswer?.[kind].truncated);
   const features = useMemo(
     () => landFeatures(shown, { byHolder, today }),
     [shown, byHolder, today],
@@ -359,7 +423,7 @@ export function useLand(organizationId: string, token: string): LandState {
     setAt(bbox ? { view: bbox, zoom } : null);
   }, []);
 
-  const loads = answer?.source.loads ?? [];
+  const loads = [...(heldAnswer?.source.loads ?? []), ...(seenAnswer?.source.loads ?? [])];
   const loadedAt = loads.map((l) => l.loadedAt).sort()[loads.length - 1] ?? null;
   const far = (kind: LandKind) =>
     at !== null &&
@@ -505,7 +569,7 @@ export function useLand(organizationId: string, token: string): LandState {
               The land could not be loaded. Move the map to try again.
             </p>
           )}
-          {wanted.some((kind) => answer?.[kind].truncated) && (
+          {truncated && (
             <p className="text-xs text-muted-foreground">
               More land than can be drawn at once here: zoom in to see all of it.
             </p>

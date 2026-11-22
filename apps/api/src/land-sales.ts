@@ -12,8 +12,12 @@ import type { LandSaleLoad, LandSaleParcelRow, LandSaleSummary } from './land-sa
 /** The oil and gas schema version the land sales need (20261127010000_petro_land_sales.sql). */
 export const LAND_SALES_SCHEMA_VERSION = 10;
 
-/** At most this many parcels per answer; a view holding more is drawn from the newest sales. */
-export const LAND_SALES_MAX = 8000;
+/**
+ * At most this many parcels per answer; a view holding more is drawn from the newest sales.
+ * Enough for every parcel loaded (42,285 on 2026-11-21), so the parcels with one play's rights
+ * can be asked for whole and kept by the page (F-263).
+ */
+export const LAND_SALES_MAX = 50_000;
 
 export const LAND_SALES_SOURCE_NAME = `${LAND_SOURCE_NAME}, public offerings of petroleum and natural gas rights`;
 

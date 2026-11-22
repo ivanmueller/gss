@@ -108,6 +108,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     expect((await get('land-sales?west=1')).status).toBe(400);
     expect((await get(`land-sales?${BOX}&rights=montney`)).status).toBe(400);
     expect((await get('land-sales/summary?since=soon')).status).toBe(400);
+    expect((await get(`land-sales?${BOX}&until=later`)).status).toBe(400);
     expect(openPetroleum).not.toHaveBeenCalled();
   });
 
@@ -136,14 +137,14 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     ]);
     const res = await get(`land-sales?${BOX}&rights=duvernay&since=2024-11-22`);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
     const body = await res.json<ReturnType<typeof landSalesAnswer>>();
     expect(body.parcels).toEqual([parcel('7')]);
     expect(body.source).toMatchObject({ firstSale: '2003-01-08', lastSale: '2026-12-16' });
     expect(petroleum.landSales).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -117, south: 54, east: -116, north: 55 },
-      { zones: ['abc'], since: '2024-11-22' },
+      { zones: ['abc'], since: '2024-11-22', until: null },
       LAND_SALES_MAX,
     );
   });
@@ -172,7 +173,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     });
     expect(petroleum.landSaleSummary).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a' }),
-      { zones: null, since: null },
+      { zones: null, since: null, until: null },
     );
   });
 });

@@ -13,6 +13,7 @@ import {
   st37Features,
   st37ZoneFeatures,
   syncSt37,
+  type St37MapWell,
 } from './st37Map';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
@@ -22,6 +23,9 @@ function fakeMap() {
   const layers = new Map<string, Record<string, unknown> & { paint: Record<string, unknown> }>();
   const sources = new Map<string, unknown>();
   const images = new Set<string>();
+  /** The sources given new data, in order, and the features now lit. */
+  const reads: string[] = [];
+  const lit = new Set<number>();
   const map = {
     getLayer: (id: string) => layers.get(id),
     getSource: (id: string) => sources.get(id),
@@ -30,10 +34,19 @@ function fakeMap() {
       sources.set(
         id,
         Object.defineProperty({ ...source }, 'setData', {
-          value: () => undefined,
+          value: () => {
+            reads.push(id);
+          },
           enumerable: false,
         }),
       ),
+    setFeatureState: ({ id }: { id: number }, state: { lit: boolean }) => {
+      if (state.lit) lit.add(id);
+      else lit.delete(id);
+    },
+    removeFeatureState: () => {
+      lit.clear();
+    },
     removeSource: (id: string) => sources.delete(id),
     addLayer: (layer: { id: string; paint?: Record<string, unknown> }) => {
       layers.set(layer.id, { ...layer, paint: { ...layer.paint } });
@@ -55,34 +68,40 @@ function fakeMap() {
       if (layer) layer.filter = filter;
     },
   };
-  return { map: map as unknown as MapboxMap, layers, sources, images };
+  return { map: map as unknown as MapboxMap, layers, sources, images, reads, lit };
 }
 
-const WELLS = st37Features([
-  {
-    uwi: '00/09-07-030-26W4/0',
-    licenceNumber: '0509395',
-    wellName: null,
-    licensee: null,
-    statusClass: 'producing',
-    statusFluid: null,
-    statusType: null,
-    spudDate: null,
-    totalDepthM: null,
-    trueVerticalDepthM: null,
-    surface: [-113.6, 53.3],
-    bottom: [-113.62, 53.3],
-    path: [
-      [-113.6, 53.3],
-      [-113.62, 53.3],
-    ],
-    licenceDate: null,
-    plannedOperation: null,
-    plannedFormation: null,
-    plannedDepthM: null,
-    plannedBottom: null,
-  },
-]);
+const WELL: St37MapWell = {
+  uwi: '00/09-07-030-26W4/0',
+  licenceNumber: '0509395',
+  wellName: null,
+  licensee: null,
+  statusClass: 'producing',
+  statusFluid: null,
+  statusType: null,
+  spudDate: null,
+  totalDepthM: null,
+  trueVerticalDepthM: null,
+  surface: [-113.6, 53.3],
+  bottom: [-113.62, 53.3],
+  path: [
+    [-113.6, 53.3],
+    [-113.62, 53.3],
+  ],
+  licenceDate: null,
+  plannedOperation: null,
+  plannedFormation: null,
+  plannedDepthM: null,
+  plannedBottom: null,
+};
+const WELLS = st37Features([WELL]);
+/** A well of two legs, and another well beside it. */
+const PAD_WELLS = [
+  WELL,
+  { ...WELL, uwi: 'UWI-OF-ONE-LEG' },
+  { ...WELL, uwi: 'UWI-OF-ANOTHER-WELL', licenceNumber: '0600001' },
+];
+const PAD = st37Features(PAD_WELLS);
 
 const OUTLINE = '/outlines/duvernay.geojson';
 /** One made-up zone. */
@@ -127,48 +146,69 @@ describe('syncSt37', () => {
     }
   });
 
-  it('highlights the well under the pointer, or the one leg pointed at (F-257, F-259)', () => {
-    const { map, layers } = fakeMap();
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
-    highlightSt37(map, '0509395');
-    // Every leg under its licence a little bolder, in the map's ink: not its pad's other
-    // wells, and no colour of its own for the main leg (the owner, 2026-11-21).
+  it('lights the well under the pointer, or the one leg pointed at, by paint alone (F-257, F-259, F-263)', () => {
+    const { map, layers, lit, reads } = fakeMap();
+    const view = { wells: PAD, shown: ['producing' as const], outline: OUTLINE, zones: null };
+    syncSt37(map, view, 'light');
+    const litNow = () =>
+      [...lit]
+        .map((at) => PAD.features[at]?.properties)
+        .map((p) => `${String(p?.licence)} ${String(p?.part)} ${String(p?.uwi)}`)
+        .sort();
+    // Every leg is in the hover layers, unseen until lit: lighting one changes no filter, so
+    // the map reads no well again and the leg is bold, and let go, at once.
+    const unseen = ['case', ['boolean', ['feature-state', 'lit'], false], 1, 0];
     expect(layers.get(ST37_LAYERS.hoverPath)?.filter).toEqual([
-      'all',
-      ['==', ['get', 'licence'], '0509395'],
-      ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
+      'in',
+      ['get', 'part'],
+      ['literal', ['path', 'planned']],
     ]);
     expect(layers.get(ST37_LAYERS.hoverPath)?.paint).toMatchObject({
       'line-width': 2.2,
       'line-color': '#1c1917',
+      'line-opacity': unseen,
     });
+    expect(layers.get(ST37_LAYERS.hoverDots)?.paint).toMatchObject({ 'circle-opacity': unseen });
+    expect(layers.get(ST37_LAYERS.hoverSurface)?.paint).toMatchObject({ 'icon-opacity': unseen });
     // Only from the zoom where wells answer the pointer.
     expect(layers.get(ST37_LAYERS.hoverPath)?.minzoom).toBe(ST37_HOVER_FROM);
     expect(Object.keys(ST37_LAYERS)).not.toContain('hoverMain');
+    expect(lit.size).toBe(0);
+
+    // A well pointed at by its surface dot: every leg under its licence a little bolder, with
+    // its bottom holes and its surface square; not the well beside it.
+    const filters = JSON.stringify([...layers.values()].map((layer) => layer.filter));
+    highlightSt37(map, '0509395');
+    expect(litNow()).toEqual([
+      '0509395 bottom 00/09-07-030-26W4/0',
+      '0509395 bottom UWI-OF-ONE-LEG',
+      '0509395 path 00/09-07-030-26W4/0',
+      '0509395 path UWI-OF-ONE-LEG',
+      '0509395 well UWI-OF-ONE-LEG',
+    ]);
     // A leg pointed at: that leg alone, its own bottom hole, its well's surface square (the
     // owner, 2026-11-21: "only highlight the single leg under the pointer").
     highlightSt37(map, '0509395', 'UWI-OF-ONE-LEG');
-    expect(layers.get(ST37_LAYERS.hoverPath)?.filter).toEqual([
-      'all',
-      ['==', ['get', 'uwi'], 'UWI-OF-ONE-LEG'],
-      ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
+    expect(litNow()).toEqual([
+      '0509395 bottom UWI-OF-ONE-LEG',
+      '0509395 path UWI-OF-ONE-LEG',
+      '0509395 well UWI-OF-ONE-LEG',
     ]);
-    expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
-      '==',
-      ['get', 'uwi'],
-      'UWI-OF-ONE-LEG',
-    ]);
-    expect(layers.get(ST37_LAYERS.hoverSurface)?.filter).toContainEqual([
-      '==',
-      ['get', 'licence'],
-      '0509395',
-    ]);
-    highlightSt37(map, null, 'UWI-OF-ONE-LEG');
-    expect(layers.get(ST37_LAYERS.hoverDots)?.filter).toContainEqual([
-      '==',
-      ['get', 'licence'],
-      '',
-    ]);
+    expect(JSON.stringify([...layers.values()].map((layer) => layer.filter))).toBe(filters);
+
+    // The same wells drawn again (a status switched, a card opened) are not read again by
+    // the map, nor is their outline; the leg stays lit.
+    syncSt37(map, { ...view, shown: [] }, 'light');
+    expect(reads).toEqual([]);
+    expect(lit.size).toBe(3);
+    // New wells are read, and the leg is lit again on them.
+    const again = st37Features(PAD_WELLS);
+    syncSt37(map, { ...view, wells: again }, 'light');
+    expect(reads).toEqual(['st37-wells']);
+    expect(lit.size).toBe(3);
+
+    highlightSt37(map, null);
+    expect(lit.size).toBe(0);
   });
 
   it('draws the parts switched on: a dot a well when the main legs are off (F-257)', () => {
