@@ -15,7 +15,17 @@ import {
   type LandSalesView,
 } from '../lib/landSalesMap';
 import { ST37_OUTLINES } from '../lib/st37Map';
-import { landRequest, landToday } from './Land';
+import type { MapBounds } from '../lib/mapbox';
+import { landBounds, landRequest, landToday } from './Land';
+import {
+  FilterChip,
+  Fold,
+  LegendTitle,
+  MapSection,
+  SIDE_INPUT,
+  SIDE_LABEL,
+  SIDE_SELECT,
+} from './MapSide';
 
 /**
  * Crown land sales on the oil and gas map (F-242): a "Land sales" panel (the next sale, the
@@ -28,12 +38,28 @@ import { landRequest, landToday } from './Land';
 
 /** The periods the panel offers, as years back from today; null for every year loaded. */
 export const SALE_PERIODS = [
-  { key: 'all', label: 'All years', years: null },
-  { key: '1', label: 'Last 12 mo', years: 1 },
-  { key: '2', label: 'Last 2 yrs', years: 2 },
-  { key: '5', label: 'Last 5 yrs', years: 5 },
+  { key: '1', label: '12 mo', title: 'last 12 mo', years: 1 },
+  { key: '2', label: '2 yrs', title: 'last 2 yrs', years: 2 },
+  { key: '5', label: '5 yrs', title: 'last 5 yrs', years: 5 },
+  { key: 'all', label: 'All', title: 'all years', years: null },
 ] as const;
 export type SalePeriod = (typeof SALE_PERIODS)[number]['key'];
+
+/** What the panel's When row holds: a period ending today, or one sale by its date (F-267). */
+export type SaleWhen = SalePeriod | { sale: string };
+
+/** The day after a date (YYYY-MM-DD): one sale's parcels are those from its day to before it. */
+export function saleNextDay(date: string): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** `2026-12-02` as `Dec 2`, or `Dec 2, 2026` with its year. */
+export function saleDay(date: string, year = false): string {
+  const month = MONTHS[Number(date.slice(5, 7)) - 1] ?? '';
+  return `${month} ${String(Number(date.slice(8, 10)))}${year ? `, ${date.slice(0, 4)}` : ''}`;
+}
 
 /** The first sale date of a period ending today (YYYY-MM-DD); null for every year. */
 export function saleSince(period: SalePeriod, today: string): string | null {
@@ -80,13 +106,17 @@ export function saleFiltered(
     today: string;
     /** Sales from this date on (YYYY-MM-DD), when the parcels of every year are held. */
     since?: string | null;
+    /** And sales before this date: one sale is its day to the day after (F-267). */
+    until?: string | null;
   },
 ): LandSaleParcel[] {
   const text = filters.buyer.trim().toLowerCase();
   const since = filters.since ?? null;
+  const until = filters.until ?? null;
   return parcels.filter(
     (p) =>
       (since === null || p.saleDate >= since) &&
+      (until === null || p.saleDate < until) &&
       filters.states.has(landSaleState(p, filters.today)) &&
       (text === '' || (p.buyers ?? '').toLowerCase().includes(text)),
   );
@@ -138,6 +168,8 @@ interface SummaryAnswer {
   averagePerHectare: string | null;
   highPerHectare: string | null;
   nextSale: { date: string; parcels: number } | null;
+  /** Every sale the rights keep a parcel of, the newest first (F-267). */
+  sales?: { date: string; parcels: number; sold: number; held: boolean }[];
   quarters: { quarter: string; bonus: string; sold: number }[];
 }
 
@@ -159,7 +191,8 @@ const inside = (asked: Bbox, view: Bbox) =>
   Math.min(ALBERTA.north, view.north) <= asked.north;
 
 const round = (n: number) => Math.round(n * 1e4) / 1e4;
-const LABEL = 'text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase';
+const LABEL = SIDE_LABEL;
+const ALL_STATES: readonly LandSaleState[] = ['sold', 'no_offers', 'upcoming'];
 const NONE: readonly string[] = [];
 const NO_DOCUMENTS: Readonly<Record<string, LandSaleDocuments>> = {};
 
@@ -172,34 +205,56 @@ export interface LandSalesState {
   parcels: ReadonlyMap<string, LandSaleParcel>;
   /** Each sale's notice and results on the department's site, by sale date. */
   documents: Readonly<Record<string, LandSaleDocuments>>;
-  panel: () => React.ReactNode;
+  /** The play the parcels' rights must include; null for every parcel. */
+  rights: string | null;
+  /** The next sale not held yet and the last one held, of the rights chosen (F-267). */
+  nextSale: { date: string; parcels: number } | null;
+  lastSale: { date: string; sold: number } | null;
+  /** Shows one sale alone and moves the map to its parcels, when they are held. */
+  showSale: (date: string, goTo: (bounds: MapBounds) => void) => void;
+  /** Shows a play's sales of the last 12 months. */
+  showPastYear: (rights: string) => void;
+  /** When the sales were last loaded; null before an answer. */
+  updated: string | null;
+  section: (props: {
+    open: boolean;
+    onToggle: () => void;
+    goTo: (bounds: MapBounds) => void;
+  }) => React.ReactNode;
+  /** What the parcels' colours mean; null when the sales are off. */
   legend: () => React.ReactNode;
+  /** What the section shows and where it comes from, for Sources & licence. */
+  about: () => React.ReactNode;
 }
 
 export function useLandSales(organizationId: string, token: string): LandSalesState {
   const [on, setOn] = useState(true);
-  const [open, setOpen] = useState(true);
   const [rights, setRights] = useState<string | null>('duvernay');
-  const [period, setPeriod] = useState<SalePeriod>('2');
+  const [when, setWhen] = useState<SaleWhen>('2');
   const [buyer, setBuyer] = useState('');
   const [states, setStates] = useState<ReadonlySet<LandSaleState>>(
-    new Set<LandSaleState>(['sold', 'no_offers', 'upcoming']),
+    new Set<LandSaleState>(ALL_STATES),
   );
   const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
-  const [summary, setSummary] = useState<{ key: string; answer: SummaryAnswer | null } | null>(
-    null,
-  );
+  const [summary, setSummary] = useState<{
+    key: string;
+    rights: string | null;
+    answer: SummaryAnswer | null;
+  } | null>(null);
   const [picked, setPicked] = useState<readonly string[]>(NONE);
   const today = useMemo(() => landToday(), []);
-  const since = saleSince(period, today);
+  // One sale alone is its day to the day after (F-267).
+  const oneSale = typeof when === 'object' ? when.sale : null;
+  const since = typeof when === 'object' ? when.sale : saleSince(when, today);
+  const until = oneSale !== null ? saleNextDay(oneSale) : null;
   // With a play's rights every parcel is asked for once, whatever the view and the period, and
   // kept: zooming, moving and choosing a period then ask for nothing (F-263). They come in
   // pieces, the newest sales first. Without a play the parcels are too many to hold: those of
   // the view and the period, close in, as before.
   const whole = rights !== null;
-  const filter = whole ? `${rights}|` : `|${since ?? ''}`;
-  const summaryFilter = `${rights ?? ''}|${since ?? ''}`;
+  const filter = whole ? `${rights}|` : `|${since ?? ''}|${until ?? ''}`;
+  const summaryFilter = `${rights ?? ''}|${since ?? ''}|${until ?? ''}`;
 
   const far = at !== null && at.zoom < saleFromZoom(rights);
   const wanted = on && (whole || (at !== null && !far));
@@ -230,9 +285,10 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       const q = new URLSearchParams({ organization_id: organizationId, ...extra });
       if (rights !== null) q.set('rights', rights);
       if (since !== null) q.set('since', since);
+      if (until !== null) q.set('until', until);
       return q.toString();
     },
-    [organizationId, rights, since],
+    [organizationId, rights, since, until],
   );
 
   useEffect(() => {
@@ -250,6 +306,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     const years = whole ? SALE_PIECES[piece] : undefined;
     if (years) {
       q.delete('since');
+      q.delete('until');
       if (years.since !== null) q.set('since', years.since);
       if (years.until !== null) q.set('until', years.until);
     }
@@ -303,14 +360,16 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       signal: controller.signal,
     })
       .then((answer) => {
-        setSummary({ key: summaryFilter, answer });
+        setSummary({ key: summaryFilter, rights, answer });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setSummary({ key: summaryFilter, answer: null });
+        if (!controller.signal.aborted) setSummary({ key: summaryFilter, rights, answer: null });
       });
     return () => {
       controller.abort();
     };
+    // `rights` is part of `summaryFilter`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [on, summaryFilter, query, token]);
 
   const answer = settled?.answer ?? null;
@@ -322,9 +381,10 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
             states,
             today,
             since: whole ? since : null,
+            until: whole ? until : null,
           })
         : [],
-    [wanted, settled?.filter, filter, answer, buyer, states, today, whole, since],
+    [wanted, settled?.filter, filter, answer, buyer, states, today, whole, since, until],
   );
   const features = useMemo(() => landSaleFeatures(shown, today), [shown, today]);
   const byId = useMemo(() => new Map(shown.map((p) => [p.id, p])), [shown]);
@@ -338,145 +398,216 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   }, []);
 
   const totals = summary?.key === summaryFilter ? summary.answer : null;
+  // The sales themselves do not change with the dates asked for: kept while the totals of
+  // another period are on their way, so the Jump to buttons and the list of sales stay.
+  const known = summary?.rights === rights ? summary.answer : null;
+  const nextSale = known?.nextSale ?? null;
+  const allSales = useMemo(() => known?.sales ?? [], [known]);
+  const lastHeld = allSales.find((sale) => sale.held) ?? null;
+  const lastSale = useMemo(
+    () => (lastHeld ? { date: lastHeld.date, sold: lastHeld.sold } : null),
+    [lastHeld],
+  );
+  const inPeriod = allSales.filter(
+    (sale) => (since === null || sale.date >= since) && (until === null || sale.date < until),
+  ).length;
   const rightsName = rights !== null ? (LAND_RIGHTS[rights]?.name ?? rights) : null;
   // A play's sales are those inside its outline, when the map has one for it (F-264).
   const outlined = rights !== null && Object.hasOwn(ST37_OUTLINES, rights);
-  const periodLabel = SALE_PERIODS.find((p) => p.key === period)?.label.toLowerCase() ?? '';
+  const periodTitle =
+    oneSale !== null
+      ? `sale of ${saleDay(oneSale, true)}`
+      : (SALE_PERIODS.find((p) => p.key === when)?.title ?? '');
+  const held = settled?.filter === filter ? answer : null;
 
-  const panel = () => (
-    <div
-      className="flex w-72 flex-col gap-2.5 rounded-card border bg-card/95 p-3 shadow-xs"
-      role="group"
-      aria-label="Land sales"
+  const showSale = (date: string, goTo: (bounds: MapBounds) => void) => {
+    setOn(true);
+    setWhen({ sale: date });
+    // The map moves to the sale's parcels when they are among those held.
+    const box = { west: Infinity, south: Infinity, east: -Infinity, north: -Infinity };
+    for (const p of held?.parcels ?? []) {
+      if (p.saleDate !== date) continue;
+      const b = landBounds(p.shape);
+      box.west = Math.min(box.west, b.west);
+      box.south = Math.min(box.south, b.south);
+      box.east = Math.max(box.east, b.east);
+      box.north = Math.max(box.north, b.north);
+    }
+    if (box.west < box.east && box.south < box.north) {
+      goTo([box.west, box.south, box.east, box.north]);
+    }
+  };
+  const showPastYear = (play: string) => {
+    setOn(true);
+    setRights(play);
+    setWhen('1');
+  };
+
+  const section = ({
+    open,
+    onToggle,
+    goTo,
+  }: {
+    open: boolean;
+    onToggle: () => void;
+    goTo: (bounds: MapBounds) => void;
+  }) => (
+    <MapSection
+      title="Land sales"
+      open={open}
+      onToggle={onToggle}
+      on={on}
+      onSwitch={setOn}
+      chip={rightsName}
+      onClearChip={() => {
+        setRights(null);
+      }}
+      sample={
+        <span aria-hidden="true" className="flex h-2.5 w-7 shrink-0 overflow-hidden rounded-sm">
+          {SALE_BLUES.filter((_, i) => i % 2 === 0).map((colour) => (
+            <span key={colour} className="grow" style={{ backgroundColor: colour }} />
+          ))}
+        </span>
+      }
     >
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => {
-            setOpen((before) => !before);
-          }}
-          className="flex grow items-center gap-1.5 text-left text-sm font-semibold"
-        >
-          <span aria-hidden="true" className="text-xs text-muted-foreground">
-            {open ? '▾' : '▸'}
-          </span>
-          Land sales
-        </button>
-        {rightsName && on && (
-          <span className="rounded-full bg-foreground px-2 py-0.5 text-xs font-medium text-background">
-            {rightsName}
-          </span>
-        )}
-        <input
-          type="checkbox"
-          aria-label="Land sales"
-          checked={on}
-          onChange={(event) => {
-            setOn(event.target.checked);
-          }}
+      <div className="flex flex-col gap-1.5">
+        <p className={LABEL}>When</p>
+        <div className="flex flex-wrap items-center gap-1" role="group" aria-label="When">
+          <FilterChip
+            plain
+            disabled={nextSale === null}
+            pressed={oneSale !== null && oneSale === nextSale?.date}
+            onClick={() => {
+              if (nextSale) showSale(nextSale.date, goTo);
+            }}
+          >
+            Next sale
+          </FilterChip>
+          <FilterChip
+            plain
+            disabled={lastSale === null}
+            pressed={oneSale !== null && oneSale === lastSale?.date}
+            onClick={() => {
+              if (lastSale) showSale(lastSale.date, goTo);
+            }}
+          >
+            Last sale
+          </FilterChip>
+          <select
+            aria-label="Pick a sale"
+            className="h-8 max-w-[8.5rem] rounded-md border bg-card px-2 text-[0.8125rem] font-medium"
+            value={oneSale ?? ''}
+            onChange={(event) => {
+              if (event.target.value !== '') showSale(event.target.value, goTo);
+            }}
+          >
+            <option value="">Pick a sale</option>
+            {allSales.map((sale) => (
+              <option key={sale.date} value={sale.date}>
+                {saleDay(sale.date, true)}
+              </option>
+            ))}
+          </select>
+          {SALE_PERIODS.map((p) => (
+            <FilterChip
+              key={p.key}
+              plain
+              pressed={when === p.key}
+              onClick={() => {
+                setWhen(p.key);
+              }}
+            >
+              {p.label}
+            </FilterChip>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-1.5">
+          <span className={LABEL}>Rights include</span>
+          <select
+            className={SIDE_SELECT}
+            value={rights ?? ''}
+            onChange={(event) => {
+              setRights(event.target.value === '' ? null : event.target.value);
+            }}
+          >
+            {Object.values(LAND_RIGHTS).map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.name}
+              </option>
+            ))}
+            <option value="">All rights</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className={LABEL}>Buyer</span>
+          <input
+            type="search"
+            className={SIDE_INPUT}
+            placeholder="Any buyer"
+            value={buyer}
+            onChange={(event) => {
+              setBuyer(event.target.value);
+            }}
+          />
+        </label>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {outlined
+          ? `Parcels whose rights include it, inside the ${rightsName ?? ''} outline drawn on the map (solid line).`
+          : rightsName
+            ? `Parcels whose rights include the ${rightsName}, in the area loaded.`
+            : 'Every parcel in the area loaded: zoom in to see them.'}
+      </p>
+      <div className="rounded-lg border bg-card px-3 py-2.5">
+        <p className={LABEL}>Bonus paid · {periodTitle}</p>
+        <p className="font-mono text-3xl font-semibold tabular-nums">
+          {totals ? saleMoney(totals.bonus) : '…'}
+        </p>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <Tile
+          label="Parcels sold"
+          value={totals ? totals.sold.toLocaleString('en-CA') : '…'}
+          note={totals ? `of ${totals.offered.toLocaleString('en-CA')} offered` : ''}
+        />
+        <Tile label="Hectares sold" value={totals ? saleHectares(totals.hectaresSold) : '…'} />
+        <Tile
+          label="Average"
+          value={totals ? `${saleMoney(totals.averagePerHectare)}/ha` : '…'}
+          note={totals?.highPerHectare ? `high ${saleMoney(totals.highPerHectare)}/ha` : ''}
         />
       </div>
-      {open && on && (
-        <>
-          {totals?.nextSale && (
-            <p className="rounded-md border border-[#e2622f]/40 bg-[#e2622f]/10 px-2.5 py-1.5 text-sm">
-              <span className="font-semibold">Next sale {totals.nextSale.date}</span>
-              <span className="block text-xs text-muted-foreground">
-                {totals.nextSale.parcels.toLocaleString('en-CA')}{' '}
-                {totals.nextSale.parcels === 1 ? 'parcel' : 'parcels'} posted
-                {rightsName ? ` with ${rightsName} rights` : ''}{' '}
-                {outlined ? 'inside its outline' : 'in the area loaded'}
-              </span>
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <label className="flex flex-col gap-1">
-              <span className={LABEL}>Rights include</span>
-              <select
-                className="h-8 rounded-md border bg-foreground px-2 text-sm font-medium text-background"
-                value={rights ?? ''}
-                onChange={(event) => {
-                  setRights(event.target.value === '' ? null : event.target.value);
-                }}
-              >
-                {Object.values(LAND_RIGHTS).map((r) => (
-                  <option key={r.key} value={r.key}>
-                    {r.name}
-                  </option>
-                ))}
-                <option value="">All rights</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className={LABEL}>Buyer</span>
-              <input
-                type="search"
-                className="h-8 rounded-md border bg-card px-2 text-sm"
-                placeholder="Any buyer"
-                value={buyer}
-                onChange={(event) => {
-                  setBuyer(event.target.value);
-                }}
-              />
-            </label>
-          </div>
-          {outlined && (
-            <p className="text-xs text-muted-foreground">
-              Parcels whose rights include it, inside the {rightsName} outline drawn on the map.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Period">
-            {SALE_PERIODS.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                aria-pressed={period === p.key}
-                onClick={() => {
-                  setPeriod(p.key);
-                }}
-                className="rounded-md px-2 py-1 text-xs hover:bg-muted aria-pressed:bg-foreground aria-pressed:font-medium aria-pressed:text-background"
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <div className="rounded-md border bg-card px-2.5 py-2">
-            <p className={LABEL}>Bonus paid · {periodLabel}</p>
-            <p className="font-mono text-2xl font-semibold tabular-nums">
-              {totals ? saleMoney(totals.bonus) : '…'}
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-1.5">
-            <Tile
-              label="Parcels sold"
-              value={totals ? totals.sold.toLocaleString('en-CA') : '…'}
-              note={totals ? `of ${totals.offered.toLocaleString('en-CA')} offered` : ''}
-            />
-            <Tile label="Hectares sold" value={totals ? saleHectares(totals.hectaresSold) : '…'} />
-            <Tile
-              label="Average"
-              value={totals ? `${saleMoney(totals.averagePerHectare)}/ha` : '…'}
-              note={totals?.highPerHectare ? `high ${saleMoney(totals.highPerHectare)}/ha` : ''}
-            />
-          </div>
-          {totals && totals.quarters.length > 0 && (
-            <div>
-              <p className={LABEL}>
-                Bonus by quarter · {totals.quarters[0]?.quarter.slice(0, 4)} to{' '}
-                {totals.quarters[totals.quarters.length - 1]?.quarter.slice(0, 4)}
-              </p>
-              <QuarterBars quarters={totals.quarters} since={since} />
-            </div>
-          )}
+      {known && known.quarters.length > 0 && (
+        <Fold
+          label="Chart"
+          note={`${since !== null ? saleDay(since, true) : (known.quarters[0]?.quarter.slice(0, 4) ?? '')}${oneSale !== null ? '' : ' – latest'}`}
+        >
+          <p className={LABEL}>
+            Bonus by quarter · {known.quarters[0]?.quarter.slice(0, 4)} to{' '}
+            {known.quarters[known.quarters.length - 1]?.quarter.slice(0, 4)}
+          </p>
+          <QuarterBars quarters={known.quarters} since={since} />
+        </Fold>
+      )}
+      <div className="flex items-center justify-between border-t pt-2.5">
+        <span className={`${LABEL} text-foreground/80`}>Sales in period</span>
+        <span className="font-mono text-[0.6875rem] text-muted-foreground">
+          {known
+            ? `${inPeriod.toLocaleString('en-CA')} ${inPeriod === 1 ? 'sale date' : 'sale dates'}`
+            : '…'}
+        </span>
+      </div>
+      <div className="relative">
+        <Fold label="More filters">
           <div className="flex items-start gap-2">
-            <span className={`${LABEL} pt-1.5`}>Status</span>
+            <span className={`${LABEL} pt-2`}>Status</span>
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="Sale status">
               {STATES.map(({ key: state, label }) => (
-                <button
+                <FilterChip
                   key={state}
-                  type="button"
-                  aria-pressed={states.has(state)}
+                  pressed={states.has(state)}
                   onClick={() => {
                     setStates((before) => {
                       const next = new Set(before);
@@ -485,72 +616,74 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
                       return next;
                     });
                   }}
-                  className="rounded-md border bg-card px-2 py-1 text-xs hover:bg-muted aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
                 >
                   {label}
-                </button>
+                </FilterChip>
               ))}
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {far
-              ? 'Zoom in to see the parcels.'
-              : `${shown.length.toLocaleString('en-CA')} ${shown.length === 1 ? 'parcel' : 'parcels'}${whole ? '' : ' in view'}.`}
-            {loading ? ' Loading…' : ''}
-          </p>
-          {failed && (
-            <p className="text-xs text-destructive">
-              The parcels could not be loaded. Move the map to try again.
-            </p>
-          )}
-          {!far && answer?.truncated && (
-            <p className="text-xs text-muted-foreground">
-              More parcels than can be drawn at once here: the newest sales are shown. Zoom in, or
-              choose a shorter period, to see every one.
-            </p>
-          )}
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none hover:text-foreground">
-              About this data
-            </summary>
-            <div className="mt-1.5 flex flex-col gap-1.5">
-              <p>
-                The Crown’s public offerings of petroleum and natural gas rights: each sale’s
-                parcels from its notice, and their results once the sale is held (status, bonus,
-                price per hectare, buyers), as published. A buyer is often a land broker bidding for
-                someone else. The totals are of every parcel loaded that the rights and the period
-                keep, not of the map’s view; the bonus by quarter covers every year. With a play
-                chosen, the parcels and the totals are those inside the play’s outline: a parcel
-                counts when the middle of its land lies within it.
-              </p>
-              <p>
-                A parcel’s shape is its land placed on the province’s township grid; quarters and
-                legal subdivisions are an even division of their section, so an edge can be a few
-                metres off. Corrections and withdrawals published after a notice are not applied
-                yet: a withdrawn parcel can still show as upcoming until its sale has results.
-                Rights include: read from the parcel’s rights as for the agreements (Land today,
-                About this data).
-              </p>
-              <p>
-                {answer?.source.loadedAt
-                  ? `${answer.source.name}; sales of ${answer.source.firstSale ?? ''} to ${answer.source.lastSale ?? ''}, loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for the Duvernay's area only so far. Not an official record.`
-                  : 'Alberta Energy and Minerals, Government of Alberta, public offerings of petroleum and natural gas rights.'}
-              </p>
-            </div>
-          </details>
-        </>
+        </Fold>
+        <button
+          type="button"
+          onClick={() => {
+            setBuyer('');
+            setStates(new Set<LandSaleState>(ALL_STATES));
+          }}
+          className="absolute top-2 right-0 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          Clear all
+        </button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {far
+          ? 'Zoom in to see the parcels.'
+          : `${shown.length.toLocaleString('en-CA')} ${shown.length === 1 ? 'parcel' : 'parcels'}${whole ? '' : ' in view'}.`}
+        {loading ? ' Loading…' : ''}
+      </p>
+      {failed && (
+        <p className="text-xs text-destructive">
+          The parcels could not be loaded. Move the map to try again.
+        </p>
       )}
-    </div>
+      {!far && answer?.truncated && (
+        <p className="text-xs text-muted-foreground">
+          More parcels than can be drawn at once here: the newest sales are shown. Zoom in, or
+          choose a shorter period, to see every one.
+        </p>
+      )}
+    </MapSection>
+  );
+
+  const about = () => (
+    <>
+      <p>
+        <strong className="font-medium text-foreground">Land sales.</strong> The Crown’s public
+        offerings of petroleum and natural gas rights: each sale’s parcels from its notice, and
+        their results once the sale is held (status, bonus, price per hectare, buyers), as
+        published. A buyer is often a land broker bidding for someone else. The totals are of every
+        parcel loaded that the rights and the period keep, not of the map’s view; the bonus by
+        quarter covers every year. With a play chosen, the parcels and the totals are those inside
+        the play’s outline: a parcel counts when the middle of its land lies within it.
+      </p>
+      <p>
+        A parcel’s shape is its land placed on the province’s township grid; quarters and legal
+        subdivisions are an even division of their section, so an edge can be a few metres off.
+        Corrections and withdrawals published after a notice are not applied yet: a withdrawn parcel
+        can still show as upcoming until its sale has results. Rights include: read from the
+        parcel’s rights as for the agreements (Land today, below).
+      </p>
+      <p>
+        {answer?.source.loadedAt
+          ? `${answer.source.name}; sales of ${answer.source.firstSale ?? ''} to ${answer.source.lastSale ?? ''}, loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for the Duvernay's area only so far. Not an official record.`
+          : 'Alberta Energy and Minerals, Government of Alberta, public offerings of petroleum and natural gas rights.'}
+      </p>
+    </>
   );
 
   const legend = () =>
     !on ? null : (
-      <div
-        className="w-64 rounded-card border bg-card/95 p-3 text-xs shadow-xs"
-        role="group"
-        aria-label="Land sales legend"
-      >
-        <p className={LABEL}>Bonus per hectare</p>
+      <div role="group" aria-label="Land sales legend">
+        <LegendTitle>Bonus per hectare</LegendTitle>
         <div className="mt-2 flex h-2 overflow-hidden rounded-sm" aria-hidden="true">
           {SALE_BLUES.map((colour) => (
             <span key={colour} className="grow" style={{ backgroundColor: colour }} />
@@ -586,7 +719,22 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       </div>
     );
 
-  return { view, onViewChange, setPicked, parcels: byId, documents, panel, legend };
+  return {
+    view,
+    onViewChange,
+    setPicked,
+    parcels: byId,
+    documents,
+    rights,
+    nextSale,
+    lastSale,
+    showSale,
+    showPastYear,
+    updated: answer?.source.loadedAt ?? null,
+    section,
+    legend,
+    about,
+  };
 }
 
 function Tile({ label, value, note }: { label: string; value: string; note?: string }) {

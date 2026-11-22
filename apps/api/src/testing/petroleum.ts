@@ -77,6 +77,7 @@ export function fakePetroleum() {
         averagePerHectare: null,
         highPerHectare: null,
         nextSale: null,
+        sales: [],
         quarters: [],
       }),
     ),

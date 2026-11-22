@@ -121,6 +121,18 @@ describe('land sales as petro_api', () => {
       expect(since).toMatchObject({ offered: 2, sold: 1, bonus: '19200.20' });
       // The quarters cover every year, whatever the date asked for.
       expect(since.quarters).toHaveLength(2);
+      // One sale's totals, from its day to the day after; and every sale, the newest first,
+      // whatever the dates (F-267).
+      const one = await db.landSaleSummary(member(), {
+        ...ALL,
+        since: '1990-02-07',
+        until: '1990-02-08',
+      });
+      expect(one).toMatchObject({ offered: 1, sold: 1, bonus: '25600.10' });
+      expect(one.sales).toEqual([
+        { date: '1990-05-09', parcels: 2, sold: 1, held: true },
+        { date: '1990-02-07', parcels: 1, sold: 1, held: true },
+      ]);
 
       // Inside a play's outline (F-264): the parcels whose middle lies within an outer ring
       // and within no hole, for the parcels and for every total.

@@ -5,9 +5,11 @@ import type { LandSaleParcel } from '../lib/landSalesMap';
 import {
   QuarterBars,
   saleFiltered,
+  saleDay,
   saleFromZoom,
   saleHectares,
   saleMoney,
+  saleNextDay,
   saleSince,
 } from './LandSales';
 
@@ -73,6 +75,21 @@ describe('saleFiltered', () => {
     expect(kept('2026-11-04')).toEqual(['1', '2', '3', '4']);
     expect(kept(null)).toEqual(['1', '2', '3', '4']);
   });
+
+  it('keeps one sale alone: from its day to the day after (F-267)', () => {
+    const all = new Set(['sold', 'no_offers', 'upcoming'] as const);
+    const one = (date: string) =>
+      saleFiltered(list, {
+        buyer: '',
+        states: all,
+        today: '2026-11-01',
+        since: date,
+        until: saleNextDay(date),
+      }).map((p) => p.id);
+    expect(one('2026-12-02')).toEqual(['3']);
+    expect(one('2026-11-04')).toEqual(['1', '2', '4']);
+    expect(one('2026-11-05')).toEqual([]);
+  });
 });
 
 describe('saleMoney and saleHectares', () => {
@@ -112,5 +129,18 @@ describe('QuarterBars', () => {
     // The quarter before the period is lighter than the one in it.
     expect(bars.map((bar) => bar.getAttribute('fill'))).toEqual(['#bcd5f4', '#2c68bd']);
     expect(bars[1]?.querySelector('title')?.textContent).toBe('2026-Q2: $2.5M, 5 sold');
+  });
+});
+
+describe('saleNextDay and saleDay', () => {
+  it('gives the day after, over a month and a year', () => {
+    expect(saleNextDay('2026-11-18')).toBe('2026-11-19');
+    expect(saleNextDay('2026-11-30')).toBe('2026-12-01');
+    expect(saleNextDay('2026-12-31')).toBe('2027-01-01');
+  });
+
+  it('writes a sale date for reading', () => {
+    expect(saleDay('2026-12-02')).toBe('Dec 2');
+    expect(saleDay('2026-11-18', true)).toBe('Nov 18, 2026');
   });
 });

@@ -1,4 +1,5 @@
-import { Settings, TriangleAlert } from 'lucide-react';
+import { formatAlberta, LAND_RIGHTS } from '@grain/domain';
+import { CircleCheck, Minus, Plus, Settings, TriangleAlert, Waves } from 'lucide-react';
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 
 import { LayerApiContext, petroleumLayers } from '../lib/layerApi';
@@ -10,6 +11,7 @@ import {
   type MapboxToken,
 } from '../lib/mapbox';
 import { useTheme } from '../lib/theme';
+import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import type { St37Hover } from './FacilityMap';
 import {
@@ -24,7 +26,8 @@ import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { useLand, type LandPick } from './Land';
 import { LandPanel, LandTip } from './LandPanel';
-import { useLandSales } from './LandSales';
+import { saleDay, useLandSales } from './LandSales';
+import { SIDE_LABEL } from './MapSide';
 import { St37Panel, St37Tip } from './St37Panel';
 import { useSt37Wells } from './St37Wells';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
@@ -44,8 +47,8 @@ const NO_PINS = [] as const;
 
 /**
  * The map on its own page (F-238, map.torvenco.com), for the oil and gas side of the platform
- * (F-239): the map filling the window, with map styles and the oil and gas map layers (F-247
- * part 2), which are its own, kept in the oil and gas database: grain's map layers are neither
+ * (F-239): the map filling the window, one side card for everything on it (F-267), with map
+ * styles and the oil and gas map layers (F-247 part 2), which are its own, kept in the oil and gas database: grain's map layers are neither
  * asked for nor offered here. Everyone switches layers on and off under Layers; admins add and
  * manage them under Settings, and choose which are on when the map opens.
  */
@@ -110,6 +113,20 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const admin = session.organization.role === 'org_admin';
   const tone = theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
 
+  // The side card (F-267): its sections open one at a time, and the legend leads with the one
+  // open. On a narrow screen the card starts folded, so the map is seen first.
+  const [section, setSection] = useState<SideSection | null>('sales');
+  const [folded, setFolded] = useState(startsFolded);
+  const [legendOpen, setLegendOpen] = useState(true);
+  const openOnly = (name: SideSection) => () => {
+    setSection((before) => (before === name ? null : name));
+  };
+  const updated =
+    [wells.updated, land.updated, sales.updated]
+      .filter((at): at is string => at !== null)
+      .sort()
+      .at(-1) ?? null;
+
   if (mapbox.status !== 'ok' || refused) {
     const text = refused
       ? 'Mapbox refused the token. An administrator needs to check the token and the web addresses it allows (README, “Map”).'
@@ -122,6 +139,15 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       </div>
     );
   }
+
+  const legends = sideOrder(section).map((name) => ({
+    name,
+    node: name === 'sales' ? sales.legend() : name === 'land' ? land.legend() : wells.legend(tone),
+  }));
+  const layersOn = layers.layers.some((layer) => layers.chosen.has(layer.id));
+  const anyLegend = legends.some((legend) => legend.node !== null) || layersOn;
+  // Beside the card, or at the map's edge while the card is folded.
+  const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
 
   return (
     <div className="relative h-full overflow-hidden bg-muted">
@@ -169,53 +195,158 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           }}
         />
         {/* Shown with the map itself, so it never covers the loading message (F-238-R1-02). */}
-        <div className="absolute top-3 left-3 z-20 flex max-w-[calc(100%-5rem)] flex-wrap items-center gap-2 rounded-card border bg-card/95 p-2 shadow-xs">
-          <MapLayersButton state={layers} />
-          <SegmentedControl
-            label="Map style"
-            options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
-              value: key,
-              label: BASEMAPS[key].label,
-            }))}
-            value={basemap}
-            onChange={setBasemap}
-          />
-          {/* Admins only; the API refuses everyone else whatever the page shows. */}
-          {admin && (
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline">
-                  <Settings aria-hidden="true" />
-                  Settings
+        {folded ? (
+          <div className="absolute top-3 left-3 z-20 flex items-center gap-2 rounded-card border bg-card/95 py-1.5 pr-1.5 pl-3 shadow-xs">
+            <span className="text-sm font-semibold">Alberta oil and gas</span>
+            <Button
+              size="icon-sm"
+              variant="outline"
+              aria-label="Show the menu"
+              onClick={() => {
+                setFolded(false);
+              }}
+            >
+              <Plus aria-hidden="true" />
+            </Button>
+          </div>
+        ) : (
+          <aside
+            aria-label="Map menu"
+            className="absolute top-3 bottom-3 left-3 z-20 flex w-[22.5rem] max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 shadow-md"
+          >
+            <div className="flex flex-col gap-3 px-4 pt-4 pb-4">
+              <div className="flex items-center gap-2">
+                <span className={`${SIDE_LABEL} grow`}>Oil and gas</span>
+                {/* Admins only; the API refuses everyone else whatever the page shows. */}
+                {admin && (
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button size="sm" variant="outline">
+                        <Settings aria-hidden="true" />
+                        Settings
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent
+                      title="Map settings"
+                      description="The layers of the oil and gas map. Only admins see this."
+                      className="max-w-2xl"
+                    >
+                      {/* The map reads its list again after each change (F-247-2-D1-03). */}
+                      <MapLayerSettings session={session} onChanged={layers.reload} />
+                    </DialogContent>
+                  </Dialog>
+                )}
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  aria-label="Hide the menu"
+                  onClick={() => {
+                    setFolded(true);
+                  }}
+                >
+                  <Minus aria-hidden="true" />
                 </Button>
-              </DialogTrigger>
-              <DialogContent
-                title="Map settings"
-                description="The layers of the oil and gas map. Only admins see this."
-                className="max-w-2xl"
-              >
-                {/* The map reads its list again after each change (F-247-2-D1-03). */}
-                <MapLayerSettings session={session} onChanged={layers.reload} />
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight">Alberta oil and gas</h1>
+                <p className="text-[0.8125rem] text-muted-foreground">
+                  Crown land sales, who holds the land, wells and production
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <MapLayersButton state={layers} />
+                <SegmentedControl
+                  label="Map style"
+                  options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
+                    value: key,
+                    label: BASEMAPS[key].label,
+                  }))}
+                  value={basemap}
+                  onChange={setBasemap}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className={SIDE_LABEL}>Jump to</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <JumpButton
+                    title="Next sale"
+                    note={
+                      sales.nextSale
+                        ? `${saleDay(sales.nextSale.date)} · ${sales.nextSale.parcels.toLocaleString('en-CA')} ${sales.nextSale.parcels === 1 ? 'parcel' : 'parcels'}`
+                        : 'none posted'
+                    }
+                    mark={<span className="size-2 rounded-full bg-[#d9541e]" />}
+                    disabled={sales.nextSale === null}
+                    onClick={() => {
+                      if (!sales.nextSale) return;
+                      setSection('sales');
+                      sales.showSale(sales.nextSale.date, goTo);
+                    }}
+                  />
+                  <JumpButton
+                    title="Last sale"
+                    note={
+                      sales.lastSale
+                        ? `${saleDay(sales.lastSale.date)} · ${sales.lastSale.sold.toLocaleString('en-CA')} sold`
+                        : 'none held'
+                    }
+                    mark={<CircleCheck className="size-3.5 text-[#d9541e]" />}
+                    disabled={sales.lastSale === null}
+                    onClick={() => {
+                      if (!sales.lastSale) return;
+                      setSection('sales');
+                      sales.showSale(sales.lastSale.date, goTo);
+                    }}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.values(LAND_RIGHTS).map((play) => (
+                    <JumpButton
+                      key={play.key}
+                      title={play.name}
+                      note="past year"
+                      mark={<Waves className="size-3.5 text-muted-foreground" />}
+                      onClick={() => {
+                        setSection('sales');
+                        sales.showPastYear(play.key);
+                        land.setRights(play.key);
+                        const loaded = wells.formations.find((f) => f.key === play.key);
+                        if (!loaded) return;
+                        wells.choose(loaded.key);
+                        const a = loaded.area;
+                        goTo([a.west, a.south, a.east, a.north]);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            {sales.section({ open: section === 'sales', onToggle: openOnly('sales'), goTo })}
+            {land.section({ open: section === 'land', onToggle: openOnly('land') })}
+            {wells.section({
+              open: section === 'wells',
+              onToggle: openOnly('wells'),
+              tone,
+              goTo,
+            })}
+            {/* What the card shows and where it comes from, out of the way until asked for.
+                The sources stay here: their terms ask that they be named. */}
+            <details className="mt-auto border-t px-4 py-3 text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none hover:text-foreground">
+                Sources &amp; licence
+                {updated ? ` · updated ${formatAlberta(updated, { weekday: false })}` : ''}
+              </summary>
+              <div className="mt-2 flex flex-col gap-1.5">
+                {sales.about()}
+                {land.about()}
+                {wells.about()}
+              </div>
+            </details>
+          </aside>
+        )}
       </Suspense>
       {/* Below the zoom buttons, top right (F-139). */}
       <MapLayersPanel state={layers} side="right" />
-      {/* The wells: under the controls, top left (F-243 part 4). */}
-      <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
-        <div className="flex flex-col gap-2">
-          {wells.panel(tone, goTo)}
-          {sales.panel()}
-          {land.panel()}
-        </div>
-      </div>
-      {/* The holders in view and what each mark means: bottom left, beside the panels. */}
-      <div className="absolute bottom-8 left-[19.75rem] z-10 hidden max-h-[calc(100%-6rem)] flex-col gap-2 overflow-y-auto md:flex">
-        {sales.legend()}
-        {land.legend()}
-      </div>
       <LandPanel
         // A panel of its own for each click: it starts on the first piece of land under it.
         key={landPick ? `land:${landPick.keys.join(',')}` : 'land'}
@@ -239,16 +370,91 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         member={{ organizationId: session.organization.id, token: session.token }}
         goTo={goTo}
       />
-      <PickedFeatureCard state={layers} token={session.token} className="left-3" />
-      {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's
-          details, so it never covers their fields or their close button (F-247-2-R3-02). */}
-      {/* With many layers on, the legend scrolls within the space under the buttons (which sit
-          above it), so Layers, the map style and Settings stay in reach (F-247-2-R13-02). */}
-      {layers.picked === null && (
-        <div className="absolute bottom-8 left-3 z-10 max-h-[calc(100%-9rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
-          <MapLayersLegend state={layers} />
+      <PickedFeatureCard state={layers} token={session.token} className={beside} />
+      {/* One legend, bottom left beside the card: what the open section's colours mean first,
+          then the other sections', then the map layers that are on. It makes way for a clicked
+          shape's details, so it never covers their fields or their close button
+          (F-247-2-R3-02), and with many layers on it scrolls within the space it has
+          (F-247-2-R13-02). */}
+      {layers.picked === null && anyLegend && (
+        <div
+          role="group"
+          aria-label="Legend"
+          className={cn(
+            'absolute bottom-8 z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
+            beside,
+            !folded && 'hidden md:flex',
+          )}
+        >
+          <button
+            type="button"
+            aria-expanded={legendOpen}
+            aria-label={legendOpen ? 'Hide the legend' : 'Show the legend'}
+            onClick={() => {
+              setLegendOpen((before) => !before);
+            }}
+            className={cn(
+              'z-10 rounded-sm px-1.5 leading-none text-muted-foreground hover:bg-muted hover:text-foreground',
+              legendOpen ? 'absolute top-2.5 right-2' : 'flex items-center gap-2 p-2.5',
+            )}
+          >
+            {legendOpen ? '−' : 'Legend +'}
+          </button>
+          {legendOpen && (
+            <div className="flex flex-col divide-y [&>*]:px-3 [&>*]:py-2.5">
+              {legends.map(
+                (legend) => legend.node !== null && <div key={legend.name}>{legend.node}</div>,
+              )}
+              <MapLayersLegend state={layers} />
+            </div>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+type SideSection = 'sales' | 'land' | 'wells';
+
+/** The sections' legends in order: the open one first, the rest as the card lists them. */
+export function sideOrder(open: SideSection | null): SideSection[] {
+  const all: SideSection[] = ['sales', 'land', 'wells'];
+  return open === null ? all : [open, ...all.filter((name) => name !== open)];
+}
+
+/** Whether the card starts folded: on a screen too narrow to show it beside the map. */
+function startsFolded(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches;
+}
+
+/** A Jump to button: where it leads, and a few words of what is there. */
+function JumpButton({
+  title,
+  note,
+  mark,
+  disabled,
+  onClick,
+}: {
+  title: string;
+  note: string;
+  mark: React.ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex flex-col items-start rounded-lg border bg-card px-3 py-2 text-left shadow-xs hover:bg-muted disabled:opacity-60 disabled:hover:bg-card"
+    >
+      <span className="flex items-center gap-1.5 text-sm font-semibold">
+        <span aria-hidden="true" className="flex items-center">
+          {mark}
+        </span>
+        {title}
+      </span>
+      <span className="text-xs text-muted-foreground">{note}</span>
+    </button>
   );
 }
