@@ -73,7 +73,37 @@ describe('FORMATION_ZONES', () => {
       label: 'Shale and mudstone with subordinate siltstone',
       colour: '#cecfd1',
       hatch: null,
+      earth: '#7f8794',
+      pattern: 'dashes',
     });
+  });
+});
+
+describe('FORMATION_ROCKS', () => {
+  it('draws every rock type in a colour and a texture of its own kind', () => {
+    for (const rock of Object.values(FORMATION_ROCKS)) {
+      expect(rock.colour).toMatch(/^#[0-9a-f]{6}$/);
+      expect(rock.earth).toMatch(/^#[0-9a-f]{6}$/);
+      expect(rock.pattern.length).toBeGreaterThan(3);
+    }
+    // The customary marks: grains for sandstone, fine beds for shale, blocks for limestone
+    // and dolostone; both rocks of an interbedded class show in its texture.
+    expect(FORMATION_ROCKS.sandstone.pattern).toBe('dots');
+    expect(FORMATION_ROCKS.shale.pattern).toBe('dashes');
+    expect(FORMATION_ROCKS.carbonate.pattern).toBe('bricks');
+    expect(FORMATION_ROCKS.carbonate_shale.pattern).toBe('bricks_dashes');
+    expect(FORMATION_ROCKS.carbonate_anhydrite.pattern).toBe('bricks_hatch');
+    // Only a rock the table does not show is left plain.
+    expect(
+      Object.entries(FORMATION_ROCKS)
+        .filter(([, rock]) => rock.pattern === 'plain')
+        .map(([key]) => key),
+    ).toEqual(['unknown']);
+    // No two rock types the play's column shows share a colour on the block.
+    const earths = ['sandstone', 'shale', 'carbonate', 'carbonate_shale', 'basement'].map(
+      (key) => FORMATION_ROCKS[key as keyof typeof FORMATION_ROCKS].earth,
+    );
+    expect(new Set(earths).size).toBe(earths.length);
   });
 });
 

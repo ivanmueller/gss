@@ -169,8 +169,13 @@ describe('the camera', () => {
   });
 
   it('turns with a drag, and never past straight up or down', () => {
+    // A drag to the right swings the eye round to the east of the block: the block is seen
+    // turning counterclockwise from above; a drag to the left, clockwise (the owner's choice).
     const turned = orbit(level, 100, 0);
-    expect(turned.yaw).toBeCloseTo(0.85, 6);
+    expect(turned.yaw).toBeCloseTo(-0.85, 6);
+    expect(lens(turned, SIZE).eye[0]).toBeLessThan(0);
+    expect(orbit(level, -100, 0).yaw).toBeCloseTo(0.85, 6);
+    expect(lens(orbit(level, -100, 0), SIZE).eye[0]).toBeGreaterThan(0);
     // The point at the middle stays at the middle.
     const [x, y] = lens(turned, SIZE).place(lens(turned, SIZE).see([0, 0, 0]));
     expect(x).toBeCloseTo(200, 6);

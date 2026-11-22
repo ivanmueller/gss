@@ -315,11 +315,15 @@ export function fitCamera(
   return camera;
 }
 
-/** The camera turned by a drag of dx, dy pixels: the scene follows the pointer. */
+/**
+ * The camera turned by a drag of dx, dy pixels. A drag to the left turns the block clockwise
+ * seen from above, a drag to the right counterclockwise (the owner, 2026-11-22, after trying the
+ * other way round); a drag down lifts the eye over the block.
+ */
 export function orbit(camera: Camera, dx: number, dy: number): Camera {
   return {
     ...camera,
-    yaw: camera.yaw + dx * 0.0085,
+    yaw: camera.yaw - dx * 0.0085,
     pitch: Math.max(-MAX_PITCH, Math.min(MAX_PITCH, camera.pitch + dy * 0.0085)),
   };
 }

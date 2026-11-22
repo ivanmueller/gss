@@ -40,13 +40,40 @@ export type RockKey =
   | 'basement'
   | 'unknown';
 
+/**
+ * How a rock type is drawn in the block of ground: the texture customary for it in geological
+ * drawings (stipple for sandstone, dashes for shale, brickwork for limestone and dolostone, and
+ * so on). The texture is a way of drawing the type the table gives; it adds no claim of its own.
+ */
+export type RockPattern =
+  | 'dots'
+  | 'dashes'
+  | 'bricks'
+  | 'bricks_dashes'
+  | 'pebbles'
+  | 'gravel'
+  | 'crystals'
+  | 'crosshatch'
+  | 'bricks_hatch'
+  | 'chevrons'
+  | 'crosses'
+  | 'plain';
+
 export interface FormationRock {
   /** The class in the table's own words. */
   label: string;
-  /** The table's fill colour for the class. */
+  /** The table's fill colour for the class: how the class was read, kept for the record. */
   colour: string;
-  /** The colour of its hatching, for the two interbedded classes; null otherwise. */
+  /** The colour of its hatching on the table, for the two interbedded classes; null otherwise. */
   hatch: string | null;
+  /**
+   * The colour the layer is drawn in: a natural tone for the rock (the owner, 2026-11-22: the
+   * block to look like an illustrated one, the texture in the layers), our choice, not the
+   * table's.
+   */
+  earth: string;
+  /** The texture drawn over it. */
+  pattern: RockPattern;
 }
 
 export const FORMATION_ROCKS: Record<RockKey, FormationRock> = {
@@ -54,47 +81,103 @@ export const FORMATION_ROCKS: Record<RockKey, FormationRock> = {
     label: 'Nonstratified interglacial sediments (clay, silt, sand)',
     colour: '#dec9b3',
     hatch: null,
+    earth: '#bfa98a',
+    pattern: 'dots',
   },
-  gravel_sand: { label: 'Gravel and sand', colour: '#ffc78e', hatch: null },
-  conglomerate: { label: 'Conglomerate and sandstone', colour: '#ff8e1c', hatch: null },
+  gravel_sand: {
+    label: 'Gravel and sand',
+    colour: '#ffc78e',
+    hatch: null,
+    earth: '#b99766',
+    pattern: 'gravel',
+  },
+  conglomerate: {
+    label: 'Conglomerate and sandstone',
+    colour: '#ff8e1c',
+    hatch: null,
+    earth: '#c48a52',
+    pattern: 'pebbles',
+  },
   sandstone: {
     label: 'Sandstone, siltstone, and quartzite, commonly interbedded with shale or mudstone',
     colour: '#ffff8e',
     hatch: null,
+    earth: '#dcbd76',
+    pattern: 'dots',
   },
-  shale: { label: 'Shale and mudstone with subordinate siltstone', colour: '#cecfd1', hatch: null },
-  carbonate: { label: 'Limestone and dolostone', colour: '#aad5ff', hatch: null },
+  shale: {
+    label: 'Shale and mudstone with subordinate siltstone',
+    colour: '#cecfd1',
+    hatch: null,
+    earth: '#7f8794',
+    pattern: 'dashes',
+  },
+  carbonate: {
+    label: 'Limestone and dolostone',
+    colour: '#aad5ff',
+    hatch: null,
+    earth: '#9fbccf',
+    pattern: 'bricks',
+  },
   carbonate_shale: {
     label: 'Limestone and dolostone interbedded with calcareous shale',
     colour: '#aad5ff',
     hatch: '#787878',
+    earth: '#8fa6b6',
+    pattern: 'bricks_dashes',
   },
-  halite: { label: 'Halite ± anhydrite, carbonate, and shale', colour: '#ffe3ff', hatch: null },
+  halite: {
+    label: 'Halite ± anhydrite, carbonate, and shale',
+    colour: '#ffe3ff',
+    hatch: null,
+    earth: '#e2cfe0',
+    pattern: 'crystals',
+  },
   anhydrite: {
     label: 'Anhydrite ± gypsum, halite, carbonate, and shale',
     colour: '#ffaaff',
     hatch: null,
+    earth: '#c6a4cf',
+    pattern: 'crosshatch',
   },
   carbonate_anhydrite: {
     label: 'Limestone and dolostone ± sandstone interbedded with anhydrite',
     colour: '#aad5ff',
     hatch: '#ff71ff',
+    earth: '#a9b0d4',
+    pattern: 'bricks_hatch',
   },
-  volcanic: { label: 'Volcanic and volcaniclastic rock', colour: '#ff0000', hatch: null },
+  volcanic: {
+    label: 'Volcanic and volcaniclastic rock',
+    colour: '#ff0000',
+    hatch: null,
+    earth: '#a14d3e',
+    pattern: 'chevrons',
+  },
   // The model's first zone: the table shows the Quaternary as tills over the Empress gravel
-  // and sand; the colour is the table's for gravel and sand.
+  // and sand; the table's colour is the one it gives gravel and sand.
   surficial: {
     label: 'Sediment above bedrock: till, gravel and sand',
     colour: '#ffc78e',
     hatch: null,
+    earth: '#8f7350',
+    pattern: 'gravel',
   },
   // The table's bottom bar, in its own words and colour.
   basement: {
     label: 'Archean and Paleoproterozoic metamorphic and igneous cratonic rocks',
     colour: '#ffaaaa',
     hatch: null,
+    earth: '#b9737a',
+    pattern: 'crosses',
   },
-  unknown: { label: 'Not shown on the Table of Formations', colour: '#9ca3af', hatch: null },
+  unknown: {
+    label: 'Not shown on the Table of Formations',
+    colour: '#9ca3af',
+    hatch: null,
+    earth: '#8b9099',
+    pattern: 'plain',
+  },
 };
 
 export interface FormationZone {
