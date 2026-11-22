@@ -22,9 +22,9 @@ const run = (...args) =>
 
 const land = (key, portion = '') =>
   `<Land><LandKey>${key}</LandKey><Portion></Portion><MetesBoundsIndicator>${portion}</MetesBoundsIndicator><MetesBounds></MetesBounds></Land>`;
-const contract = (no, lands, zone = 'EXAMPLE FM') =>
-  `<Contract><ContractNo>${no}</ContractNo><Hectares>256</Hectares><Tract><LandDescription>${lands}</LandDescription>` +
-  `<ZoneDescription><Line><Substance>PETROLEUM AND NATURAL GAS</Substance><Qualifier>IN THE</Qualifier><ZoneName>${zone}</ZoneName></Line></ZoneDescription></Tract></Contract>`;
+const contract = (no, lands, zone = 'EXAMPLE FM', codes = '', reversion = '') =>
+  `<Contract><ContractNo>${no}</ContractNo><Hectares>256</Hectares>${codes}<Tract><LandDescription>${lands}</LandDescription>` +
+  `<ZoneDescription><Line><Substance>PETROLEUM AND NATURAL GAS</Substance><Qualifier>IN THE</Qualifier><ZoneName>${zone}</ZoneName>${reversion}</Line></ZoneDescription></Tract></Contract>`;
 const notice = (date, contracts) =>
   `<?xml version="1.0"?><PublicOfferingNotice xmlns="http://tempuri.org/PON.xsd"><MineralType>PETROLEUM AND NATURAL GAS</MineralType><SaleDate>${date}</SaleDate>` +
   `<Schedule><ContractType>LEASE</ContractType><Region><Name>PLAINS</Name>${contracts}</Region></Schedule><AddendaAndContacts></AddendaAndContacts></PublicOfferingNotice>`;
@@ -44,7 +44,13 @@ function setUp(into, sold = 'EXAMPLE "LAND" LTD.\'); drop table x; --') {
     join(into, '20261104PON.xml'),
     notice(
       '2026-11-04',
-      contract('A0001', land('51806024')) +
+      contract(
+        'A0001',
+        land('51806024'),
+        'EXAMPLE FM',
+        '<RestrictionCodeApplies>SHA010301</RestrictionCodeApplies><RestrictionCodeApplies>SHA010401</RestrictionCodeApplies>',
+        '<DRRZDCode>D00004</DRRZDCode>',
+      ) +
         contract('A0002', land('51806024SW', 'P') + land('41203424')) +
         contract('A0003', land('41203424')),
     ),
@@ -129,18 +135,19 @@ describe('load-land-sales.js', () => {
     // The sold parcel: its money as published, its buyer's quotes doubled so it stays one value.
     assert.ok(
       sql.includes(
-        '"2026-11-04","A0001","LEASE","PLAINS","256","PETROLEUM AND NATURAL GAS IN THE EXAMPLE FM","51806024","f","ACCEPTED","56888.32","222.22","EXAMPLE ""LAND"" LTD.\'); drop table x; -- 100%","(-115.975,54.0145),(-116,54)"',
+        '"2026-11-04","A0001","LEASE","PLAINS","256","PETROLEUM AND NATURAL GAS IN THE EXAMPLE FM","51806024","f","ACCEPTED","56888.32","222.22","EXAMPLE ""LAND"" LTD.\'); drop table x; -- 100%","SHA010301 SHA010401","D00004","(-115.975,54.0145),(-116,54)"',
       ),
       sql,
     );
     // Part of its land outside the area, and a portion: kept, marked inexact, with no offers.
-    assert.match(sql, /"2026-11-04","A0002",[^\n]*"51806024SW 41203424","t","NO OFFERS",,,,/);
+    // It has no codes: none are written.
+    assert.match(sql, /"2026-11-04","A0002",[^\n]*"51806024SW 41203424","t","NO OFFERS",,,,,,"\(/);
     // A parcel wholly outside the area is left out; one of a sale not held yet has no result.
     assert.doesNotMatch(sql, /"A0003"/);
     assert.match(sql, /"2026-12-02","A0001",[^\n]*"5180602401","f",,,,,/);
     assert.match(
       sql,
-      /values \('https:\/\/content2\.energy\.alberta\.ca\/[^']+', '2026-11-04', '2026-12-02', -117, 53, -115, 55, 2, 3\);/,
+      /values \('https:\/\/content2\.energy\.alberta\.ca\/[^']+', '2026-11-04', '2026-12-02', -117, 53, -115, 55, 2, 3, '\{\}'::jsonb\);/,
     );
     assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
@@ -148,6 +155,36 @@ describe('load-land-sales.js', () => {
       out.stderr,
       /2 sales from 2026-11-04 to 2026-12-02, 1 results files; 3 parcels in the area, 1 outside it\./,
     );
+  });
+
+  test('sql: the PDF links fetch kept go with the load, only for its sales and in their form', () => {
+    const into = join(dir, 'with-documents');
+    setUp(into);
+    writeFileSync(
+      join(into, 'documents.json'),
+      JSON.stringify({
+        '2026-11-04': {
+          notice: '/download/?s=png&id=20261104PON&ft=.pdf',
+          results: "/download/?s=png&id=20261104PSR&ft=.pdf'); drop table x; --",
+        },
+        '2026-12-02': { notice: 'https://example.test/notice.pdf' },
+        // A sale not among those read.
+        '2020-01-08': { notice: '/download/?s=png&id=20200108PON&ft=.pdf&y=2020' },
+      }),
+    );
+    const out = run('sql', into, sections, '-117', '53', '-115', '55', '1000');
+    assert.equal(out.status, 0, out.stderr);
+    assert.ok(
+      out.stdout.includes(
+        `, 2, 3, '{"2026-11-04":{"notice":"/download/?s=png&id=20261104PON&ft=.pdf"}}'::jsonb);`,
+      ),
+      out.stdout,
+    );
+    assert.doesNotMatch(out.stdout, /example\.test|drop table x; --"|20200108/);
+    // A list in another form loads nothing.
+    writeFileSync(join(into, 'documents.json'), 'not json');
+    const refused = run('sql', into, sections, '-117', '53', '-115', '55', '1000');
+    assert.equal(refused.status, 2);
   });
 
   test('sql: no sale files, no parcel in the area or sections in another form load nothing', () => {

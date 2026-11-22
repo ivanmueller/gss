@@ -9,6 +9,7 @@ import {
   SALE_NO_OFFERS,
   SALE_STEPS,
   SALE_UPCOMING,
+  type LandSaleDocuments,
   type LandSaleParcel,
   type LandSaleState,
   type LandSalesView,
@@ -124,6 +125,8 @@ interface ParcelsAnswer {
     lastSale: string | null;
   };
   truncated: boolean;
+  /** The documents of the sales these parcels belong to, by sale date (F-265). */
+  documents?: Record<string, LandSaleDocuments>;
   parcels: LandSaleParcel[];
 }
 
@@ -158,6 +161,7 @@ const inside = (asked: Bbox, view: Bbox) =>
 const round = (n: number) => Math.round(n * 1e4) / 1e4;
 const LABEL = 'text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase';
 const NONE: readonly string[] = [];
+const NO_DOCUMENTS: Readonly<Record<string, LandSaleDocuments>> = {};
 
 export interface LandSalesState {
   view: LandSalesView | null;
@@ -166,6 +170,8 @@ export interface LandSalesState {
   setPicked: (keys: readonly string[]) => void;
   /** The parcels shown, by their id: for the box at the pointer and the panel (F-265). */
   parcels: ReadonlyMap<string, LandSaleParcel>;
+  /** Each sale's notice and results on the department's site, by sale date. */
+  documents: Readonly<Record<string, LandSaleDocuments>>;
   panel: () => React.ReactNode;
   legend: () => React.ReactNode;
 }
@@ -263,6 +269,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
               ? {
                   ...answer,
                   truncated: earlier.truncated || answer.truncated,
+                  documents: { ...earlier.documents, ...answer.documents },
                   parcels: [...earlier.parcels, ...answer.parcels],
                 }
               : answer,
@@ -321,6 +328,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   );
   const features = useMemo(() => landSaleFeatures(shown, today), [shown, today]);
   const byId = useMemo(() => new Map(shown.map((p) => [p.id, p])), [shown]);
+  const documents = answer?.documents ?? NO_DOCUMENTS;
   const view = useMemo<LandSalesView | null>(
     () => (on ? { parcels: features, picked } : null),
     [on, features, picked],
@@ -578,7 +586,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       </div>
     );
 
-  return { view, onViewChange, setPicked, parcels: byId, panel, legend };
+  return { view, onViewChange, setPicked, parcels: byId, documents, panel, legend };
 }
 
 function Tile({ label, value, note }: { label: string; value: string; note?: string }) {

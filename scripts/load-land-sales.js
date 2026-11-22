@@ -6,7 +6,8 @@
 //   node --experimental-strip-types scripts/load-land-sales.js fetch <dir> <first-year>
 //
 // reads the department's page of notices and results, year by year from <first-year>, and saves
-// each sale's notice and results (their XML files) in <dir>, one request at a time.
+// each sale's notice and results (their XML files) in <dir>, one request at a time, with the
+// page's links to the same documents as PDF files (documents.json; F-265).
 //
 //   node --experimental-strip-types scripts/load-land-sales.js sections <west> <south> <east> \
 //     <north> <out.ndjson>
@@ -30,7 +31,7 @@
 //
 // The province's files are never written to the repository: they live only on the runner.
 
-import { readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { URLSearchParams } from 'node:url';
@@ -39,6 +40,8 @@ import {
   parseSaleNotice,
   parseSaleResults,
   placeParcel,
+  saleDocumentLinks,
+  saleDocumentPath,
   sectionCorners,
 } from '../packages/domain/src/landSales.ts';
 
@@ -53,6 +56,8 @@ const PAGE = 1000;
 const MAX_PAGES = 400;
 /** The department's files have been XML since 2003. */
 const FIRST_YEAR = 2003;
+/** Where `fetch` keeps the page's links to each sale's PDF files, for `sql`. */
+const DOCUMENTS_FILE = 'documents.json';
 
 function usage() {
   return [
@@ -125,9 +130,13 @@ async function mainFetch(argv) {
   const thisYear = new Date().getUTCFullYear();
   if (!dir || !(first >= FIRST_YEAR && first <= thisYear)) fail(usage(), 2);
   const files = new Map();
+  const documents = {};
   const keep = (html) => {
     for (const file of saleFiles(html)) {
       if (Number(file.date.slice(0, 4)) >= first) files.set(`${file.date}${file.kind}`, file);
+    }
+    for (const [date, links] of Object.entries(saleDocumentLinks(html))) {
+      if (Number(date.slice(0, 4)) >= first) documents[date] = { ...documents[date], ...links };
     }
   };
   // The page as it opens holds the current sales, and lists the earlier years it can be asked
@@ -153,8 +162,9 @@ async function mainFetch(argv) {
     }
     await sleep(250);
   }
+  writeFileSync(join(dir, DOCUMENTS_FILE), JSON.stringify(documents));
   console.error(
-    `Sale files: ${String(files.size)} listed since ${String(first)}, ${String(saved)} saved.`,
+    `Sale files: ${String(files.size)} listed since ${String(first)}, ${String(saved)} saved; PDF links for ${String(Object.keys(documents).length)} sales.`,
   );
 }
 
@@ -246,6 +256,30 @@ function readSections(file) {
   return sections;
 }
 
+/**
+ * The PDF links `fetch` kept, for the sales given: only dates, kinds and paths in the form the
+ * department's page writes them; anything else in the file is left out.
+ */
+function readDocuments(dir, sales) {
+  const file = join(dir, DOCUMENTS_FILE);
+  if (!existsSync(file)) return {};
+  let read;
+  try {
+    read = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    fail('The list of PDF links is not in the form "fetch" writes; nothing was loaded.', 2);
+  }
+  const documents = {};
+  for (const date of sales) {
+    const links = read?.[date];
+    const kept = {};
+    if (saleDocumentPath(links?.notice)) kept.notice = links.notice;
+    if (saleDocumentPath(links?.results)) kept.results = links.results;
+    if (Object.keys(kept).length > 0) documents[date] = kept;
+  }
+  return documents;
+}
+
 function mainSql(argv) {
   const [dir, sectionsFile, west, south, east, north, grainBytes] = argv;
   const area = areaOf(west, south, east, north);
@@ -292,6 +326,8 @@ function mainSql(argv) {
           result?.bonus,
           result?.dollarsPerHectare,
           result?.buyers,
+          parcel.restrictions.slice(0, 60).join(' ') || null,
+          parcel.reversionZones.slice(0, 120).join(' ') || null,
           `(${String(e)},${String(n)}),(${String(w)},${String(s)})`,
           JSON.stringify(placed.shape),
         ]
@@ -308,7 +344,8 @@ function mainSql(argv) {
   );
 
   const columns =
-    'sale_date, contract_no, contract_type, region, hectares, zone, land, inexact, status, bonus, dollars_per_hectare, buyers, bounds, shape';
+    'sale_date, contract_no, contract_type, region, hectares, zone, land, inexact, status, bonus, dollars_per_hectare, buyers, restrictions, reversion_zones, bounds, shape';
+  const documents = readDocuments(dir, sales);
   const out = [
     '\\set ON_ERROR_STOP on',
     'begin;',
@@ -329,8 +366,9 @@ function mainSql(argv) {
   }
   out.push(
     '\\.',
-    'insert into petro.land_sale_loads (source_url, first_sale, last_sale, west, south, east, north, sales, parcels)',
-    `values ('${PAGE_URL}', '${sales[0]}', '${sales[sales.length - 1]}', ${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}, ${String(sales.length)}, ${String(rows.length)});`,
+    'insert into petro.land_sale_loads (source_url, first_sale, last_sale, west, south, east, north, sales, parcels, documents)',
+    // Only dates and paths of the department's own form are in it: no quote can be.
+    `values ('${PAGE_URL}', '${sales[0]}', '${sales[sales.length - 1]}', ${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}, ${String(sales.length)}, ${String(rows.length)}, '${JSON.stringify(documents).replaceAll("'", "''")}'::jsonb);`,
     // Measured inside the transaction, with the new rows written: over the guard, nothing stays.
     'do $$',
     'begin',

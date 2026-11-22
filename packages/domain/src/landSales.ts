@@ -218,6 +218,23 @@ export interface SaleNoticeParcel {
   lands: string[];
   /** Whether any of its land is only a portion, or by metes and bounds. */
   portion: boolean;
+  /**
+   * The codes of the restrictions that apply to it (`SHA010301`), each once, as the notice
+   * lists them with the contract; what each means is in the notice's addenda.
+   */
+  restrictions: string[];
+  /** The codes of its deeper rights reversion zones (`D00004`), each once, in the notice's order. */
+  reversionZones: string[];
+}
+
+/** The codes among the values of a tag, each once, in order; anything not a code is left out. */
+function codes(xml: string, name: string): string[] {
+  const out: string[] = [];
+  for (const block of blocks(xml, name)) {
+    const code = block.trim();
+    if (/^[A-Z0-9]{2,12}$/.test(code) && !out.includes(code)) out.push(code);
+  }
+  return out;
 }
 
 /** The clauses as one zone: as many whole clauses as fit in the 1,000 characters kept. */
@@ -263,7 +280,10 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
           if (tag(land, 'Portion') || tag(land, 'MetesBoundsIndicator')) portion = true;
         }
         // A clause is a substance and its interval, written over one or more lines; the same
-        // clause repeated for each tract is kept once.
+        // clause repeated for each tract is kept once. A clause that takes rights away is
+        // marked on its line (`<Excepting>EXCEPTING</Excepting>`): it keeps that word, so it
+        // is never read as rights given, and it stays with the clause it follows, so the same
+        // clause with and without an exception are two (F-265).
         const clauses: string[] = [];
         for (const description of blocks(contract, 'ZoneDescription')) {
           let clause = '';
@@ -273,8 +293,14 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
           };
           for (const line of blocks(description, 'Line')) {
             const substance = tag(line, 'Substance');
-            if (substance) end();
-            const words = [substance, tag(line, 'Qualifier'), tag(line, 'ZoneName')]
+            const excepting = tag(line, 'Excepting') !== null;
+            if (substance && !excepting) end();
+            const words = [
+              excepting ? 'EXCEPTING' : null,
+              substance,
+              tag(line, 'Qualifier'),
+              tag(line, 'ZoneName'),
+            ]
               .filter((w): w is string => w !== null)
               .join(' ');
             if (words !== '') clause = clause === '' ? words : `${clause} ${words}`;
@@ -289,6 +315,8 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
           zone: zoneOf(clauses),
           lands,
           portion,
+          restrictions: codes(contract, 'RestrictionCodeApplies'),
+          reversionZones: codes(contract, 'DRRZDCode'),
         });
       }
     }
@@ -345,6 +373,49 @@ export function parseSaleResults(xml: string): SaleResults | null {
     });
   }
   return { saleDate, parcels };
+}
+
+/** The department's site, where each sale's notice and results are published. */
+export const SALE_DOCUMENTS_SITE = 'https://content2.energy.alberta.ca';
+
+/**
+ * Whether a path is one of the department's links to a sale's notice or results as a PDF, as
+ * its page writes them: `/download/?s=png&id=20260819PON&ft=.pdf`, with `&y=2015` for an
+ * earlier year. Only such a path is ever kept, sent or made into a link (F-265).
+ */
+export function saleDocumentPath(path: unknown): path is string {
+  return (
+    typeof path === 'string' &&
+    /^\/download\/\?s=png&id=\d{8}(PON|PSR)&ft=\.(pdf|PDF)(&y=\d{4})?$/.test(path)
+  );
+}
+
+/** A sale's documents as the department's page links them: paths on its site. */
+export interface SaleDocumentLinks {
+  notice?: string;
+  results?: string;
+}
+
+/**
+ * The notices and results a page of the department's site links to as PDF files, by sale date
+ * (F-265): `{ '2026-08-19': { notice: '/download/?s=png&id=20260819PON&ft=.pdf', results } }`.
+ * The paths as the page writes them (an earlier year's carry `&y=2015`, and some `.PDF`); a
+ * link in any other form is left out.
+ */
+export function saleDocumentLinks(html: string): Record<string, SaleDocumentLinks> {
+  const documents: Record<string, SaleDocumentLinks> = {};
+  const link =
+    /(\/download\/\?s=png&amp;id=(\d{4})(\d{2})(\d{2})(PON|PSR)&amp;ft=\.(?:pdf|PDF)(?:&amp;y=\d{4})?)['"]/g;
+  for (const m of html.matchAll(link)) {
+    const path = (m[1] ?? '').replace(/&amp;/g, '&');
+    if (!saleDocumentPath(path)) continue;
+    const date = `${String(m[2])}-${String(m[3])}-${String(m[4])}`;
+    const sale = documents[date] ?? {};
+    if (m[5] === 'PON') sale.notice = path;
+    else sale.results = path;
+    documents[date] = sale;
+  }
+  return documents;
 }
 
 /** A parcel placed on the grid: its shape, the box around it, and how much of it was placed. */

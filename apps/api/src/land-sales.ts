@@ -1,4 +1,4 @@
-import { LAND_SOURCE_NAME } from '@grain/domain';
+import { LAND_SOURCE_NAME, SALE_DOCUMENTS_SITE, saleDocumentPath } from '@grain/domain';
 
 import type { LandSaleLoad, LandSaleParcelRow, LandSaleSummary } from './land-sales-db';
 
@@ -9,8 +9,11 @@ import type { LandSaleLoad, LandSaleParcelRow, LandSaleSummary } from './land-sa
  * every answer. Nothing here is a price of GSS's, and nothing is estimated.
  */
 
-/** The oil and gas schema version the land sales need (20261127010000_petro_land_sales.sql). */
-export const LAND_SALES_SCHEMA_VERSION = 10;
+/**
+ * The oil and gas schema version the land sales need: a parcel's restriction and reversion
+ * zone codes and each sale's documents (20261128010000_petro_land_sale_details.sql, F-265).
+ */
+export const LAND_SALES_SCHEMA_VERSION = 11;
 
 /**
  * At most this many parcels per answer; a view holding more is drawn from the newest sales.
@@ -39,12 +42,49 @@ const source = (load: LandSaleLoad | null) => ({
   area: load?.area ?? null,
 });
 
+/** A sale's notice and results as PDF files on the department's site; null for none. */
+export interface SaleDocuments {
+  notice: string | null;
+  results: string | null;
+}
+
+/**
+ * The documents of the sales given, by sale date, as addresses on the department's site
+ * (F-265). Only a path in the form the department's page writes is made into an address;
+ * anything else the load kept is left out, so no other site is ever linked.
+ */
+export function saleDocuments(
+  kept: unknown,
+  saleDates: Iterable<string>,
+): Record<string, SaleDocuments> {
+  const out: Record<string, SaleDocuments> = {};
+  if (typeof kept !== 'object' || kept === null) return out;
+  const address = (path: unknown) =>
+    saleDocumentPath(path) ? `${SALE_DOCUMENTS_SITE}${path}` : null;
+  for (const date of new Set(saleDates)) {
+    const links: unknown = Object.hasOwn(kept, date)
+      ? (kept as Record<string, unknown>)[date]
+      : null;
+    if (typeof links !== 'object' || links === null) continue;
+    const { notice, results } = links as { notice?: unknown; results?: unknown };
+    const documents = { notice: address(notice), results: address(results) };
+    if (documents.notice !== null || documents.results !== null) out[date] = documents;
+  }
+  return out;
+}
+
 export function landSalesAnswer(load: LandSaleLoad | null, parcels: LandSaleParcelRow[]) {
   const truncated = parcels.length > LAND_SALES_MAX;
+  const sent = truncated ? parcels.slice(0, LAND_SALES_MAX) : parcels;
   return {
     source: source(load),
     truncated,
-    parcels: truncated ? parcels.slice(0, LAND_SALES_MAX) : parcels,
+    // The documents of the sales these parcels belong to, and of no other.
+    documents: saleDocuments(
+      load?.documents,
+      sent.map((p) => p.saleDate),
+    ),
+    parcels: sent,
   };
 }
 

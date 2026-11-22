@@ -60,16 +60,18 @@ describe('land sales as petro_api', () => {
       await admin`
         insert into petro.land_sale_parcels
           (sale_date, contract_no, contract_type, region, hectares, zone, land, status, bonus,
-           dollars_per_hectare, buyers, bounds, shape)
+           dollars_per_hectare, buyers, restrictions, reversion_zones, bounds, shape)
         values
           ('1990-02-07', 'A0001', 'LEASE', 'PLAINS', 256, ${zone}, '61212624', 'ACCEPTED',
-           25600.10, 100.00, 'EXAMPLE LAND LTD. 100%', ${a.bounds}::box, ${admin.json(a.shape)}),
+           25600.10, 100.00, 'EXAMPLE LAND LTD. 100%', 'SHA010301 SHA010401', 'D00004',
+           ${a.bounds}::box, ${admin.json(a.shape)}),
           ('1990-05-09', 'A0002', 'LEASE', 'PLAINS', 64, ${zone}, '61212625SW', 'ACCEPTED',
-           19200.20, 300.00, 'SAMPLE RESOURCES INC. 100%', ${b.bounds}::box, ${admin.json(b.shape)}),
+           19200.20, 300.00, 'SAMPLE RESOURCES INC. 100%', null, null, ${b.bounds}::box,
+           ${admin.json(b.shape)}),
           ('1990-05-09', 'A0003', 'LICENCE', 'NORTHERN', 128, ${zone}, '61212626', 'NO OFFERS',
-           null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}),
+           null, null, null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}),
           ('1990-05-09', 'A0004', 'LEASE', 'PLAINS', 64, 'PETROLEUM AND NATURAL GAS IN THE OTHER FM',
-           '61212627', 'ACCEPTED', 1, 1, null, ${a.bounds}::box, ${admin.json(a.shape)})`;
+           '61212627', 'ACCEPTED', 1, 1, null, null, null, ${a.bounds}::box, ${admin.json(a.shape)})`;
 
       // The newest sale first; the parcel elsewhere and the one of other rights are left out.
       const inView = await db.landSales(member(), VIEW, ALL, 10);
@@ -86,8 +88,12 @@ describe('land sales as petro_api', () => {
         bonus: '25600.10',
         dollarsPerHectare: '100.00',
         buyers: 'EXAMPLE LAND LTD. 100%',
+        restrictions: 'SHA010301 SHA010401',
+        reversionZones: 'D00004',
         shape: a.shape,
       });
+      // A parcel with no codes has none (F-265).
+      expect(inView.parcels[0]).toMatchObject({ restrictions: null, reversionZones: null });
       // From a date on, and one more than the limit to say there is more.
       const later = await db.landSales(member(), VIEW, { ...ALL, since: '1990-03-01' }, 10);
       expect(later.parcels.map((p) => p.contractNo)).toEqual(['A0002']);

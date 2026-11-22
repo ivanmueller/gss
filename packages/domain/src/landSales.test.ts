@@ -8,6 +8,8 @@ import {
   parseSaleResults,
   placeParcel,
   saleAgreementTail,
+  saleDocumentLinks,
+  saleDocumentPath,
   sectionCorners,
   sectionKey,
   sectionPartRing,
@@ -156,6 +158,68 @@ describe('parseSaleNotice', () => {
     );
   });
 
+  it('keeps a clause that takes rights away as one, with its codes (F-265)', () => {
+    const png = 'PETROLEUM AND NATURAL GAS';
+    const xml = NOTICE.replace(
+      /<Contract>[\s\S]*?<\/Contract>/,
+      `<Contract><ContractNo>A0001</ContractNo><Hectares>64</Hectares>
+        <RestrictionCodeApplies>SHA010301</RestrictionCodeApplies>
+        <RestrictionCodeApplies>SHA010401</RestrictionCodeApplies>
+        <RestrictionCodeApplies>not a code</RestrictionCodeApplies>
+        <Tract><LandDescription><Land><LandKey>41203424</LandKey></Land></LandDescription><ZoneDescription>
+        <Line><Substance>${png}</Substance><Qualifier>BELOW THE BASE OF THE</Qualifier><ZoneName>EXAMPLE GRP</ZoneName><DRRZDCode>D00004</DRRZDCode></Line>
+        <Line><Qualifier>TO</Qualifier><ZoneName>BASEMENT</ZoneName></Line>
+        <Line><Excepting>EXCEPTING</Excepting><Substance>${png}</Substance><Qualifier>IN THE</Qualifier><ZoneName>SAMPLE FM</ZoneName><DRRZDCode>D00009</DRRZDCode></Line>
+        </ZoneDescription></Tract>
+        <Tract><LandDescription><Land><LandKey>41203425</LandKey></Land></LandDescription><ZoneDescription>
+        <Line><Substance>${png}</Substance><Qualifier>IN THE</Qualifier><ZoneName>EXAMPLE GRP</ZoneName><DRRZDCode>D00004</DRRZDCode></Line>
+        </ZoneDescription></Tract>
+        <Tract><LandDescription><Land><LandKey>41203426</LandKey></Land></LandDescription><ZoneDescription>
+        <Line><Substance>${png}</Substance><Qualifier>BELOW THE BASE OF THE</Qualifier><ZoneName>EXAMPLE GRP</ZoneName><DRRZDCode>D00004</DRRZDCode></Line>
+        <Line><Qualifier>TO</Qualifier><ZoneName>BASEMENT</ZoneName></Line>
+        </ZoneDescription></Tract></Contract>`,
+    );
+    const parcel = parseSaleNotice(xml)?.parcels[0];
+    expect(parcel?.zone).toBe(
+      // The exception stays with its own clause; the same clause without one is another.
+      `${png} BELOW THE BASE OF THE EXAMPLE GRP TO BASEMENT EXCEPTING ${png} IN THE SAMPLE FM ${png} IN THE EXAMPLE GRP ${png} BELOW THE BASE OF THE EXAMPLE GRP TO BASEMENT`,
+    );
+    expect(parcel?.restrictions).toEqual(['SHA010301', 'SHA010401']);
+    // Each zone once, in the notice's order.
+    expect(parcel?.reversionZones).toEqual(['D00004', 'D00009']);
+  });
+
+  it('knows the department\u2019s links to a notice or results as a PDF, and nothing else', () => {
+    expect(saleDocumentPath('/download/?s=png&id=20260819PON&ft=.pdf')).toBe(true);
+    expect(saleDocumentPath('/download/?s=png&id=20040107PSR&ft=.PDF&y=2004')).toBe(true);
+    expect(saleDocumentPath('/download/?s=png&id=20260819PON&ft=.xml')).toBe(false);
+    expect(saleDocumentPath('https://example.test/download/?s=png&id=20260819PON&ft=.pdf')).toBe(
+      false,
+    );
+    expect(saleDocumentPath('/download/?s=png&id=20260819PON&ft=.pdf&next=//example.test')).toBe(
+      false,
+    );
+    expect(saleDocumentPath(null)).toBe(false);
+  });
+
+  it('reads a page\u2019s links to each sale\u2019s notice and results as PDF files', () => {
+    const html = `
+      <a href='/download/?s=png&amp;id=20260819PON&amp;ft=.pdf'>Notice</a>
+      <a href='/download/?s=png&amp;id=20260819PON&amp;ft=.xml'>Notice (XML)</a>
+      <a href='/download/?s=png&amp;id=20260819PSR&amp;ft=.pdf'>Results</a>
+      <a href="/download/?s=png&amp;id=20040107PON&amp;ft=.PDF&amp;y=2004">Notice</a>
+      <a href='/download/?s=png&amp;id=20260819POC&amp;ft=.pdf'>Changes</a>
+      <a href='https://example.test/download/?s=png&amp;id=20260902PON&amp;ft=.pdf&amp;x=1'>Elsewhere</a>`;
+    expect(saleDocumentLinks(html)).toEqual({
+      '2026-08-19': {
+        notice: '/download/?s=png&id=20260819PON&ft=.pdf',
+        results: '/download/?s=png&id=20260819PSR&ft=.pdf',
+      },
+      '2004-01-07': { notice: '/download/?s=png&id=20040107PON&ft=.PDF&y=2004' },
+    });
+    expect(saleDocumentLinks('<p>No sales.</p>')).toEqual({});
+  });
+
   it('reads each contract with its land and its rights, and not the addenda', () => {
     expect(parseSaleNotice(NOTICE)).toEqual({
       saleDate: '2026-12-02',
@@ -168,6 +232,8 @@ describe('parseSaleNotice', () => {
           zone: 'PETROLEUM AND NATURAL GAS BELOW THE BASE OF THE EXAMPLE FM TO BASEMENT',
           lands: ['41203424', '40303921SW'],
           portion: true,
+          restrictions: ['SHA009801'],
+          reversionZones: ['D00013'],
         },
         {
           contractNo: 'B0018',
@@ -177,6 +243,8 @@ describe('parseSaleNotice', () => {
           zone: 'PETROLEUM AND NATURAL GAS IN THE EXAMPLE & SAMPLE FM',
           lands: ['50603419'],
           portion: false,
+          restrictions: [],
+          reversionZones: [],
         },
       ],
     });
