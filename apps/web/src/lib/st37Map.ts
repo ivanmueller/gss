@@ -5,13 +5,15 @@ import type {
   GeoJSONSource,
   Map as MapboxMap,
 } from 'mapbox-gl';
+import { DETAIL_FULL, DETAIL_GONE, fadeIn } from './mapDetail';
 
 /**
  * The AER's ST37 wells on the oil and gas map (F-243 part 4): how they are drawn at each zoom.
- * Zoomed out, a soft grey shading where wells are dense; as the distance bar nears 30 km
- * (zoom 7) each well's drilled path comes in faintly as a line, a vertical well as a dot, and
- * by a 10 km bar (zoom 8) the shading is gone and every well is drawn (F-260). A well with no
- * drilled path yet (licensed, or being drilled)
+ * Zoomed out, a faint grey shading where wells are dense; from the second scroll after the
+ * distance bar reads 30 km (DETAIL_GONE) each well's drilled path comes in as a line, a
+ * vertical well as a dot, and by the second scroll after it reads 20 km (DETAIL_FULL) the
+ * shading is gone and every well is drawn at full strength (F-260). A well with no drilled
+ * path yet (licensed, or being drilled)
  * is a dashed straight line from its surface hole to its planned bottom hole (F-243 part 4b).
  * Every well is coloured by its status. FacilityMap calls
  * `syncSt37` and `highlightSt37`; the Mapbox calls stay in these two map files.
@@ -348,12 +350,11 @@ function shownFilter(
   return filter as FilterSpecification;
 }
 
-/** The zoom from which drilled paths are drawn, faint at first (F-260). */
-const PATHS_FROM = 7;
-/** The zoom by which the shading is gone and the paths are at full strength (F-260). */
-const SHADING_GONE = 8;
-/** The zoom from which a well not drilled yet is its planned line, and before which one dot. */
-const PLANNED_FROM = 7.5;
+/**
+ * The shading's strength where it is strongest, far out (the owner, 2026-11-21: "much less
+ * opaque"; it was 0.85).
+ */
+const SHADING_OPACITY = 0.4;
 
 /** A small hollow square for the hovered well's surface hole, drawn without a canvas. */
 function squareImage(colour: string) {
@@ -415,20 +416,21 @@ export function syncSt37(
         id: ST37_LAYERS.density,
         type: 'heatmap',
         source: SOURCE,
-        maxzoom: SHADING_GONE,
+        maxzoom: DETAIL_FULL,
         paint: {
           'heatmap-weight': 1,
           // A wide, weak spread per well, so a cluster reads as one soft shadow and a lone
           // well barely shows (F-260).
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.25, SHADING_GONE, 0.45],
-          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 7, SHADING_GONE, 30],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.25, 8, 0.45],
+          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 7, 8, 30],
+          // Gives way to the wells as they come in.
           'heatmap-opacity': [
             'interpolate',
             ['linear'],
             ['zoom'],
-            PATHS_FROM,
-            0.85,
-            SHADING_GONE,
+            DETAIL_GONE,
+            SHADING_OPACITY,
+            DETAIL_FULL,
             0,
           ],
         },
@@ -440,19 +442,11 @@ export function syncSt37(
         id: ST37_LAYERS.paths,
         type: 'line',
         source: SOURCE,
-        minzoom: PATHS_FROM,
+        minzoom: DETAIL_GONE,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-width': ['interpolate', ['linear'], ['zoom'], PATHS_FROM, 0.5, 11, 1, 14, 1.8],
-          'line-opacity': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            PATHS_FROM,
-            0.25,
-            SHADING_GONE,
-            0.9,
-          ],
+          'line-width': ['interpolate', ['linear'], ['zoom'], DETAIL_GONE, 0.5, 11, 1, 14, 1.8],
+          'line-opacity': fadeIn(0.9),
         },
       },
       before,
@@ -462,15 +456,25 @@ export function syncSt37(
         id: ST37_LAYERS.planned,
         type: 'line',
         source: SOURCE,
-        // From where the far-out dots stop (F-259): a line or a dot, never both.
-        minzoom: PLANNED_FROM,
+        // Comes in as the far-out dot goes (F-259, F-260).
+        minzoom: DETAIL_GONE,
         paint: {
-          'line-width': ['interpolate', ['linear'], ['zoom'], PLANNED_FROM, 1, 11, 1.4, 14, 2],
+          'line-width': ['interpolate', ['linear'], ['zoom'], DETAIL_GONE, 1, 11, 1.4, 14, 2],
           'line-dasharray': [2, 2],
+          'line-opacity': fadeIn(1),
         },
       },
       before,
     );
+    const fadeOut: ExpressionSpecification = [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      DETAIL_GONE,
+      1,
+      DETAIL_FULL,
+      0,
+    ];
     // A well not yet drilled gets a larger dot: it has no path to be seen by.
     const pending = ['in', ['get', 'status'], ['literal', PENDING]];
     map.addLayer(
@@ -478,20 +482,30 @@ export function syncSt37(
         id: ST37_LAYERS.dots,
         type: 'circle',
         source: SOURCE,
-        minzoom: PLANNED_FROM,
+        minzoom: DETAIL_GONE,
         paint: {
           'circle-radius': [
             'interpolate',
             ['linear'],
             ['zoom'],
-            PLANNED_FROM,
+            DETAIL_GONE,
             ['case', pending, 3, 0.8],
             11,
             ['case', pending, 3.5, 1.4],
             14,
             ['case', pending, 4.5, 2.8],
           ],
-          'circle-opacity': ['interpolate', ['linear'], ['zoom'], PLANNED_FROM, 0.4, 8.5, 1],
+          'circle-opacity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            DETAIL_GONE,
+            0,
+            DETAIL_FULL,
+            0.6,
+            8.5,
+            1,
+          ],
         },
       },
       before,
@@ -501,11 +515,14 @@ export function syncSt37(
         id: ST37_LAYERS.pending,
         type: 'circle',
         source: SOURCE,
-        maxzoom: PLANNED_FROM,
+        // The far-out dot of a well not drilled yet: gone as its planned line comes in.
+        maxzoom: DETAIL_FULL,
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, PLANNED_FROM, 3],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, DETAIL_GONE, 3],
           'circle-stroke-width': 1,
           'circle-stroke-color': '#ffffff',
+          'circle-opacity': fadeOut,
+          'circle-stroke-opacity': fadeOut,
         },
       },
       before,
@@ -524,16 +541,16 @@ export function syncSt37(
             ['zoom'],
             5,
             ['case', pending, 2, 0],
-            PATHS_FROM,
+            DETAIL_GONE,
             ['case', pending, 3, 0],
-            PLANNED_FROM,
+            DETAIL_FULL,
             ['case', pending, 3, 1.2],
             11,
             ['case', pending, 3.5, 2.2],
             14,
             ['case', pending, 4.5, 3.6],
           ],
-          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], PLANNED_FROM, 0, 11, 0.75],
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], DETAIL_GONE, 0, 11, 0.75],
           'circle-stroke-color': '#ffffff',
         },
       },
@@ -587,7 +604,8 @@ export function syncSt37(
 
   const colour = colourBy(tone);
   // Wells are dense where they count: zoomed out, a grey shading of how many there are. On the
-  // light map's land (#f2f0e8) its darkest part reads as about #9b9790 (the owner, 2026-11-21).
+  // light map's land (#f2f0e8) its darkest part read as about #9b9790 at a strength of 0.85
+  // (the owner, 2026-11-21); the same colour since, at SHADING_OPACITY.
   const shade = tone === 'light' ? '13, 6, 0' : '230, 228, 226';
   map.setPaintProperty(ST37_LAYERS.density, 'heatmap-color', [
     'interpolate',

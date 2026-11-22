@@ -1,6 +1,7 @@
 import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
 import { SALE_LAYERS } from './landSalesMap';
+import { DETAIL_GONE, fadeIn } from './mapDetail';
 import { ST37_LAYERS } from './st37Map';
 
 /**
@@ -256,15 +257,19 @@ export function syncLand(
         (id) => map.getLayer(id),
       ) ?? (beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     const thin: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 7, 0.3, 12, 0.9];
+    // Every layer fades out with the wells' legs as the map is zoomed out, and is gone at
+    // DETAIL_GONE (F-260; the owner, 2026-11-21).
     // Land that is not the Crown's: hatched, sand for freehold and grey for parks and reserves.
     map.addLayer(
       {
         id: LAND_LAYERS.freeholdFill,
         type: 'fill',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: looks('freehold', 'reserve'),
         paint: {
           'fill-pattern': ['match', ['get', 'look'], 'reserve', HATCH.reserve, HATCH.freehold],
+          'fill-opacity': fadeIn(1),
         },
       },
       under,
@@ -274,11 +279,12 @@ export function syncLand(
         id: LAND_LAYERS.freeholdLine,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: looks('freehold', 'reserve'),
         paint: {
           'line-color': ['match', ['get', 'look'], 'reserve', LAND_RESERVE, LAND_FREEHOLD],
           'line-width': thin,
-          'line-opacity': 0.6,
+          'line-opacity': fadeIn(0.6),
         },
       },
       under,
@@ -289,8 +295,9 @@ export function syncLand(
         id: LAND_LAYERS.agreementFill,
         type: 'fill',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: looks('agreement'),
-        paint: { 'fill-color': ['get', 'colour'], 'fill-opacity': 0.7 },
+        paint: { 'fill-color': ['get', 'colour'], 'fill-opacity': fadeIn(0.7) },
       },
       under,
     );
@@ -299,8 +306,9 @@ export function syncLand(
         id: LAND_LAYERS.agreementLine,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: looks('agreement'),
-        paint: { 'line-color': INK, 'line-width': thin, 'line-opacity': 0.28 },
+        paint: { 'line-color': INK, 'line-width': thin, 'line-opacity': fadeIn(0.28) },
       },
       under,
     );
@@ -309,8 +317,9 @@ export function syncLand(
         id: LAND_LAYERS.expiring,
         type: 'fill',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: ['all', looks('agreement'), ['==', ['get', 'expiring'], true]],
-        paint: { 'fill-pattern': HATCH.ink },
+        paint: { 'fill-pattern': HATCH.ink, 'fill-opacity': fadeIn(1) },
       },
       under,
     );
@@ -320,10 +329,11 @@ export function syncLand(
         id: LAND_LAYERS.offsetFill,
         type: 'fill',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: looks('offset', 'offset_passed'),
         paint: {
           'fill-color': LAND_OFFSET,
-          'fill-opacity': ['match', ['get', 'look'], 'offset_passed', 0.1, 0.25],
+          'fill-opacity': fadeIn(['match', ['get', 'look'], 'offset_passed', 0.1, 0.25]),
         },
       },
       under,
@@ -333,12 +343,13 @@ export function syncLand(
         id: LAND_LAYERS.offsetLine,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: looks('offset', 'offset_passed'),
         layout: { 'line-join': 'round' },
         paint: {
           'line-color': LAND_OFFSET,
           'line-width': ['interpolate', ['linear'], ['zoom'], 7, 1.2, 12, 2],
-          'line-opacity': ['match', ['get', 'look'], 'offset_passed', 0.5, 1],
+          'line-opacity': fadeIn(['match', ['get', 'look'], 'offset_passed', 0.5, 1]),
         },
       },
       under,
@@ -348,8 +359,9 @@ export function syncLand(
         id: LAND_LAYERS.picked,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         layout: { 'line-join': 'round' },
-        paint: { 'line-width': 2.5 },
+        paint: { 'line-width': 2.5, 'line-opacity': fadeIn(1) },
       },
       under,
     );

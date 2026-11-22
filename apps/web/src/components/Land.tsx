@@ -17,6 +17,7 @@ import {
   type LandShape,
   type LandView,
 } from '../lib/landMap';
+import { DETAIL_GONE } from '../lib/mapDetail';
 
 /**
  * Land held today on the oil and gas map (F-241): a "Land today" panel (who holds the Crown
@@ -32,10 +33,15 @@ export type LandKind = (typeof LAND_KINDS)[number];
 /**
  * The zoom each kind is drawn from: farther out a view holds more shapes than can be sent and
  * drawn at once (about 135 km across at zoom 10 on a wide screen). Agreements narrowed to one
- * play's rights are few enough to draw from far out (LAND_FROM_RIGHTS).
+ * play's rights are few enough to draw from far out (LAND_FROM_RIGHTS). Nothing is asked for
+ * farther out than DETAIL_GONE, where the map draws no land (F-260).
  */
-export const LAND_FROM: Record<LandKind, number> = { agreements: 10, offsets: 6, freehold: 11 };
-export const LAND_FROM_RIGHTS = 6;
+export const LAND_FROM: Record<LandKind, number> = {
+  agreements: 10,
+  offsets: DETAIL_GONE,
+  freehold: 11,
+};
+export const LAND_FROM_RIGHTS = DETAIL_GONE;
 
 /** The terms the Status chips keep. */
 export const LAND_TERMS = ['primary', 'expiring', 'continued'] as const;

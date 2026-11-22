@@ -4,6 +4,7 @@ import type { Map as MapboxMap } from 'mapbox-gl';
 import { validate } from 'mapbox-gl/dist/style-spec/index.es.js';
 import { describe, expect, it } from 'vitest';
 
+import { DETAIL_FULL, DETAIL_GONE, fadeIn } from './mapDetail';
 import {
   highlightSt37,
   ST37_HOVER_FROM,
@@ -202,10 +203,25 @@ describe('syncSt37', () => {
       ['get', 'at'],
       ['literal', ['hole', 'start']],
     ]);
-    expect(layers.get(ST37_LAYERS.planned)?.minzoom).toBe(layers.get(ST37_LAYERS.pending)?.maxzoom);
-    // The shading is gone by a 10 km distance bar (zoom 8), the paths in from a 30 km one (F-260).
-    expect(layers.get(ST37_LAYERS.density)?.maxzoom).toBe(8);
-    expect(layers.get(ST37_LAYERS.paths)?.minzoom).toBe(7);
+    // The legs and planned lines come in from DETAIL_GONE and are whole by DETAIL_FULL, where
+    // the shading and the far-out dots are gone (F-260).
+    for (const id of [ST37_LAYERS.paths, ST37_LAYERS.planned, ST37_LAYERS.dots]) {
+      expect(layers.get(id)?.minzoom).toBe(DETAIL_GONE);
+    }
+    expect(layers.get(ST37_LAYERS.density)?.maxzoom).toBe(DETAIL_FULL);
+    expect(layers.get(ST37_LAYERS.pending)?.maxzoom).toBe(DETAIL_FULL);
+    expect(layers.get(ST37_LAYERS.paths)?.paint['line-opacity']).toEqual(fadeIn(0.9));
+    expect(layers.get(ST37_LAYERS.planned)?.paint['line-opacity']).toEqual(fadeIn(1));
+    // Much fainter than it was (0.85; the owner, 2026-11-21).
+    expect(layers.get(ST37_LAYERS.density)?.paint['heatmap-opacity']).toEqual([
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      DETAIL_GONE,
+      0.4,
+      DETAIL_FULL,
+      0,
+    ]);
 
     // Main legs and planned lines off: other legs only, a dot a well, and a leg not drilled
     // yet has its dot where it starts.
