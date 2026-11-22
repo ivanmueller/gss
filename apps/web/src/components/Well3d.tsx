@@ -19,7 +19,6 @@ import {
   layerScene,
   pickLayer,
   type FormationAnswer,
-  type LayerField,
   type LayerHit,
   type LayerScene,
 } from '../lib/formationLayers';
@@ -52,11 +51,13 @@ import { drawWell3d, WELL3D_COLOURS } from '../lib/well3dDraw';
  * - **Wells:** the well's legs along their real paths, with the other wells nearby, in a block
  *   of ground. The AER's ST37 paths, used on the owner's decision (docs/DECISIONS.md,
  *   2026-11-19): members only, nothing downloaded.
- * - **Layers:** the same block cut open: its far faces show the ground's layers at their real
- *   depths, each in the colour of its rock type, the Duvernay edged in white with its top as a
- *   sheet through the block, and every layer under the well listed. Depths from the Alberta
- *   Geological Survey's 3D model, rock types from its Table of Formations (open data, the
- *   Survey named here; docs/DECISIONS.md, 2026-11-22).
+ * - **Layers:** the ground as a solid block seen from outside (the owner, 2026-11-22, from three
+ *   pictures of such blocks): its faces show the layers at their real depths, each a band in
+ *   the colour of its rock type with its name on it, the real ground on top, the wells as pipes
+ *   through the faces; opened at the Duvernay, the part beneath is drawn lower, so the top of
+ *   the play shows with the legs that run in it; and every layer under the well is listed.
+ *   Depths from the Alberta Geological Survey's 3D model, rock types from its Table of
+ *   Formations (open data, the Survey named here; docs/DECISIONS.md, 2026-11-22).
  *
  * The block turns with a drag, moves with a right or Shift drag (or two fingers) and zooms with
  * the wheel (or a pinch). True to scale unless the person asks for the depths to be stretched.
@@ -118,13 +119,12 @@ function layerWords(zone: number): { name: string; rock: string } {
 }
 
 /** What the pointer is on, in words: the leg, how deep the point lies, and in which layer. */
-function hitText(scene: Scene, hit: Well3dHit, field: LayerField | null): Told {
-  const elevation = trueZ(scene, hit.point[2]);
-  const layer = field
-    ? formationLayerAt(
-        layersAt(field, ...sceneLonLat(scene, hit.point[0], hit.point[1])),
-        elevation,
-      )
+function hitText(scene: Scene, hit: Well3dHit, layers: LayerScene | null): Told {
+  const [x, y, z] = hit.point;
+  // With the block opened, what lies under the opening is drawn lower than it is.
+  const elevation = layers?.elevation(x, y, z) ?? trueZ(scene, z);
+  const layer = layers
+    ? formationLayerAt(layersAt(layers.field, ...sceneLonLat(scene, x, y)), elevation)
     : null;
   return {
     title: hit.line.uwi,
@@ -188,10 +188,15 @@ function Well3dCanvas({
   const again = useRef<() => void>(() => undefined);
   const [told, setTold] = useState<Told | null>(null);
   const [touched, setTouched] = useState(false);
-  // The layers' names need room beside the block.
+  // The depth marks need room beside the block; the solid block a little more.
   const room = useMemo(
-    () => (layers ? { side: large ? 130 : 62, top: 34 } : { side: 44, top: 30 }),
+    () => (layers ? { side: large ? 80 : 56, top: 36 } : { side: 44, top: 30 }),
     [layers, large],
+  );
+  // With the layers on, the legs are where the block shows them (lower under its opening).
+  const shown = useMemo(
+    () => (layers ? { ...scene, lines: layers.lines } : scene),
+    [scene, layers],
   );
 
   const paint = useCallback(() => {
@@ -217,11 +222,10 @@ function Well3dCanvas({
         layers,
         layerHit: layerHit.current,
         playZone,
-        labels: large ? 'all' : 'play',
       });
       if (sweep.current) again.current();
     });
-  }, [scene, layers, playZone, large, room]);
+  }, [scene, layers, playZone, room]);
   useEffect(() => {
     again.current = paint;
   }, [paint]);
@@ -330,7 +334,7 @@ function Well3dCanvas({
     if (!camera.current) return;
     const { x, y } = at(event);
     const view = lens(camera.current, size.current);
-    const found = pickLine(scene, view, x, y, 9);
+    const found = pickLine(shown, view, x, y, 9);
     const layer = !found && layers ? pickLayer(scene, layers, view, x, y) : null;
     if (!found && !layer) {
       if (forget()) paint();
@@ -338,7 +342,7 @@ function Well3dCanvas({
     }
     hit.current = found;
     layerHit.current = layer;
-    setTold(found ? hitText(scene, found, layers?.field ?? null) : layer ? layerText(layer) : null);
+    setTold(found ? hitText(scene, found, layers) : layer ? layerText(layer) : null);
     paint();
   };
 
@@ -443,8 +447,12 @@ function Well3dCanvas({
         onKeyDown={onKeyDown}
       />
       <p className="pointer-events-none absolute top-2 left-2.5 font-mono text-[0.625rem] tracking-wider text-[#cbd5e1]/80 uppercase">
-        {scene.stretch === 1 ? 'True scale' : `Depths drawn ×${String(scene.stretch)}`} · grid{' '}
-        {metres(scene.step)}
+        {scene.stretch === 1 ? 'True scale' : `Depths drawn ×${String(scene.stretch)}`}
+        {layers
+          ? layers.cut >= 0
+            ? ` · opened at the top of the ${formationZone(playZone ?? 0)?.short.split(' / ')[0] ?? 'play'}`
+            : ''
+          : ` · grid ${metres(scene.step)}`}
       </p>
       <button
         type="button"
@@ -600,7 +608,10 @@ export function Well3d({
   const [mode, setMode] = useState<Mode>('wells');
   const [nearby, setNearby] = useState(true);
   const [large, setLarge] = useState(false);
-  const [stretch, setStretch] = useState(1);
+  // The Layers view opens as the owner's pictures show such blocks: the depths drawn deeper so
+  // every layer reads, and the block opened at the play.
+  const [stretch, setStretch] = useState(3);
+  const [opened, setOpened] = useState(true);
 
   // The layers are asked for once, for the ground under the well and its neighbours.
   const whole = useMemo(() => (answer ? well3dScene(answer, true) : null), [answer]);
@@ -627,7 +638,14 @@ export function Well3d({
     [field, whole],
   );
   const layered = mode === 'layers' && field !== null && column.length > 0 && whole !== null;
-  const floor = layered ? floorUnder(column, whole.ground) : undefined;
+  const duvernay = FORMATION_PLAY_ZONES.duvernay ?? null;
+  const playZone = duvernay !== null && field?.zones.includes(duvernay) ? duvernay : null;
+  // Opened at the play, the part of the block under its top is drawn lower by nearly half the
+  // block's own depth, so the eye sees well into the opening: the floor goes down with it.
+  const open = layered && opened && column.some((layer) => layer.zone === playZone);
+  const under = layered ? floorUnder(column, whole.ground) : undefined;
+  const gap = open && under !== undefined ? ((column[0]?.top ?? whole.ground) - under) * 0.45 : 0;
+  const floor = under === undefined ? undefined : under - gap;
   const scene = useMemo(
     () =>
       answer
@@ -639,11 +657,12 @@ export function Well3d({
         : null,
     [answer, nearby, layered, stretch, floor],
   );
-  const duvernay = FORMATION_PLAY_ZONES.duvernay ?? null;
-  const playZone = duvernay !== null && field?.zones.includes(duvernay) ? duvernay : null;
   const layers = useMemo(
-    () => (layered && scene ? layerScene(scene, field, playZone) : null),
-    [layered, scene, field, playZone],
+    () =>
+      layered && scene
+        ? layerScene(scene, field, { playZone, open, drop: gap * scene.stretch })
+        : null,
+    [layered, scene, field, playZone, open, gap],
   );
   const own = useMemo(() => scene?.lines.filter((line) => line.own) ?? [], [scene]);
 
@@ -737,6 +756,28 @@ export function Well3d({
           </button>
         ))}
       </div>
+      {layered && playZone !== null && (
+        <div role="group" aria-label="Block" className={frame}>
+          {[true, false].map((each) => (
+            <button
+              key={String(each)}
+              type="button"
+              aria-pressed={opened === each}
+              title={
+                each
+                  ? 'The block opened at the top of the play: the legs that run in it show'
+                  : 'The block whole'
+              }
+              onClick={() => {
+                setOpened(each);
+              }}
+              className={pressed(opened === each)}
+            >
+              {each ? 'Opened' : 'Whole'}
+            </button>
+          ))}
+        </div>
+      )}
       {layered && (
         <div role="group" aria-label="Depth scale" className={frame}>
           {[1, 3].map((times) => (
@@ -860,7 +901,7 @@ export function Well3d({
             : ''}
           .
           {play
-            ? ` The ${formationZone(play.zone)?.name ?? 'play'} lies ${down(play.top)} to ${down(play.base)} down here, ${metres(play.top - play.base)} thick: edged in white, its top the blue sheet.`
+            ? ` The ${formationZone(play.zone)?.name ?? 'play'} lies ${down(play.top)} to ${down(play.base)} down here, ${metres(play.top - play.base)} thick${open ? ': the block is opened at its top, where the legs that run in it show.' : '.'}`
             : ''}
           {lowestLayer
             ? ` The well's deepest point is in the ${formationZone(lowestLayer.zone)?.name ?? 'ground'}.`
