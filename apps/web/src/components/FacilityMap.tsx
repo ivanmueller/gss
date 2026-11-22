@@ -473,7 +473,10 @@ export default function FacilityMap(props: FacilityMapProps) {
   const pictureSignIns = useRef(new PictureSignIns());
   // The latest props, read by map event handlers that are registered once.
   const latest = useRef({ ...props, data: pinFeatures(pins) });
-  /** The licence of the well highlighted under the pointer, or kept open. */
+  /**
+   * What is highlighted under the pointer, or kept open: `licence` for a whole well,
+   * `licence|uwi` for one leg of it.
+   */
   const st37Hovered = useRef<string | null>(null);
   // The box on the map: where the chosen pin is on screen, and the pin whose box was closed.
   const [anchor, setAnchor] = useState<PinAnchor | null>(null);
@@ -614,12 +617,14 @@ export default function FacilityMap(props: FacilityMapProps) {
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
-    const wellsAt = (point: mapboxgl.Point): { uwis: string[]; licence: string | null } => {
+    const wellsAt = (
+      point: mapboxgl.Point,
+    ): { uwis: string[]; licence: string | null; leg: string | null } => {
       const layers = ST37_PICKABLE.filter((id) => instance.getLayer(id));
       // Farther out the wells are faint and packed together: none answers the pointer there
       // (the owner, 2026-11-21).
       if (layers.length === 0 || instance.getZoom() < ST37_HOVER_FROM) {
-        return { uwis: [], licence: null };
+        return { uwis: [], licence: null, leg: null };
       }
       // Three pixels about the pointer: near enough to catch a thin line, not its neighbours.
       const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
@@ -628,28 +633,34 @@ export default function FacilityMap(props: FacilityMapProps) {
       ];
       const uwis = new Set<string>();
       let licence: string | null = null;
+      let leg: string | null = null;
       for (const feature of instance.queryRenderedFeatures(box, { layers })) {
         const uwi: unknown = feature.properties?.uwi;
         if (typeof uwi !== 'string') continue;
-        // The first well found is the one highlighted, whole: every leg under its licence.
+        // The first found is the one highlighted: that leg alone (the owner, 2026-11-21), or
+        // the whole well when it is pointed at by its surface dot, which stands for every leg.
         const of: unknown = feature.properties?.licence;
-        if (uwis.size === 0 && typeof of === 'string') licence = of;
+        if (uwis.size === 0 && typeof of === 'string') {
+          licence = of;
+          leg = feature.properties?.part === 'well' ? null : uwi;
+        }
         uwis.add(uwi);
       }
-      return { uwis: [...uwis], licence };
+      return { uwis: [...uwis], licence, leg };
     };
     const hover = (point: mapboxgl.Point) => {
       const onHover = latest.current.onSt37Hover;
       if (!onHover) return null;
-      const { uwis, licence } = wellsAt(point);
+      const { uwis, licence, leg } = wellsAt(point);
       const first = uwis[0] ?? null;
       instance.getCanvas().style.cursor = first ? 'pointer' : '';
       const found = first ? { uwis, x: point.x, y: point.y } : null;
       // While a well's card is kept open, that well stays the one shown.
       if (latest.current.st37Locked) return found;
-      if (licence !== st37Hovered.current) {
-        st37Hovered.current = licence;
-        highlightSt37(instance, licence);
+      const lit = licence !== null && leg !== null ? `${licence}|${leg}` : licence;
+      if (lit !== st37Hovered.current) {
+        st37Hovered.current = lit;
+        highlightSt37(instance, licence, leg);
       }
       onHover(found);
       return found;
@@ -817,12 +828,15 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && styleReady.current) syncOverlays(instance, props.overlays ?? []);
   }, [props.overlays]);
 
-  // The well whose card is kept open stays highlighted; letting it go clears the highlight
-  // until the pointer finds a well again.
+  // The well whose card is kept open stays highlighted, by the leg clicked; letting it go
+  // clears the highlight until the pointer finds a well again.
   const locked = props.st37Locked ?? null;
   useEffect(() => {
     const instance = map.current;
     if (!instance || !styleReady.current) return;
+    // The click that kept it open has already lit its leg (or the whole well): left as it is.
+    const lit = st37Hovered.current;
+    if (locked !== null && (lit === locked || lit?.startsWith(`${locked}|`))) return;
     st37Hovered.current = locked;
     highlightSt37(instance, locked);
   }, [locked]);
