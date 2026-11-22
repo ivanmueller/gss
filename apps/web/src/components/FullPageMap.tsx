@@ -1,5 +1,5 @@
 import { Settings, TriangleAlert } from 'lucide-react';
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 
 import { LayerApiContext, petroleumLayers } from '../lib/layerApi';
 import {
@@ -22,9 +22,11 @@ import {
 import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
-import { LandCard, useLand, type LandPick } from './Land';
+import { useLand, type LandPick } from './Land';
+import { LandPanel, LandTip } from './LandPanel';
 import { useLandSales } from './LandSales';
-import { St37Card, useSt37Wells } from './St37Wells';
+import { St37Panel, St37Tip } from './St37Panel';
+import { useSt37Wells } from './St37Wells';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -71,8 +73,10 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // The AER's new licences and rigs (F-243 part 2) are off the map for now (the owner,
   // 2026-11-19); their code and daily job stay. The ST37 wells take their place (F-243 part 4).
   const wells = useSt37Wells(session.organization.id, session.token);
+  // The well or leg under the pointer: a box at the pointer with its simple lines (F-265).
   const [hover, setHover] = useState<St37Hover | null>(null);
-  // A clicked well's card is kept open, to choose a leg on it (F-258), while the well is loaded.
+  // A clicked well's panel stays open on the right, to choose a leg on it (F-258), while the
+  // well is loaded.
   const [clicked, setClicked] = useState<St37Hover | null>(null);
   const kept = clicked && wells.byUwi.has(clicked.uwis[0] ?? '') ? clicked : null;
   const locked = kept ? (wells.byUwi.get(kept.uwis[0] ?? '')?.licenceNumber ?? null) : null;
@@ -86,7 +90,23 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     land.setPicked(pick?.keys ?? []);
     sales.setPicked(pick?.keys ?? []);
   };
+  // The land under the pointer, where no well is: a box at the pointer, and its outline.
+  const [landHover, setLandHover] = useState<string | null>(null);
+  const hoverShape = useMemo(() => {
+    if (landHover === null) return null;
+    return landHover.startsWith('sale:')
+      ? (sales.parcels.get(landHover.slice(5))?.shape ?? null)
+      : land.shapeOf(landHover);
+  }, [landHover, sales.parcels, land]);
   const [fitTo, setFitTo] = useState<MapBounds | null>(null);
+  // The map moves only when the bounds it is given change: a second click on a Zoom button,
+  // after the map was moved away, hands it the same place a hair off, so it moves again.
+  const goTo = useCallback((bounds: MapBounds) => {
+    setFitTo((before) => {
+      const [west, south, east, north] = bounds;
+      return before?.join(',') === bounds.join(',') ? [west, south, east, north + 1e-9] : bounds;
+    });
+  }, []);
   const admin = session.organization.role === 'org_admin';
   const tone = theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
 
@@ -125,6 +145,15 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           land={land.view}
           landSales={sales.view}
           onLandClick={pickLand}
+          onLandHover={setLandHover}
+          landHover={hoverShape}
+          hoverBox={
+            hover ? (
+              <St37Tip hover={hover} byUwi={wells.byUwi} legsOf={wells.legsOf} />
+            ) : (
+              <LandTip landKey={landHover} land={land} sales={sales} />
+            )
+          }
           fitTo={fitTo}
           onViewChange={(bbox, zoom) => {
             layers.onViewChange(bbox, zoom);
@@ -177,7 +206,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       {/* The wells: under the controls, top left (F-243 part 4). */}
       <div className="absolute top-16 left-3 z-10 max-h-[calc(100%-5rem)] max-w-[calc(100%-1.5rem)] overflow-y-auto">
         <div className="flex flex-col gap-2">
-          {wells.panel(tone, setFitTo)}
+          {wells.panel(tone, goTo)}
           {sales.panel()}
           {land.panel()}
         </div>
@@ -187,25 +216,28 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         {sales.legend()}
         {land.legend()}
       </div>
-      <LandCard
+      <LandPanel
+        // A panel of its own for each click: it starts on the first piece of land under it.
+        key={landPick ? `land:${landPick.keys.join(',')}` : 'land'}
         pick={kept ? null : landPick}
         land={land}
-        saleRow={sales.cardRow}
+        sales={sales}
+        goTo={goTo}
         onClose={() => {
           pickLand(null);
         }}
       />
-      <St37Card
-        // A card of its own for each click: the leg clicked is the one it starts on (F-258).
-        key={kept ? `${kept.uwis[0] ?? ''}@${String(kept.x)},${String(kept.y)}` : 'pointer'}
-        hover={kept ?? hover}
-        kept={kept !== null}
+      <St37Panel
+        // A panel of its own for each click: the leg clicked is the one it starts on (F-258).
+        key={kept ? `${kept.uwis[0] ?? ''}@${String(kept.x)},${String(kept.y)}` : 'well'}
+        pick={kept}
         onClose={() => {
           setClicked(null);
         }}
         byUwi={wells.byUwi}
         legsOf={wells.legsOf}
         member={{ organizationId: session.organization.id, token: session.token }}
+        goTo={goTo}
       />
       <PickedFeatureCard state={layers} token={session.token} className="left-3" />
       {/* Both sit at the bottom left over the map: the legend makes way for a clicked shape's

@@ -21,14 +21,13 @@ import {
   type St37Parts,
   type St37View,
 } from '../lib/st37Map';
-import type { St37Hover } from './FacilityMap';
-import { FormationProduction, FormationProductionAbout, WellProduction } from './Production';
+import { FormationProduction, FormationProductionAbout } from './Production';
 import { Button } from './ui/button';
 
 /**
  * The AER's ST37 wells on the oil and gas map (F-243 part 4): a Wells panel (a switch, the
- * statuses as a legend that also hides and shows them, the source) and the card of the wells
- * under the pointer. Data from the AER, used on the owner's decision (docs/DECISIONS.md,
+ * statuses as a legend that also hides and shows them, the source). The box at the pointer and
+ * the panel of a well clicked are in St37Panel.tsx (F-265). Data from the AER, used on the owner's decision (docs/DECISIONS.md,
  * 2026-11-19): its name and the list's date are always shown, and nothing here offers a download.
  */
 
@@ -372,11 +371,12 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
                 A well is every leg drilled under one licence. Its main leg is the most active one;
                 its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
                 does not say which kind. With main legs off, a well is one dot at its surface
-                location; point at it to see all its legs. Point at a leg, from about the 10 km
-                distance bar and closer: that leg is drawn a little bolder and its well's card
-                opens. A well's production is its legs' added together; a dashed line on its charts
-                marks the month a later leg starts. Click a leg to keep the card open with that
-                leg's own production under the well's.
+                location. Point at a leg, from about the 10 km distance bar and closer: that leg is
+                drawn a little bolder and a box at the pointer gives its details. Click it for the
+                whole well in a panel on the right: every leg, and its production, which is its
+                legs' added together; a dashed line on its charts marks the month a later leg
+                starts. Click a leg, on the map or in the panel, for that leg's own production under
+                the well's.
               </p>
               {outline && <p>{outline.credit}</p>}
               {answer && (
@@ -459,185 +459,3 @@ export function st37Place(well: St37MapWell): string | null {
 }
 
 const metres = (n: number) => `${n.toLocaleString('en-CA', { maximumFractionDigits: 0 })} m`;
-
-/**
- * The card of the wells under the pointer: the first well whole (its main leg in full, then
- * every leg under its licence, F-257), and how many more wells share the place.
- */
-export function St37Card({
-  hover,
-  byUwi,
-  legsOf,
-  member,
-  kept = false,
-  onClose,
-}: {
-  hover: St37Hover | null;
-  /**
-   * Whether the card is kept open after a click (F-258): it can then be pointed at and clicked,
-   * to see one leg's production instead of the well's total, and closed.
-   */
-  kept?: boolean;
-  onClose?: () => void;
-  byUwi: ReadonlyMap<string, St37MapWell>;
-  /** Each well's legs by licence number, the main leg first; without it, the leg alone. */
-  legsOf?: ReadonlyMap<string, St37MapWell[]>;
-  /** Whose sign-in reads the well's monthly production (F-252 step 3); none shows no chart. */
-  member?: { organizationId: string; token: string };
-}) {
-  // The leg whose own production is shown under the well's total: not chosen yet (the leg
-  // clicked on the map, unless it is the main one), none, or the leg clicked on the card. The
-  // map page gives each kept card a key of its own, so a new click starts afresh.
-  const [chosen, setChosen] = useState<string | null | undefined>(undefined);
-  if (!hover) return null;
-  const [first] = hover.uwis;
-  const pointed = first === undefined ? undefined : byUwi.get(first);
-  if (!pointed) return null;
-  const legs = legsOf?.get(pointed.licenceNumber) ?? [pointed];
-  const well = legs[0] ?? pointed;
-  // The other wells under the pointer: other licences, not this well's own legs.
-  const others = new Set(
-    hover.uwis
-      .map((uwi) => byUwi.get(uwi)?.licenceNumber)
-      .filter((licence) => licence !== undefined && licence !== well.licenceNumber),
-  ).size;
-  const alone = !kept
-    ? undefined
-    : chosen === undefined
-      ? pointed.uwi === well.uwi
-        ? undefined
-        : pointed
-      : legs.find((leg) => leg.uwi === chosen);
-  const status = [ST37_STATUS_LABELS[well.statusClass], well.statusFluid, well.statusType]
-    .filter((part): part is string => Boolean(part))
-    .join(' · ');
-  const depth = [
-    well.spudDate && `Spud ${well.spudDate}`,
-    well.totalDepthM !== null &&
-      `TD ${metres(well.totalDepthM)}${
-        well.trueVerticalDepthM !== null ? ` (TVD ${metres(well.trueVerticalDepthM)})` : ''
-      }`,
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join(' · ');
-  // Opens to the left of the pointer near the window's right edge, and above it near the bottom.
-  const left = hover.x > window.innerWidth - 340;
-  const up =
-    hover.y >
-    window.innerHeight - (member ? 380 : 180) - (legs.length > 1 ? 80 : 0) - (alone ? 200 : 0);
-  return (
-    <div
-      role="status"
-      className={`absolute z-30 w-72 rounded-card border bg-card p-3 text-sm shadow-md ${
-        kept ? 'max-h-[calc(100%-1rem)] overflow-y-auto' : 'pointer-events-none'
-      }`}
-      style={{
-        left: hover.x,
-        top: hover.y,
-        transform: `translate(${left ? 'calc(-100% - 14px)' : '14px'}, ${up ? 'calc(-100% - 14px)' : '14px'})`,
-      }}
-    >
-      {kept && onClose && (
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={onClose}
-          className="absolute top-1.5 right-1.5 rounded-sm px-1.5 text-base leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          ×
-        </button>
-      )}
-      <p className="font-semibold">{well.uwi}</p>
-      <p className="font-mono text-xs text-muted-foreground">
-        Licence {well.licenceNumber}
-        {well.licensee ? ` · ${well.licensee}` : ''}
-      </p>
-      <p className="mt-1">{status}</p>
-      {st37Place(well) && <p className="text-muted-foreground">{st37Place(well)}</p>}
-      {depth && <p className="text-muted-foreground">{depth}</p>}
-      {(well.statusClass === 'licensed' || well.statusClass === 'drilling') && st37Plan(well) && (
-        <p className="text-muted-foreground">{st37Plan(well)}</p>
-      )}
-      {well.plannedBottom && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          The dashed line is the plan: straight from the surface location to the planned bottom
-          hole. The drilled path comes once the well is drilled.
-        </p>
-      )}
-      {legs.length > 1 && (
-        <div className="mt-1.5">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            {legs.length} legs
-          </p>
-          <ul className="text-xs" aria-label="Legs of this well">
-            {legs.map((leg, i) => (
-              <li key={leg.uwi}>
-                <button
-                  type="button"
-                  disabled={!kept}
-                  aria-pressed={kept ? leg.uwi === alone?.uwi : undefined}
-                  onClick={() => {
-                    setChosen(leg.uwi === alone?.uwi ? null : leg.uwi);
-                  }}
-                  className="flex w-full items-baseline gap-1.5 rounded-sm px-1 text-left enabled:hover:bg-muted aria-pressed:bg-muted"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="inline-block size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: ST37_COLOURS.light[leg.statusClass] }}
-                  />
-                  <span className="font-mono">{leg.uwi}</span>
-                  <span className="text-muted-foreground">
-                    {[
-                      i === 0 ? 'main leg' : null,
-                      ST37_STATUS_LABELS[leg.statusClass],
-                      leg.totalDepthM !== null ? `TD ${metres(leg.totalDepthM)}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {member && well.statusClass !== 'licensed' && (
-        <>
-          {legs.length > 1 && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              {kept
-                ? 'Production of all legs together. Click a leg, on the map or above, for its own below.'
-                : 'Production of all legs together. Click a leg for its own below.'}
-            </p>
-          )}
-          <WellProduction
-            uwis={legs.map((leg) => leg.uwi)}
-            organizationId={member.organizationId}
-            token={member.token}
-            interactive={kept}
-          />
-          {alone && (
-            <div aria-label={`Production of leg ${alone.uwi}`} role="group">
-              <p className="mt-2 text-xs text-muted-foreground">
-                Leg <span className="font-mono text-foreground">{alone.uwi}</span> alone
-                {alone.uwi === well.uwi ? ' (the main leg)' : ''}.
-              </p>
-              <WellProduction
-                uwis={[alone.uwi]}
-                organizationId={member.organizationId}
-                token={member.token}
-                interactive
-              />
-            </div>
-          )}
-        </>
-      )}
-      {others > 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          +{others} more {others === 1 ? 'well' : 'wells'} here
-        </p>
-      )}
-    </div>
-  );
-}

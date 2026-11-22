@@ -6,12 +6,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   LAND_HOLDER_COLOURS,
+  LAND_HOVER_LAYER,
   LAND_LAYERS,
   LAND_PLAIN,
   landExpiring,
   landFeatures,
   landHolderColour,
   syncLand,
+  syncLandHover,
   type LandShape,
 } from './landMap';
 import { DETAIL_GONE, fadeIn } from './mapDetail';
@@ -241,5 +243,49 @@ describe('syncLand', () => {
     syncLand(map, null, 'light');
     expect(layers.size).toBe(0);
     expect(sources.size).toBe(0);
+  });
+});
+
+describe('syncLandHover (F-265)', () => {
+  /** A stand-in for the map that counts what the hover outline's own source is given. */
+  function hoverMap() {
+    const given: GeoJSON.FeatureCollection[] = [];
+    const layers = new Map<string, { id: string; paint: Record<string, unknown> }>();
+    let source: { setData: (data: GeoJSON.FeatureCollection) => void } | undefined;
+    const map = {
+      getSource: () => source,
+      addSource: (_id: string, added: { data: GeoJSON.FeatureCollection }) => {
+        given.push(added.data);
+        source = { setData: (data) => given.push(data) };
+      },
+      getLayer: (id: string) => layers.get(id),
+      addLayer: (layer: { id: string; paint?: Record<string, unknown> }) => {
+        layers.set(layer.id, { id: layer.id, paint: { ...layer.paint } });
+      },
+      setPaintProperty: (id: string, name: string, value: unknown) => {
+        const layer = layers.get(id);
+        if (layer) layer.paint[name] = value;
+      },
+    };
+    return { map: map as unknown as MapboxMap, given, layers };
+  }
+
+  it('outlines the land under the pointer from a source of its own, on top of everything', () => {
+    const { map, given, layers } = hoverMap();
+    // Nothing is added until there is land to outline.
+    syncLandHover(map, null, 'light');
+    expect(given).toHaveLength(0);
+    syncLandHover(map, SHAPE, 'light');
+    expect(given).toHaveLength(1);
+    expect(given[0]?.features[0]?.geometry).toEqual({ type: 'MultiPolygon', coordinates: SHAPE });
+    expect(layers.get(LAND_HOVER_LAYER)?.paint['line-color']).toBe('#1c1917');
+    // The same land again (the page drew itself again) is not handed to the map again.
+    syncLandHover(map, SHAPE, 'dark');
+    expect(given).toHaveLength(1);
+    expect(layers.get(LAND_HOVER_LAYER)?.paint['line-color']).toBe('#fafaf9');
+    // The pointer left: the outline is emptied, its layer kept for the next land.
+    syncLandHover(map, null, 'dark');
+    expect(given).toHaveLength(2);
+    expect(given[1]?.features).toEqual([]);
   });
 });

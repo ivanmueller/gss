@@ -94,6 +94,28 @@ export function rightsClauses(zone: string): { clauses: RightsClause[]; unread: 
   return { clauses, unread };
 }
 
+/**
+ * A zone's clauses as text, a clause a line, for reading (F-265): each starts at its substance
+ * ("PETROLEUM AND NATURAL GAS BELOW THE BASE OF ..."); a clause that takes rights away
+ * ("EXCEPTING ...") stays on the line of the clause it follows. Words before the first
+ * substance, or a zone with none, are kept as they are.
+ */
+export function rightsLines(zone: string): string[] {
+  const text = zone.replace(/\s+/g, ' ').trim();
+  if (text === '') return [];
+  const starts = [...text.matchAll(SUBSTANCE)];
+  const lines: string[] = [];
+  const lead = text.slice(0, starts[0]?.index ?? text.length).trim();
+  if (lead !== '') lines.push(lead);
+  starts.forEach((start, i) => {
+    const clause = text.slice(start.index, starts[i + 1]?.index ?? text.length).trim();
+    const last = lines.length - 1;
+    if (start[1] !== undefined && last >= 0) lines[last] = `${lines[last] ?? ''}; ${clause}`;
+    else lines.push(clause);
+  });
+  return lines;
+}
+
 /** Which limits are known to lie above which, from every clause given. */
 export interface RightsOrder {
   /** For each limit, the limits stated to lie directly below it. */

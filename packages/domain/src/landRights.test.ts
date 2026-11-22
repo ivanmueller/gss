@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { rightsClauses, rightsIncluding, rightsOrder, rightsZones } from './landRights';
+import {
+  rightsClauses,
+  rightsIncluding,
+  rightsLines,
+  rightsOrder,
+  rightsZones,
+} from './landRights';
 
 // Which rights include a play (F-241, F-242). Formations named ALPHA to ECHO are made up, in
 // that order from the surface down; the play's own name is the Duvernay's.
@@ -133,5 +139,28 @@ describe('rightsZones', () => {
       EVIDENCE[1],
       `${PNG} BELOW THE BASE OF THE ALPHA FM TO BASEMENT`,
     ]);
+  });
+});
+
+describe('rightsLines (F-265)', () => {
+  it('writes a zone a clause a line, an exception on the line of the clause it follows', () => {
+    expect(
+      rightsLines(
+        `${PNG} FROM SURFACE TO BASEMENT ${PNG} BELOW THE BASE OF THE ALPHA FM TO BASEMENT EXCEPTING ${PNG} IN THE DELTA FM NATURAL GAS IN THE BRAVO FM`,
+      ),
+    ).toEqual([
+      `${PNG} FROM SURFACE TO BASEMENT`,
+      `${PNG} BELOW THE BASE OF THE ALPHA FM TO BASEMENT; EXCEPTING ${PNG} IN THE DELTA FM`,
+      'NATURAL GAS IN THE BRAVO FM',
+    ]);
+  });
+
+  it('keeps words it cannot split as they are, and gives nothing for no zone', () => {
+    expect(rightsLines('PNG TO BASE EXAMPLE')).toEqual(['PNG TO BASE EXAMPLE']);
+    expect(rightsLines(`ALL ZONES ${PNG} IN THE ALPHA FM`)).toEqual([
+      'ALL ZONES',
+      `${PNG} IN THE ALPHA FM`,
+    ]);
+    expect(rightsLines('  ')).toEqual([]);
   });
 });

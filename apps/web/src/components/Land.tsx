@@ -1,4 +1,4 @@
-import { formatAlberta, LAND_RIGHTS, type Bbox } from '@grain/domain';
+import { formatAlberta, LAND_RIGHTS, saleAgreementTail, type Bbox } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -10,7 +10,6 @@ import {
   landExpiring,
   landFeatures,
   landHolderColour,
-  landKey,
   type LandMapAgreement,
   type LandMapFreehold,
   type LandMapOffset,
@@ -22,7 +21,8 @@ import { DETAIL_GONE } from '../lib/mapDetail';
 /**
  * Land held today on the oil and gas map (F-241): a "Land today" panel (who holds the Crown
  * rights, filtered by the rights they include, by holder and by term; land that is not the
- * Crown's; offset notices), a legend of the holders in view, and the card of the land clicked.
+ * Crown's; offset notices) and a legend of the holders in view. The box at the pointer and the
+ * panel of the land clicked are in LandPanel.tsx (F-265).
  * Data from Alberta Energy and Minerals, named wherever it is shown, as the Open Government
  * Licence - Alberta asks (docs/DECISIONS.md, 2026-11-21).
  */
@@ -163,7 +163,7 @@ export function landFiltered(
 
 /** The box around a shape, worked out once: the holders in view are counted at every move. */
 const boxes = new WeakMap<LandShape, Bbox>();
-function boundsOf(shape: LandShape): Bbox {
+export function landBounds(shape: LandShape): Bbox {
   const kept = boxes.get(shape);
   if (kept) return kept;
   const box = { west: Infinity, south: Infinity, east: -Infinity, north: -Infinity };
@@ -192,7 +192,7 @@ export function landHolders(
   for (const a of agreements) {
     if (!a.holder) continue;
     if (view) {
-      const b = boundsOf(a.shape);
+      const b = landBounds(a.shape);
       if (
         b.east < view.west ||
         b.west > view.east ||
@@ -229,6 +229,52 @@ export function landToday(now = new Date()): string {
   return new Date(now.getTime() - 6 * 3_600_000).toISOString().slice(0, 10);
 }
 
+/** The agreements by the last eight digits of their number, for `landIssuedFrom`. */
+export function landByTail(
+  agreements: readonly LandMapAgreement[],
+): Map<string, LandMapAgreement[]> {
+  const by = new Map<string, LandMapAgreement[]>();
+  for (const a of agreements) {
+    if (a.rights !== 'png' || !/^\d{10}$/.test(a.agreementNumber)) continue;
+    const tail = a.agreementNumber.slice(-8);
+    const list = by.get(tail);
+    if (list) list.push(a);
+    else by.set(tail, [a]);
+  }
+  return by;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The agreement the province issued from a sold parcel, among those loaded (F-265): its number
+ * ends in the sale's year and month and the parcel's four digits, it is a lease for a parcel
+ * numbered A and a licence for one numbered B, and its term starts within three days of the
+ * sale (on a local load of 2026-11-22 always the sale's day or the day after; two sales in one
+ * month can reuse a number, which the term's date tells apart). Null when none is loaded.
+ */
+export function landIssuedFrom(
+  byTail: ReadonlyMap<string, readonly LandMapAgreement[]>,
+  saleDate: string,
+  contractNo: string,
+): LandMapAgreement | null {
+  const tail = saleAgreementTail(saleDate, contractNo);
+  const group = contractNo.startsWith('A')
+    ? 'LEASE'
+    : contractNo.startsWith('B')
+      ? 'LICENSE'
+      : null;
+  if (tail === null || group === null) return null;
+  const sold = Date.parse(`${saleDate}T00:00:00Z`);
+  return (
+    byTail.get(tail)?.find((a) => {
+      if (a.group !== group || a.termDate === null) return false;
+      const days = (Date.parse(`${a.termDate}T00:00:00Z`) - sold) / DAY_MS;
+      return days >= 0 && days <= 3;
+    }) ?? null
+  );
+}
+
 /** What a click on the map found: the keys of the land under it, and where. */
 export interface LandPick {
   keys: string[];
@@ -241,6 +287,10 @@ export interface LandState {
   agreements: ReadonlyMap<string, LandMapAgreement>;
   offsets: ReadonlyMap<string, LandMapOffset>;
   freehold: ReadonlyMap<string, LandMapFreehold>;
+  /** The agreement issued from a sold parcel, when it is among those loaded (F-265). */
+  issuedFrom: (saleDate: string, contractNo: string) => LandMapAgreement | null;
+  /** The shape of a piece of land by its key (`png:12`), for the outline under the pointer. */
+  shapeOf: (key: string) => LandShape | null;
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
   /** The land whose card is open, drawn with a bold outline. */
   setPicked: (keys: readonly string[]) => void;
@@ -384,21 +434,32 @@ export function useLand(organizationId: string, token: string): LandState {
   // Only what is switched on is drawn, and agreements read for other rights than those now
   // asked for are let go. What is held whole is drawn whatever the zoom: the map's layers fade
   // it out far out, with nothing to read again.
-  const shown = useMemo(() => {
-    const agreementsNow =
+  const loaded = useMemo(
+    () =>
       rights !== null
         ? on.agreements && heldRights === rights
           ? (heldAnswer?.agreements.items ?? [])
           : []
         : viewKinds.includes('agreements')
           ? (seenAnswer?.agreements.items ?? [])
-          : [];
-    return {
-      agreements: landFiltered(agreementsNow, { holder, terms, today }),
+          : [],
+    [heldAnswer, heldRights, seenAnswer, on, viewKinds, rights],
+  );
+  const shown = useMemo(
+    () => ({
+      agreements: landFiltered(loaded, { holder, terms, today }),
       offsets: on.offsets ? (heldAnswer?.offsets.items ?? []) : [],
       freehold: viewKinds.includes('freehold') ? (seenAnswer?.freehold.items ?? []) : [],
-    };
-  }, [heldAnswer, heldRights, seenAnswer, on, viewKinds, rights, holder, terms, today]);
+    }),
+    [loaded, heldAnswer, seenAnswer, on, viewKinds, holder, terms, today],
+  );
+  // An agreement issued from a sale is looked for among every agreement loaded, whatever the
+  // panel's holder and status filters keep.
+  const byTail = useMemo(() => landByTail(loaded), [loaded]);
+  const issuedFrom = useCallback(
+    (saleDate: string, contractNo: string) => landIssuedFrom(byTail, saleDate, contractNo),
+    [byTail],
+  );
   const truncated =
     wholeKinds.some((kind) => heldAnswer?.[kind].truncated) ||
     viewKinds.some((kind) => seenAnswer?.[kind].truncated);
@@ -409,6 +470,23 @@ export function useLand(organizationId: string, token: string): LandState {
   const agreements = useMemo(() => new Map(shown.agreements.map((a) => [a.id, a])), [shown]);
   const offsets = useMemo(() => new Map(shown.offsets.map((o) => [o.id, o])), [shown]);
   const freehold = useMemo(() => new Map(shown.freehold.map((f) => [f.id, f])), [shown]);
+  const shapeOf = useCallback(
+    (key: string) => {
+      const cut = key.indexOf(':');
+      const of = key.slice(0, cut);
+      const id = key.slice(cut + 1);
+      const found =
+        of === 'png' || of === 'oil_sands'
+          ? agreements.get(id)
+          : of === 'offset'
+            ? offsets.get(id)
+            : of === 'freehold'
+              ? freehold.get(id)
+              : undefined;
+      return found?.shape ?? null;
+    },
+    [agreements, offsets, freehold],
+  );
   const anyOn = LAND_KINDS.some((kind) => on[kind]);
   const view = useMemo<LandView | null>(
     () => (anyOn ? { land: features, picked } : null),
@@ -597,7 +675,8 @@ export function useLand(organizationId: string, token: string): LandState {
                 Freehold minerals: land whose petroleum and natural gas is not the Crown’s; the
                 province names no owner. National parks and reserves are hatched in grey. Drawn from
                 close in. Offset notices: the active ones, fainter once the deadline has passed.
-                Click land for its details.
+                Point at land for a few lines about it; click it for its details in a panel on the
+                right.
               </p>
               <p>
                 {loadedAt
@@ -701,11 +780,30 @@ export function useLand(organizationId: string, token: string): LandState {
       </div>
     );
 
-  return { view, agreements, offsets, freehold, onViewChange, setPicked, panel, legend };
+  return {
+    view,
+    agreements,
+    offsets,
+    freehold,
+    issuedFrom,
+    shapeOf,
+    onViewChange,
+    setPicked,
+    panel,
+    legend,
+  };
 }
 
 /** A small square of the legend: filled, hatched or outlined. */
-function Swatch({ colour, hatch, outline }: { colour?: string; hatch?: string; outline?: string }) {
+export function Swatch({
+  colour,
+  hatch,
+  outline,
+}: {
+  colour?: string;
+  hatch?: string;
+  outline?: string;
+}) {
   const style: React.CSSProperties = colour
     ? { backgroundColor: colour, borderColor: colour }
     : hatch
@@ -723,149 +821,8 @@ function Swatch({ colour, hatch, outline }: { colour?: string; hatch?: string; o
   );
 }
 
-const hectares = (n: number) => `${n.toLocaleString('en-CA', { maximumFractionDigits: 1 })} ha`;
-
 /** "Lease 002-924, tract 00": an agreement as the province numbers it. */
 export function landAgreementName(a: LandMapAgreement): string {
   const kind = a.group === 'LEASE' ? 'Lease' : a.group === 'LICENSE' ? 'Licence' : 'Agreement';
   return `${kind} ${a.agreementType}-${a.agreementNumber}${a.tract ? `, tract ${a.tract}` : ''}`;
-}
-
-/** At most this many pieces of land are written out on one card. */
-const CARD_MAX = 6;
-
-/**
- * The card of the land clicked: every agreement, offset notice and piece of non-Crown land
- * under the click, the agreements first, kept open until closed.
- */
-export function LandCard({
-  pick,
-  land,
-  saleRow,
-  onClose,
-}: {
-  pick: LandPick | null;
-  land: Pick<LandState, 'agreements' | 'offsets' | 'freehold'>;
-  /** A sale parcel's lines (F-242), by its id; they come first on the card. */
-  saleRow?: (id: string) => React.ReactNode;
-  onClose: () => void;
-}) {
-  if (!pick) return null;
-  const today = landToday();
-  const rows: React.ReactNode[] = [];
-  for (const key of pick.keys) {
-    const cut = key.indexOf(':');
-    const of = key.slice(0, cut);
-    const id = key.slice(cut + 1);
-    const agreement = of === 'png' || of === 'oil_sands' ? land.agreements.get(id) : undefined;
-    const offset = of === 'offset' ? land.offsets.get(id) : undefined;
-    const freehold = of === 'freehold' ? land.freehold.get(id) : undefined;
-    const sale = of === 'sale' ? saleRow?.(id) : null;
-    if (sale) {
-      rows.push(sale);
-    } else if (agreement) {
-      rows.push(
-        <li key={landKey(agreement.rights, id)}>
-          <p className="flex items-center gap-1.5 font-semibold">
-            <Swatch colour={landHolderColour(agreement.holder)} />
-            {agreement.holder ? landReadable(agreement.holder) : 'No holder named'}
-          </p>
-          <p>{landAgreementName(agreement)}</p>
-          <p className="text-xs text-muted-foreground">
-            {[
-              agreement.rights === 'png' ? 'Petroleum and natural gas' : 'Oil sands',
-              agreement.status,
-              agreement.vintage,
-              agreement.areaHa !== null ? hectares(agreement.areaHa) : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          {agreement.parties && agreement.parties !== agreement.holder && (
-            <p className="text-xs text-muted-foreground">Parties: {agreement.parties}</p>
-          )}
-          {agreement.zone && <p className="text-xs text-muted-foreground">{agreement.zone}</p>}
-          <p className="text-xs text-muted-foreground">
-            {[
-              agreement.termDate && `Term from ${agreement.termDate}`,
-              agreement.continuationDate && `continued ${agreement.continuationDate}`,
-              agreement.expiryText && `expiry: ${agreement.expiryText}`,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          {landExpiring(agreement.expiryText, today) && (
-            <p className="text-xs font-medium">Expires within 12 months.</p>
-          )}
-        </li>,
-      );
-    } else if (offset) {
-      rows.push(
-        <li key={landKey('offset', id)}>
-          <p className="font-semibold">
-            Offset notice {offset.offsetNumber}
-            {offset.tract ? `, tract ${offset.tract}` : ''}
-          </p>
-          {offset.holder && <p>{landReadable(offset.holder)}</p>}
-          {offset.zone && <p className="text-xs text-muted-foreground">{offset.zone}</p>}
-          {offset.expiryDate && (
-            <p className="text-xs text-muted-foreground">
-              Deadline {offset.expiryDate}
-              {offset.expiryDate < today ? ' (passed)' : ''}
-            </p>
-          )}
-        </li>,
-      );
-    } else if (freehold) {
-      rows.push(
-        <li key={landKey('freehold', id)}>
-          <p className="font-semibold">
-            {freehold.nationalPark
-              ? `National park: ${freehold.nationalPark}`
-              : freehold.reserveName || freehold.reserveNumber
-                ? `Reserve: ${freehold.reserveName ?? freehold.reserveNumber ?? ''}`
-                : 'Freehold minerals (not the Crown’s)'}
-          </p>
-          {freehold.substances && (
-            <p className="text-xs text-muted-foreground">{freehold.substances}</p>
-          )}
-        </li>,
-      );
-    }
-  }
-  if (rows.length === 0) return null;
-  const more = rows.length - CARD_MAX;
-  // Opens to the left of the click near the window's right edge, and above it near the bottom.
-  const left = pick.x > window.innerWidth - 360;
-  const up = pick.y > window.innerHeight - 320;
-  return (
-    <div
-      role="dialog"
-      aria-label="Land here"
-      className="absolute z-30 max-h-[min(24rem,calc(100%-1rem))] w-80 overflow-y-auto rounded-card border bg-card p-3 text-sm shadow-md"
-      style={{
-        left: pick.x,
-        top: pick.y,
-        transform: `translate(${left ? 'calc(-100% - 14px)' : '14px'}, ${up ? 'calc(-100% - 14px)' : '14px'})`,
-      }}
-    >
-      <button
-        type="button"
-        aria-label="Close"
-        onClick={onClose}
-        className="absolute top-1.5 right-1.5 rounded-sm px-1.5 text-base leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        ×
-      </button>
-      <ul className="flex flex-col gap-2 pr-4">{rows.slice(0, CARD_MAX)}</ul>
-      {more > 0 && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          +{more} more here: zoom in and click a smaller spot.
-        </p>
-      )}
-      <p className="mt-2 text-xs text-muted-foreground">
-        Alberta Energy and Minerals, Government of Alberta. Not an official record.
-      </p>
-    </div>
-  );
 }
