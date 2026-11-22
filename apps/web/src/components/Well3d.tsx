@@ -52,8 +52,8 @@ import { drawWell3d, WELL3D_COLOURS } from '../lib/well3dDraw';
  *   of ground. The AER's ST37 paths, used on the owner's decision (docs/DECISIONS.md,
  *   2026-11-19): members only, nothing downloaded.
  * - **Layers:** the ground as a solid block seen from outside (the owner, 2026-11-22, from three
- *   pictures of such blocks): its faces show the layers at their real depths, each a band in
- *   the colour of its rock type with its name on it, the real ground on top, the wells as pipes
+ *   pictures of such blocks): its faces show the layers at their real depths, each a band with
+ *   its rock type's texture and its name on it, the real ground on top, the wells as pipes
  *   through the faces; opened at the Duvernay, the part beneath is drawn lower, so the top of
  *   the play shows with the legs that run in it; and every layer under the well is listed.
  *   Depths from the Alberta Geological Survey's 3D model, rock types from its Table of
@@ -222,8 +222,11 @@ function Well3dCanvas({
         layers,
         layerHit: layerHit.current,
         playZone,
+        // Held or sweeping: the quick textures; the frame after it is let go, the whole ones.
+        moving: pointers.current.size > 0 || sweep.current !== null,
       });
       if (sweep.current) again.current();
+      else if (moving) again.current();
     });
   }, [scene, layers, playZone, room]);
   useEffect(() => {
@@ -388,13 +391,16 @@ function Well3dCanvas({
   const onPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     pointers.current.delete(event.pointerId);
     event.currentTarget.releasePointerCapture(event.pointerId);
+    // Let go: one more frame, with the textures laid whole.
+    paint();
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (!camera.current) return;
     const turn: Record<string, [number, number]> = {
-      ArrowLeft: [24, 0],
-      ArrowRight: [-24, 0],
+      // As a drag to that side.
+      ArrowLeft: [-24, 0],
+      ArrowRight: [24, 0],
       ArrowUp: [0, 24],
       ArrowDown: [0, -24],
     };
@@ -486,13 +492,9 @@ function Well3dCanvas({
   );
 }
 
-/** A rock type's colour as a small box, hatched for the two interbedded classes. */
+/** A rock type's colour as a small box: the colour its layers have on the block. */
 function swatch(rock: FormationRock): React.CSSProperties {
-  return rock.hatch
-    ? {
-        background: `repeating-linear-gradient(135deg, ${rock.hatch} 0 1px, transparent 1px 4px), ${rock.colour}`,
-      }
-    : { backgroundColor: rock.colour };
+  return { backgroundColor: rock.earth };
 }
 
 /** Every layer under the well, from the surface down: its name, rock type, depth and thickness. */
@@ -908,9 +910,9 @@ export function Well3d({
             : ''}
         </p>
         <p className={faint}>
-          Depths: {FORMATION_SOURCE_NAME}. Rock types: {FORMATION_ROCK_SOURCE_NAME}, each layer in
-          the colour the table gives its unit. A layer the Survey models as several formations
-          together is one layer here.
+          Depths: {FORMATION_SOURCE_NAME}. Rock types: {FORMATION_ROCK_SOURCE_NAME}, each layer
+          drawn with the texture and a natural colour of the rock type the table gives its unit. A
+          layer the Survey models as several formations together is one layer here.
         </p>
       </div>
     );

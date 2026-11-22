@@ -1,5 +1,6 @@
 import { FORMATION_ROCKS, formationZone, type St37StatusClass } from '@grain/domain';
 
+import { ROCK_TILE, rockPattern } from './rockPatterns';
 import {
   wallsShown,
   type LayerHit,
@@ -57,6 +58,11 @@ export interface DrawOptions {
   layerHit?: LayerHit | null;
   /** The zone the play is (the Duvernay's), edged and always named; null for none. */
   playZone?: number | null;
+  /**
+   * The block is being turned or moved right now: the textures are laid in longer stretches and
+   * only on the taller bands, so every frame stays quick; the next still frame lays them whole.
+   */
+  moving?: boolean;
 }
 
 /** Strokes the line through the points, cut where it passes behind the camera. */
@@ -297,6 +303,7 @@ function drawMesh(
   mesh: LayerMesh,
   colour: string,
   grid: string | null,
+  brightness = 1,
 ) {
   const width = mesh.side + 1;
   const at = (i: number, j: number) => mesh.points[j * width + i] ?? null;
@@ -316,7 +323,7 @@ function drawMesh(
       quads.push({
         away: seen.reduce((sum, corner) => sum + corner[2], 0) / 4,
         corners: seen.map((corner) => view.place(corner)),
-        lit: 0.62 + 0.5 * facing,
+        lit: (0.62 + 0.5 * facing) * brightness,
       });
     }
   }
@@ -367,6 +374,11 @@ interface Face {
   runs: [number, number][];
   /** The surface under zone index k (k = the zones' count: the last base), lowered or not. */
   line(k: number, lowered: boolean): ([number, number] | null)[];
+  /**
+   * Each sample's place on the face for laying a texture: how far along the face it is, in the
+   * scene's metres, and where its points at the scene's top and floor stand on the canvas.
+   */
+  marks: ({ along: number; high: [number, number]; low: [number, number] } | null)[];
 }
 
 function faceOf(view: Lens, scene: Scene, layers: LayerScene, wall: LayerWall): Face {
@@ -400,7 +412,68 @@ function faceOf(view: Lens, scene: Scene, layers: LayerScene, wall: LayerWall): 
       from = -1;
     }
   });
-  return { wall, lit: wall.normal[0] !== 0 ? 0.8 : 1, runs, line };
+  const start = wall.samples[0];
+  const marks = wall.samples.map((sample) => {
+    const [high, low] = [
+      view.see([sample.x, sample.y, scene.max[2]]),
+      view.see([sample.x, sample.y, floor]),
+    ];
+    if (!start || high[2] < view.near || low[2] < view.near) return null;
+    return {
+      along: Math.hypot(sample.x - start.x, sample.y - start.y),
+      high: view.place(high),
+      low: view.place(low),
+    };
+  });
+  return { wall, lit: wall.normal[0] !== 0 ? 0.8 : 1, runs, line, marks };
+}
+
+/** How many samples of a face share one laying of the texture: few enough to stay true. */
+const TEXTURE_SPAN = 4;
+/** The same while the block is being turned: longer stretches, a little less true. */
+const TEXTURE_SPAN_MOVING = 14;
+
+/**
+ * A rock's texture laid on a stretch of one band of a face. The face is flat, so over a few
+ * samples its picture is all but a plain slant of the face's own (along, height) plane: the
+ * tile is drawn in that plane, cut to the band, and so lies on the face, shrinking with distance
+ * and turning with the block.
+ */
+function layTexture(
+  ctx: CanvasRenderingContext2D,
+  scene: Scene,
+  face: Face,
+  fill: CanvasPattern,
+  tile: number,
+  top: readonly ([number, number] | null)[],
+  under: readonly ([number, number] | null)[],
+  a: number,
+  b: number,
+  span: number,
+) {
+  const height = scene.max[2] - scene.min[2];
+  for (let from = a; from < b; from += span) {
+    const to = Math.min(b, from + span);
+    const [m0, m1] = [face.marks[from], face.marks[to]];
+    if (!m0 || !m1 || m1.along === m0.along || height <= 0) continue;
+    // Canvas = origin + across × (along − along0) + up × (height above the floor).
+    const run = m1.along - m0.along;
+    const [ax, ay] = [(m1.low[0] - m0.low[0]) / run, (m1.low[1] - m0.low[1]) / run];
+    const [ux, uy] = [(m0.high[0] - m0.low[0]) / height, (m0.high[1] - m0.low[1]) / height];
+    ctx.save();
+    ctx.beginPath();
+    edge(ctx, top, from, to);
+    edge(ctx, under, to, from);
+    ctx.closePath();
+    ctx.clip();
+    ctx.transform(ax, ay, ux, uy, m0.low[0] - ax * m0.along, m0.low[1] - ay * m0.along);
+    // One tile to `tile` metres of the face, the same across and up.
+    const scale = tile / ROCK_TILE;
+    ctx.scale(scale, scale);
+    ctx.fillStyle = fill;
+    ctx.fillRect(m0.along / scale - 1, -1, run / scale + 2, height / scale + 2);
+    ctx.restore();
+  }
 }
 
 /** Adds one surface's stretch to the path being drawn. */
@@ -419,16 +492,19 @@ function edge(
 
 /**
  * The layers of zone indexes `first` to `last` (not included) on a face: each a band between
- * its top and its base, in its rock type's colour, hatched for the two interbedded classes, the
- * play's zone edged dark.
+ * its top and its base, in its rock type's natural colour with its texture laid on the face
+ * (`tile`: the size of a tile of texture, in the scene's metres), the play's zone edged dark.
  */
 function drawBands(
   ctx: CanvasRenderingContext2D,
+  scene: Scene,
   layers: LayerScene,
   face: Face,
   first: number,
   last: number,
   play: number,
+  tile: number,
+  moving: boolean,
 ) {
   const zones = layers.field.zones;
   const lowered = (k: number) => layers.cut >= 0 && k >= layers.cut;
@@ -448,18 +524,13 @@ function drawBands(
       edge(ctx, top, a, b);
       edge(ctx, under, b, a);
       ctx.closePath();
-      ctx.fillStyle = shade(rock.colour, face.lit);
+      ctx.fillStyle = shade(rock.earth, face.lit);
       ctx.fill();
-      if (rock.hatch) {
-        // The two interbedded classes: slanted lines, as on the table.
-        ctx.beginPath();
-        for (let s = a; s < b; s += 1) {
-          const [p, q] = [top[s], under[s + 1]];
-          if (!p || !q) continue;
-          ctx.moveTo(p[0], p[1]);
-          ctx.lineTo(q[0], q[1]);
-        }
-        stroke(ctx, rock.hatch, 0.9);
+      // The texture only where the band is tall enough to show it.
+      const fill = thick >= (moving ? 9 : 5) ? rockPattern(ctx, rock.pattern) : null;
+      if (fill) {
+        const span = moving ? TEXTURE_SPAN_MOVING : TEXTURE_SPAN;
+        layTexture(ctx, scene, face, fill, tile, top, under, a, b, span);
       }
       ctx.beginPath();
       edge(ctx, top, a, b);
@@ -667,6 +738,13 @@ function drawBlock(
     })
     .sort((a, b) => b.away - a.away)
     .map(({ wall }) => faceOf(view, scene, layers, wall));
+  // The texture's size: a tile some 44 pixels tall as the block stands now, in steps of two
+  // (so it keeps to the rock while the block is turned, and only changes on a real zoom).
+  const mark = faces.flatMap((face) => face.marks).find((each) => each != null);
+  const tall = mark ? Math.hypot(mark.high[0] - mark.low[0], mark.high[1] - mark.low[1]) : 0;
+  const perPixel = tall > 0 ? (scene.max[2] - scene.min[2]) / tall : 1;
+  const tile = 2 ** Math.round(Math.log2(44 * perPixel));
+  const moving = options.moving === true;
   const bright = (line: SceneLine) =>
     line.uwi === options.hit?.line.uwi || line.uwi === options.chosen;
   const pipes = (lines: readonly SceneLine[], inside: boolean) => {
@@ -683,16 +761,18 @@ function drawBlock(
     const fromBelow = middle != null && view.eye[2] < middle[2];
     const rock = rockOf(zones[cut] ?? 0);
     if (!fromBelow && layers.opened) {
-      drawMesh(ctx, view, layers.opened, rock.colour, 'rgba(15, 23, 42, 0.14)');
+      drawMesh(ctx, view, layers.opened, rock.earth, 'rgba(15, 23, 42, 0.16)', 1.15);
     }
-    for (const face of faces) drawBands(ctx, layers, face, cut, zones.length, play);
+    for (const face of faces) {
+      drawBands(ctx, scene, layers, face, cut, zones.length, play, tile, moving);
+    }
     pipes(layers.lines, false);
     if (fromBelow && layers.underside) {
-      drawMesh(ctx, view, layers.underside, shade(rockOf(zones[cut - 1] ?? 0).colour, 0.7), null);
+      drawMesh(ctx, view, layers.underside, rockOf(zones[cut - 1] ?? 0).earth, null, 0.7);
     }
   }
   // The upper part (or the whole block): its faces, then the ground on top.
-  for (const face of faces) drawBands(ctx, layers, face, 0, upper, play);
+  for (const face of faces) drawBands(ctx, scene, layers, face, 0, upper, play, tile, moving);
   drawMesh(ctx, view, layers.terrain, GRASS, 'rgba(15, 23, 42, 0.1)');
 
   // The legs inside the block show through its faces, never over the ground.
