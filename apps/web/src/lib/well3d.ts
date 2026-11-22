@@ -53,8 +53,17 @@ export interface SceneLine {
 
 export interface Scene {
   lines: SceneLine[];
+  /** The well's surface location, [longitude, latitude]: where east and north are counted from. */
+  origin: readonly [number, number];
+  /** Metres to a degree of longitude at the origin. */
+  kx: number;
   /** The ground at the well, in metres above sea level: the level depths are counted from. */
   ground: number;
+  /**
+   * How many times depths are drawn deeper than they are (1: true to scale). Every height in
+   * the scene is already stretched about the ground: `sceneZ` and `trueZ` go between the two.
+   */
+  stretch: number;
   /** The box the scene is drawn in: snapped outward to the grid. */
   min: Vec3;
   max: Vec3;
@@ -78,26 +87,62 @@ export function niceStep(span: number, parts: number): number {
   return nice * power;
 }
 
+/** An elevation as the scene draws it: stretched about the ground. */
+export function sceneZ(scene: Pick<Scene, 'ground' | 'stretch'>, elevation: number): number {
+  return scene.ground + (elevation - scene.ground) * scene.stretch;
+}
+
+/** The elevation a height of the scene stands for. */
+export function trueZ(scene: Pick<Scene, 'ground' | 'stretch'>, z: number): number {
+  return scene.ground + (z - scene.ground) / scene.stretch;
+}
+
+/** The place under a point of the scene, [longitude, latitude]. */
+export function sceneLonLat(scene: Scene, x: number, y: number): [number, number] {
+  return [scene.origin[0] + x / scene.kx, scene.origin[1] + y / M_PER_DEG_LAT];
+}
+
 /**
  * The scene of an answer: every leg with at least two points, in metres around the well's
- * surface location. Without `nearby`, only the well's own legs. Null when nothing can be drawn.
+ * surface location. Without `nearby`, only the well's own legs. `stretch` draws depths that
+ * many times deeper; `floor` (an elevation) lowers the box to hold what lies under the wells.
+ * Null when nothing can be drawn.
  */
-export function well3dScene(answer: Well3dAnswer, nearby: boolean): Scene | null {
+export function well3dScene(
+  answer: Well3dAnswer,
+  nearby: boolean,
+  options: { stretch?: number; floor?: number } = {},
+): Scene | null {
   const kept = answer.legs.filter((leg) => leg.points.length >= 2 && (nearby || leg.own));
   const first = kept.find((leg) => leg.own) ?? kept[0];
   if (!first) return null;
   const origin = answer.well?.surface ?? [first.points[0]?.[0] ?? 0, first.points[0]?.[1] ?? 0];
   const kx = M_PER_DEG_LON * Math.cos((origin[1] * Math.PI) / 180);
-  const lines: SceneLine[] = kept.map((leg) => ({
+  const flat = kept.map((leg) =>
+    leg.points.map(
+      ([lon, lat, z]) => [(lon - origin[0]) * kx, (lat - origin[1]) * M_PER_DEG_LAT, z] as const,
+    ),
+  );
+  // The ground: as the AER gives it for the well; else where the well's own paths start (the
+  // kelly bushing, a few metres above the ground).
+  const ownTop = Math.max(
+    ...flat.filter((_, i) => kept[i]?.own).map((points) => points[0]?.[2] ?? -Infinity),
+  );
+  const highest = Math.max(...flat.flatMap((points) => points.map((p) => p[2])));
+  const ground =
+    answer.well?.groundElevationM ??
+    answer.well?.kbElevationM ??
+    (Number.isFinite(ownTop) ? ownTop : highest);
+  const stretch = options.stretch && options.stretch > 0 ? options.stretch : 1;
+  const deep = (z: number) => ground + (z - ground) * stretch;
+  const lines: SceneLine[] = kept.map((leg, i) => ({
     uwi: leg.uwi,
     licenceNumber: leg.licenceNumber,
     licensee: leg.licensee,
     statusClass: leg.statusClass,
     surveyed: leg.surveyed,
     own: leg.own,
-    points: leg.points.map(
-      ([lon, lat, z]) => [(lon - origin[0]) * kx, (lat - origin[1]) * M_PER_DEG_LAT, z] as const,
-    ),
+    points: (flat[i] ?? []).map(([x, y, z]) => [x, y, deep(z)] as const),
   }));
   let [x0, y0, z0] = [Infinity, Infinity, Infinity];
   let [x1, y1, z1] = [-Infinity, -Infinity, -Infinity];
@@ -111,13 +156,7 @@ export function well3dScene(answer: Well3dAnswer, nearby: boolean): Scene | null
       z1 = Math.max(z1, z);
     }
   }
-  // The ground: as the AER gives it for the well; else where the well's own paths start (the
-  // kelly bushing, a few metres above the ground).
-  const ownTop = Math.max(...lines.filter((l) => l.own).map((l) => l.points[0]?.[2] ?? -Infinity));
-  const ground =
-    answer.well?.groundElevationM ??
-    answer.well?.kbElevationM ??
-    (Number.isFinite(ownTop) ? ownTop : z1);
+  if (options.floor !== undefined) z0 = Math.min(z0, deep(options.floor));
   const top = Math.max(ground, z1);
   const step = niceStep(Math.max(x1 - x0, y1 - y0, top - z0, 400), 12);
   // Some ground about the wells, and never a sliver: a vertical well still gets a square.
@@ -131,7 +170,7 @@ export function well3dScene(answer: Well3dAnswer, nearby: boolean): Scene | null
   const max: Vec3 = [snapUp(x1), snapUp(y1), top];
   const centre: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
   const radius = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2;
-  return { lines, ground, min, max, step, centre, radius };
+  return { lines, origin, kx, ground, stretch, min, max, step, centre, radius };
 }
 
 /**
@@ -175,6 +214,10 @@ function basis(camera: Camera) {
 export type Seen = readonly [number, number, number];
 
 export interface Lens {
+  /** Where the camera stands. */
+  eye: Vec3;
+  /** The line of sight through a point of the canvas: from the eye, in this direction. */
+  ray(x: number, y: number): Vec3;
   /** A scene point in the camera's own axes. */
   see(point: Vec3): Seen;
   /** A seen point on the canvas: x, y in pixels. Only for points in front of `near`. */
@@ -188,6 +231,15 @@ export function lens(camera: Camera, size: Size): Lens {
   const f = focal(size);
   const [cx, cy] = [size.width / 2, size.height / 2];
   return {
+    eye,
+    ray(x, y) {
+      const [across, upward] = [(x - cx) / f, -(y - cy) / f];
+      return [
+        forward[0] + right[0] * across + up[0] * upward,
+        forward[1] + right[1] * across + up[1] * upward,
+        forward[2] + right[2] * across + up[2] * upward,
+      ];
+    },
     near: Math.max(1, camera.distance * 0.02),
     see([x, y, z]) {
       const [dx, dy, dz] = [x - eye[0], y - eye[1], z - eye[2]];
@@ -219,11 +271,16 @@ export function clipSegment(a: Seen, b: Seen, near: number): [Seen, Seen] | null
  * The camera a scene opens with: from the south-east and above, as near as holds the whole box
  * in the picture with a little air around it.
  */
-export function fitCamera(scene: Scene, size: Size): Camera {
+export function fitCamera(
+  scene: Scene,
+  size: Size,
+  room = { side: 44, top: 30 },
+  angles = { yaw: -0.65, pitch: 0.42 },
+): Camera {
   let camera: Camera = {
     target: scene.centre,
-    yaw: -0.65,
-    pitch: 0.42,
+    yaw: angles.yaw,
+    pitch: angles.pitch,
     distance: scene.radius / Math.sin(FIELD_OF_VIEW / 2),
   };
   if (!(size.width > 0) || !(size.height > 0)) return camera;
@@ -234,7 +291,7 @@ export function fitCamera(scene: Scene, size: Size): Camera {
     }
   }
   // Room for the depth marks on the left and the lines of text top and bottom.
-  const [halfWide, halfHigh] = [size.width / 2 - 44, size.height / 2 - 30];
+  const [halfWide, halfHigh] = [size.width / 2 - room.side, size.height / 2 - room.top];
   // The picture does not shrink in step with the distance: a few rounds settle it.
   for (let round = 0; round < 8; round += 1) {
     const view = lens(camera, size);

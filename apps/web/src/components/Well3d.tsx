@@ -1,8 +1,28 @@
-import { ST37_STATUS_LABELS } from '@grain/domain';
+import {
+  FORMATION_PLAY_ZONES,
+  FORMATION_ROCK_SOURCE_NAME,
+  FORMATION_ROCKS,
+  FORMATION_SOURCE_NAME,
+  formationLayerAt,
+  formationZone,
+  ST37_STATUS_LABELS,
+  type FormationLayer,
+  type FormationRock,
+} from '@grain/domain';
 import { Maximize2, Minimize2, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiJson } from '../lib/api';
+import {
+  layerField,
+  layersAt,
+  layerScene,
+  pickLayer,
+  type FormationAnswer,
+  type LayerField,
+  type LayerHit,
+  type LayerScene,
+} from '../lib/formationLayers';
 import { cn } from '../lib/utils';
 import {
   between,
@@ -12,6 +32,8 @@ import {
   orbit,
   pan,
   pickLine,
+  sceneLonLat,
+  trueZ,
   well3dScene,
   zoom,
   type Camera,
@@ -25,28 +47,37 @@ import { drawWell3d, WELL3D_COLOURS } from '../lib/well3dDraw';
 /**
  * A well under the ground, in 3D, on its panel (F-261; the owner, 2026-11-22: "displayed in the
  * details panel when the user clicks on the well … super cool and you can free move/zoom the
- * chart"). The well's legs along their real paths, with the other wells nearby, in a block of
- * ground that turns with a drag, moves with a right or Shift drag (or two fingers) and zooms
- * with the wheel (or a pinch). True to scale: no depth is stretched. The AER's ST37 paths, used
- * on the owner's decision (docs/DECISIONS.md, 2026-11-19): members only, nothing downloaded.
+ * chart"). Two views to switch between (the owner, 2026-11-22):
+ *
+ * - **Wells:** the well's legs along their real paths, with the other wells nearby, in a block
+ *   of ground. The AER's ST37 paths, used on the owner's decision (docs/DECISIONS.md,
+ *   2026-11-19): members only, nothing downloaded.
+ * - **Layers:** the same block cut open: its far faces show the ground's layers at their real
+ *   depths, each in the colour of its rock type, the Duvernay edged in white with its top as a
+ *   sheet through the block, and every layer under the well listed. Depths from the Alberta
+ *   Geological Survey's 3D model, rock types from its Table of Formations (open data, the
+ *   Survey named here; docs/DECISIONS.md, 2026-11-22).
+ *
+ * The block turns with a drag, moves with a right or Shift drag (or two fingers) and zooms with
+ * the wheel (or a pinch). True to scale unless the person asks for the depths to be stretched.
  */
 
 const metres = (n: number) => `${Math.round(n).toLocaleString('en-CA')} m`;
 
 /** Answers already read in this visit, by address. */
-const cache = new Map<string, Well3dAnswer>();
+const cache = new Map<string, unknown>();
 
 /** For tests: forget the answers read. */
 export function clearWell3dCache() {
   cache.clear();
 }
 
-function useWell3d(path: string, token: string) {
+function useAnswer<T>(path: string | null, token: string) {
   const [loaded, setLoaded] = useState<{ path: string; failed: boolean } | null>(null);
   useEffect(() => {
-    if (cache.has(path)) return;
+    if (path === null || cache.has(path)) return;
     const controller = new AbortController();
-    apiJson<Well3dAnswer>(path, token, { signal: controller.signal })
+    apiJson<T>(path, token, { signal: controller.signal })
       .then((answer) => {
         cache.set(path, answer);
         setLoaded({ path, failed: false });
@@ -58,7 +89,8 @@ function useWell3d(path: string, token: string) {
       controller.abort();
     };
   }, [path, token]);
-  const answer = cache.get(path);
+  if (path === null) return { answer: null, state: 'idle' as const };
+  const answer = cache.get(path) as T | undefined;
   if (answer) return { answer, state: 'ok' as const };
   if (loaded?.path === path && loaded.failed) return { answer: null, state: 'failed' as const };
   return { answer: null, state: 'loading' as const };
@@ -68,17 +100,57 @@ const reducedMotion = () =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** What the pointer is on, in words: the leg, and how deep the point lies. */
-function hitText(scene: Scene, hit: Well3dHit) {
-  const depth = scene.ground - hit.point[2];
+/** A depth below the surface for reading: never above it. */
+const below = (scene: Scene, elevation: number) => metres(Math.max(0, scene.ground - elevation));
+
+interface Told {
+  title: string;
+  lines: string[];
+}
+
+/** A layer in words: its name, and its rock type as the Table of Formations gives it. */
+function layerWords(zone: number): { name: string; rock: string } {
+  const found = formationZone(zone);
   return {
-    uwi: hit.line.uwi,
-    who: [ST37_STATUS_LABELS[hit.line.statusClass], hit.line.own ? null : hit.line.licensee]
-      .filter(Boolean)
-      .join(' · '),
-    where: `${metres(Math.max(0, depth))} below the surface · ${
-      hit.point[2] >= 0 ? metres(hit.point[2]) : `−${metres(-hit.point[2])}`
-    } above sea level`,
+    name: found?.name ?? `Zone ${String(zone)}`,
+    rock: FORMATION_ROCKS[found?.rock ?? 'unknown'].label,
+  };
+}
+
+/** What the pointer is on, in words: the leg, how deep the point lies, and in which layer. */
+function hitText(scene: Scene, hit: Well3dHit, field: LayerField | null): Told {
+  const elevation = trueZ(scene, hit.point[2]);
+  const layer = field
+    ? formationLayerAt(
+        layersAt(field, ...sceneLonLat(scene, hit.point[0], hit.point[1])),
+        elevation,
+      )
+    : null;
+  return {
+    title: hit.line.uwi,
+    lines: [
+      [ST37_STATUS_LABELS[hit.line.statusClass], hit.line.own ? null : hit.line.licensee]
+        .filter(Boolean)
+        .join(' · '),
+      `${below(scene, elevation)} below the surface · ${
+        elevation >= 0 ? metres(elevation) : `−${metres(-elevation)}`
+      } above sea level`,
+      ...(layer ? [`In the ${layerWords(layer.zone).name}`] : []),
+    ],
+  };
+}
+
+function layerText(hit: LayerHit): Told {
+  const { name, rock } = layerWords(hit.zone);
+  const down = (elevation: number) => metres(Math.max(0, hit.surface - elevation));
+  return {
+    title: name,
+    lines: [
+      rock,
+      `${down(hit.top)} to ${down(hit.base)} below the surface here · ${metres(
+        hit.top - hit.base,
+      )} thick`,
+    ],
   };
 }
 
@@ -88,11 +160,16 @@ function hitText(scene: Scene, hit: Well3dHit) {
  */
 function Well3dCanvas({
   scene,
+  layers,
+  playZone,
   chosen,
   large,
   label,
 }: {
   scene: Scene;
+  /** The ground's layers, when the Layers view is on. */
+  layers: LayerScene | null;
+  playZone: number | null;
   chosen: string | null;
   large: boolean;
   label: string;
@@ -101,14 +178,21 @@ function Well3dCanvas({
   const size = useRef<Size>({ width: 0, height: 0 });
   const camera = useRef<Camera | null>(null);
   const hit = useRef<Well3dHit | null>(null);
+  const layerHit = useRef<LayerHit | null>(null);
   const frame = useRef(0);
   const sweep = useRef<{ from: Camera; to: Camera; start: number } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number; move: boolean }>());
   const chosenRef = useRef(chosen);
+  const drawn = useRef<{ scene: Scene; layers: LayerScene | null }>({ scene, layers });
   // The painter itself, for the frame that asks for another while a sweep runs.
   const again = useRef<() => void>(() => undefined);
-  const [told, setTold] = useState<ReturnType<typeof hitText> | null>(null);
+  const [told, setTold] = useState<Told | null>(null);
   const [touched, setTouched] = useState(false);
+  // The layers' names need room beside the block.
+  const room = useMemo(
+    () => (layers ? { side: large ? 130 : 62, top: 34 } : { side: 44, top: 30 }),
+    [layers, large],
+  );
 
   const paint = useCallback(() => {
     if (frame.current !== 0) return;
@@ -124,16 +208,20 @@ function Well3dCanvas({
         camera.current = between(moving.from, moving.to, 1 - (1 - t) ** 3);
         if (t >= 1) sweep.current = null;
       }
-      camera.current ??= fitCamera(scene, size.current);
+      camera.current ??= fitCamera(scene, size.current, room);
       const ratio = window.devicePixelRatio || 1;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       drawWell3d(ctx, scene, camera.current, size.current, {
         hit: hit.current,
         chosen: chosenRef.current,
+        layers,
+        layerHit: layerHit.current,
+        playZone,
+        labels: large ? 'all' : 'play',
       });
       if (sweep.current) again.current();
     });
-  }, [scene]);
+  }, [scene, layers, playZone, large, room]);
   useEffect(() => {
     again.current = paint;
   }, [paint]);
@@ -141,7 +229,7 @@ function Well3dCanvas({
   // The opening view: from straight above, as the map shows the well, down to the side.
   const open = useCallback(
     (animate: boolean) => {
-      const to = fitCamera(scene, size.current);
+      const to = fitCamera(scene, size.current, room);
       if (animate && !reducedMotion()) {
         const from: Camera = { ...to, yaw: 0, pitch: 1.5, distance: to.distance * 1.5 };
         camera.current = from;
@@ -152,7 +240,7 @@ function Well3dCanvas({
       }
       paint();
     },
-    [scene, paint],
+    [scene, room, paint],
   );
 
   useEffect(() => {
@@ -160,19 +248,35 @@ function Well3dCanvas({
     paint();
   }, [chosen, paint]);
 
+  // Another scene (the layers on or off, the other wells, the depths stretched): the block is
+  // held whole again, seen from the side the person had turned it to.
+  useEffect(() => {
+    const before = drawn.current;
+    drawn.current = { scene, layers };
+    if (before.scene === scene && before.layers === layers) return;
+    hit.current = null;
+    layerHit.current = null;
+    setTold(null);
+    if (camera.current && size.current.width > 0) {
+      sweep.current = null;
+      camera.current = fitCamera(scene, size.current, room, camera.current);
+    }
+    paint();
+  }, [scene, layers, room, paint]);
+
   // The canvas follows its box: sharp on any screen, refitted when the box changes.
+  const opened = useRef(false);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let first = true;
     const fit = () => {
       const box = canvas.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
       size.current = { width: box.width, height: box.height };
       canvas.width = Math.max(1, Math.round(box.width * ratio));
       canvas.height = Math.max(1, Math.round(box.height * ratio));
-      if (first && box.width > 0) {
-        first = false;
+      if (!opened.current && box.width > 0) {
+        opened.current = true;
         open(true);
       } else {
         paint();
@@ -213,13 +317,28 @@ function Well3dCanvas({
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   };
 
+  const forget = () => {
+    if (!hit.current && !layerHit.current) return false;
+    hit.current = null;
+    layerHit.current = null;
+    setTold(null);
+    return true;
+  };
+
+  // A leg first; with the layers on, else the layer of the far face under the pointer.
   const point = (event: React.PointerEvent) => {
     if (!camera.current) return;
     const { x, y } = at(event);
-    const found = pickLine(scene, lens(camera.current, size.current), x, y, 9);
-    if (!found && !hit.current) return;
+    const view = lens(camera.current, size.current);
+    const found = pickLine(scene, view, x, y, 9);
+    const layer = !found && layers ? pickLayer(scene, layers, view, x, y) : null;
+    if (!found && !layer) {
+      if (forget()) paint();
+      return;
+    }
     hit.current = found;
-    setTold(found ? hitText(scene, found) : null);
+    layerHit.current = layer;
+    setTold(found ? hitText(scene, found, layers?.field ?? null) : layer ? layerText(layer) : null);
     paint();
   };
 
@@ -258,10 +377,7 @@ function Well3dCanvas({
       camera.current = orbit(camera.current, dx, dy);
     }
     pointers.current.set(event.pointerId, { ...held, ...now });
-    if (hit.current) {
-      hit.current = null;
-      setTold(null);
-    }
+    forget();
     paint();
   };
 
@@ -288,7 +404,7 @@ function Well3dCanvas({
     } else if (event.key === '-' || event.key === '_') {
       camera.current = zoom(camera.current, 1 / 0.85, scene);
     } else if (event.key === '0') {
-      camera.current = fitCamera(scene, size.current);
+      camera.current = fitCamera(scene, size.current, room);
     } else {
       return;
     }
@@ -316,11 +432,7 @@ function Well3dCanvas({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onPointerLeave={() => {
-          if (hit.current && pointers.current.size === 0) {
-            hit.current = null;
-            setTold(null);
-            paint();
-          }
+          if (pointers.current.size === 0 && forget()) paint();
         }}
         onDoubleClick={() => {
           open(false);
@@ -331,7 +443,8 @@ function Well3dCanvas({
         onKeyDown={onKeyDown}
       />
       <p className="pointer-events-none absolute top-2 left-2.5 font-mono text-[0.625rem] tracking-wider text-[#cbd5e1]/80 uppercase">
-        True scale · grid {metres(scene.step)}
+        {scene.stretch === 1 ? 'True scale' : `Depths drawn ×${String(scene.stretch)}`} · grid{' '}
+        {metres(scene.step)}
       </p>
       <button
         type="button"
@@ -346,14 +459,17 @@ function Well3dCanvas({
       </button>
       <div
         role="status"
-        className="pointer-events-none absolute bottom-2 left-2.5 max-w-[calc(100%-3.5rem)] text-[0.6875rem] leading-snug text-[#cbd5e1]/85"
+        className="pointer-events-none absolute bottom-2 left-2.5 max-w-[calc(100%-3.5rem)] text-[0.6875rem] leading-snug text-[#cbd5e1]/90"
       >
         {told ? (
-          <>
-            <p className="font-mono font-semibold text-white">{told.uwi}</p>
-            <p>{told.who}</p>
-            <p className="tabular-nums">{told.where}</p>
-          </>
+          <div className="rounded-sm bg-[#0a0f16]/75 px-1.5 py-1">
+            <p className="font-mono font-semibold text-white">{told.title}</p>
+            {told.lines.map((line) => (
+              <p key={line} className="tabular-nums">
+                {line}
+              </p>
+            ))}
+          </div>
         ) : (
           !touched && <p>Drag to turn · right-drag or Shift to move · scroll to zoom</p>
         )}
@@ -361,6 +477,107 @@ function Well3dCanvas({
     </div>
   );
 }
+
+/** A rock type's colour as a small box, hatched for the two interbedded classes. */
+function swatch(rock: FormationRock): React.CSSProperties {
+  return rock.hatch
+    ? {
+        background: `repeating-linear-gradient(135deg, ${rock.hatch} 0 1px, transparent 1px 4px), ${rock.colour}`,
+      }
+    : { backgroundColor: rock.colour };
+}
+
+/** Every layer under the well, from the surface down: its name, rock type, depth and thickness. */
+function LayerList({
+  column,
+  playZone,
+  dark,
+}: {
+  column: readonly FormationLayer[];
+  playZone: number | null;
+  dark: boolean;
+}) {
+  const faint = dark ? 'text-[#94a3b8]' : 'text-muted-foreground';
+  // Depths from the model's own surface at the well: the top of its first layer.
+  const ground = column[0]?.top ?? 0;
+  return (
+    <ol
+      aria-label="Layers under this well"
+      className={cn(
+        'flex flex-col overflow-y-auto rounded-md border text-xs',
+        dark ? 'h-full border-[#334155]' : 'max-h-72',
+      )}
+    >
+      <li
+        aria-hidden="true"
+        className={cn(
+          'sticky top-0 flex justify-between border-b px-2 py-1 text-[0.625rem] font-medium tracking-wider uppercase',
+          dark ? 'border-[#1e293b] bg-[#0f172a] text-[#94a3b8]' : 'bg-muted text-muted-foreground',
+        )}
+      >
+        <span>Layer and rock type</span>
+        <span>Depth to its top</span>
+      </li>
+      {column.map((layer) => {
+        const zone = formationZone(layer.zone);
+        const rock = FORMATION_ROCKS[zone?.rock ?? 'unknown'];
+        const play = layer.zone === playZone;
+        return (
+          <li
+            key={layer.zone}
+            aria-current={play ? 'true' : undefined}
+            title={
+              zone?.unit
+                ? `Rock type as the Table of Formations colours the ${zone.unit} (${zone.column ?? ''})`
+                : undefined
+            }
+            className={cn(
+              'flex items-start gap-2 border-b px-2 py-1.5 last:border-b-0',
+              dark && 'border-[#1e293b]',
+              play && 'bg-[#38bdf8]/15',
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className="mt-0.5 inline-block size-3.5 shrink-0 rounded-[3px] ring-1 ring-black/25"
+              style={swatch(rock)}
+            />
+            <div className="min-w-0 grow">
+              <p className="font-medium">
+                {zone?.name ?? `Zone ${String(layer.zone)}`}
+                {play && <span className="ml-1.5 font-semibold">· the play</span>}
+              </p>
+              <p className={faint}>
+                {rock.label}
+                {zone?.also.map((other) => (
+                  <span key={other.unit}>
+                    {' '}
+                    · {other.unit}: {FORMATION_ROCKS[other.rock].label.toLowerCase()}
+                  </span>
+                ))}
+              </p>
+            </div>
+            <div className="shrink-0 text-right font-mono tabular-nums">
+              <p>{metres(Math.max(0, ground - layer.top))}</p>
+              <p className={faint}>{metres(layer.top - layer.base)} thick</p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Where the block's floor lies when the layers are shown: a little into the lowest layer. */
+function floorUnder(column: readonly FormationLayer[], ground: number): number | undefined {
+  const last = column[column.length - 1];
+  if (!last) return undefined;
+  // The lowest layer (the Precambrian) runs to the model's base, kilometres down: a strip of
+  // it is enough.
+  return Math.max(last.base, last.top - Math.max(120, (ground - last.top) * 0.05));
+}
+
+type Mode = 'wells' | 'layers';
 
 /**
  * The 3D view of a well, for its panel: asked of the API once per well, then a canvas the
@@ -379,10 +596,55 @@ export function Well3d({
   token: string;
 }) {
   const path = `/petroleum/st37/well-3d?${new URLSearchParams({ organization_id: organizationId, uwi }).toString()}`;
-  const { answer, state } = useWell3d(path, token);
+  const { answer, state } = useAnswer<Well3dAnswer>(path, token);
+  const [mode, setMode] = useState<Mode>('wells');
   const [nearby, setNearby] = useState(true);
   const [large, setLarge] = useState(false);
-  const scene = useMemo(() => (answer ? well3dScene(answer, nearby) : null), [answer, nearby]);
+  const [stretch, setStretch] = useState(1);
+
+  // The layers are asked for once, for the ground under the well and its neighbours.
+  const whole = useMemo(() => (answer ? well3dScene(answer, true) : null), [answer]);
+  const layersPath = useMemo(() => {
+    if (mode !== 'layers' || !whole) return null;
+    const [west, south] = sceneLonLat(whole, whole.min[0], whole.min[1]);
+    const [east, north] = sceneLonLat(whole, whole.max[0], whole.max[1]);
+    const round = (n: number) => String(Math.round(n * 1000) / 1000);
+    return `/petroleum/formation-layers?${new URLSearchParams({
+      organization_id: organizationId,
+      west: round(west - 0.001),
+      south: round(south - 0.001),
+      east: round(east + 0.001),
+      north: round(north + 0.001),
+    }).toString()}`;
+  }, [mode, whole, organizationId]);
+  const ground = useAnswer<FormationAnswer>(layersPath, token);
+  const field = useMemo(
+    () => (ground.answer && ground.answer.cells > 0 ? layerField(ground.answer) : null),
+    [ground.answer],
+  );
+  const column = useMemo(
+    () => (field && whole ? layersAt(field, whole.origin[0], whole.origin[1]) : []),
+    [field, whole],
+  );
+  const layered = mode === 'layers' && field !== null && column.length > 0 && whole !== null;
+  const floor = layered ? floorUnder(column, whole.ground) : undefined;
+  const scene = useMemo(
+    () =>
+      answer
+        ? well3dScene(
+            answer,
+            nearby,
+            layered ? { stretch, ...(floor !== undefined && { floor }) } : {},
+          )
+        : null,
+    [answer, nearby, layered, stretch, floor],
+  );
+  const duvernay = FORMATION_PLAY_ZONES.duvernay ?? null;
+  const playZone = duvernay !== null && field?.zones.includes(duvernay) ? duvernay : null;
+  const layers = useMemo(
+    () => (layered && scene ? layerScene(scene, field, playZone) : null),
+    [layered, scene, field, playZone],
+  );
   const own = useMemo(() => scene?.lines.filter((line) => line.own) ?? [], [scene]);
 
   useEffect(() => {
@@ -396,7 +658,7 @@ export function Well3d({
     };
   }, [large]);
 
-  if (state === 'loading') {
+  if (state === 'loading' || state === 'idle') {
     return <p className="text-xs text-muted-foreground">The well in 3D: loading…</p>;
   }
   if (state === 'failed') {
@@ -411,47 +673,91 @@ export function Well3d({
     );
   }
   const others = new Set(answer.legs.filter((leg) => !leg.own).map((leg) => leg.licenceNumber));
-  const deepest = Math.max(
-    ...own.map((line) => scene.ground - Math.min(...line.points.map((p) => p[2]))),
+  // The deepest point of the well's own legs, as it is (the scene may be stretched).
+  let lowest: { x: number; y: number; elevation: number } | null = null;
+  for (const line of own) {
+    for (const [x, y, z] of line.points) {
+      const elevation = trueZ(scene, z);
+      if (!lowest || elevation < lowest.elevation) lowest = { x, y, elevation };
+    }
+  }
+  const deepest = scene.ground - (lowest?.elevation ?? scene.ground);
+  const longest = Math.max(
+    ...own.map((line) =>
+      lineLength(line.points.map(([x, y, z]) => [x, y, trueZ(scene, z)] as const)),
+    ),
   );
-  const longest = Math.max(...own.map((line) => lineLength(line.points)));
   const calculated = own.some((line) => line.surveyed === false);
   const label = `Well ${uwi} under the ground, in 3D: ${String(own.length)} ${
     own.length === 1 ? 'leg' : 'legs'
   }, down to ${metres(deepest)} below the surface${
     nearby && others.size > 0 ? `, with ${String(others.size)} wells nearby` : ''
-  }`;
+  }${layers ? `, through ${String(column.length)} layers of the ground` : ''}`;
   const statuses = [...new Set(scene.lines.map((line) => line.statusClass))];
+  const faint = large ? 'text-[#94a3b8]' : 'text-muted-foreground';
+  const pressed = (on: boolean) =>
+    cn(
+      'px-2.5 py-1 font-medium',
+      on
+        ? large
+          ? 'bg-[#e2e8f0] text-[#0f172a]'
+          : 'bg-foreground text-background'
+        : large
+          ? 'text-[#cbd5e1] hover:bg-[#1e293b]'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+    );
+  const frame = cn('inline-flex overflow-hidden rounded-md border', large && 'border-[#475569]');
+
   const view = (
     <Well3dCanvas
-      // A new scene (the other wells on or off, the large view) starts from its own opening.
-      key={`${String(nearby)}:${String(large)}`}
+      // The large view is another canvas; every other change keeps the one being turned.
+      key={String(large)}
       scene={scene}
+      layers={layers}
+      playZone={playZone}
       chosen={chosen ?? null}
       large={large}
       label={label}
     />
   );
-  const controls = (
-    <div className="flex items-center gap-3 text-xs">
-      {others.size > 0 && (
-        <label className="flex cursor-pointer items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={nearby}
-            onChange={(event) => {
-              setNearby(event.target.checked);
+  const switches = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+      <div role="group" aria-label="View" className={frame}>
+        {(['wells', 'layers'] as const).map((each) => (
+          <button
+            key={each}
+            type="button"
+            aria-pressed={mode === each}
+            onClick={() => {
+              setMode(each);
             }}
-          />
-          <span>
-            Wells within {answer.nearbyKm} km
-            <span className={large ? 'text-[#94a3b8]' : 'text-muted-foreground'}>
-              {' '}
-              ({others.size}
-              {answer.truncated ? ', the nearest' : ''})
-            </span>
-          </span>
-        </label>
+            className={pressed(mode === each)}
+          >
+            {each === 'wells' ? 'Wells' : 'Layers'}
+          </button>
+        ))}
+      </div>
+      {layered && (
+        <div role="group" aria-label="Depth scale" className={frame}>
+          {[1, 3].map((times) => (
+            <button
+              key={times}
+              type="button"
+              aria-pressed={stretch === times}
+              title={
+                times === 1
+                  ? 'Depths as they are'
+                  : 'Depths drawn three times deeper, so thin layers show'
+              }
+              onClick={() => {
+                setStretch(times);
+              }}
+              className={pressed(stretch === times)}
+            >
+              {times === 1 ? 'True scale' : 'Depth ×3'}
+            </button>
+          ))}
+        </div>
       )}
       <button
         type="button"
@@ -473,6 +779,25 @@ export function Well3d({
         {large ? 'Close' : 'Expand'}
       </button>
     </div>
+  );
+  const neighbours = others.size > 0 && (
+    <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs">
+      <input
+        type="checkbox"
+        checked={nearby}
+        onChange={(event) => {
+          setNearby(event.target.checked);
+        }}
+      />
+      <span>
+        Wells within {answer.nearbyKm} km
+        <span className={faint}>
+          {' '}
+          ({others.size}
+          {answer.truncated ? ', the nearest' : ''})
+        </span>
+      </span>
+    </label>
   );
   const legend = (
     <ul
@@ -503,6 +828,53 @@ export function Well3d({
         : 'Paths as surveyed.'}
     </p>
   );
+
+  // What the layers say about this well, in words.
+  const play = column.find((layer) => layer.zone === playZone);
+  const lowestLayer =
+    layered && lowest
+      ? formationLayerAt(
+          layersAt(field, ...sceneLonLat(scene, lowest.x, lowest.y)),
+          lowest.elevation,
+        )
+      : null;
+  const bottom = column[column.length - 1];
+  // Depths of the layers from the model's own surface at the well.
+  const surface = column[0]?.top ?? scene.ground;
+  const down = (elevation: number) => metres(Math.max(0, surface - elevation));
+  const about =
+    mode !== 'layers' ? null : ground.state === 'loading' ? (
+      <p className={cn('text-xs', faint)}>The ground&rsquo;s layers: loading…</p>
+    ) : ground.state === 'failed' ? (
+      <p className={cn('text-xs', faint)}>The ground&rsquo;s layers could not be loaded.</p>
+    ) : !layered ? (
+      <p className={cn('text-xs', faint)}>
+        The ground&rsquo;s layers are not loaded for this place yet: the wells are shown alone.
+      </p>
+    ) : (
+      <div className={cn('flex flex-col gap-1 text-xs', large && 'text-[#cbd5e1]')}>
+        <p>
+          {column.length} layers under this well, from the surface down
+          {bottom
+            ? ` to the ${formationZone(bottom.zone)?.short ?? 'lowest layer'} at ${down(bottom.top)}`
+            : ''}
+          .
+          {play
+            ? ` The ${formationZone(play.zone)?.name ?? 'play'} lies ${down(play.top)} to ${down(play.base)} down here, ${metres(play.top - play.base)} thick: edged in white, its top the blue sheet.`
+            : ''}
+          {lowestLayer
+            ? ` The well's deepest point is in the ${formationZone(lowestLayer.zone)?.name ?? 'ground'}.`
+            : ''}
+        </p>
+        <p className={faint}>
+          Depths: {FORMATION_SOURCE_NAME}. Rock types: {FORMATION_ROCK_SOURCE_NAME}, each layer in
+          the colour the table gives its unit. A layer the Survey models as several formations
+          together is one layer here.
+        </p>
+      </div>
+    );
+  const list = layered && <LayerList column={column} playZone={playZone} dark={large} />;
+
   if (large) {
     return (
       <>
@@ -516,9 +888,14 @@ export function Well3d({
             <p className="font-mono text-sm font-semibold">{uwi}</p>
             <p className="text-xs text-[#94a3b8]">Under the ground, in 3D</p>
           </div>
-          <div className="min-h-0 grow">{view}</div>
-          {controls}
+          {switches}
+          <div className="flex min-h-0 grow gap-3">
+            <div className="min-w-0 grow">{view}</div>
+            {list && <div className="hidden w-96 shrink-0 md:block">{list}</div>}
+          </div>
+          {about}
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+            {neighbours}
             {facts}
             {legend}
           </div>
@@ -528,8 +905,11 @@ export function Well3d({
   }
   return (
     <div className="flex flex-col gap-2">
+      {switches}
       {view}
-      {controls}
+      {neighbours}
+      {about}
+      {list}
       {facts}
       {legend}
     </div>

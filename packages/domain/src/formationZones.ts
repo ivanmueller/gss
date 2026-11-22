@@ -1,0 +1,1180 @@
+/**
+ * The layers of the ground under Alberta, as the Alberta Geological Survey models them, each
+ * with its rock type as the Survey's Table of Formations colours it (F-261 part 2; the owner,
+ * 2026-11-22: "ensuring that all the Earth layers are actually correct at those depths and the
+ * type of rock matches the Alberta formation tables").
+ *
+ * Two published sources, both under the Open Government Licence – Alberta, the Survey to be
+ * acknowledged (docs/DECISIONS.md, 2026-11-22):
+ * - The zones, their numbers, ages, names and abbreviations: the Geological Framework of
+ *   Alberta, Version 4 (the table on the model site's Bulk Download page, read 2026-11-22). The
+ *   elevations of their tops and bases are loaded from the model's grids by the "Load formation
+ *   layers" workflow, never kept here.
+ * - The rock types: Alberta Geological Survey (2019), Alberta Table of Formations. "Stratigraphic
+ *   unit polygons are coloured to represent the dominant lithology or combination of lithologies
+ *   present": each zone's `rock` is the colour of the unit named in `unit`, in the table's
+ *   column named in `column`, read from the table's file by a program (the two hatched classes
+ *   checked by eye on its picture). The table is "a guide", its columns "typical stratigraphic
+ *   relationships": the West-Central Plains column (the Duvernay's Kaybob area) is read first,
+ *   another column only for a unit it does not show.
+ *
+ * A zone that joins several formations has one top and one base in the model, so it is one
+ * layer here (the owner, 2026-11-22); `also` names its other formations whose colour on the
+ * table differs. Nothing here is from memory: a zone the table does not show is `unknown`.
+ */
+
+/** The table's LITHOLOGY classes, and three of our own for what its legend does not cover. */
+export type RockKey =
+  | 'interglacial'
+  | 'gravel_sand'
+  | 'conglomerate'
+  | 'sandstone'
+  | 'shale'
+  | 'carbonate'
+  | 'carbonate_shale'
+  | 'halite'
+  | 'anhydrite'
+  | 'carbonate_anhydrite'
+  | 'volcanic'
+  | 'surficial'
+  | 'basement'
+  | 'unknown';
+
+export interface FormationRock {
+  /** The class in the table's own words. */
+  label: string;
+  /** The table's fill colour for the class. */
+  colour: string;
+  /** The colour of its hatching, for the two interbedded classes; null otherwise. */
+  hatch: string | null;
+}
+
+export const FORMATION_ROCKS: Record<RockKey, FormationRock> = {
+  interglacial: {
+    label: 'Nonstratified interglacial sediments (clay, silt, sand)',
+    colour: '#dec9b3',
+    hatch: null,
+  },
+  gravel_sand: { label: 'Gravel and sand', colour: '#ffc78e', hatch: null },
+  conglomerate: { label: 'Conglomerate and sandstone', colour: '#ff8e1c', hatch: null },
+  sandstone: {
+    label: 'Sandstone, siltstone, and quartzite, commonly interbedded with shale or mudstone',
+    colour: '#ffff8e',
+    hatch: null,
+  },
+  shale: { label: 'Shale and mudstone with subordinate siltstone', colour: '#cecfd1', hatch: null },
+  carbonate: { label: 'Limestone and dolostone', colour: '#aad5ff', hatch: null },
+  carbonate_shale: {
+    label: 'Limestone and dolostone interbedded with calcareous shale',
+    colour: '#aad5ff',
+    hatch: '#787878',
+  },
+  halite: { label: 'Halite ± anhydrite, carbonate, and shale', colour: '#ffe3ff', hatch: null },
+  anhydrite: {
+    label: 'Anhydrite ± gypsum, halite, carbonate, and shale',
+    colour: '#ffaaff',
+    hatch: null,
+  },
+  carbonate_anhydrite: {
+    label: 'Limestone and dolostone ± sandstone interbedded with anhydrite',
+    colour: '#aad5ff',
+    hatch: '#ff71ff',
+  },
+  volcanic: { label: 'Volcanic and volcaniclastic rock', colour: '#ff0000', hatch: null },
+  // The model's first zone: the table shows the Quaternary as tills over the Empress gravel
+  // and sand; the colour is the table's for gravel and sand.
+  surficial: {
+    label: 'Sediment above bedrock: till, gravel and sand',
+    colour: '#ffc78e',
+    hatch: null,
+  },
+  // The table's bottom bar, in its own words and colour.
+  basement: {
+    label: 'Archean and Paleoproterozoic metamorphic and igneous cratonic rocks',
+    colour: '#ffaaaa',
+    hatch: null,
+  },
+  unknown: { label: 'Not shown on the Table of Formations', colour: '#9ca3af', hatch: null },
+};
+
+export interface FormationZone {
+  /** The zone's number in the model, 1 (the surface) to 90 (the Precambrian). */
+  number: number;
+  /** The model's abbreviation, as its files are named: "68_D_Dv_Mu". */
+  code: string;
+  /** The age the model's table gives, or null where it gives none. */
+  age: string | null;
+  /** The zone's name as the model's table writes it. */
+  name: string;
+  /** A short name for a label on the picture. */
+  short: string;
+  rock: RockKey;
+  /** The unit of the Table of Formations the rock type was read from, and its column. */
+  unit: string | null;
+  column: string | null;
+  /** Other formations of a joined zone whose colour on the table differs. */
+  also: readonly { rock: RockKey; unit: string; column: string }[];
+}
+
+/** The model's 90 zones, from the surface down. */
+export const FORMATION_ZONES: readonly FormationZone[] = [
+  {
+    number: 1,
+    code: '01_QNgPg_sediment',
+    age: null,
+    name: 'Sediment above bedrock (surficial deposits)',
+    short: 'Surficial deposits',
+    rock: 'surficial',
+    unit: null,
+    column: null,
+    also: [],
+  },
+  {
+    number: 2,
+    code: '02_Pg_PH',
+    age: 'Paleogene',
+    name: 'Porcupine Hills Formation',
+    short: 'Porcupine Hills',
+    rock: 'sandstone',
+    unit: 'Porcupine Hills',
+    column: 'Southern Plains',
+    also: [],
+  },
+  {
+    number: 3,
+    code: '03_Pg_Pa',
+    age: 'Paleogene',
+    name: 'Paskapoo Formation',
+    short: 'Paskapoo',
+    rock: 'sandstone',
+    unit: 'Paskapoo',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 4,
+    code: '04_KPg_R_F',
+    age: 'Cretaceous/Paleogene',
+    name: 'Ravenscrag Formation / Frenchman Formation',
+    short: 'Ravenscrag / Frenchman',
+    rock: 'sandstone',
+    unit: 'Ravenscrag',
+    column: 'Southern Plains',
+    also: [],
+  },
+  {
+    number: 5,
+    code: '05_KPg_S_WC',
+    age: 'Cretaceous/Paleogene',
+    name: 'Scollard Formation / Willow Creek Formation',
+    short: 'Scollard / Willow Creek',
+    rock: 'sandstone',
+    unit: 'Scollard',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 6,
+    code: '06_K_B',
+    age: 'Cretaceous',
+    name: 'Battle Formation',
+    short: 'Battle',
+    rock: 'shale',
+    unit: 'Battle',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 7,
+    code: '07_K_Wh_E',
+    age: 'Cretaceous',
+    name: 'Whitemud Formation / Eastend Formation',
+    short: 'Whitemud / Eastend',
+    rock: 'sandstone',
+    unit: 'Whitemud',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 8,
+    code: '08_K_Wt_Bz',
+    age: 'Cretaceous',
+    name: 'Wapiti Formation / Brazeau Formation',
+    short: 'Wapiti / Brazeau',
+    rock: 'sandstone',
+    unit: 'Wapiti / Brazeau',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 9,
+    code: '09_K_HC_SM_Bd',
+    age: 'Cretaceous',
+    name: 'Horseshoe Canyon Formation (excluding Strathmore Member) / St. Mary River Formation',
+    short: 'Horseshoe Canyon',
+    rock: 'sandstone',
+    unit: 'Horseshoe Canyon',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 10,
+    code: '10_K_undiff_Bp',
+    age: 'Cretaceous',
+    name: 'Undifferentiated Bearpaw Formation',
+    short: 'Bearpaw',
+    rock: 'shale',
+    unit: 'Bearpaw',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 11,
+    code: '11_K_uBp',
+    age: 'Cretaceous',
+    name: 'Upper Bearpaw Formation (above Bearpaw maximum flooding surface)',
+    short: 'Upper Bearpaw',
+    rock: 'shale',
+    unit: 'Bearpaw',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 12,
+    code: '12_K_lBp-A',
+    age: 'Cretaceous',
+    name: 'Lower Bearpaw Formation (A - outside of Strathmore Member and below Bearpaw maximum flooding surface)',
+    short: 'Lower Bearpaw',
+    rock: 'shale',
+    unit: 'Bearpaw',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 13,
+    code: '13_K_HC-st',
+    age: 'Cretaceous',
+    name: 'Strathmore Member',
+    short: 'Strathmore',
+    rock: 'sandstone',
+    unit: 'Strathmore',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 14,
+    code: '14_K_lBp-B',
+    age: 'Cretaceous',
+    name: 'Lower Bearpaw Formation (B - below Strathmore Member)',
+    short: 'Lower Bearpaw',
+    rock: 'shale',
+    unit: 'Bearpaw',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 15,
+    code: '15_K_undiff_BR',
+    age: 'Cretaceous',
+    name: 'Undifferentiated Belly River Group',
+    short: 'Belly River',
+    rock: 'sandstone',
+    unit: 'Lower Belly River',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 16,
+    code: '16_K_DP',
+    age: 'Cretaceous',
+    name: 'Dinosaur Park Formation',
+    short: 'Dinosaur Park',
+    rock: 'sandstone',
+    unit: 'Dinosaur Park',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 17,
+    code: '17_K_O',
+    age: 'Cretaceous',
+    name: 'Oldman Formation',
+    short: 'Oldman',
+    rock: 'sandstone',
+    unit: 'Oldman',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 18,
+    code: '18_K_Fo',
+    age: 'Cretaceous',
+    name: 'Foremost Formation',
+    short: 'Foremost',
+    rock: 'sandstone',
+    unit: 'Foremost',
+    column: 'Southern Plains',
+    also: [],
+  },
+  {
+    number: 19,
+    code: '19_K_Pw_undiff_S',
+    age: 'Cretaceous',
+    name: 'Puskwaskau Formation / undifferentiated Smoky Group',
+    short: 'Puskwaskau',
+    rock: 'shale',
+    unit: 'Puskwaskau',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 20,
+    code: '20_K_undiff_LP',
+    age: 'Cretaceous',
+    name: 'Undifferentiated Lea Park Formation',
+    short: 'Lea Park',
+    rock: 'shale',
+    unit: 'Lea Park',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 21,
+    code: '21_K_Pk_uLP',
+    age: 'Cretaceous',
+    name: 'Pakowki Formation / upper Lea Park Formation',
+    short: 'Pakowki / Upper Lea Park',
+    rock: 'shale',
+    unit: 'Lea Park',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 22,
+    code: '22_K_MR_lLP',
+    age: 'Cretaceous',
+    name: 'Milk River Formation / lower Lea Park Formation (including Alderson Member)',
+    short: 'Milk River / Lower Lea Park',
+    rock: 'shale',
+    unit: 'Lea Park',
+    column: 'West-Central Plains',
+    also: [{ rock: 'sandstone', unit: 'Milk River', column: 'Southern Plains' }],
+  },
+  {
+    number: 23,
+    code: '23_K_Wp_N_undiff_S_Co',
+    age: 'Cretaceous',
+    name: 'Wapiabi Formation / Niobrara Formation / undifferentiated Smoky and Colorado groups (above Second White Specks marker)',
+    short: 'Wapiabi / Colorado',
+    rock: 'shale',
+    unit: 'Wapiabi',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 24,
+    code: '24_K_BH',
+    age: 'Cretaceous',
+    name: 'Bad Heart Formation',
+    short: 'Bad Heart',
+    rock: 'sandstone',
+    unit: 'Bad Heart',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 25,
+    code: '25_K_Mk_undiff_K',
+    age: 'Cretaceous',
+    name: 'Muskiki Formation / undifferentiated Kaskapau Formation',
+    short: 'Muskiki / Kaskapau',
+    rock: 'shale',
+    unit: 'Kaskapau',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 26,
+    code: '26_K_Cr',
+    age: 'Cretaceous',
+    name: 'Carlile Formation',
+    short: 'Carlile',
+    rock: 'shale',
+    unit: 'Carlile',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 27,
+    code: '27_K_K-A',
+    age: 'Cretaceous',
+    name: 'Kaskapau Formation (A - outside of Cardium Formation and above Second White Specks marker)',
+    short: 'Kaskapau',
+    rock: 'shale',
+    unit: 'Kaskapau',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 28,
+    code: '28_K_Ca',
+    age: 'Cretaceous',
+    name: 'Cardium Formation',
+    short: 'Cardium',
+    rock: 'sandstone',
+    unit: 'Cardium',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 29,
+    code: '29_K_Bl',
+    age: 'Cretaceous',
+    name: 'Blackstone Formation',
+    short: 'Blackstone',
+    rock: 'shale',
+    unit: 'Blackstone',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 30,
+    code: '30_K_K-B',
+    age: 'Cretaceous',
+    name: 'Kaskapau Formation (B - below Russian marker and above Second White Specks marker)',
+    short: 'Kaskapau',
+    rock: 'shale',
+    unit: 'Kaskapau',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 31,
+    code: '31_K_SW_BF_FS',
+    age: 'Cretaceous',
+    name: 'Second White Specks Formation / Belle Fourche Formation / Fish Scales Formation (including Barons Sand Member)',
+    short: 'Second White Specks',
+    rock: 'shale',
+    unit: 'Second White Specks',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 32,
+    code: '32_K_K-C',
+    age: 'Cretaceous',
+    name: 'Kaskapau Formation (C - below Second White Specks marker above Dunvegan Formation)',
+    short: 'Kaskapau',
+    rock: 'shale',
+    unit: 'Kaskapau',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 33,
+    code: '33_K_K-dc',
+    age: 'Cretaceous',
+    name: 'Doe Creek Member',
+    short: 'Doe Creek',
+    rock: 'sandstone',
+    unit: 'Doe Creek',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 34,
+    code: '34_K_D',
+    age: 'Cretaceous',
+    name: 'Dunvegan Formation',
+    short: 'Dunvegan',
+    rock: 'sandstone',
+    unit: 'Dunvegan',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 35,
+    code: '35_K_uSh',
+    age: 'Cretaceous',
+    name: 'Upper Shaftesbury Formation (above Base of Fish Scales marker)',
+    short: 'Upper Shaftesbury',
+    rock: 'shale',
+    unit: 'Shaftesbury',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 36,
+    code: '36_K_Wg',
+    age: 'Cretaceous',
+    name: 'Westgate Formation',
+    short: 'Westgate',
+    rock: 'shale',
+    unit: 'Westgate',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 37,
+    code: '37_K_lSh',
+    age: 'Cretaceous',
+    name: 'Lower Shaftesbury Formation (below Base of Fish Scales marker)',
+    short: 'Lower Shaftesbury',
+    rock: 'shale',
+    unit: 'Shaftesbury',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 38,
+    code: '38_K_uLR',
+    age: 'Cretaceous',
+    name: 'Upper Loon River Formation',
+    short: 'Upper Loon River',
+    rock: 'shale',
+    unit: 'Loon River',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 39,
+    code: '39_K_BoI_V_Pl',
+    age: 'Cretaceous',
+    name: 'Bow Island Formation / Viking Formation / Pelican Formation',
+    short: 'Bow Island / Viking',
+    rock: 'sandstone',
+    unit: 'Viking',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 40,
+    code: '40_K_PR_excl_PR-h',
+    age: 'Cretaceous',
+    name: 'Peace River Formation (excluding Harmon Member)',
+    short: 'Peace River',
+    rock: 'sandstone',
+    unit: 'Peace River',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 41,
+    code: '41_K_JF',
+    age: 'Cretaceous',
+    name: 'Joli Fou Formation (including Basal Colorado Sand Member)',
+    short: 'Joli Fou',
+    rock: 'shale',
+    unit: 'Joli Fou',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 42,
+    code: '42_K_PR-h',
+    age: 'Cretaceous',
+    name: 'Harmon Member',
+    short: 'Harmon',
+    rock: 'shale',
+    unit: 'Harmon',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 43,
+    code: '43_K_GR',
+    age: 'Cretaceous',
+    name: 'Grand Rapids Formation',
+    short: 'Grand Rapids',
+    rock: 'sandstone',
+    unit: 'Grand Rapids',
+    column: 'Northeast Plains',
+    also: [],
+  },
+  {
+    number: 44,
+    code: '44_K_lLR',
+    age: 'Cretaceous',
+    name: 'Lower Loon River Formation',
+    short: 'Lower Loon River',
+    rock: 'shale',
+    unit: 'Loon River',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 45,
+    code: '45_K_SR',
+    age: 'Cretaceous',
+    name: 'Spirit River Formation',
+    short: 'Spirit River',
+    rock: 'sandstone',
+    unit: 'Spirit River',
+    column: 'West-Central Plains',
+    also: [{ rock: 'shale', unit: 'Wilrich', column: 'West-Central Plains' }],
+  },
+  {
+    number: 46,
+    code: '46_K_undiv_Mn',
+    age: 'Cretaceous',
+    name: 'Undivided Mannville Group',
+    short: 'Mannville',
+    rock: 'sandstone',
+    unit: 'unnamed upper Mannville',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 47,
+    code: '47_K_C_excl_C-w',
+    age: 'Cretaceous',
+    name: 'Clearwater Formation (excluding Wabiskaw Member)',
+    short: 'Clearwater',
+    rock: 'sandstone',
+    unit: 'Clearwater',
+    column: 'Northeast Plains',
+    also: [],
+  },
+  {
+    number: 48,
+    code: '48_K_GS',
+    age: 'Cretaceous',
+    name: 'Glauconitic Sandstone Formation',
+    short: 'Glauconitic Sandstone',
+    rock: 'sandstone',
+    unit: 'Glauconitic Sandstone',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 49,
+    code: '49_K_lMn-ob-es',
+    age: 'Cretaceous',
+    name: 'Ostracod Beds Member / Ellerslie Member',
+    short: 'Ostracod Beds / Ellerslie',
+    rock: 'shale',
+    unit: 'Ostracod Beds',
+    column: 'West-Central Plains',
+    also: [{ rock: 'sandstone', unit: 'Ellerslie', column: 'West-Central Plains' }],
+  },
+  {
+    number: 50,
+    code: '50_K_Bs_Ge_Cd_bc',
+    age: 'Cretaceous',
+    name: 'Bluesky Formation / Gething Formation / Cadomin Formation / basal Cretaceous sandstone',
+    short: 'Bluesky / Gething',
+    rock: 'sandstone',
+    unit: 'Bluesky',
+    column: 'West-Central Plains',
+    also: [{ rock: 'conglomerate', unit: 'Cadomin', column: 'West-Central Plains' }],
+  },
+  {
+    number: 51,
+    code: '51_K_C-w',
+    age: 'Cretaceous',
+    name: 'Wabiskaw Member',
+    short: 'Wabiskaw',
+    rock: 'sandstone',
+    unit: 'Wabiskaw',
+    column: 'Northeast Plains',
+    also: [],
+  },
+  {
+    number: 52,
+    code: '52_K_Mc',
+    age: 'Cretaceous',
+    name: 'McMurray Formation',
+    short: 'McMurray',
+    rock: 'sandstone',
+    unit: 'McMurray',
+    column: 'Northeast Plains',
+    also: [],
+  },
+  {
+    number: 53,
+    code: '53_KJ_N_M_Fn',
+    age: 'Cretaceous/Jurassic',
+    name: 'Nikanassin Formation / Monteith Formation / Fernie Formation',
+    short: 'Nikanassin / Fernie',
+    rock: 'sandstone',
+    unit: 'Nikanassin / Monteith',
+    column: 'West-Central Plains',
+    also: [{ rock: 'shale', unit: 'Fernie', column: 'West-Central Plains' }],
+  },
+  {
+    number: 54,
+    code: '54_T_SC',
+    age: 'Triassic',
+    name: 'Schooler Creek Group',
+    short: 'Schooler Creek',
+    rock: 'carbonate_anhydrite',
+    unit: 'Charlie Lake',
+    column: 'West-Central Plains',
+    also: [{ rock: 'sandstone', unit: 'Halfway', column: 'West-Central Plains' }],
+  },
+  {
+    number: 55,
+    code: '55_T_Dg',
+    age: 'Triassic',
+    name: 'Doig Formation',
+    short: 'Doig',
+    rock: 'sandstone',
+    unit: 'Doig',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 56,
+    code: '56_T_uMo',
+    age: 'Triassic',
+    name: 'Upper Montney Formation',
+    short: 'Upper Montney',
+    rock: 'sandstone',
+    unit: 'Montney',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 57,
+    code: '57_T_mMo-A',
+    age: 'Triassic',
+    name: 'Middle Montney Formation (A - excluding middle Montney below turbidite)',
+    short: 'Middle Montney',
+    rock: 'sandstone',
+    unit: 'Montney',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 58,
+    code: '58_T_Mo-tbd',
+    age: 'Triassic',
+    name: 'Montney turbidite',
+    short: 'Montney turbidite',
+    rock: 'sandstone',
+    unit: 'Montney',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 59,
+    code: '59_T_mMo-B',
+    age: 'Triassic',
+    name: 'Middle Montney Formation (B - below Montney turbidite)',
+    short: 'Middle Montney',
+    rock: 'sandstone',
+    unit: 'Montney',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 60,
+    code: '60_T_Mo-lg',
+    age: 'Triassic',
+    name: 'La Glace sandstone member',
+    short: 'La Glace sandstone',
+    rock: 'sandstone',
+    unit: 'Montney',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 61,
+    code: '61_T_Mo-ac',
+    age: 'Triassic',
+    name: 'Anten coquina member',
+    short: 'Anten coquina',
+    rock: 'carbonate',
+    unit: 'Coquinal Dolomite Middle Member',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 62,
+    code: '62_T_lMo',
+    age: 'Triassic',
+    name: 'Lower Montney Formation',
+    short: 'Lower Montney',
+    rock: 'sandstone',
+    unit: 'Montney',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 63,
+    code: '63_JPCf_Es_I_Sd_Rd',
+    age: 'Jurassic/Permian/Carboniferous',
+    name: 'Ellis Group / Ishbel Group / Stoddart Group / Rundle Group',
+    short: 'Rundle / Ishbel',
+    rock: 'carbonate',
+    unit: 'Pekisko',
+    column: 'West-Central Plains',
+    also: [
+      { rock: 'carbonate_shale', unit: 'Shunda', column: 'West-Central Plains' },
+      { rock: 'sandstone', unit: 'Belloy', column: 'West-Central Plains' },
+    ],
+  },
+  {
+    number: 64,
+    code: '64_MD_Bf_Ex',
+    age: 'Mississippian/Devonian',
+    name: 'Banff Formation / Exshaw Formation',
+    short: 'Banff / Exshaw',
+    rock: 'carbonate_shale',
+    unit: 'Banff',
+    column: 'West-Central Plains',
+    also: [{ rock: 'shale', unit: 'Exshaw', column: 'West-Central Plains' }],
+  },
+  {
+    number: 65,
+    code: '65_D_Wa_undiff_D',
+    age: 'Devonian',
+    name: 'Wabamun Group / undifferentiated Devonian strata (Peace River Arch)',
+    short: 'Wabamun',
+    rock: 'carbonate',
+    unit: 'Stettler',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 66,
+    code: '66_D_Wt',
+    age: 'Devonian',
+    name: 'Winterburn Group',
+    short: 'Winterburn',
+    rock: 'carbonate',
+    unit: 'Nisku',
+    column: 'West-Central Plains',
+    also: [
+      { rock: 'shale', unit: 'Calmar', column: 'West-Central Plains' },
+      { rock: 'sandstone', unit: 'Graminia Silt', column: 'West-Central Plains' },
+    ],
+  },
+  {
+    number: 67,
+    code: '67_D_Ir_FS_Gr_G',
+    age: 'Devonian',
+    name: 'Ireton Formation / Fort Simpson Formation / Grosmont Formation / Grumbler Group',
+    short: 'Ireton / Fort Simpson',
+    rock: 'shale',
+    unit: 'Ireton',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 68,
+    code: '68_D_Dv_Mu',
+    age: 'Devonian',
+    name: 'Duvernay Formation / Muskwa Formation',
+    short: 'Duvernay / Muskwa',
+    rock: 'shale',
+    unit: 'Duvernay',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 69,
+    code: '69_D_Ld',
+    age: 'Devonian',
+    name: 'Leduc Formation',
+    short: 'Leduc',
+    rock: 'carbonate',
+    unit: 'Leduc',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 70,
+    code: '70_D_ML',
+    age: 'Devonian',
+    name: 'Majeau Lake Formation',
+    short: 'Majeau Lake',
+    rock: 'shale',
+    unit: 'Majeau Lake',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 71,
+    code: '71_D_CL',
+    age: 'Devonian',
+    name: 'Cooking Lake Formation',
+    short: 'Cooking Lake',
+    rock: 'carbonate',
+    unit: 'Cooking Lake',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 72,
+    code: '72_D_Ww',
+    age: 'Devonian',
+    name: 'Waterways Formation',
+    short: 'Waterways',
+    rock: 'shale',
+    unit: 'Waterways',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 73,
+    code: '73_D_SH_SP',
+    age: 'Devonian',
+    name: 'Swan Hills Formation / Slave Point Formation',
+    short: 'Swan Hills / Slave Point',
+    rock: 'carbonate',
+    unit: 'Slave Point',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 74,
+    code: '74_D_FV',
+    age: 'Devonian',
+    name: 'Fort Vermilion Formation',
+    short: 'Fort Vermilion',
+    rock: 'anhydrite',
+    unit: 'Fort Vermilion',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 75,
+    code: '75_D_WM',
+    age: 'Devonian',
+    name: 'Watt Mountain Formation',
+    short: 'Watt Mountain',
+    rock: 'shale',
+    unit: 'Watt Mountain',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 76,
+    code: '76_D_SuP',
+    age: 'Devonian',
+    name: 'Sulphur Point Formation',
+    short: 'Sulphur Point',
+    rock: 'carbonate',
+    unit: 'Sulphur Point',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 77,
+    code: '77_D_PE_Mg_Ey',
+    age: 'Devonian',
+    name: 'Prairie Evaporite Formation / Muskeg Formation (excluding Zama and lower anhydrite members) / Eyot Formation',
+    short: 'Prairie Evaporite / Muskeg',
+    rock: 'halite',
+    unit: 'Prairie Evaporite',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 78,
+    code: '78_D_Mg-z',
+    age: 'Devonian',
+    name: 'Zama Member',
+    short: 'Zama',
+    rock: 'carbonate',
+    unit: 'Zama',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 79,
+    code: '79_D_Mg-la',
+    age: 'Devonian',
+    name: 'Muskeg lower anhydrite member',
+    short: 'Muskeg lower anhydrite',
+    rock: 'carbonate_anhydrite',
+    unit: 'Muskeg',
+    column: 'Northwest Plains',
+    also: [],
+  },
+  {
+    number: 80,
+    code: '80_D_KR_Wi',
+    age: 'Devonian',
+    name: 'Keg River Formation / Winnipegosis Formation',
+    short: 'Keg River / Winnipegosis',
+    rock: 'carbonate',
+    unit: 'Keg River',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 81,
+    code: '81_D_CR_Ch',
+    age: 'Devonian',
+    name: 'Contact Rapids Formation / Chinchaga Formation',
+    short: 'Contact Rapids / Chinchaga',
+    rock: 'carbonate_shale',
+    unit: 'Contact Rapids',
+    column: 'West-Central Plains',
+    also: [],
+  },
+  {
+    number: 82,
+    code: '82_D_CdL',
+    age: 'Devonian',
+    name: 'Cold Lake Formation',
+    short: 'Cold Lake',
+    rock: 'halite',
+    unit: 'Cold Lake',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 83,
+    code: '83_D_EL',
+    age: 'Devonian',
+    name: 'Ernestina Lake Formation',
+    short: 'Ernestina Lake',
+    rock: 'carbonate_anhydrite',
+    unit: 'Ernestina Lake',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 84,
+    code: '84_D_uL',
+    age: 'Devonian',
+    name: 'Upper Lotsberg Formation',
+    short: 'Upper Lotsberg',
+    rock: 'halite',
+    unit: 'Lotsberg',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 85,
+    code: '85_D_L-mrb',
+    age: 'Devonian',
+    name: 'Middle red beds unit',
+    short: 'Middle red beds',
+    rock: 'unknown',
+    unit: null,
+    column: null,
+    also: [],
+  },
+  {
+    number: 86,
+    code: '86_D_lL',
+    age: 'Devonian',
+    name: 'Lower Lotsberg Formation',
+    short: 'Lower Lotsberg',
+    rock: 'halite',
+    unit: 'Lotsberg',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 87,
+    code: '87_D_LL_L-brb',
+    age: 'Devonian',
+    name: 'La Loche Formation / basal red beds unit',
+    short: 'La Loche / Basal red beds',
+    rock: 'sandstone',
+    unit: 'Basal Red Beds',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 88,
+    code: '88_undiv_SuO',
+    age: null,
+    name: 'Undivided Silurian / upper Ordovician strata',
+    short: 'Silurian / upper Ordovician',
+    rock: 'carbonate',
+    unit: 'Red River',
+    column: 'East-Central Plains',
+    also: [],
+  },
+  {
+    number: 89,
+    code: '89_undiv_lOC',
+    age: null,
+    name: 'Undivided lower Ordovician / Cambrian strata',
+    short: 'Cambrian',
+    rock: 'shale',
+    unit: 'Deadwood',
+    column: 'East-Central Plains',
+    also: [{ rock: 'sandstone', unit: 'Basal Sandstone Unit', column: 'East-Central Plains' }],
+  },
+  {
+    number: 90,
+    code: '90_PreC',
+    age: null,
+    name: 'Precambrian',
+    short: 'Precambrian',
+    rock: 'basement',
+    unit: null,
+    column: null,
+    also: [],
+  },
+];
+
+export const FORMATION_ZONE_COUNT = 90;
+
+/** The zone the Duvernay play is: "Duvernay Formation / Muskwa Formation". */
+export const FORMATION_PLAY_ZONES: Record<string, number> = { duvernay: 68 };
+
+export const FORMATION_MODEL_NAME = 'Geological Framework of Alberta, Version 4';
+export const FORMATION_SOURCE_NAME =
+  'Alberta Energy Regulator / Alberta Geological Survey, Geological Framework of Alberta, Version 4';
+export const FORMATION_ROCK_SOURCE_NAME =
+  'Alberta Geological Survey (2019), Alberta Table of Formations';
+
+/**
+ * The lattice the model's grids are kept on: a cell every 0.016° of longitude and 0.009° of
+ * latitude (about 1 km each way at 54°N), the cell of column x and row y centred on
+ * (x × 0.016, y × 0.009). Each cell holds the value of the model's own 500 m cell at its
+ * centre, nothing averaged, so the layers of a cell stack exactly as in the model.
+ */
+export const FORMATION_LON_STEP = 0.016;
+export const FORMATION_LAT_STEP = 0.009;
+
+/** The lattice cell nearest a place. */
+export function formationCell(lon: number, lat: number): { x: number; y: number } {
+  return { x: Math.round(lon / FORMATION_LON_STEP), y: Math.round(lat / FORMATION_LAT_STEP) };
+}
+
+/** The zone of a number, or undefined. */
+export function formationZone(number: number): FormationZone | undefined {
+  return FORMATION_ZONES[number - 1];
+}
+
+/** A layer at one place: a zone between its top and its base, in metres above sea level. */
+export interface FormationLayer {
+  zone: number;
+  top: number;
+  base: number;
+}
+
+/**
+ * The layers at one place, from the surface down: the zones that have a top and a base there
+ * with some thickness between. `tops` and `bases` hold one value a zone (zone 1 first), null
+ * where the zone is absent.
+ */
+export function formationColumn(
+  tops: readonly (number | null)[],
+  bases: readonly (number | null)[],
+): FormationLayer[] {
+  const layers: FormationLayer[] = [];
+  for (let i = 0; i < FORMATION_ZONE_COUNT; i += 1) {
+    const [top, base] = [tops[i], bases[i]];
+    if (typeof top !== 'number' || typeof base !== 'number' || !(top > base)) continue;
+    layers.push({ zone: i + 1, top, base });
+  }
+  return layers;
+}
+
+/** The layer a point lies in (its elevation between a top and a base), or null. */
+export function formationLayerAt(
+  layers: readonly FormationLayer[],
+  elevation: number,
+): FormationLayer | null {
+  return layers.find((layer) => elevation <= layer.top && elevation > layer.base) ?? null;
+}

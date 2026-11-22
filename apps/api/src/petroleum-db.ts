@@ -3,6 +3,7 @@ import postgres from 'postgres';
 
 import { aerListsQueries, type AerListsDatabase } from './aer-lists-db';
 import { connectionOptions } from './db';
+import { formationQueries, type FormationDatabase } from './formation-db';
 import { landQueries, type LandDatabase } from './land-db';
 import { landSalesQueries, type LandSalesDatabase } from './land-sales-db';
 import { productionQueries, type ProductionDatabase } from './production-db';
@@ -40,6 +41,7 @@ export interface PetroleumDatabase
     St37Database,
     ProductionDatabase,
     LandDatabase,
+    FormationDatabase,
     LandSalesDatabase {
   /** The database's schema version (petro.schema_version()). Reads no data. */
   schemaVersion(): Promise<number>;
@@ -190,6 +192,7 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
     ...st37Queries(sql),
     ...productionQueries(sql),
     ...landQueries(sql),
+    ...formationQueries(sql),
     ...landSalesQueries(sql),
     async schemaVersion() {
       const [row] = await sql.begin(async (tx) => {
