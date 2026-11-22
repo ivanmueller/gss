@@ -1,6 +1,7 @@
 import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
 import type { LandShape } from './landMap';
+import { DETAIL_GONE, fadeIn } from './mapDetail';
 import { ST37_LAYERS } from './st37Map';
 
 /**
@@ -143,9 +144,19 @@ export function syncLandSales(
         id: SALE_LAYERS.fill,
         type: 'fill',
         source: SOURCE,
+        // Fades out with the wells' legs as the map is zoomed out (F-260), as the lines below.
+        minzoom: DETAIL_GONE,
         paint: {
           'fill-color': ['get', 'colour'],
-          'fill-opacity': ['match', ['get', 'state'], 'upcoming', 0.35, 'no_offers', 0.75, 0.9],
+          'fill-opacity': fadeIn([
+            'match',
+            ['get', 'state'],
+            'upcoming',
+            0.35,
+            'no_offers',
+            0.75,
+            0.9,
+          ]),
         },
       },
       under,
@@ -155,11 +166,12 @@ export function syncLandSales(
         id: SALE_LAYERS.line,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: ['!=', ['get', 'state'], 'upcoming'],
         paint: {
           'line-color': '#f8f6f0',
           'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.2, 12, 0.8],
-          'line-opacity': 0.7,
+          'line-opacity': fadeIn(0.7),
         },
       },
       under,
@@ -169,11 +181,13 @@ export function syncLandSales(
         id: SALE_LAYERS.upcoming,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         filter: ['==', ['get', 'state'], 'upcoming'],
         paint: {
           'line-color': SALE_UPCOMING,
           'line-width': ['interpolate', ['linear'], ['zoom'], 7, 1, 12, 1.8],
           'line-dasharray': [2, 1.5],
+          'line-opacity': fadeIn(1),
         },
       },
       under,
@@ -183,8 +197,9 @@ export function syncLandSales(
         id: SALE_LAYERS.picked,
         type: 'line',
         source: SOURCE,
+        minzoom: DETAIL_GONE,
         layout: { 'line-join': 'round' },
-        paint: { 'line-width': 2.5 },
+        paint: { 'line-width': 2.5, 'line-opacity': fadeIn(1) },
       },
       under,
     );

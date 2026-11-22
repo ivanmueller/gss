@@ -16,6 +16,7 @@ import {
   syncLandSales,
   type LandSaleParcel,
 } from './landSalesMap';
+import { DETAIL_GONE, fadeIn } from './mapDetail';
 import { ST37_LAYERS } from './st37Map';
 
 // Crown land sales on the oil and gas map (F-242). Made-up parcels and prices only.
@@ -151,6 +152,13 @@ describe('syncLandSales', () => {
       ['get', 'key'],
       ['literal', ['sale:1']],
     ]);
+    // Every layer fades out with the wells' legs, gone at DETAIL_GONE (F-260).
+    for (const id of Object.values(SALE_LAYERS)) {
+      const layer = layers.get(id);
+      expect(layer?.minzoom).toBe(DETAIL_GONE);
+      const opacity = layer?.paint[layer.type === 'fill' ? 'fill-opacity' : 'line-opacity'];
+      expect((opacity as unknown[]).slice(0, 6)).toEqual(fadeIn(1).slice(0, 6));
+    }
     syncLandSales(map, null, 'light');
     expect(layers.size).toBe(0);
     expect(sources.size).toBe(0);

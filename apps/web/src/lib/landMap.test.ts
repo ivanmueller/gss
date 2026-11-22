@@ -14,6 +14,7 @@ import {
   syncLand,
   type LandShape,
 } from './landMap';
+import { DETAIL_GONE, fadeIn } from './mapDetail';
 import { ST37_LAYERS } from './st37Map';
 
 // Land held today on the oil and gas map (F-241). Made-up land only.
@@ -197,6 +198,18 @@ describe('syncLand', () => {
       ['match', ['get', 'look'], ['agreement'], true, false],
       ['==', ['get', 'expiring'], true],
     ]);
+  });
+
+  it('fades every layer out with the wells’ legs, gone at DETAIL_GONE (F-260)', () => {
+    const { map, layers } = fakeMap();
+    syncLand(map, { land: LAND, picked: [] }, 'light');
+    for (const id of Object.values(LAND_LAYERS)) {
+      const layer = layers.get(id);
+      expect(layer?.minzoom).toBe(DETAIL_GONE);
+      const opacity = layer?.paint[layer.type === 'fill' ? 'fill-opacity' : 'line-opacity'];
+      expect((opacity as unknown[]).slice(0, 6)).toEqual(fadeIn(1).slice(0, 6));
+    }
+    expect(layers.get(LAND_LAYERS.agreementFill)?.paint['fill-opacity']).toEqual(fadeIn(0.7));
   });
 
   it('outlines the land whose card is open, and lets it go', () => {
