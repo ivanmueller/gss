@@ -22,6 +22,12 @@
 // <grain-bytes> is the size of grain's database: the load is refused, and nothing changes, if
 // both databases together would pass 400 MB (docs/DECISIONS.md, 2026-11-19).
 //
+//   node --experimental-strip-types scripts/load-land-sales.js area <west> <south> <east> \
+//     <north> <outline.geojson>
+//
+// prints the area to load for a play: the box around its wells widened to hold the play's
+// outline as the map draws it (F-264), as "west south east north".
+//
 // The province's files are never written to the repository: they live only on the runner.
 
 import { readdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
@@ -53,6 +59,7 @@ function usage() {
     'usage: load-land-sales.js fetch <dir> <first-year>',
     '       load-land-sales.js sections <west> <south> <east> <north> <out.ndjson>',
     '       load-land-sales.js sql <dir> <sections.ndjson> <west> <south> <east> <north> <grain-bytes>',
+    '       load-land-sales.js area <west> <south> <east> <north> <outline.geojson>',
   ].join('\n');
 }
 
@@ -338,10 +345,56 @@ function mainSql(argv) {
   flush();
 }
 
+/**
+ * The area a play's sales are loaded for (F-264): the box around its wells, widened to hold
+ * every point of the play's outline, each edge to two decimals outward and no farther than
+ * Alberta's. The map shows a play's sales inside its outline, which reaches beyond the wells.
+ */
+function mainArea(argv) {
+  const [west, south, east, north, outlineFile] = argv;
+  const box = areaOf(west, south, east, north);
+  if (!box || !outlineFile) fail(usage(), 2);
+  let outline;
+  try {
+    outline = JSON.parse(readFileSync(outlineFile, 'utf8'));
+  } catch {
+    fail('The outline could not be read; no area was worked out.', 2);
+  }
+  let points = 0;
+  const walk = (value) => {
+    if (!Array.isArray(value)) return;
+    const [x, y] = value;
+    if (typeof x === 'number' && typeof y === 'number') {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      box.west = Math.min(box.west, x);
+      box.east = Math.max(box.east, x);
+      box.south = Math.min(box.south, y);
+      box.north = Math.max(box.north, y);
+      points += 1;
+      return;
+    }
+    for (const part of value) walk(part);
+  };
+  for (const feature of Array.isArray(outline?.features) ? outline.features : []) {
+    walk(feature?.geometry?.coordinates);
+  }
+  if (points === 0) fail('The outline has no points; no area was worked out.', 2);
+  const out = (edge, limit, round, keep) => keep(limit, round(edge * 100) / 100).toFixed(2);
+  console.log(
+    [
+      out(box.west, ALBERTA.west, Math.floor, Math.max),
+      out(box.south, ALBERTA.south, Math.floor, Math.max),
+      out(box.east, ALBERTA.east, Math.ceil, Math.min),
+      out(box.north, ALBERTA.north, Math.ceil, Math.min),
+    ].join(' '),
+  );
+}
+
 async function main(argv) {
   if (argv[0] === 'fetch') await mainFetch(argv.slice(1));
   else if (argv[0] === 'sections') await mainSections(argv.slice(1));
   else if (argv[0] === 'sql') mainSql(argv.slice(1));
+  else if (argv[0] === 'area') mainArea(argv.slice(1));
   else fail(usage(), 2);
 }
 

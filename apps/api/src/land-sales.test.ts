@@ -12,6 +12,7 @@ import {
 } from './land-sales';
 import type { LandSaleParcelRow } from './land-sales-db';
 import type { PetroleumFactory } from './petroleum-db';
+import { PLAY_OUTLINES } from './play-outlines';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
 import { fakePetroleum } from './testing/petroleum';
 
@@ -144,7 +145,16 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     expect(petroleum.landSales).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -117, south: 54, east: -116, north: 55 },
-      { zones: ['abc'], since: '2024-11-22', until: null },
+      // With a play's rights, only the parcels inside its outline (F-264).
+      { zones: ['abc'], since: '2024-11-22', until: null, outline: PLAY_OUTLINES.duvernay },
+      LAND_SALES_MAX,
+    );
+    // Without, every parcel of the box.
+    await get(`land-sales?${BOX}`);
+    expect(petroleum.landSales).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { zones: null, since: null, until: null, outline: null },
       LAND_SALES_MAX,
     );
   });
@@ -173,7 +183,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     });
     expect(petroleum.landSaleSummary).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a' }),
-      { zones: null, since: null, until: null },
+      { zones: null, since: null, until: null, outline: null },
     );
   });
 });

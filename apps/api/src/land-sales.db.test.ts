@@ -116,6 +116,35 @@ describe('land sales as petro_api', () => {
       // The quarters cover every year, whatever the date asked for.
       expect(since.quarters).toHaveLength(2);
 
+      // Inside a play's outline (F-264): the parcels whose middle lies within an outer ring
+      // and within no hole, for the parcels and for every total.
+      const outline = [
+        { hole: false, ring: '((-120.01,59.94),(-119.96,59.94),(-119.96,59.97),(-120.01,59.97))' },
+        // Around the second parcel.
+        {
+          hole: true,
+          ring: '((-119.985,59.945),(-119.965,59.945),(-119.965,59.965),(-119.985,59.965))',
+        },
+      ];
+      const hugged = await db.landSales(member(), VIEW, { ...ALL, outline }, 10);
+      expect(hugged.parcels.map((p) => p.contractNo)).toEqual(['A0001']);
+      expect(await db.landSaleSummary(member(), { ...ALL, outline })).toMatchObject({
+        offered: 1,
+        sold: 1,
+        bonus: '25600.10',
+        quarters: [{ quarter: '1990-Q1', bonus: '25600.10', sold: 1 }],
+      });
+      // An outline elsewhere keeps none; no outline keeps them all, as above.
+      const elsewhere = [
+        { hole: false, ring: '((-111,50),(-110.9,50),(-110.9,50.1),(-111,50.1))' },
+      ];
+      expect(
+        (await db.landSales(member(), VIEW, { ...ALL, outline: elsewhere }, 10)).parcels,
+      ).toEqual([]);
+      expect(
+        (await db.landSales(member(), VIEW, { ...ALL, outline: null }, 10)).parcels,
+      ).toHaveLength(2);
+
       // Without a member the rows are not read at all.
       const nobody = { ...member(), role: 'stranger' };
       expect((await db.landSales(nobody, VIEW, ALL, 10)).parcels).toEqual([]);
