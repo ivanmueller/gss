@@ -17,10 +17,12 @@ export const LAND_SCHEMA_VERSION = 10;
 
 /**
  * At most this many shapes of each kind per answer; a view holding more is drawn from the
- * first ones, and the page says to zoom in.
+ * first ones, and the page says to zoom in. The agreements' limit holds every agreement with
+ * one play's rights at once (6,012 for the Duvernay, 2026-11-21), which the page asks for whole
+ * and keeps (F-263).
  */
 export const LAND_MAX: Record<LandKind, number> = {
-  agreements: 6000,
+  agreements: 20_000,
   offsets: 1000,
   freehold: 10_000,
 };

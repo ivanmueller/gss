@@ -112,6 +112,8 @@ export function landExpiring(expiryText: string | null, today: string): boolean 
 export type LandClass = 'png' | 'oil_sands' | 'offset' | 'freehold';
 export const landKey = (of: LandClass, id: string) => `${of}:${id}`;
 
+/** What each map's source was last given. */
+const drawn = new WeakMap<MapboxMap, GeoJSON.FeatureCollection>();
 const SOURCE = 'land-held';
 export const LAND_LAYERS = {
   freeholdFill: 'land-freehold-fill',
@@ -235,11 +237,14 @@ export function syncLand(
   if (view === null) {
     for (const id of Object.values(LAND_LAYERS)) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+    drawn.delete(map);
     return;
   }
   const existing = map.getSource<GeoJSONSource>(SOURCE);
-  if (existing) existing.setData(view.land);
-  else map.addSource(SOURCE, { type: 'geojson', data: view.land });
+  // The same shapes again (a card opened, the map moved) are not read again by the map (F-263).
+  if (existing && drawn.get(map) !== view.land) existing.setData(view.land);
+  else if (!existing) map.addSource(SOURCE, { type: 'geojson', data: view.land });
+  drawn.set(map, view.land);
 
   for (const [id, colour, alpha] of [
     [HATCH.ink, INK, 150],

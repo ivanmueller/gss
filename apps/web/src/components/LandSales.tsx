@@ -40,13 +40,25 @@ export function saleSince(period: SalePeriod, today: string): string | null {
 }
 
 /**
- * The zoom the parcels are drawn from: narrowed to a play's rights and to a period they are
- * few enough to draw from far out, where each is a dot (F-262); otherwise a view farther out
- * holds too many.
+ * The zoom from which parcels are asked for by the map's view, when no play's rights narrow
+ * them: every parcel loaded is too many to hold at once. With a play's rights they are asked
+ * for whole, once, every year of them, and kept at every zoom (F-263): 0.
  */
-export function saleFromZoom(rights: string | null, since: string | null): number {
-  return rights !== null && since !== null ? 6 : 9;
+export function saleFromZoom(rights: string | null): number {
+  return rights !== null ? 0 : 9;
 }
+
+/**
+ * The pieces a play's parcels are read in, the newest sales first, each from a date on and
+ * before the piece ahead of it: one answer with every year is tens of megabytes, more than the
+ * API should hold at once, and the newest piece alone serves the periods most looked at
+ * (F-263). Fixed dates, so each piece's address stays the same and the browser can keep it.
+ */
+const SALE_PIECE_STARTS = ['2021-01-01', '2014-01-01', '2010-01-01', '2007-01-01'] as const;
+export const SALE_PIECES: readonly { since: string | null; until: string | null }[] = [
+  ...SALE_PIECE_STARTS.map((since, i) => ({ since, until: SALE_PIECE_STARTS[i - 1] ?? null })),
+  { since: null, until: SALE_PIECE_STARTS[SALE_PIECE_STARTS.length - 1] ?? null },
+];
 
 const STATES: { key: LandSaleState; label: string }[] = [
   { key: 'sold', label: 'Sold' },
@@ -54,14 +66,25 @@ const STATES: { key: LandSaleState; label: string }[] = [
   { key: 'upcoming', label: 'Upcoming' },
 ];
 
-/** The parcels the panel's filters keep: the statuses on, and a buyer whose name holds the text. */
+/**
+ * The parcels the panel's filters keep: the statuses on, a buyer whose name holds the text, and
+ * the period when it is chosen here and not by the request.
+ */
 export function saleFiltered(
   parcels: readonly LandSaleParcel[],
-  filters: { buyer: string; states: ReadonlySet<LandSaleState>; today: string },
+  filters: {
+    buyer: string;
+    states: ReadonlySet<LandSaleState>;
+    today: string;
+    /** Sales from this date on (YYYY-MM-DD), when the parcels of every year are held. */
+    since?: string | null;
+  },
 ): LandSaleParcel[] {
   const text = filters.buyer.trim().toLowerCase();
+  const since = filters.since ?? null;
   return parcels.filter(
     (p) =>
+      (since === null || p.saleDate >= since) &&
       filters.states.has(landSaleState(p, filters.today)) &&
       (text === '' || (p.buyers ?? '').toLowerCase().includes(text)),
   );
@@ -118,6 +141,8 @@ interface Settled {
   key: string;
   filter: string;
   asked: Bbox;
+  /** How many of SALE_PIECES the answer holds, when a play's parcels are read whole. */
+  pieces: number;
   answer: ParcelsAnswer | null;
   failed: boolean;
 }
@@ -161,21 +186,34 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   const [picked, setPicked] = useState<readonly string[]>(NONE);
   const today = useMemo(() => landToday(), []);
   const since = saleSince(period, today);
-  const filter = `${rights ?? ''}|${since ?? ''}`;
+  // With a play's rights every parcel is asked for once, whatever the view and the period, and
+  // kept: zooming, moving and choosing a period then ask for nothing (F-263). They come in
+  // pieces, the newest sales first. Without a play the parcels are too many to hold: those of
+  // the view and the period, close in, as before.
+  const whole = rights !== null;
+  const filter = whole ? `${rights}|` : `|${since ?? ''}`;
+  const summaryFilter = `${rights ?? ''}|${since ?? ''}`;
 
-  const far = at !== null && at.zoom < saleFromZoom(rights, since);
-  const wanted = on && at !== null && !far;
+  const far = at !== null && at.zoom < saleFromZoom(rights);
+  const wanted = on && (whole || (at !== null && !far));
+  // The piece to read next, of a play's parcels.
+  const piece = whole && settled?.filter === filter ? settled.pieces : 0;
   const covered =
     settled !== null &&
     !settled.failed &&
     settled.filter === filter &&
     settled.answer !== null &&
-    !settled.answer.truncated &&
-    at !== null &&
-    inside(settled.asked, at.view);
-  const box = wanted && !covered ? landRequest(at.view) : null;
+    (whole
+      ? piece >= SALE_PIECES.length
+      : !settled.answer.truncated && at !== null && inside(settled.asked, at.view));
+  const box = !wanted || covered ? null : whole ? ALBERTA : at ? landRequest(at.view) : null;
+  // A piece that failed is asked for again when the map next moves.
+  const again =
+    whole && settled?.failed === true && at
+      ? `@${String(round(at.view.west))},${String(round(at.view.south))},${String(round(at.zoom))}`
+      : '';
   const key = box
-    ? `${filter}:${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}`
+    ? `${filter}:${whole ? `piece ${String(piece)}` : ''}${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}${again}`
     : null;
   const loading = key !== null && settled?.key !== key;
   const failed = settled?.failed === true && settled.key === key;
@@ -193,15 +231,43 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   useEffect(() => {
     if (key === null || box === null) return;
     const controller = new AbortController();
-    const q = query({
-      west: String(round(box.west)),
-      south: String(round(box.south)),
-      east: String(round(box.east)),
-      north: String(round(box.north)),
-    });
-    apiJson<ParcelsAnswer>(`/petroleum/land-sales?${q}`, token, { signal: controller.signal })
+    const q = new URLSearchParams(
+      query({
+        west: String(round(box.west)),
+        south: String(round(box.south)),
+        east: String(round(box.east)),
+        north: String(round(box.north)),
+      }),
+    );
+    // Every year of them, a piece at a time: the period is then chosen here, from what is held.
+    const years = whole ? SALE_PIECES[piece] : undefined;
+    if (years) {
+      q.delete('since');
+      if (years.since !== null) q.set('since', years.since);
+      if (years.until !== null) q.set('until', years.until);
+    }
+    apiJson<ParcelsAnswer>(`/petroleum/land-sales?${q.toString()}`, token, {
+      signal: controller.signal,
+    })
       .then((answer) => {
-        setSettled({ key, filter, asked: box, answer, failed: false });
+        setSettled((before) => {
+          // A later piece joins the ones already held; anything else stands alone.
+          const earlier = years && piece > 0 && before?.filter === filter ? before.answer : null;
+          return {
+            key,
+            filter,
+            asked: box,
+            pieces: years ? piece + 1 : 0,
+            answer: earlier
+              ? {
+                  ...answer,
+                  truncated: earlier.truncated || answer.truncated,
+                  parcels: [...earlier.parcels, ...answer.parcels],
+                }
+              : answer,
+            failed: false,
+          };
+        });
       })
       .catch(() => {
         if (controller.signal.aborted) return;
@@ -209,6 +275,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
           key,
           filter: before?.filter ?? '',
           asked: box,
+          pieces: before?.pieces ?? 0,
           answer: before?.answer ?? null,
           failed: true,
         }));
@@ -228,23 +295,28 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       signal: controller.signal,
     })
       .then((answer) => {
-        setSummary({ key: filter, answer });
+        setSummary({ key: summaryFilter, answer });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setSummary({ key: filter, answer: null });
+        if (!controller.signal.aborted) setSummary({ key: summaryFilter, answer: null });
       });
     return () => {
       controller.abort();
     };
-  }, [on, filter, query, token]);
+  }, [on, summaryFilter, query, token]);
 
   const answer = settled?.answer ?? null;
   const shown = useMemo(
     () =>
       wanted && settled?.filter === filter
-        ? saleFiltered(answer?.parcels ?? [], { buyer, states, today })
+        ? saleFiltered(answer?.parcels ?? [], {
+            buyer,
+            states,
+            today,
+            since: whole ? since : null,
+          })
         : [],
-    [wanted, settled?.filter, filter, answer, buyer, states, today],
+    [wanted, settled?.filter, filter, answer, buyer, states, today, whole, since],
   );
   const features = useMemo(() => landSaleFeatures(shown, today), [shown, today]);
   const byId = useMemo(() => new Map(shown.map((p) => [p.id, p])), [shown]);
@@ -256,7 +328,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     setAt(bbox ? { view: bbox, zoom } : null);
   }, []);
 
-  const totals = summary?.key === filter ? summary.answer : null;
+  const totals = summary?.key === summaryFilter ? summary.answer : null;
   const rightsName = rights !== null ? (LAND_RIGHTS[rights]?.name ?? rights) : null;
   const periodLabel = SALE_PERIODS.find((p) => p.key === period)?.label.toLowerCase() ?? '';
 
@@ -450,7 +522,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
           <p className="text-xs text-muted-foreground">
             {far
               ? 'Zoom in to see the parcels.'
-              : `${shown.length.toLocaleString('en-CA')} ${shown.length === 1 ? 'parcel' : 'parcels'} in view.`}
+              : `${shown.length.toLocaleString('en-CA')} ${shown.length === 1 ? 'parcel' : 'parcels'}${whole ? '' : ' in view'}.`}
             {loading ? ' Loading…' : ''}
           </p>
           {failed && (

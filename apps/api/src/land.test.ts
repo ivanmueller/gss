@@ -209,7 +209,7 @@ describe('GET /api/v1/petroleum/land', () => {
     });
     const res = await get(`${BOX}&layers=agreements,offsets`);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
     const body = await res.json<ReturnType<typeof landAnswer>>();
     expect(body.agreements.items).toEqual([agreement('7')]);
     expect(body.source.loads[0]?.layer).toBe('png_agreements');

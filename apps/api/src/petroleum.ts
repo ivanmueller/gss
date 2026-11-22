@@ -12,6 +12,7 @@ import {
   parseLandKinds,
   parseLandRights,
 } from './land';
+import { keptJson } from './kept-json';
 import {
   LAND_SALES_MAX,
   LAND_SALES_SCHEMA_VERSION,
@@ -541,7 +542,7 @@ export function petroleumRoutes(
             await st37LoadZones(load, (formation) => petroleum.st37Drilled(who, formation)),
           );
         }
-        return c.json(st37Answer(loads, zones, wells));
+        return keptJson(c, st37Answer(loads, zones, wells));
       });
     });
   });
@@ -580,7 +581,7 @@ export function petroleumRoutes(
           zones: () => petroleum.landZones(who),
         });
         const rows = await petroleum.land(who, box, landLimits(kinds), zones);
-        return c.json(landAnswer(rows));
+        return keptJson(c, landAnswer(rows));
       });
     });
   });
@@ -594,7 +595,7 @@ export function petroleumRoutes(
     read: (
       petroleum: PetroleumDatabase,
       ctx: PetroleumContext,
-      filter: { zones: readonly string[] | null; since: string | null },
+      filter: { zones: readonly string[] | null; since: string | null; until: string | null },
     ) => Promise<unknown>,
   ) => {
     c.header('Cache-Control', 'no-store');
@@ -602,6 +603,11 @@ export function petroleumRoutes(
     if (typeof rights === 'string') return apiError(c, 400, 'VALIDATION_FAILED', rights);
     const since = parseSince(c.req.query('since'));
     if (typeof since === 'string') return apiError(c, 400, 'VALIDATION_FAILED', since);
+    // Sales before a date: the page reads every year of a play a few years at a time (F-263).
+    const until = parseSince(c.req.query('until'));
+    if (typeof until === 'string') {
+      return apiError(c, 400, 'VALIDATION_FAILED', 'until must be a date such as 2024-11-22.');
+    }
     return withDatabase(c, openDatabase, async (db, ctx) => {
       const membership = membershipOf(c, await db.memberships(ctx.userId));
       if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
@@ -624,7 +630,10 @@ export function petroleumRoutes(
           stamp: () => petroleum.landZoneStamp(who),
           zones: () => petroleum.landZones(who),
         });
-        return c.json(await read(petroleum, who, { zones, since: since.since }));
+        return keptJson(
+          c,
+          await read(petroleum, who, { zones, since: since.since, until: until.since }),
+        );
       });
     });
   };
@@ -672,7 +681,7 @@ export function petroleumRoutes(
           role: membership.role,
           requestId: ctx.requestId,
         });
-        return c.json(productionAnswer(load, months));
+        return keptJson(c, productionAnswer(load, months));
       });
     });
 

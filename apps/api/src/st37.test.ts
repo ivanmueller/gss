@@ -210,8 +210,28 @@ describe('GET /api/v1/petroleum/st37/wells', () => {
     petroleum.st37Drilled.mockResolvedValue(DRILLED);
     const res = await app.request(`/api/v1/petroleum/st37/wells?${BOX}`, { headers: AUTH }, env);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    // The member's own browser may keep it, and asks before each use (F-263).
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
+    const tag = res.headers.get('ETag') ?? '';
+    expect(tag).toMatch(/^"[0-9a-f]{32}"$/);
     const body = await res.json<ReturnType<typeof st37Answer>>();
+    // A browser holding these bytes is told so, also when the tag came back weak; the sign-in
+    // and the membership were checked again first.
+    for (const held of [tag, `W/${tag}`, `"other", W/${tag}`]) {
+      const again = await app.request(
+        `/api/v1/petroleum/st37/wells?${BOX}`,
+        { headers: { ...AUTH, 'If-None-Match': held } },
+        env,
+      );
+      expect(again.status).toBe(304);
+      expect(await again.text()).toBe('');
+    }
+    const other = await app.request(
+      `/api/v1/petroleum/st37/wells?${BOX}`,
+      { headers: { ...AUTH, 'If-None-Match': '"something-else"' } },
+      env,
+    );
+    expect(other.status).toBe(200);
     expect(body.truncated).toBe(false);
     expect(body.wells).toEqual([well('00/09-07-030-26W4/0')]);
     expect(body.source).toMatchObject({ sourceDate: '2026-11-01' });

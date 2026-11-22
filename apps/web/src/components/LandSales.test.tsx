@@ -38,10 +38,9 @@ describe('saleSince and saleFromZoom', () => {
     expect(saleSince('all', '2026-11-21')).toBeNull();
   });
 
-  it('draws from far out only when narrowed to a play’s rights and a period', () => {
-    expect(saleFromZoom('duvernay', '2024-11-21')).toBe(6);
-    expect(saleFromZoom(null, '2024-11-21')).toBe(9);
-    expect(saleFromZoom('duvernay', null)).toBe(9);
+  it('holds a play’s parcels at every zoom, and asks by view close in without one (F-263)', () => {
+    expect(saleFromZoom('duvernay')).toBe(0);
+    expect(saleFromZoom(null)).toBe(9);
   });
 });
 
@@ -64,6 +63,15 @@ describe('saleFiltered', () => {
 
   it('keeps the buyers whose name holds the text typed', () => {
     expect(ids(' sample ', 'sold', 'no_offers', 'upcoming')).toEqual(['4']);
+  });
+
+  it('keeps the sales of the period, when every year is held (F-263)', () => {
+    const all = new Set(['sold', 'no_offers', 'upcoming'] as const);
+    const kept = (since: string | null) =>
+      saleFiltered(list, { buyer: '', states: all, today: '2026-11-01', since }).map((p) => p.id);
+    expect(kept('2026-11-05')).toEqual(['3']);
+    expect(kept('2026-11-04')).toEqual(['1', '2', '3', '4']);
+    expect(kept(null)).toEqual(['1', '2', '3', '4']);
   });
 });
 

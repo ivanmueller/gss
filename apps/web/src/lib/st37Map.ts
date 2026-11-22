@@ -350,6 +350,68 @@ function shownFilter(
   return filter as FilterSpecification;
 }
 
+/**
+ * What a map's wells were last drawn from, so the same wells and outline are never handed to
+ * the map twice (it reads them all again each time), and which well is lit (F-263).
+ */
+interface Drawn {
+  wells: GeoJSON.FeatureCollection | null;
+  outline: string | null;
+  /** The well or leg to light, kept so that it is lit again when the wells are drawn anew. */
+  target: { licence: string; uwi: string | null } | null;
+  /** The features now lit, by their place in `wells` (the ids the map gives them). */
+  lit: number[];
+}
+const drawn = new WeakMap<MapboxMap, Drawn>();
+function drawnOn(map: MapboxMap): Drawn {
+  let state = drawn.get(map);
+  if (!state) {
+    state = { wells: null, outline: null, target: null, lit: [] };
+    drawn.set(map, state);
+  }
+  return state;
+}
+
+/** Each licence's features, by their place in the collection; made once a collection. */
+const byLicence = new WeakMap<GeoJSON.FeatureCollection, Map<string, number[]>>();
+function licenceIndex(wells: GeoJSON.FeatureCollection): Map<string, number[]> {
+  let index = byLicence.get(wells);
+  if (!index) {
+    index = new Map();
+    for (const [at, feature] of wells.features.entries()) {
+      const licence: unknown = feature.properties?.licence;
+      if (typeof licence !== 'string') continue;
+      const list = index.get(licence);
+      if (list) list.push(at);
+      else index.set(licence, [at]);
+    }
+    byLicence.set(wells, index);
+  }
+  return index;
+}
+
+/**
+ * The features lit for a well or one of its legs: the leg's line and its bottom-hole dot (every
+ * leg's without a UWI), and the well's surface square.
+ */
+function litFeatures(wells: GeoJSON.FeatureCollection, target: NonNullable<Drawn['target']>) {
+  return (licenceIndex(wells).get(target.licence) ?? []).filter((at) => {
+    const p = wells.features[at]?.properties;
+    if (!p) return false;
+    if (p.part === 'well') return true;
+    const leg = target.uwi === null || p.uwi === target.uwi;
+    if (p.part === 'path' || p.part === 'planned') return leg;
+    return p.part === 'bottom' && p.at === 'hole' && leg;
+  });
+}
+
+/** Lights the target's features and lets the ones lit before go. */
+function light(map: MapboxMap, state: Drawn) {
+  for (const id of state.lit) map.setFeatureState({ source: SOURCE, id }, { lit: false });
+  state.lit = state.wells && state.target ? litFeatures(state.wells, state.target) : [];
+  for (const id of state.lit) map.setFeatureState({ source: SOURCE, id }, { lit: true });
+}
+
 /** A small hollow square for the hovered well's surface hole, drawn without a canvas. */
 function squareImage(colour: string) {
   const size = 11;
@@ -390,14 +452,28 @@ export function syncSt37(
     if (map.getSource(SOURCE)) map.removeSource(SOURCE);
     if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
     if (map.getSource(ZONES_SOURCE)) map.removeSource(ZONES_SOURCE);
+    drawn.delete(map);
     return;
   }
+  const state = drawnOn(map);
   const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
   syncOutline(map, view.outline, tone, before);
   syncZones(map, view.zones, tone, before);
   const existing = map.getSource<GeoJSONSource>(SOURCE);
-  if (existing) existing.setData(view.wells);
-  else map.addSource(SOURCE, { type: 'geojson', data: view.wells });
+  // The same wells again (a status switched, a new tone) are not read again by the map; new
+  // ones, or a map style that lost them, are, and the lit well is lit again on them.
+  const anew = !existing || state.wells !== view.wells;
+  if (existing && anew) {
+    existing.setData(view.wells);
+    map.removeFeatureState({ source: SOURCE });
+  } else if (!existing) {
+    // Each feature's id is its place in the collection: what `light` goes by.
+    map.addSource(SOURCE, { type: 'geojson', data: view.wells, generateId: true });
+  }
+  if (anew) {
+    state.wells = view.wells;
+    state.lit = [];
+  }
 
   const ink = tone === 'light' ? '#1c1917' : '#fafaf9';
   const square = squareImage(ink);
@@ -556,7 +632,16 @@ export function syncSt37(
     // The leg under the pointer (F-259), whatever is switched off: a little bolder in the
     // map's ink, its bottom hole a dot. Only that leg: not the well's other legs, not the
     // others on its pad, and no colour of its own (the owner, 2026-11-21). A well pointed at
-    // by its surface dot is shown whole (F-257).
+    // by its surface dot is shown whole (F-257). Every leg is in these layers, unseen until
+    // lit: lighting one is then a change of paint the map makes at once, where a change of
+    // filter had it read every well again, and a quick pass of the pointer left a leg lit
+    // while it caught up (F-263).
+    const lit: ExpressionSpecification = [
+      'case',
+      ['boolean', ['feature-state', 'lit'], false],
+      1,
+      0,
+    ];
     map.addLayer(
       {
         id: ST37_LAYERS.hoverPath,
@@ -564,8 +649,8 @@ export function syncSt37(
         source: SOURCE,
         minzoom: ST37_HOVER_FROM,
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': 2.2 },
-        filter: ['==', ['get', 'licence'], ''],
+        paint: { 'line-width': 2.2, 'line-opacity': lit },
+        filter: ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
       },
       before,
     );
@@ -575,8 +660,14 @@ export function syncSt37(
         type: 'circle',
         source: SOURCE,
         minzoom: ST37_HOVER_FROM,
-        paint: { 'circle-radius': 3.5, 'circle-stroke-width': 1, 'circle-stroke-color': '#ffffff' },
-        filter: ['==', ['get', 'licence'], ''],
+        paint: {
+          'circle-radius': 3.5,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#ffffff',
+          'circle-opacity': lit,
+          'circle-stroke-opacity': lit,
+        },
+        filter: ['all', ['==', ['get', 'part'], 'bottom'], ['==', ['get', 'at'], 'hole']],
       },
       before,
     );
@@ -591,11 +682,13 @@ export function syncSt37(
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
         },
-        filter: ['==', ['get', 'licence'], ''],
+        paint: { 'icon-opacity': lit },
+        filter: ['==', ['get', 'part'], 'well'],
       },
       before,
     );
   }
+  if (anew && state.target) light(map, state);
   const parts = view.parts ?? ST37_ALL_PARTS;
   const none: readonly St37StatusClass[] = [];
 
@@ -658,11 +751,15 @@ function syncOutline(
   if (url === null) {
     for (const id of ids) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
+    drawnOn(map).outline = null;
     return;
   }
   const existing = map.getSource<GeoJSONSource>(OUTLINE_SOURCE);
-  if (existing) existing.setData(url);
-  else map.addSource(OUTLINE_SOURCE, { type: 'geojson', data: url });
+  const state = drawnOn(map);
+  // The same outline is not fetched and read again each time the wells are drawn (F-263).
+  if (existing && state.outline !== url) existing.setData(url);
+  else if (!existing) map.addSource(OUTLINE_SOURCE, { type: 'geojson', data: url });
+  state.outline = url;
   // Under the wells' own layers when they exist already, else under the pins.
   const under = map.getLayer(ST37_LAYERS.density) ? ST37_LAYERS.density : before;
   if (!map.getLayer(ST37_LAYERS.outlineFill)) {
@@ -741,24 +838,8 @@ function syncZones(
  * null licence clears it.
  */
 export function highlightSt37(map: MapboxMap, licence: string | null, uwi: string | null = null) {
-  if (!map.getLayer(ST37_LAYERS.hoverPath)) return;
-  const id = licence ?? '';
-  const legs: FilterSpecification =
-    licence !== null && uwi !== null ? ['==', ['get', 'uwi'], uwi] : ['==', ['get', 'licence'], id];
-  map.setFilter(ST37_LAYERS.hoverPath, [
-    'all',
-    legs,
-    ['in', ['get', 'part'], ['literal', ['path', 'planned']]],
-  ] as FilterSpecification);
-  map.setFilter(ST37_LAYERS.hoverDots, [
-    'all',
-    legs,
-    ['==', ['get', 'part'], 'bottom'],
-    ['==', ['get', 'at'], 'hole'],
-  ]);
-  map.setFilter(ST37_LAYERS.hoverSurface, [
-    'all',
-    ['==', ['get', 'licence'], id],
-    ['==', ['get', 'part'], 'well'],
-  ]);
+  const state = drawnOn(map);
+  state.target = licence === null ? null : { licence, uwi };
+  if (!map.getSource(SOURCE)) return;
+  light(map, state);
 }

@@ -478,6 +478,8 @@ export default function FacilityMap(props: FacilityMapProps) {
    * `licence|uwi` for one leg of it.
    */
   const st37Hovered = useRef<string | null>(null);
+  // The wells the page was last told are under the pointer (their UWIs joined); '' for none.
+  const st37Told = useRef('');
   // The box on the map: where the chosen pin is on screen, and the pin whose box was closed.
   const [anchor, setAnchor] = useState<PinAnchor | null>(null);
   const [closedId, setClosedId] = useState<string | null>(null);
@@ -648,7 +650,9 @@ export default function FacilityMap(props: FacilityMapProps) {
       }
       return { uwis: [...uwis], licence, leg };
     };
-    const hover = (point: mapboxgl.Point) => {
+    // `clicked`: the click that keeps a well's card open lights the leg clicked, also while
+    // another well's card is kept open (it used to leave the earlier one lit).
+    const hover = (point: mapboxgl.Point, clicked = false) => {
       const onHover = latest.current.onSt37Hover;
       if (!onHover) return null;
       const { uwis, licence, leg } = wellsAt(point);
@@ -656,20 +660,35 @@ export default function FacilityMap(props: FacilityMapProps) {
       instance.getCanvas().style.cursor = first ? 'pointer' : '';
       const found = first ? { uwis, x: point.x, y: point.y } : null;
       // While a well's card is kept open, that well stays the one shown.
-      if (latest.current.st37Locked) return found;
+      if (latest.current.st37Locked && !(clicked && found)) return found;
       const lit = licence !== null && leg !== null ? `${licence}|${leg}` : licence;
       if (lit !== st37Hovered.current) {
         st37Hovered.current = lit;
         highlightSt37(instance, licence, leg);
       }
-      onHover(found);
+      // The page is told only when the wells under the pointer change, not at every move of
+      // it: each telling draws the whole page again (F-263).
+      const told = uwis.join('|');
+      if (told !== st37Told.current) {
+        st37Told.current = told;
+        onHover(found);
+      }
       return found;
     };
     // Where the pointer last was over the map; null once it has left.
     let pointer: mapboxgl.Point | null = null;
+    // The pointer's moves are looked at once a frame: the mouse reports more often than the
+    // map draws, and each look searches the wells drawn.
+    let frame: number | null = null;
     instance.on('mousemove', (event) => {
       pointer = event.point;
-      hover(event.point);
+      frame ??= requestAnimationFrame(() => {
+        frame = null;
+        if (pointer) hover(pointer);
+      });
+    });
+    instance.on('remove', () => {
+      if (frame !== null) cancelAnimationFrame(frame);
     });
     // The map can move or zoom under a still pointer (the wheel, the zoom buttons, an eased
     // move): the well under it is looked for again, so one it has left never stays lit.
@@ -679,7 +698,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     // A click keeps the well's card open (F-258); a tap shows it, on a phone where nothing
     // hovers; a click on no well lets it go.
     instance.on('click', (event) => {
-      const found = hover(event.point);
+      const found = hover(event.point, true);
       latest.current.onSt37Click?.(found);
       // Land under the click, when no well is: every shape there, agreements first (F-241).
       const onLand = latest.current.onLandClick;
@@ -697,10 +716,15 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     instance.on('mouseout', () => {
       pointer = null;
-      if (st37Hovered.current === null || latest.current.st37Locked) return;
-      st37Hovered.current = null;
-      highlightSt37(instance, null);
-      latest.current.onSt37Hover?.(null);
+      if (latest.current.st37Locked) return;
+      if (st37Hovered.current !== null) {
+        st37Hovered.current = null;
+        highlightSt37(instance, null);
+      }
+      if (st37Told.current !== '') {
+        st37Told.current = '';
+        latest.current.onSt37Hover?.(null);
+      }
     });
     instance.on('move', () => {
       handlers.current.place();
@@ -839,6 +863,12 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (locked !== null && (lit === locked || lit?.startsWith(`${locked}|`))) return;
     st37Hovered.current = locked;
     highlightSt37(instance, locked);
+    // Let go: the page forgets the well it showed, and hears of the next one pointed at.
+    if (locked === null && st37Told.current !== '') {
+      st37Told.current = '';
+      props.onSt37Hover?.(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change of the well kept.
   }, [locked]);
 
   const { st37 } = props;

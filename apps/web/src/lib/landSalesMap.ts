@@ -109,6 +109,8 @@ export function landSaleColour(
 /** One parcel on the map, as a click reports it. */
 export const landSaleKey = (id: string) => `sale:${id}`;
 
+/** What each map's source was last given. */
+const drawn = new WeakMap<MapboxMap, GeoJSON.FeatureCollection>();
 const SOURCE = 'land-sales';
 export const SALE_LAYERS = {
   fill: 'land-sale-fill',
@@ -147,6 +149,15 @@ function ringSums(ring: readonly number[][]) {
  * apart, whose common middle may lie on none of them); null for a shape with no ground.
  */
 export function landSaleCentre(shape: LandShape): [number, number] | null {
+  const kept = centres.get(shape);
+  if (kept !== undefined) return kept;
+  const centre = centreOf(shape);
+  centres.set(shape, centre);
+  return centre;
+}
+/** Worked out once a shape: the features are made again on every change of a filter. */
+const centres = new WeakMap<LandShape, [number, number] | null>();
+function centreOf(shape: LandShape): [number, number] | null {
   let best: { area: number; x: number; y: number } | null = null;
   for (const polygon of shape) {
     const outer = polygon[0];
@@ -204,11 +215,14 @@ export function syncLandSales(
   if (view === null) {
     for (const id of Object.values(SALE_LAYERS)) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(SOURCE)) map.removeSource(SOURCE);
+    drawn.delete(map);
     return;
   }
   const existing = map.getSource<GeoJSONSource>(SOURCE);
-  if (existing) existing.setData(view.parcels);
-  else map.addSource(SOURCE, { type: 'geojson', data: view.parcels });
+  // The same shapes again (a card opened, the map moved) are not read again by the map (F-263).
+  if (existing && drawn.get(map) !== view.parcels) existing.setData(view.parcels);
+  else if (!existing) map.addSource(SOURCE, { type: 'geojson', data: view.parcels });
+  drawn.set(map, view.parcels);
 
   if (!map.getLayer(SALE_LAYERS.fill)) {
     const under =

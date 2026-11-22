@@ -100,7 +100,7 @@ describe('GET /api/v1/petroleum/production', () => {
     petroleum.wellProduction.mockResolvedValue({ load: LOAD, months });
     const res = await app.request(WELL, { headers: AUTH }, env);
     expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
     const body = await res.json<ReturnType<typeof productionAnswer>>();
     expect(body.months).toEqual(months);
     expect(body.source.lastMonth).toBe('2026-09');
