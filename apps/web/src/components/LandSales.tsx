@@ -13,7 +13,6 @@ import {
   type LandSaleState,
   type LandSalesView,
 } from '../lib/landSalesMap';
-import { DETAIL_GONE } from '../lib/mapDetail';
 import { landReadable, landRequest, landToday } from './Land';
 
 /**
@@ -42,11 +41,11 @@ export function saleSince(period: SalePeriod, today: string): string | null {
 
 /**
  * The zoom the parcels are drawn from: narrowed to a play's rights and to a period they are
- * few enough to draw from far out, as far as the map draws them (DETAIL_GONE, F-260);
- * otherwise a view farther out holds too many.
+ * few enough to draw from far out, where each is a dot (F-262); otherwise a view farther out
+ * holds too many.
  */
 export function saleFromZoom(rights: string | null, since: string | null): number {
-  return rights !== null && since !== null ? DETAIL_GONE : 9;
+  return rights !== null && since !== null ? 6 : 9;
 }
 
 const STATES: { key: LandSaleState; label: string }[] = [

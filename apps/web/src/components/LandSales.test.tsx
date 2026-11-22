@@ -2,7 +2,6 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { LandSaleParcel } from '../lib/landSalesMap';
-import { DETAIL_GONE } from '../lib/mapDetail';
 import {
   QuarterBars,
   saleFiltered,
@@ -40,7 +39,7 @@ describe('saleSince and saleFromZoom', () => {
   });
 
   it('draws from far out only when narrowed to a play’s rights and a period', () => {
-    expect(saleFromZoom('duvernay', '2024-11-21')).toBe(DETAIL_GONE);
+    expect(saleFromZoom('duvernay', '2024-11-21')).toBe(6);
     expect(saleFromZoom(null, '2024-11-21')).toBe(9);
     expect(saleFromZoom('duvernay', null)).toBe(9);
   });

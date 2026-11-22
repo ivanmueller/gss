@@ -6,17 +6,21 @@ import { describe, expect, it } from 'vitest';
 
 import { LAND_LAYERS, landFeatures, syncLand } from './landMap';
 import {
+  landSaleCentre,
   landSaleColour,
   landSaleFeatures,
   landSaleState,
+  SALE_AREAS_FULL,
+  SALE_AREAS_GONE,
   SALE_BLUES,
+  SALE_DOTS_FULL,
   SALE_LAYERS,
   SALE_NO_OFFERS,
+  SALE_PICKABLE,
   SALE_UPCOMING,
   syncLandSales,
   type LandSaleParcel,
 } from './landSalesMap';
-import { DETAIL_GONE, fadeIn } from './mapDetail';
 import { ST37_LAYERS } from './st37Map';
 
 // Crown land sales on the oil and gas map (F-242). Made-up parcels and prices only.
@@ -129,10 +133,44 @@ const PARCELS = landSaleFeatures(
 
 describe('landSaleFeatures', () => {
   it('draws the newest sale last, each parcel with its key, state and colour', () => {
-    expect(PARCELS.features.map((f) => f.properties)).toEqual([
-      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4] },
-      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING },
+    expect(
+      PARCELS.features.filter((f) => f.properties?.part === 'area').map((f) => f.properties),
+    ).toEqual([
+      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4], part: 'area' },
+      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING, part: 'area' },
     ]);
+  });
+
+  it('gives each parcel the dot it becomes zoomed out, in its colour (F-262)', () => {
+    const dots = PARCELS.features.filter((f) => f.properties?.part === 'dot');
+    expect(dots.map((f) => f.properties)).toEqual([
+      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4], part: 'dot' },
+      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING, part: 'dot' },
+    ]);
+    expect(dots.every((f) => f.geometry.type === 'Point')).toBe(true);
+  });
+});
+
+describe('landSaleCentre', () => {
+  it('is the middle of the parcel’s largest piece', () => {
+    const square = (west: number, south: number, size: number) => [
+      [
+        [west, south],
+        [west + size, south],
+        [west + size, south + size],
+        [west, south + size],
+        [west, south],
+      ],
+    ];
+    // A small piece far west, a large one east: the dot sits in the large one, not between.
+    const centre = landSaleCentre([square(-118, 54, 0.1), square(-116, 54, 0.4)]);
+    expect(centre?.[0]).toBeCloseTo(-115.8);
+    expect(centre?.[1]).toBeCloseTo(54.2);
+  });
+
+  it('is nothing for a shape with no ground', () => {
+    expect(landSaleCentre([])).toBeNull();
+    expect(landSaleCentre([[[]]])).toBeNull();
   });
 });
 
@@ -148,17 +186,34 @@ describe('syncLandSales', () => {
     expect(validate(style)).toEqual([]);
     expect([...layers.keys()].sort()).toEqual(Object.values(SALE_LAYERS).sort());
     expect(layers.get(SALE_LAYERS.picked)?.filter).toEqual([
-      'in',
-      ['get', 'key'],
-      ['literal', ['sale:1']],
+      'all',
+      ['==', ['get', 'part'], 'area'],
+      ['in', ['get', 'key'], ['literal', ['sale:1']]],
     ]);
-    // Every layer fades out with the wells' legs, gone at DETAIL_GONE (F-260).
-    for (const id of Object.values(SALE_LAYERS)) {
+    // Zoomed out the parcels give way to their dots (F-262): the areas and their edges gone
+    // at SALE_AREAS_GONE, the dots whole from SALE_DOTS_FULL out, at every zoom farther.
+    for (const id of [SALE_LAYERS.fill, SALE_LAYERS.line, SALE_LAYERS.upcoming]) {
       const layer = layers.get(id);
-      expect(layer?.minzoom).toBe(DETAIL_GONE);
-      const opacity = layer?.paint[layer.type === 'fill' ? 'fill-opacity' : 'line-opacity'];
-      expect((opacity as unknown[]).slice(0, 6)).toEqual(fadeIn(1).slice(0, 6));
+      expect(layer?.minzoom).toBe(SALE_AREAS_GONE);
+      const opacity = layer?.paint[id === SALE_LAYERS.fill ? 'fill-opacity' : 'line-opacity'];
+      expect((opacity as unknown[]).slice(3, 5)).toEqual([SALE_AREAS_GONE, 0]);
+      expect((opacity as unknown[])[7]).toBe(SALE_AREAS_FULL);
     }
+    const dots = layers.get(SALE_LAYERS.dots);
+    expect(dots?.minzoom).toBeUndefined();
+    expect(dots?.maxzoom).toBe(SALE_AREAS_FULL);
+    expect(dots?.filter).toEqual(['==', ['get', 'part'], 'dot']);
+    expect(dots?.paint['circle-opacity']).toEqual([
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      SALE_DOTS_FULL,
+      1,
+      SALE_AREAS_FULL,
+      0,
+    ]);
+    // A click finds a parcel by its dot as by its area.
+    expect(SALE_PICKABLE).toEqual([SALE_LAYERS.dots, SALE_LAYERS.fill]);
     syncLandSales(map, null, 'light');
     expect(layers.size).toBe(0);
     expect(sources.size).toBe(0);
