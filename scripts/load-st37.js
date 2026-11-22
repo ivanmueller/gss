@@ -8,7 +8,7 @@
 //
 // <dir> holds surface.geojson, bottom.geojson, strings.geojson and paths.geojson, the four
 // layers of ST_37_Wells.gdb cut to the area (or to the formation's licences) by ogr2ogr
-// (EPSG:4326). <grain-bytes> is the size of grain's database: the load is refused, and nothing
+// (EPSG:4326; the paths with their elevations, -dim XYZ, for the 3D view, F-261). <grain-bytes> is the size of grain's database: the load is refused, and nothing
 // changes, if both databases together would pass 400 MB (the free plan's limit is shared,
 // docs/DECISIONS.md, 2026-11-19).
 //
@@ -116,6 +116,10 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     'planned_bottom_longitude',
     'planned_bottom_latitude',
     'formation',
+    'path_3d',
+    'path_surveyed',
+    'kb_elevation_m',
+    'ground_elevation_m',
   ];
   const rows = wells.map((w) =>
     [
@@ -146,6 +150,10 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
       w.plannedBottom?.[0] ?? null,
       w.plannedBottom?.[1] ?? null,
       formation,
+      w.path3d === null ? null : JSON.stringify(w.path3d),
+      w.pathSurveyed,
+      w.kbElevationM,
+      w.groundElevationM,
     ]
       .map(csv)
       .join(','),
@@ -173,7 +181,7 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     'end',
     '$$;',
     'commit;',
-    "select count(*) as wells, count(path) as with_paths, count(planned_bottom_longitude) as planned_lines, pg_size_pretty(pg_total_relation_size('petro.st37_wells')) as size from petro.st37_wells;",
+    "select count(*) as wells, count(path) as with_paths, count(path_3d) as with_depths, count(planned_bottom_longitude) as planned_lines, pg_size_pretty(pg_total_relation_size('petro.st37_wells')) as size from petro.st37_wells;",
     '',
   ].join('\n');
 }
@@ -360,8 +368,9 @@ async function main(argv) {
     licences,
   );
   const withPaths = wells.filter((w) => w.path !== null).length;
+  const withDepths = wells.filter((w) => w.path3d !== null).length;
   console.error(
-    `ST37: ${String(wells.length)} wells in ${formation ? `the ${formation.name}` : 'the area'} (${String(withPaths)} with drilled paths), ${String(skipped)} records skipped as unreadable.`,
+    `ST37: ${String(wells.length)} wells in ${formation ? `the ${formation.name}` : 'the area'} (${String(withPaths)} with drilled paths, ${String(withDepths)} with depths along the path), ${String(skipped)} records skipped as unreadable.`,
   );
   if (wells.length === 0) {
     console.error('No wells: nothing to load.');

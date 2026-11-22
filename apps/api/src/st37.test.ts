@@ -6,12 +6,16 @@ import type { PetroleumFactory } from './petroleum-db';
 import {
   clearSt37Zones,
   parseSt37Box,
+  ST37_3D_MAX_NEARBY,
+  ST37_3D_NEARBY_KM,
+  ST37_3D_SCHEMA_VERSION,
   ST37_MAX_WELLS,
   ST37_SCHEMA_VERSION,
   st37Answer,
   st37LoadZones,
+  st37Well3dAnswer,
 } from './st37';
-import type { St37Load, St37WellRow } from './st37-db';
+import type { St37DeepLeg, St37Load, St37WellRow } from './st37-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
 import { fakePetroleum } from './testing/petroleum';
 
@@ -245,6 +249,126 @@ describe('GET /api/v1/petroleum/st37/wells', () => {
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
       { west: -114, south: 53, east: -113, north: 54 },
       ST37_MAX_WELLS,
+    );
+  });
+});
+
+// A well under the ground, in 3D (F-261). Made-up wells only.
+const MAIN = '00/09-07-030-26W4/0';
+const deepLeg = (uwi: string, extra: Partial<St37DeepLeg> = {}): St37DeepLeg => ({
+  uwi,
+  licenceNumber: '0509395',
+  licensee: 'Example Energy Ltd.',
+  statusClass: 'producing',
+  surveyed: true,
+  own: true,
+  surface: [-113.6, 53.3],
+  kbElevationM: 904.1,
+  groundElevationM: 898.5,
+  points: [
+    [-113.6, 53.3, 904.1],
+    [-113.6, 53.3, -1300],
+    [-113.62, 53.3, -1355.8],
+  ],
+  ...extra,
+});
+
+describe('st37Well3dAnswer', () => {
+  it('gives the well, its legs and the wells nearby, without the legs that have no depths', () => {
+    const answer = st37Well3dAnswer(MAIN, '2026-11-22T06:00:00.000Z', [
+      deepLeg(MAIN, { kbElevationM: null }),
+      deepLeg('02/09-07-030-26W4/0', { points: null, kbElevationM: 905 }),
+      deepLeg('00/01-08-030-26W4/0', { own: false, licenceNumber: '0509400' }),
+    ]);
+    expect(answer?.well).toEqual({
+      uwi: MAIN,
+      licenceNumber: '0509395',
+      surface: [-113.6, 53.3],
+      // The leg asked for has none: another leg of the well gives it.
+      kbElevationM: 905,
+      groundElevationM: 898.5,
+    });
+    expect(answer?.legs.map((leg) => [leg.uwi, leg.own])).toEqual([
+      [MAIN, true],
+      ['00/01-08-030-26W4/0', false],
+    ]);
+    expect(answer?.nearbyKm).toBe(ST37_3D_NEARBY_KM);
+    expect(answer?.truncated).toBe(false);
+    expect(answer?.source.name).toContain('Alberta Energy Regulator');
+  });
+
+  it('says when more wells lie nearby than it holds, and nothing for a well not loaded', () => {
+    const many = Array.from({ length: ST37_3D_MAX_NEARBY + 1 }, (_, i) =>
+      deepLeg(`n${String(i)}`, { own: false, licenceNumber: `9${String(i)}` }),
+    );
+    const answer = st37Well3dAnswer(MAIN, null, [deepLeg(MAIN), ...many]);
+    expect(answer?.truncated).toBe(true);
+    expect(answer?.legs).toHaveLength(1 + ST37_3D_MAX_NEARBY);
+    expect(st37Well3dAnswer(MAIN, null, [])).toBeNull();
+    expect(st37Well3dAnswer(MAIN, null, many)).toBeNull();
+  });
+});
+
+describe('GET /api/v1/petroleum/st37/well-3d', () => {
+  const app = createApp(openDatabase, { petroleum: openPetroleum, petroleumReadyCacheMs: 0 });
+  const path = `/api/v1/petroleum/st37/well-3d?uwi=${encodeURIComponent(MAIN)}`;
+  const viewer = () => {
+    grain.memberships.mockResolvedValue([
+      { organizationId: 'org-a', organizationName: 'Synthetic Org A', role: 'viewer' },
+    ]);
+    petroleum.schemaVersion.mockResolvedValue(ST37_3D_SCHEMA_VERSION);
+  };
+
+  it('refuses a non-member without opening the oil and gas database', async () => {
+    grain.memberships.mockResolvedValueOnce([]);
+    const res = await app.request(path, { headers: AUTH }, env);
+    expect(res.status).toBe(403);
+    expect(openPetroleum).not.toHaveBeenCalled();
+  });
+
+  it('refuses what is not a well identifier before any database', async () => {
+    const res = await app.request(
+      '/api/v1/petroleum/st37/well-3d?uwi=x%27%3B--',
+      { headers: AUTH },
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(openPetroleum).not.toHaveBeenCalled();
+  });
+
+  it('waits for its migration', async () => {
+    viewer();
+    petroleum.schemaVersion.mockResolvedValue(ST37_3D_SCHEMA_VERSION - 1);
+    const res = await app.request(path, { headers: AUTH }, env);
+    expect(res.status).toBe(503);
+    expect(petroleum.st37Well3d).not.toHaveBeenCalled();
+  });
+
+  it('says so when the well is not loaded', async () => {
+    viewer();
+    const res = await app.request(path, { headers: AUTH }, env);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('gives a viewer the well with its depths, asked as that member', async () => {
+    viewer();
+    petroleum.st37Well3d.mockResolvedValue({
+      loadedAt: '2026-11-22T06:00:00.000Z',
+      legs: [deepLeg(MAIN), deepLeg('00/01-08-030-26W4/0', { own: false })],
+    });
+    const res = await app.request(path, { headers: AUTH }, env);
+    expect(res.status).toBe(200);
+    // Kept by the member's own browser, asked about before each use (F-263).
+    expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
+    const body = await res.json<NonNullable<ReturnType<typeof st37Well3dAnswer>>>();
+    expect(body.legs).toHaveLength(2);
+    expect(body.legs[0]?.points[2]).toEqual([-113.62, 53.3, -1355.8]);
+    expect(petroleum.st37Well3d).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
+      MAIN,
+      ST37_3D_NEARBY_KM,
+      ST37_3D_MAX_NEARBY,
     );
   });
 });

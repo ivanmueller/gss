@@ -138,6 +138,17 @@ export interface St37Well {
   bottom: [number, number];
   /** The drilled path from the surface down, or null when it runs less than 20 m sideways. */
   path: [number, number][] | null;
+  /**
+   * The drilled path with its depth (F-261): [longitude, latitude, metres above sea level] from
+   * the kelly bushing down, kept to within 2 m; also for a vertical well. Null when the list has
+   * no path for the well or its path has no elevations.
+   */
+  path3d: [number, number, number][] | null;
+  /** Whether the AER surveyed the path (true) or worked it out (false); null when not said. */
+  pathSurveyed: boolean | null;
+  /** The kelly bushing's and the ground's elevation, in metres above sea level. */
+  kbElevationM: number | null;
+  groundElevationM: number | null;
   /** What the licence planned (Petrinex's Well Licence file), when the load read it. */
   licenceDate: string | null;
   plannedOperation: string | null;
@@ -250,6 +261,87 @@ function lineOf(feature: St37Feature): [number, number][] | null {
   return out.length >= 2 ? st37Simplify(out, ST37_SIMPLIFY_M) : null;
 }
 
+/** An elevation in metres above sea level, as far as Alberta's ground and wells reach. */
+function elevation(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > -9000 && value < 4000
+    ? Math.round(value * 10) / 10
+    : null;
+}
+
+/**
+ * The path's vertices with their elevations, from the surface down, without repeats, kept to
+ * within `ST37_SIMPLIFY_M` in all three directions; null when unusable or when a vertex has no
+ * elevation (a layer cut flat).
+ */
+function line3dOf(feature: St37Feature): [number, number, number][] | null {
+  const g = feature.geometry;
+  if (!g || !Array.isArray(g.coordinates)) return null;
+  const parts =
+    g.type === 'LineString'
+      ? [g.coordinates as unknown[]]
+      : g.type === 'MultiLineString'
+        ? (g.coordinates as unknown[][])
+        : null;
+  if (!parts) return null;
+  const out: [number, number, number][] = [];
+  for (const part of parts) {
+    if (!Array.isArray(part)) return null;
+    for (const vertex of part) {
+      if (!Array.isArray(vertex)) return null;
+      const p = point(vertex[0], vertex[1]);
+      const z = elevation(vertex[2]);
+      if (!p || z === null) return null;
+      const last = out[out.length - 1];
+      if (last?.[0] !== p[0] || last[1] !== p[1] || last[2] !== z) out.push([p[0], p[1], z]);
+    }
+  }
+  return out.length >= 2 ? st37Simplify3d(out, ST37_SIMPLIFY_M) : null;
+}
+
+/**
+ * The 3D line without the vertices that lie within `tolerance` metres of the straight line
+ * through their neighbours (Douglas–Peucker in three directions); the ends always stay.
+ */
+export function st37Simplify3d(
+  line: [number, number, number][],
+  tolerance: number,
+): [number, number, number][] {
+  const first = line[0];
+  if (line.length <= 2 || !first) return line;
+  const kx = 111_320 * Math.cos((first[1] * Math.PI) / 180);
+  const xs = line.map(([lon]) => (lon - first[0]) * kx);
+  const ys = line.map(([, lat]) => (lat - first[1]) * 110_574);
+  const zs = line.map(([, , z]) => z);
+  const keep = new Uint8Array(line.length);
+  keep[0] = 1;
+  keep[line.length - 1] = 1;
+  const stack: [number, number][] = [[0, line.length - 1]];
+  for (let span = stack.pop(); span; span = stack.pop()) {
+    const [from, to] = span;
+    const [ax, ay, az] = [xs[from] ?? 0, ys[from] ?? 0, zs[from] ?? 0];
+    const [ux, uy, uz] = [(xs[to] ?? 0) - ax, (ys[to] ?? 0) - ay, (zs[to] ?? 0) - az];
+    const length = Math.hypot(ux, uy, uz);
+    let worst = -1;
+    let most = tolerance;
+    for (let i = from + 1; i < to; i += 1) {
+      const [vx, vy, vz] = [(xs[i] ?? 0) - ax, (ys[i] ?? 0) - ay, (zs[i] ?? 0) - az];
+      const distance =
+        length === 0
+          ? Math.hypot(vx, vy, vz)
+          : Math.hypot(vy * uz - vz * uy, vz * ux - vx * uz, vx * uy - vy * ux) / length;
+      if (distance > most) {
+        most = distance;
+        worst = i;
+      }
+    }
+    if (worst > 0) {
+      keep[worst] = 1;
+      stack.push([from, worst], [worst, to]);
+    }
+  }
+  return line.filter((_, i) => keep[i] === 1);
+}
+
 /** A drilled path keeps its shape to within this many metres (the map never shows less). */
 export const ST37_SIMPLIFY_M = 2;
 
@@ -331,18 +423,38 @@ export function buildSt37Wells(
   licences: ReadonlyMap<string, St37Licence> = new Map(),
 ): { wells: St37Well[]; skipped: number } {
   const surfaceByLicence = new Map<string, [number, number]>();
+  const groundByLicence = new Map<string, number>();
   for (const f of layers.surface) {
     const p = f.properties ?? {};
     const licence = licenceOf(p.Well_Licence_Number);
     const at = point(p.SH_Actual_Longitude, p.SH_Actual_Latitude) ?? pointOf(f);
     if (licence && at && !surfaceByLicence.has(licence)) surfaceByLicence.set(licence, at);
+    const ground = elevation(p.Ground_Elevation);
+    if (licence && ground !== null && !groundByLicence.has(licence)) {
+      groundByLicence.set(licence, ground);
+    }
   }
 
   const pathByUwi = new Map<string, [number, number][]>();
+  interface Deep {
+    line: [number, number, number][];
+    surveyed: boolean | null;
+    kb: number | null;
+  }
+  const deepByUwi = new Map<string, Deep>();
   for (const f of layers.paths) {
     const uwi = text(f.properties?.UWI_Label, 30);
     const line = lineOf(f);
     if (uwi && line && !pathByUwi.has(uwi)) pathByUwi.set(uwi, line);
+    const deep = line3dOf(f);
+    if (uwi && deep && !deepByUwi.has(uwi)) {
+      const source = text(f.properties?.Well_Geometry_Source, 15)?.toLowerCase();
+      deepByUwi.set(uwi, {
+        line: deep,
+        surveyed: source === 'surveyed' ? true : source === 'calculated' ? false : null,
+        kb: elevation(f.properties?.Kelly_Bushing_Elevation),
+      });
+    }
   }
 
   interface Strung {
@@ -433,6 +545,10 @@ export function buildSt37Wells(
       surface,
       bottom,
       path: line && st37Reach(line) >= ST37_MIN_REACH_M ? line : null,
+      path3d: deepByUwi.get(uwi)?.line ?? null,
+      pathSurveyed: deepByUwi.get(uwi)?.surveyed ?? null,
+      kbElevationM: elevation(p.Kelly_Bushing_Elevation) ?? deepByUwi.get(uwi)?.kb ?? null,
+      groundElevationM: elevation(p.Ground_Elevation) ?? groundByLicence.get(licence) ?? null,
       licenceDate: licences.get(licence)?.licenceDate ?? null,
       plannedOperation: licences.get(licence)?.operation ?? null,
       plannedFormation: licences.get(licence)?.formation ?? null,
