@@ -196,9 +196,21 @@ describe('syncLandSales', () => {
       const layer = layers.get(id);
       expect(layer?.minzoom).toBe(SALE_AREAS_GONE);
       const opacity = layer?.paint[id === SALE_LAYERS.fill ? 'fill-opacity' : 'line-opacity'];
-      expect((opacity as unknown[]).slice(3, 5)).toEqual([SALE_AREAS_GONE, 0]);
-      expect((opacity as unknown[])[7]).toBe(SALE_AREAS_FULL);
+      // One steady fade from whole to nothing, with no step in it (F-264).
+      expect(opacity as unknown[]).toHaveLength(7);
+      expect((opacity as unknown[]).slice(0, 5)).toEqual([
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        SALE_AREAS_GONE,
+        0,
+      ]);
+      expect((opacity as unknown[])[5]).toBe(SALE_AREAS_FULL);
     }
+    // The dots come in over four scrolls of the wheel (about 0.15 of a zoom each), not one,
+    // and are whole while the parcels can still be seen: a square flows into a circle.
+    expect(SALE_AREAS_FULL - SALE_DOTS_FULL).toBeGreaterThanOrEqual(0.55);
+    expect(SALE_DOTS_FULL).toBeGreaterThan(SALE_AREAS_GONE);
     const dots = layers.get(SALE_LAYERS.dots);
     expect(dots?.minzoom).toBeUndefined();
     expect(dots?.maxzoom).toBe(SALE_AREAS_FULL);

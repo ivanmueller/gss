@@ -13,6 +13,7 @@ import {
   type LandSaleState,
   type LandSalesView,
 } from '../lib/landSalesMap';
+import { ST37_OUTLINES } from '../lib/st37Map';
 import { landReadable, landRequest, landToday } from './Land';
 
 /**
@@ -330,6 +331,8 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
 
   const totals = summary?.key === summaryFilter ? summary.answer : null;
   const rightsName = rights !== null ? (LAND_RIGHTS[rights]?.name ?? rights) : null;
+  // A play's sales are those inside its outline, when the map has one for it (F-264).
+  const outlined = rights !== null && Object.hasOwn(ST37_OUTLINES, rights);
   const periodLabel = SALE_PERIODS.find((p) => p.key === period)?.label.toLowerCase() ?? '';
 
   const cardRow = (id: string) => {
@@ -418,7 +421,8 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
               <span className="block text-xs text-muted-foreground">
                 {totals.nextSale.parcels.toLocaleString('en-CA')}{' '}
                 {totals.nextSale.parcels === 1 ? 'parcel' : 'parcels'} posted
-                {rightsName ? ` with ${rightsName} rights` : ''} in the area loaded
+                {rightsName ? ` with ${rightsName} rights` : ''}{' '}
+                {outlined ? 'inside its outline' : 'in the area loaded'}
               </span>
             </p>
           )}
@@ -453,6 +457,11 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
               />
             </label>
           </div>
+          {outlined && (
+            <p className="text-xs text-muted-foreground">
+              Parcels whose rights include it, inside the {rightsName} outline drawn on the map.
+            </p>
+          )}
           <div className="flex flex-wrap gap-1" role="group" aria-label="Period">
             {SALE_PERIODS.map((p) => (
               <button
@@ -546,7 +555,9 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
                 parcels from its notice, and their results once the sale is held (status, bonus,
                 price per hectare, buyers), as published. A buyer is often a land broker bidding for
                 someone else. The totals are of every parcel loaded that the rights and the period
-                keep, not of the map’s view; the bonus by quarter covers every year.
+                keep, not of the map’s view; the bonus by quarter covers every year. With a play
+                chosen, the parcels and the totals are those inside the play’s outline: a parcel
+                counts when the middle of its land lies within it.
               </p>
               <p>
                 A parcel’s shape is its land placed on the province’s township grid; quarters and
@@ -558,7 +569,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
               </p>
               <p>
                 {answer?.source.loadedAt
-                  ? `${answer.source.name}; sales of ${answer.source.firstSale ?? ''} to ${answer.source.lastSale ?? ''}, loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for the area of the Duvernay's wells only so far. Not an official record.`
+                  ? `${answer.source.name}; sales of ${answer.source.firstSale ?? ''} to ${answer.source.lastSale ?? ''}, loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for the Duvernay's area only so far. Not an official record.`
                   : 'Alberta Energy and Minerals, Government of Alberta, public offerings of petroleum and natural gas rights.'}
               </p>
             </div>

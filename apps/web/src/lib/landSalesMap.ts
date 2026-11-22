@@ -12,31 +12,23 @@ import { ST37_LAYERS } from './st37Map';
  */
 
 /**
- * How the parcels give way to dots as the map is zoomed out (F-262; the owner, 2026-11-21, by
- * the distance bar and the mouse wheel, from eight pictures of another map): the parcels start
- * to fade as the bar turns to 20 km (SALE_AREAS_FULL), a scroll later every parcel has its dot,
- * so the small ones read as round (SALE_DOTS_FULL), and by the second scroll after the bar
- * reads 30 km only dots are left (SALE_AREAS_GONE). The bar's readings as in `mapDetail.ts`.
+ * How the parcels give way to dots as the map is zoomed out (F-262, F-264; the owner,
+ * 2026-11-21, by the distance bar and the mouse wheel, from pictures of another map): the
+ * parcels start to fade as the bar turns to 20 km (SALE_AREAS_FULL) and are gone by the second
+ * scroll after it reads 30 km (SALE_AREAS_GONE), steadily over those six scrolls; the dots come
+ * in as steadily over the first four, whole as the bar turns to 30 km (SALE_DOTS_FULL). A dot
+ * first shows as a pale ring on its own parcel, which then fades away around it, so a square
+ * flows into a circle. At first the dots were whole within one scroll, the parcels dropping to
+ * half with it: "from square to circle almost instantly". The bar's readings as in
+ * `mapDetail.ts`.
  */
 export const SALE_AREAS_FULL = 8.1;
-export const SALE_DOTS_FULL = 7.95;
+export const SALE_DOTS_FULL = 7.5;
 export const SALE_AREAS_GONE = 7.2;
 
-/** A parcel's opacity: `full` close in, a little over half once the dots are in, then nothing. */
+/** A parcel's opacity: `full` close in, steadily less from SALE_AREAS_FULL out, then nothing. */
 function areaFade(full: number | ExpressionSpecification): ExpressionSpecification {
-  const half: number | ExpressionSpecification =
-    typeof full === 'number' ? full * 0.55 : ['*', 0.55, full];
-  return [
-    'interpolate',
-    ['linear'],
-    ['zoom'],
-    SALE_AREAS_GONE,
-    0,
-    SALE_DOTS_FULL,
-    half,
-    SALE_AREAS_FULL,
-    full,
-  ];
+  return ['interpolate', ['linear'], ['zoom'], SALE_AREAS_GONE, 0, SALE_AREAS_FULL, full];
 }
 /** A dot's opacity: nothing while the parcels are whole, `full` from SALE_DOTS_FULL out. */
 function dotFade(full: number): ExpressionSpecification {

@@ -20,6 +20,8 @@ import {
   landSaleSummaryAnswer,
   parseSince,
 } from './land-sales';
+import type { LandSaleFilter } from './land-sales-db';
+import { PLAY_OUTLINES } from './play-outlines';
 import {
   parseFormation,
   parseUwi,
@@ -589,13 +591,14 @@ export function petroleumRoutes(
   // /petroleum/land-sales and /land-sales/summary: the parcels of the province's public
   // offerings of petroleum and natural gas rights, with their results (F-242): those whose
   // shape touches the map's view, and the totals of every parcel loaded. `rights` keeps the
-  // parcels whose rights include a play; `since` the sales from a date on. Membership first.
+  // parcels whose rights include a play, and of those the ones inside the play's outline
+  // (F-264); `since` the sales from a date on. Membership first.
   const landSales = (
     c: Context<ApiEnv>,
     read: (
       petroleum: PetroleumDatabase,
       ctx: PetroleumContext,
-      filter: { zones: readonly string[] | null; since: string | null; until: string | null },
+      filter: LandSaleFilter & { until: string | null },
     ) => Promise<unknown>,
   ) => {
     c.header('Cache-Control', 'no-store');
@@ -632,7 +635,13 @@ export function petroleumRoutes(
         });
         return keptJson(
           c,
-          await read(petroleum, who, { zones, since: since.since, until: until.since }),
+          await read(petroleum, who, {
+            zones,
+            since: since.since,
+            until: until.since,
+            // The play's sales are those inside its outline, as the map draws it (F-264).
+            outline: rights.play !== null ? (PLAY_OUTLINES[rights.play] ?? null) : null,
+          }),
         );
       });
     });

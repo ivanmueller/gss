@@ -2,6 +2,7 @@ import type { LandShape } from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { PetroleumContext } from './petroleum-db';
+import type { OutlineRing } from './play-outlines';
 import type { St37Box } from './st37-db';
 
 /**
@@ -39,12 +40,14 @@ export interface LandSaleLoad {
 /**
  * What narrows the parcels: the hashes (md5) of the zones that include a play's rights, sales
  * from a date on and, for the parcels (not their totals), sales before a date: the page reads
- * every year a few years at a time (F-263).
+ * every year a few years at a time (F-263). And a play's outline: the parcels and the totals
+ * are then of the parcels lying inside it (F-264).
  */
 export interface LandSaleFilter {
   zones: readonly string[] | null;
   since: string | null;
   until?: string | null;
+  outline?: readonly OutlineRing[] | null;
 }
 
 export interface LandSaleSummary {
@@ -85,6 +88,27 @@ async function asMember(tx: postgres.TransactionSql, ctx: PetroleumContext) {
                   set_config('petro.request_id', ${ctx.requestId}, true)`;
 }
 
+/**
+ * A play's outline for a query (`with ${outlineRings(tx, filter)} select ...`): each ring read
+ * once as a polygon, with the box around it, which rules most parcels out before the ring is
+ * walked.
+ */
+const outlineRings = (tx: postgres.TransactionSql, filter: LandSaleFilter) => tx`
+  outline as materialized (
+    select o.hole, o.ring::polygon as ring, box(o.ring::polygon) as reach
+    from jsonb_to_recordset((${JSON.stringify(filter.outline ?? [])}::text)::jsonb)
+      as o(hole boolean, ring text))`;
+/**
+ * Whether a parcel lies inside the outline: the middle of its bounds is within an outer ring
+ * and within no hole. Every parcel when there is no outline.
+ */
+const inOutline = (tx: postgres.TransactionSql, filter: LandSaleFilter) => tx`
+  (${(filter.outline ?? null) === null}::boolean
+   or (exists (select 1 from outline o
+               where not o.hole and o.reach @> center(bounds) and o.ring @> center(bounds))
+       and not exists (select 1 from outline o
+                       where o.hole and o.reach @> center(bounds) and o.ring @> center(bounds))))`;
+
 export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
   return {
     landSales(ctx, box, filter, limit) {
@@ -122,6 +146,7 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             shape: LandShape;
           }[]
         >`
+          with ${outlineRings(tx, filter)}
           select id::text as id, sale_date::text as sale_date, contract_no, contract_type, region,
                  hectares::text as hectares, zone, land, inexact, status, bonus::text as bonus,
                  dollars_per_hectare::text as dollars_per_hectare, buyers, shape
@@ -133,6 +158,7 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
                    (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
             and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
             and (${filter.until ?? null}::date is null or sale_date < ${filter.until ?? null}::date)
+            and ${inOutline(tx, filter)}
           order by sale_date desc, contract_no
           limit ${limit + 1}`;
         return {
@@ -171,9 +197,13 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
     landSaleSummary(ctx, filter) {
       return sql.begin(async (tx) => {
         await asMember(tx, ctx);
+        // The rights, and the play's outline when there is one: the totals are of the parcels
+        // the map shows.
+        const outline = outlineRings(tx, filter);
         const rights = tx`(${filter.zones === null}::boolean
                            or md5(zone) in (select jsonb_array_elements_text(
-                   (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))`;
+                   (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
+                          and ${inOutline(tx, filter)}`;
         const [totals] = await tx<
           {
             offered: number;
@@ -184,6 +214,7 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             high: string | null;
           }[]
         >`
+          with ${outline}
           select count(*) filter (where status is not null)::int as offered,
                  count(*) filter (where status = 'ACCEPTED')::int as sold,
                  coalesce(sum(bonus) filter (where status = 'ACCEPTED'), 0)::text as bonus,
@@ -195,12 +226,14 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
           where ${rights}
             and (${filter.since}::date is null or sale_date >= ${filter.since}::date)`;
         const [next] = await tx<{ sale_date: string; parcels: number }[]>`
+          with ${outline}
           select sale_date::text as sale_date, count(*)::int as parcels
           from petro.land_sale_parcels
           where status is null and ${rights}
             and sale_date >= (now() at time zone 'America/Edmonton')::date
           group by sale_date order by sale_date limit 1`;
         const quarters = await tx<{ quarter: string; bonus: string; sold: number }[]>`
+          with ${outline}
           select to_char(date_trunc('quarter', sale_date), 'YYYY"-Q"Q') as quarter,
                  sum(bonus)::text as bonus, count(*)::int as sold
           from petro.land_sale_parcels

@@ -65,6 +65,57 @@ function setUp(into, sold = 'EXAMPLE "LAND" LTD.\'); drop table x; --') {
 }
 
 describe('load-land-sales.js', () => {
+  test("area: the wells' box widened to hold the play's outline, no farther than Alberta", () => {
+    const outline = join(dir, 'outline.geojson');
+    const ring = (points) => [[...points, points[0]]];
+    writeFileSync(
+      outline,
+      JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'MultiPolygon',
+              coordinates: [
+                // Beyond the wells to the west and the north; inside them to the south.
+                ring([
+                  [-118.123, 53.5],
+                  [-116, 53.5],
+                  [-116, 55.4561],
+                ]),
+                // Beyond Alberta to the east: kept to the province's edge.
+                ring([
+                  [-112, 54],
+                  [-109, 54],
+                  [-112, 54.5],
+                ]),
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const out = run('area', '-117', '53', '-115', '55', outline);
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.stdout.trim(), '-118.13 53.00 -109.90 55.46');
+    // The map's own outline of the Duvernay: wider than the box around its wells on every side.
+    const duvernay = fileURLToPath(
+      new URL('../apps/web/public/outlines/duvernay.geojson', import.meta.url),
+    );
+    assert.equal(
+      run('area', '-118.75', '51.57', '-112.9', '55.28', duvernay).stdout.trim(),
+      '-119.86 51.32 -110.97 56.23',
+    );
+    // No outline, or one with no points: no area.
+    assert.equal(run('area', '-117', '53', '-115', '55', join(dir, 'none.geojson')).status, 2);
+    const empty = join(dir, 'empty.geojson');
+    writeFileSync(empty, JSON.stringify({ type: 'FeatureCollection', features: [] }));
+    assert.equal(run('area', '-117', '53', '-115', '55', empty).status, 2);
+    assert.equal(run('area', '-117', '53', '-115', outline).status, 2);
+  });
+
   test('sql: one transaction that replaces the copy, joins the results and checks the size', () => {
     setUp(files);
     const out = run('sql', files, sections, '-117', '53', '-115', '55', '1000');
