@@ -1,0 +1,135 @@
+name: Load formation layers
+
+# Run by hand from the Actions tab (Actions → Load formation layers → Run workflow). Downloads the
+# Alberta Geological Survey's Geological Framework of Alberta, Version 4 (the elevation of the top
+# and of the base of each of its 90 zones, about 1.6 GB), cuts every grid onto our lattice of
+# about 1 km and loads the cells within 10 km of a well into the oil and gas database
+# (petroleum-staging), replacing the copy in one transaction (F-261 part 2,
+# docs/FEATURES_OIL_GAS.md). A well's 3D view draws the ground's layers from it.
+#
+# Open data: the Survey's material is under the Open Government Licence – Alberta, the Survey
+# acknowledged where it is shown (docs/DECISIONS.md, 2026-11-22). Its files stay on the runner.
+# The load is refused if grain's and the oil and gas databases together would pass 400 MB (the
+# free plan's limit is shared by both). Run it after Load ST37 wells: the cells kept are those
+# around the wells loaded.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-formation-layers
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 13 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 13)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB."
+      - name: List the wells loaded
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gfa/tm" "$RUNNER_TEMP/gfa/grids"
+          # Where each well starts and ends: numbers only, never written to the log.
+          psql "$PETROLEUM_STAGING_DB_URL" -tA -F ',' -c "select surface_longitude, surface_latitude, bottom_longitude, bottom_latitude from petro.st37_wells" > "$RUNNER_TEMP/gfa/wells.csv"
+          wells=$(wc -l < "$RUNNER_TEMP/gfa/wells.csv")
+          if [ "$wells" -eq 0 ]; then
+            echo "::error::No wells in the oil and gas database: run Load ST37 wells first."
+            exit 1
+          fi
+          lattice=$(node --experimental-strip-types scripts/load-formation-layers.js lattice "$RUNNER_TEMP/gfa/wells.csv")
+          read -r west south east north columns rows <<< "$lattice"
+          {
+            echo "WEST=$west"
+            echo "SOUTH=$south"
+            echo "EAST=$east"
+            echo "NORTH=$north"
+            echo "COLUMNS=$columns"
+            echo "ROWS=$rows"
+          } >> "$GITHUB_ENV"
+          echo "$wells wells; the lattice is $columns by $rows cells."
+      - name: Download the Survey's elevation surfaces
+        run: |
+          cd "$RUNNER_TEMP/gfa"
+          url='https://aercclrsuatagsgispub01.blob.core.windows.net/arcgis-online/projects/GFA/Bulk_download/Modelled%20elevation%20surfaces.zip'
+          curl -sSfL --retry 3 -D headers.txt -o surfaces.zip "$url"
+          # The file's own date, when the server sends one.
+          modified=$(grep -i '^last-modified:' headers.txt | cut -d' ' -f2- | tr -d '\r' || true)
+          date=$(date -u -d "$modified" +%F 2>/dev/null || echo -)
+          echo "SOURCE_URL=$url" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE=$date" >> "$GITHUB_ENV"
+          echo "Downloaded $(( $(stat -c %s surfaces.zip) / 1048576 )) MB, dated $date."
+          # The tops and bases of the 90 zones in Alberta's own projection (the model site's
+          # advice for any work on the grids); not the three joined Montney and Doig grids,
+          # whose names carry two numbers.
+          unzip -q -j surfaces.zip '*Elevation_Surface_Top_[0-9][0-9]_[A-Za-z]*_10tm.tif' \
+            '*Elevation_Surface_Base_[0-9][0-9]_[A-Za-z]*_10tm.tif' -d tm
+          rm surfaces.zip
+          count=$(find tm -name '*.tif' | wc -l)
+          if [ "$count" -ne 180 ]; then
+            echo "::error::Expected the tops and bases of 90 zones (180 grids), found $count: the Survey's file has changed."
+            exit 1
+          fi
+      - name: Cut the grids onto the lattice
+        run: |
+          cd "$RUNNER_TEMP/gfa"
+          # Each cell takes the model's own value at its centre (nearest, nothing averaged), so
+          # the layers of a cell stack exactly as in the model. Raw 32-bit numbers, north row
+          # first, -9999 where a zone is absent.
+          docker run --rm -v "$PWD:/data" -e WEST="$WEST" -e SOUTH="$SOUTH" -e EAST="$EAST" \
+            -e NORTH="$NORTH" -e COLUMNS="$COLUMNS" -e ROWS="$ROWS" \
+            ghcr.io/osgeo/gdal:alpine-small-3.10.0 sh -c '
+              set -e
+              cd /data/tm
+              for f in Elevation_Surface_*_10tm.tif; do
+                kind=$(echo "$f" | cut -d_ -f3 | tr "[:upper:]" "[:lower:]")
+                number=$(echo "$f" | cut -d_ -f4)
+                gdalwarp -q -overwrite -t_srs EPSG:4326 -te "$WEST" "$SOUTH" "$EAST" "$NORTH" \
+                  -ts "$COLUMNS" "$ROWS" -r near -ot Float32 -dstnodata -9999 -of ENVI \
+                  "$f" "/data/grids/${kind}_${number}.bil"
+              done'
+          rm -rf tm
+          ls grids/*.bil | wc -l
+      - name: Load the layers
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          node --experimental-strip-types scripts/load-formation-layers.js load \
+            "$RUNNER_TEMP/gfa/grids" "$RUNNER_TEMP/gfa/wells.csv" "$SOURCE_URL" "$SOURCE_DATE" \
+            "$GRAIN_BYTES" > "$RUNNER_TEMP/gfa/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/gfa/load.sql"
+      - name: Remove the files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/gfa"

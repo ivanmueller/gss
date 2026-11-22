@@ -1,8 +1,17 @@
-import type { St37StatusClass } from '@grain/domain';
+import { FORMATION_ROCKS, formationZone, type St37StatusClass } from '@grain/domain';
+
+import {
+  wallIsBehind,
+  type LayerHit,
+  type LayerScene,
+  type LayerSheet,
+  type LayerWall,
+} from './formationLayers';
 
 import {
   lens,
   niceStep,
+  sceneZ,
   type Camera,
   type Lens,
   type Scene,
@@ -40,6 +49,14 @@ export interface DrawOptions {
   hit: Well3dHit | null;
   /** The leg picked out on the panel (its UWI), drawn brightest; null for none. */
   chosen: string | null;
+  /** The ground's layers, for the Layers view: the block's far faces are cut through them. */
+  layers?: LayerScene | null;
+  /** The layer the pointer is on, on a far face. */
+  layerHit?: LayerHit | null;
+  /** The zone the play is (the Duvernay's), edged and named; null for none. */
+  playZone?: number | null;
+  /** Which layers are named on the picture: all that have room, or the play's alone. */
+  labels?: 'all' | 'play';
 }
 
 /** Strokes the line through the points, cut where it passes behind the camera. */
@@ -252,6 +269,238 @@ function drawLine(
   }
 }
 
+/** A zone's colour and hatching, as the Table of Formations colours its unit. */
+function rockOf(zone: number) {
+  return FORMATION_ROCKS[formationZone(zone)?.rock ?? 'unknown'];
+}
+
+/**
+ * The block's far faces, cut through the ground: each zone a band between its top and its
+ * base, in its rock type's colour, the play's zone edged in white. Returns nothing: the
+ * pointer is answered from the layers themselves (`pickLayer`).
+ */
+function drawWalls(
+  ctx: CanvasRenderingContext2D,
+  view: Lens,
+  scene: Scene,
+  layers: LayerScene,
+  playZone: number | null,
+) {
+  const floor = scene.min[2];
+  const zones = layers.field.zones;
+  const walls = layers.walls
+    .filter((wall) => wallIsBehind(wall, view.eye))
+    .map((wall) => {
+      const middle = wall.samples[Math.floor(wall.samples.length / 2)];
+      return { wall, away: middle ? view.see([middle.x, middle.y, floor])[2] : 0 };
+    })
+    .sort((a, b) => b.away - a.away);
+  for (const { wall } of walls) {
+    // Each surface along the face, on the canvas: surfaces[k][s], null where it cannot be drawn.
+    const surfaces: ([number, number] | null)[][] = [];
+    for (let k = 0; k <= zones.length; k += 1) {
+      surfaces.push(
+        wall.samples.map((sample) => {
+          if (!sample.stack) return null;
+          const elevation = k < zones.length ? (sample.stack.tops[k] ?? 0) : sample.stack.base;
+          const seen = view.see([sample.x, sample.y, Math.max(floor, sceneZ(scene, elevation))]);
+          return seen[2] >= view.near ? view.place(seen) : null;
+        }),
+      );
+    }
+    // The stretches of the face that can be drawn: samples in a row with every surface seen.
+    const runs: [number, number][] = [];
+    let from = -1;
+    wall.samples.forEach((_, s) => {
+      const seen = surfaces[0]?.[s] != null && surfaces[zones.length]?.[s] != null;
+      if (seen && from < 0) from = s;
+      if ((!seen || s === wall.samples.length - 1) && from >= 0) {
+        const to = seen ? s : s - 1;
+        if (to > from) runs.push([from, to]);
+        from = -1;
+      }
+    });
+    const edge = (k: number, a: number, b: number) => {
+      const step = a <= b ? 1 : -1;
+      for (let s = a; s !== b + step; s += step) {
+        const point = surfaces[k]?.[s];
+        if (point) ctx.lineTo(point[0], point[1]);
+      }
+    };
+    for (const [a, b] of runs) {
+      for (let k = 0; k < zones.length; k += 1) {
+        // A zone with no thickness anywhere along the stretch is not there.
+        let thick = 0;
+        for (let s = a; s <= b; s += 1) {
+          const [top, under] = [surfaces[k]?.[s], surfaces[k + 1]?.[s]];
+          if (top && under) thick = Math.max(thick, Math.abs(under[1] - top[1]));
+        }
+        if (thick < 0.35) continue;
+        const rock = rockOf(zones[k] ?? 0);
+        ctx.beginPath();
+        edge(k, a, b);
+        edge(k + 1, b, a);
+        ctx.closePath();
+        ctx.globalAlpha = 0.94;
+        ctx.fillStyle = rock.colour;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        if (rock.hatch) {
+          // The two interbedded classes: slanted lines, as on the table.
+          ctx.beginPath();
+          for (let s = a; s < b; s += 1) {
+            const [top, under] = [surfaces[k]?.[s], surfaces[k + 1]?.[s + 1]];
+            if (!top || !under) continue;
+            ctx.moveTo(top[0], top[1]);
+            ctx.lineTo(under[0], under[1]);
+          }
+          stroke(ctx, rock.hatch, 0.9);
+        }
+        ctx.beginPath();
+        edge(k, a, b);
+        stroke(ctx, 'rgba(15, 23, 42, 0.42)', 0.7);
+      }
+      // One face a little darker than the other, so the corner between them reads.
+      if (wall.normal[0] !== 0) {
+        ctx.beginPath();
+        edge(0, a, b);
+        edge(zones.length, b, a);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(2, 6, 12, 0.2)';
+        ctx.fill();
+      }
+      const play = playZone === null ? -1 : zones.indexOf(playZone);
+      if (play >= 0) {
+        for (const k of [play, play + 1]) {
+          ctx.beginPath();
+          edge(k, a, b);
+          stroke(ctx, 'rgba(255, 255, 255, 0.95)', 1.4);
+        }
+      }
+    }
+  }
+}
+
+/** The top of the play's zone, as a faint sheet through the block: where the legs run. */
+function drawSheet(ctx: CanvasRenderingContext2D, view: Lens, sheet: LayerSheet) {
+  const width = sheet.side + 1;
+  const at = (i: number, j: number) => sheet.points[j * width + i] ?? null;
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.09)';
+  for (let j = 0; j < sheet.side; j += 1) {
+    for (let i = 0; i < sheet.side; i += 1) {
+      const quad = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+      if (quad.some((point) => point === null)) continue;
+      const seen = (quad as Vec3[]).map((point) => view.see(point));
+      if (seen.some((corner) => corner[2] < view.near)) continue;
+      ctx.beginPath();
+      seen.forEach((corner, n) => {
+        const [x, y] = view.place(corner);
+        if (n === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  const line = (points: (Vec3 | null)[]) => {
+    let run: Vec3[] = [];
+    for (const point of [...points, null]) {
+      if (point) {
+        run.push(point);
+        continue;
+      }
+      if (run.length > 1) {
+        trace(ctx, view, run);
+        stroke(ctx, 'rgba(125, 211, 252, 0.3)', 0.8);
+      }
+      run = [];
+    }
+  };
+  for (let n = 0; n <= sheet.side; n += 2) {
+    line(Array.from({ length: width }, (_, i) => at(i, n)));
+    line(Array.from({ length: width }, (_, j) => at(n, j)));
+  }
+}
+
+/**
+ * The layers' names down the far face's outer edge that stands rightmost in the picture: every
+ * layer tall enough to hold a line of text, or the play's alone.
+ */
+function drawLayerLabels(
+  ctx: CanvasRenderingContext2D,
+  view: Lens,
+  scene: Scene,
+  layers: LayerScene,
+  size: Size,
+  which: 'all' | 'play',
+  playZone: number | null,
+) {
+  const floor = scene.min[2];
+  let edge: LayerWall['samples'][number] | null = null;
+  let rightmost = -Infinity;
+  for (const wall of layers.walls) {
+    if (!wallIsBehind(wall, view.eye)) continue;
+    for (const sample of [wall.samples[0], wall.samples[wall.samples.length - 1]]) {
+      if (!sample?.stack) continue;
+      const seen = view.see([sample.x, sample.y, (floor + scene.ground) / 2]);
+      if (seen[2] < view.near) continue;
+      const [x] = view.place(seen);
+      if (x > rightmost) {
+        rightmost = x;
+        edge = sample;
+      }
+    }
+  }
+  if (!edge?.stack) return;
+  const zones = layers.field.zones;
+  const stack = edge.stack;
+  const [ex, ey] = [edge.x, edge.y];
+  const found = zones.flatMap((zone, k) => {
+    const play = zone === playZone;
+    if (which === 'play' && !play) return [];
+    const [top, under] = [stack.tops[k] ?? 0, stack.tops[k + 1] ?? stack.base];
+    const a = view.see([ex, ey, Math.max(floor, sceneZ(scene, top))]);
+    const b = view.see([ex, ey, Math.max(floor, sceneZ(scene, under))]);
+    if (a[2] < view.near || b[2] < view.near) return [];
+    const [ax, ay] = view.place(a);
+    const [, by] = view.place(b);
+    if (!play && by - ay < 11) return [];
+    return [{ zone, play, ax, middle: (ay + by) / 2 }];
+  });
+  // The play's name always; the others where they do not crowd one already written.
+  const written: number[] = [];
+  ctx.textBaseline = 'middle';
+  for (const label of [...found.filter((l) => l.play), ...found.filter((l) => !l.play)]) {
+    const { zone, play, ax, middle } = label;
+    if (written.some((y) => Math.abs(y - middle) < 12)) continue;
+    written.push(middle);
+    const short = formationZone(zone)?.short ?? '';
+    // With little room (the panel), the first of a joined layer's names is enough.
+    const text = which === 'play' ? (short.split(' / ')[0] ?? short) : short;
+    ctx.font = play ? `600 ${FONT}` : FONT;
+    const wide = ctx.measureText(text).width;
+    // Beside the edge where there is room, else inside the face.
+    const outside = ax + 10 + wide <= size.width - 4;
+    ctx.textAlign = outside ? 'left' : 'right';
+    const x = outside ? ax + 10 : ax - 6;
+    if (play) {
+      ctx.beginPath();
+      ctx.moveTo(ax, middle);
+      ctx.lineTo(ax + (outside ? 7 : -3), middle);
+      stroke(ctx, '#ffffff', 1.2);
+    }
+    if (!outside) {
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([]);
+      ctx.strokeText(text, x, middle);
+    }
+    ctx.fillStyle = outside ? (play ? '#ffffff' : `rgba(${INK}, 0.82)`) : '#0f172a';
+    ctx.fillText(text, x, middle);
+  }
+}
+
 /** The depth marks down the corner that stands leftmost in the picture. */
 function drawDepths(ctx: CanvasRenderingContext2D, view: Lens, scene: Scene) {
   const middle = (scene.min[2] + scene.ground) / 2;
@@ -270,9 +519,10 @@ function drawDepths(ctx: CanvasRenderingContext2D, view: Lens, scene: Scene) {
   ctx.font = FONT;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  const marks = niceStep(scene.ground - scene.min[2], 4);
-  for (let depth = 0; scene.ground - depth >= scene.min[2] - 1; depth += marks) {
-    const seen = view.see([post[0], post[1], scene.ground - depth]);
+  // Depths as they are, placed where the scene draws them (deeper when it is stretched).
+  const marks = niceStep((scene.ground - scene.min[2]) / scene.stretch, 4);
+  for (let depth = 0; scene.ground - depth * scene.stretch >= scene.min[2] - 1; depth += marks) {
+    const seen = view.see([post[0], post[1], scene.ground - depth * scene.stretch]);
     if (seen[2] < view.near) continue;
     const [x, y] = view.place(seen);
     ctx.beginPath();
@@ -357,7 +607,8 @@ export function drawWell3d(
   }
   trace(ctx, view, corners(scene, floor), true);
   stroke(ctx, 'rgba(125, 211, 252, 0.3)', 1);
-  for (const line of scene.lines) {
+  // With the layers on, the floor lies far under the wells: no shadows there.
+  for (const line of options.layers ? [] : scene.lines) {
     trace(
       ctx,
       view,
@@ -365,6 +616,7 @@ export function drawWell3d(
     );
     stroke(ctx, line.own ? 'rgba(56, 189, 248, 0.28)' : 'rgba(0, 0, 0, 0.5)', line.own ? 2 : 1.4);
   }
+  if (options.layers) drawWalls(ctx, view, scene, options.layers, options.playZone ?? null);
 
   // The box: its upright edges and a frame at every depth mark.
   for (const [x, y] of corners(scene, 0)) {
@@ -374,11 +626,12 @@ export function drawWell3d(
     ]);
     stroke(ctx, `rgba(${INK}, 0.2)`, 1);
   }
-  const marks = niceStep(scene.ground - floor, 4);
+  const marks = niceStep((scene.ground - floor) / scene.stretch, 4) * scene.stretch;
   for (let z = scene.ground - marks; z > floor + 1; z -= marks) {
     trace(ctx, view, corners(scene, z), true);
     stroke(ctx, `rgba(${INK}, 0.07)`, 1);
   }
+  if (options.layers?.sheet) drawSheet(ctx, view, options.layers.sheet);
 
   // The legs, the farthest first, each fainter the farther it lies.
   const [nearest, farthest] = [camera.distance - scene.radius, camera.distance + scene.radius];
@@ -402,5 +655,24 @@ export function drawWell3d(
 
   if (eyeAbove) drawGround(ctx, view, scene);
   drawDepths(ctx, view, scene);
+  if (options.layers) {
+    drawLayerLabels(
+      ctx,
+      view,
+      scene,
+      options.layers,
+      size,
+      options.labels ?? 'play',
+      options.playZone ?? null,
+    );
+  }
+  if (options.layerHit) {
+    const [x, y] = options.layerHit.at;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fill();
+    stroke(ctx, '#0f172a', 1.2);
+  }
   if (options.hit) drawHit(ctx, view, scene, options.hit);
 }

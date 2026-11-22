@@ -12,6 +12,7 @@ import {
   parseLandKinds,
   parseLandRights,
 } from './land';
+import { FORMATION_SCHEMA_VERSION, formationAnswer, formationRange } from './formation';
 import { keptJson } from './kept-json';
 import {
   LAND_SALES_MAX,
@@ -586,6 +587,41 @@ export function petroleumRoutes(
         const answer = st37Well3dAnswer(asked.uwi, loadedAt, legs);
         if (answer === null) return apiError(c, 404, 'NOT_FOUND', 'No such well is loaded.');
         return keptJson(c, answer);
+      });
+    });
+  });
+
+  // /petroleum/formation-layers: the layers of the ground under a box (F-261 part 2): the
+  // elevation of the top and of the base of each zone of the Survey's model, cell by cell, for
+  // a well's 3D view. Membership first, as above.
+  routes.get('/formation-layers', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const box = parseSt37Box(c.req.query());
+    if (typeof box === 'string') return apiError(c, 400, 'VALIDATION_FAILED', box);
+    const range = formationRange(box);
+    if (typeof range === 'string') return apiError(c, 400, 'VALIDATION_FAILED', range);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < FORMATION_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { load, cells } = await petroleum.formationCells(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          range,
+        );
+        return keptJson(c, formationAnswer(range, load, cells));
       });
     });
   });

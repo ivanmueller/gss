@@ -57,6 +57,9 @@ export function fakePetroleum() {
     st37Well3d: vi.fn<PetroleumDatabase['st37Well3d']>(() =>
       Promise.resolve({ loadedAt: null, legs: [] }),
     ),
+    formationCells: vi.fn<PetroleumDatabase['formationCells']>(() =>
+      Promise.resolve({ load: null, cells: [] }),
+    ),
     wellProduction: vi.fn<PetroleumDatabase['wellProduction']>(() =>
       Promise.resolve({ load: null, months: [] }),
     ),
