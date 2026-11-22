@@ -7,7 +7,7 @@ import { clearApiCache } from '../lib/useApiResource';
 import { mockApi, ORG, SESSION } from '../test/api';
 import { choose } from '../test/select';
 import type { FacilityMapProps } from './FacilityMap';
-import { CANADA, FullPageMap } from './FullPageMap';
+import { CANADA, FullPageMap, sideOrder } from './FullPageMap';
 
 // Mapbox GL JS needs WebGL and Mapbox's servers; a stand-in reports what it was given.
 vi.mock('./FacilityMap', () => ({
@@ -118,6 +118,49 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('the side card (F-267)', () => {
+  it('opens one section at a time, each with its switch, and folds away', async () => {
+    mockApi({ [LIST]: listOf(), ...noLegend });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    expect(within(card).getByRole('heading', { name: 'Alberta oil and gas' })).toBeInTheDocument();
+    for (const title of ['Land sales', 'Land today', 'Wells & licences']) {
+      expect(within(card).getByRole('switch', { name: title })).toBeChecked();
+    }
+    // Land sales is open at first; opening another closes it.
+    const sales = within(card).getByRole('button', { name: 'Land sales' });
+    const wells = within(card).getByRole('button', { name: 'Wells & licences' });
+    expect(sales).toHaveAttribute('aria-expanded', 'true');
+    expect(within(card).getByRole('group', { name: 'When' })).toBeInTheDocument();
+    await userEvent.click(wells);
+    expect(sales).toHaveAttribute('aria-expanded', 'false');
+    expect(wells).toHaveAttribute('aria-expanded', 'true');
+    expect(within(card).queryByRole('group', { name: 'When' })).not.toBeInTheDocument();
+    // The statuses are chips; the parts of a well have no switches any more.
+    expect(within(card).getByRole('group', { name: 'Statuses shown' })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Producing' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(card).queryByText('Main legs')).not.toBeInTheDocument();
+    expect(within(card).queryByText('Planned lines')).not.toBeInTheDocument();
+    // A section switched off shows nothing under its title.
+    await userEvent.click(within(card).getByRole('switch', { name: 'Wells & licences' }));
+    expect(within(card).queryByRole('group', { name: 'Statuses shown' })).not.toBeInTheDocument();
+    // Folded, the card leaves the map; a button brings it back.
+    await userEvent.click(within(card).getByRole('button', { name: 'Hide the menu' }));
+    expect(screen.queryByRole('complementary', { name: 'Map menu' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show the menu' }));
+    expect(screen.getByRole('complementary', { name: 'Map menu' })).toBeInTheDocument();
+  });
+
+  it('leads the legend with the open section', () => {
+    expect(sideOrder('sales')).toEqual(['sales', 'land', 'wells']);
+    expect(sideOrder('wells')).toEqual(['wells', 'sales', 'land']);
+    expect(sideOrder(null)).toEqual(['sales', 'land', 'wells']);
+  });
 });
 
 describe('FullPageMap', () => {
@@ -588,10 +631,11 @@ describe('FullPageMap', () => {
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const legend = await screen.findByRole('list', { name: 'Map layers shown' });
     expect(within(legend).getAllByRole('listitem')).toHaveLength(30);
-    const box = legend.parentElement;
+    // In the one legend card, beside the side card that holds the buttons (F-267).
+    const box = legend.closest('[aria-label="Legend"]');
     expect(box?.className).toMatch(/\bmax-h-\[calc\(100%-9rem\)\]/);
     expect(box?.className).toMatch(/\boverflow-y-auto\b/);
-    const buttons = screen.getByRole('button', { name: 'Layers (30)' }).parentElement;
+    const buttons = screen.getByRole('button', { name: 'Layers (30)' }).closest('aside');
     expect(buttons?.className).toMatch(/\bz-20\b/);
     expect(box?.className).toMatch(/\bz-10\b/);
   });

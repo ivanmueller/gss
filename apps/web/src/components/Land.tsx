@@ -17,6 +17,15 @@ import {
   type LandView,
 } from '../lib/landMap';
 import { DETAIL_GONE } from '../lib/mapDetail';
+import {
+  FilterChip,
+  LegendTitle,
+  MapSection,
+  SIDE_INPUT,
+  SIDE_LABEL,
+  SIDE_SELECT,
+  SwitchRow,
+} from './MapSide';
 
 /**
  * Land held today on the oil and gas map (F-241): a "Land today" panel (who holds the Crown
@@ -294,13 +303,19 @@ export interface LandState {
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
   /** The land whose card is open, drawn with a bold outline. */
   setPicked: (keys: readonly string[]) => void;
-  panel: () => React.ReactNode;
+  /** Narrows the agreements to a play's rights; null for every agreement. */
+  setRights: (rights: string | null) => void;
+  /** When the land was last loaded; null before an answer. */
+  updated: string | null;
+  section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   /** The holders in view and what each mark means; null when no land is on. */
   legend: () => React.ReactNode;
+  /** What the section shows and where it comes from, for Sources & licence. */
+  about: () => React.ReactNode;
 }
 
 const NONE: readonly string[] = [];
-const LABEL = 'text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase';
+const LABEL = SIDE_LABEL;
 
 /**
  * One request for land and what came back. `ground` is the map's view (the box asked for is
@@ -389,8 +404,6 @@ export function useLand(organizationId: string, token: string): LandState {
   const [holder, setHolder] = useState('');
   const [terms, setTerms] = useState<ReadonlySet<LandTerm>>(new Set());
   const [byHolder, setByHolder] = useState(true);
-  const [open, setOpen] = useState(true);
-  const [legendOpen, setLegendOpen] = useState(true);
   const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
   const [picked, setPicked] = useState<readonly string[]>(NONE);
   const today = useMemo(() => landToday(), []);
@@ -511,272 +524,220 @@ export function useLand(organizationId: string, token: string): LandState {
   const rightsName = rights !== null ? (LAND_RIGHTS[rights]?.name ?? rights) : null;
 
   const row = (kind: LandKind, title: string, note: string) => (
-    <label className="flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-sm">
-      <span className="grow font-medium">{title}</span>
-      <span className={LABEL}>{count(kind) || note}</span>
-      <input
-        type="checkbox"
-        aria-label={title}
-        checked={kinds[kind]}
-        onChange={(event) => {
-          setKinds((before) => ({ ...before, [kind]: event.target.checked }));
-        }}
-      />
-    </label>
+    <SwitchRow
+      title={title}
+      note={count(kind) || note}
+      checked={kinds[kind]}
+      onChange={(checked) => {
+        setKinds((before) => ({ ...before, [kind]: checked }));
+      }}
+    />
   );
 
-  const panel = () => (
-    <div
-      className="flex w-72 flex-col gap-2.5 rounded-card border bg-card/95 p-3 shadow-xs"
-      role="group"
-      aria-label="Land today"
+  const section = ({ open, onToggle }: { open: boolean; onToggle: () => void }) => (
+    <MapSection
+      title="Land today"
+      open={open}
+      onToggle={onToggle}
+      on={all}
+      onSwitch={setAll}
+      chip={kinds.agreements ? rightsName : null}
+      onClearChip={() => {
+        setRights(null);
+      }}
+      sample={<Swatch hatch="#44403c" />}
     >
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => {
-            setOpen((before) => !before);
-          }}
-          className="flex grow items-center gap-1.5 text-left text-sm font-semibold"
-        >
-          <span aria-hidden="true" className="text-xs text-muted-foreground">
-            {open ? '▾' : '▸'}
-          </span>
-          Land today
-        </button>
-        {rightsName && all && (
-          <span className="rounded-full bg-foreground px-2 py-0.5 text-xs font-medium text-background">
-            {rightsName}
-          </span>
-        )}
-        <input
-          type="checkbox"
-          aria-label="Land today"
-          checked={all}
-          onChange={(event) => {
-            setAll(event.target.checked);
-          }}
-        />
-      </div>
-      {open && all && (
+      <p className="text-[0.8125rem] text-muted-foreground">
+        Who holds the rights now, and land that never comes up for sale.
+      </p>
+      {row('agreements', 'Current agreements', 'who holds it today')}
+      {kinds.agreements && (
         <>
-          <p className="text-xs text-muted-foreground">
-            Who holds the rights now, and land that never comes up for sale.
-          </p>
-          {row('agreements', 'Current agreements', 'who holds it today')}
-          {kinds.agreements && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-1">
-                  <span className={LABEL}>Rights include</span>
-                  <select
-                    className="h-8 rounded-md border bg-foreground px-2 text-sm font-medium text-background"
-                    value={rights ?? ''}
-                    onChange={(event) => {
-                      setRights(event.target.value === '' ? null : event.target.value);
-                    }}
-                  >
-                    {Object.values(LAND_RIGHTS).map((r) => (
-                      <option key={r.key} value={r.key}>
-                        {r.name}
-                      </option>
-                    ))}
-                    <option value="">All rights</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className={LABEL}>Holder</span>
-                  <input
-                    type="search"
-                    className="h-8 rounded-md border bg-card px-2 text-sm"
-                    placeholder="Any holder"
-                    value={holder}
-                    onChange={(event) => {
-                      setHolder(event.target.value);
-                    }}
-                  />
-                </label>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className={`${LABEL} pt-1.5`}>Status</span>
-                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Status">
-                  {LAND_TERMS.map((term) => (
-                    <button
-                      key={term}
-                      type="button"
-                      aria-pressed={terms.has(term)}
-                      onClick={() => {
-                        setTerms((before) => {
-                          const next = new Set(before);
-                          if (next.has(term)) next.delete(term);
-                          else next.add(term);
-                          return next;
-                        });
-                      }}
-                      className="rounded-md border bg-card px-2 py-1 text-xs hover:bg-muted aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background"
-                    >
-                      {TERM_LABELS[term]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={byHolder}
-                  onChange={(event) => {
-                    setByHolder(event.target.checked);
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1.5">
+              <span className={LABEL}>Rights include</span>
+              <select
+                className={SIDE_SELECT}
+                value={rights ?? ''}
+                onChange={(event) => {
+                  setRights(event.target.value === '' ? null : event.target.value);
+                }}
+              >
+                {Object.values(LAND_RIGHTS).map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.name}
+                  </option>
+                ))}
+                <option value="">All rights</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className={LABEL}>Holder</span>
+              <input
+                type="search"
+                className={SIDE_INPUT}
+                placeholder="Any holder"
+                value={holder}
+                onChange={(event) => {
+                  setHolder(event.target.value);
+                }}
+              />
+            </label>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className={`${LABEL} pt-2`}>Status</span>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Status">
+              {LAND_TERMS.map((term) => (
+                <FilterChip
+                  key={term}
+                  pressed={terms.has(term)}
+                  onClick={() => {
+                    setTerms((before) => {
+                      const next = new Set(before);
+                      if (next.has(term)) next.delete(term);
+                      else next.add(term);
+                      return next;
+                    });
                   }}
-                />
-                <span className="font-medium">Colour by holder</span>
-              </label>
-              <p className="text-xs text-muted-foreground">
-                Who holds the Crown rights today, drawn under the wells.{' '}
-                {rightsName
-                  ? `Only agreements whose rights include the ${rightsName}.`
-                  : 'Every agreement: zoom in to see them.'}
-              </p>
-            </>
-          )}
-          {row('freehold', 'Freehold minerals', 'not Crown-owned')}
-          {row('offsets', 'Offset notices', 'drainage deadlines')}
-          {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
-          {failed && (
-            <p className="text-xs text-destructive">
-              The land could not be loaded. Move the map to try again.
-            </p>
-          )}
-          {truncated && (
-            <p className="text-xs text-muted-foreground">
-              More land than can be drawn at once here: zoom in to see all of it.
-            </p>
-          )}
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none hover:text-foreground">
-              About this data
-            </summary>
-            <div className="mt-1.5 flex flex-col gap-1.5">
-              <p>
-                Current agreements: the Crown’s petroleum and natural gas and oil sands leases and
-                licences, a shape for each tract, in its holder’s colour (the designated
-                representative; a colour can be shared by two holders). Hatched: its expiry falls
-                within 12 months. The counts are those of the land in view.
-              </p>
-              <p>
-                Rights include: read from each agreement’s zone as the province writes it. An
-                agreement counts when any of its rights reach into the formation: in it, across it,
-                down into it from above, or from within it down. Which formation lies above which is
-                taken from the zones themselves (“below the base of the Cardium to the base of the
-                Duvernay” places the Cardium above), from every agreement and sale parcel loaded,
-                and from nowhere else. Where those do not settle it, the agreement is not counted.
-              </p>
-              <p>
-                Freehold minerals: land whose petroleum and natural gas is not the Crown’s; the
-                province names no owner. National parks and reserves are hatched in grey. Drawn from
-                close in. Offset notices: the active ones, fainter once the deadline has passed.
-                Point at land for a few lines about it; click it for its details in a panel on the
-                right.
-              </p>
-              <p>
-                {loadedAt
-                  ? `${answer?.source.name ?? ''}, public map services; loaded ${formatAlberta(loadedAt, { weekday: false })}, for the area of the Duvernay's wells only so far. Not an official record.`
-                  : answer
-                    ? 'No land loaded yet.'
-                    : 'Alberta Energy and Minerals, Government of Alberta, public map services.'}
-              </p>
+                >
+                  {TERM_LABELS[term]}
+                </FilterChip>
+              ))}
             </div>
-          </details>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-foreground"
+              checked={byHolder}
+              onChange={(event) => {
+                setByHolder(event.target.checked);
+              }}
+            />
+            <span className="font-medium">Colour by holder</span>
+            <span className="text-xs text-muted-foreground">a soft colour for each holder</span>
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Who holds the Crown rights today, drawn under the sale parcels and the wells.{' '}
+            {rightsName
+              ? `Only agreements whose rights include the ${rightsName}.`
+              : 'Every agreement: zoom in to see them.'}
+          </p>
         </>
       )}
-    </div>
+      {row('freehold', 'Freehold minerals', 'not Crown-owned')}
+      {row('offsets', 'Offset notices', 'drainage deadlines')}
+      {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
+      {failed && (
+        <p className="text-xs text-destructive">
+          The land could not be loaded. Move the map to try again.
+        </p>
+      )}
+      {truncated && (
+        <p className="text-xs text-muted-foreground">
+          More land than can be drawn at once here: zoom in to see all of it.
+        </p>
+      )}
+    </MapSection>
+  );
+
+  const about = () => (
+    <>
+      <p>
+        <strong className="font-medium text-foreground">Land today.</strong> Current agreements: the
+        Crown’s petroleum and natural gas and oil sands leases and licences, a shape for each tract,
+        in its holder’s colour (the designated representative; a colour can be shared by two
+        holders). Hatched: its expiry falls within 12 months. The counts are those of the land in
+        view.
+      </p>
+      <p>
+        Rights include: read from each agreement’s zone as the province writes it. An agreement
+        counts when any of its rights reach into the formation: in it, across it, down into it from
+        above, or from within it down. Which formation lies above which is taken from the zones
+        themselves (“below the base of the Cardium to the base of the Duvernay” places the Cardium
+        above), from every agreement and sale parcel loaded, and from nowhere else. Where those do
+        not settle it, the agreement is not counted.
+      </p>
+      <p>
+        Freehold minerals: land whose petroleum and natural gas is not the Crown’s; the province
+        names no owner. National parks and reserves are hatched in grey. Drawn from close in. Offset
+        notices: the active ones, fainter once the deadline has passed. Point at land for a few
+        lines about it; click it for its details in a panel on the right.
+      </p>
+      <p>
+        {loadedAt
+          ? `${answer?.source.name ?? ''}, public map services; loaded ${formatAlberta(loadedAt, { weekday: false })}, for the area of the Duvernay's wells only so far. Not an official record.`
+          : answer
+            ? 'No land loaded yet.'
+            : 'Alberta Energy and Minerals, Government of Alberta, public map services.'}
+      </p>
+    </>
   );
 
   const legend = () =>
     !anyOn ? null : (
-      <div
-        className="w-64 rounded-card border bg-card/95 p-3 text-xs shadow-xs"
-        role="group"
-        aria-label="Land legend"
-      >
-        <div className="flex items-center justify-between">
-          <p className={LABEL}>{byHolder ? 'Holders in view' : 'Land today'}</p>
-          <button
-            type="button"
-            aria-expanded={legendOpen}
-            aria-label={legendOpen ? 'Hide the legend' : 'Show the legend'}
-            onClick={() => {
-              setLegendOpen((before) => !before);
-            }}
-            className="rounded-sm px-1.5 leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
+      <div role="group" aria-label="Land legend">
+        <LegendTitle>{byHolder ? 'Holders in view' : 'Land today'}</LegendTitle>
+        {on.agreements && (
+          <ul
+            className="mt-2 flex max-h-36 flex-col gap-1 overflow-y-auto"
+            aria-label="Holders in view"
           >
-            {legendOpen ? '−' : '+'}
-          </button>
-        </div>
-        {legendOpen && (
-          <>
-            {on.agreements && (
-              <ul
-                className="mt-2 flex max-h-36 flex-col gap-1 overflow-y-auto"
-                aria-label="Holders in view"
-              >
-                {byHolder ? (
-                  holders.length > 0 ? (
-                    holders.map((h) => (
-                      <li key={h.holder} className="flex items-center gap-2">
-                        <Swatch colour={landHolderColour(h.holder)} />
-                        <span className="truncate" title={h.holder}>
-                          {landReadable(h.holder)}
-                        </span>
-                      </li>
-                    ))
-                  ) : (
-                    <li className="text-muted-foreground">
-                      {far('agreements') ? 'Zoom in to see who holds the land.' : 'None here.'}
-                    </li>
-                  )
-                ) : (
-                  <li className="flex items-center gap-2">
-                    <Swatch colour={LAND_PLAIN} />
-                    Current agreements
+            {byHolder ? (
+              holders.length > 0 ? (
+                holders.map((h) => (
+                  <li key={h.holder} className="flex items-center gap-2">
+                    <Swatch colour={landHolderColour(h.holder)} />
+                    <span className="truncate" title={h.holder}>
+                      {landReadable(h.holder)}
+                    </span>
                   </li>
-                )}
-              </ul>
-            )}
-            <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
-              {on.agreements && (
-                <li className="flex items-center gap-2">
-                  <Swatch hatch="#44403c" />
-                  Expiring within 12 months
+                ))
+              ) : (
+                <li className="text-muted-foreground">
+                  {far('agreements') ? 'Zoom in to see who holds the land.' : 'None here.'}
                 </li>
-              )}
-              {on.freehold && (
-                <>
-                  <li className="flex items-center gap-2">
-                    <Swatch hatch={LAND_FREEHOLD} />
-                    Freehold minerals
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Swatch hatch={LAND_RESERVE} />
-                    National park or reserve
-                  </li>
-                </>
-              )}
-              {on.offsets && (
-                <>
-                  <li className="flex items-center gap-2">
-                    <Swatch outline={LAND_OFFSET} />
-                    Offset notice, open
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Swatch outline={`${LAND_OFFSET}80`} />
-                    Deadline passed
-                  </li>
-                </>
-              )}
-            </ul>
-          </>
+              )
+            ) : (
+              <li className="flex items-center gap-2">
+                <Swatch colour={LAND_PLAIN} />
+                Current agreements
+              </li>
+            )}
+          </ul>
         )}
+        <ul className="mt-2 flex flex-col gap-1">
+          {on.agreements && (
+            <li className="flex items-center gap-2">
+              <Swatch hatch="#44403c" />
+              Expiring within 12 months
+            </li>
+          )}
+          {on.freehold && (
+            <>
+              <li className="flex items-center gap-2">
+                <Swatch hatch={LAND_FREEHOLD} />
+                Freehold minerals
+              </li>
+              <li className="flex items-center gap-2">
+                <Swatch hatch={LAND_RESERVE} />
+                National park or reserve
+              </li>
+            </>
+          )}
+          {on.offsets && (
+            <>
+              <li className="flex items-center gap-2">
+                <Swatch outline={LAND_OFFSET} />
+                Offset notice, open
+              </li>
+              <li className="flex items-center gap-2">
+                <Swatch outline={`${LAND_OFFSET}80`} />
+                Deadline passed
+              </li>
+            </>
+          )}
+        </ul>
       </div>
     );
 
@@ -789,8 +750,11 @@ export function useLand(organizationId: string, token: string): LandState {
     shapeOf,
     onViewChange,
     setPicked,
-    panel,
+    setRights,
+    updated: loadedAt,
+    section,
     legend,
+    about,
   };
 }
 

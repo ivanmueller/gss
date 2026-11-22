@@ -18,15 +18,24 @@ import {
   st37ZoneFeatures,
   type St37MapWell,
   type St37MapZone,
-  type St37Parts,
   type St37View,
 } from '../lib/st37Map';
+import {
+  FilterChip,
+  Fold,
+  LegendTitle,
+  MapSection,
+  SIDE_ACCENT,
+  SIDE_INPUT,
+  SIDE_LABEL,
+  SIDE_SELECT,
+} from './MapSide';
 import { FormationProduction, FormationProductionAbout } from './Production';
-import { Button } from './ui/button';
 
 /**
- * The AER's ST37 wells on the oil and gas map (F-243 part 4): a Wells panel (a switch, the
- * statuses as a legend that also hides and shows them, the source). The box at the pointer and
+ * The AER's ST37 wells on the oil and gas map (F-243 part 4): the Wells & licences section of
+ * the side card (a switch, the play and operator, the statuses as chips that hide and show
+ * them, the play's production) and its legend (F-267). The box at the pointer and
  * the panel of a well clicked are in St37Panel.tsx (F-265). Data from the AER, used on the owner's decision (docs/DECISIONS.md,
  * 2026-11-19): its name and the list's date are always shown, and nothing here offers a download.
  */
@@ -103,14 +112,29 @@ export interface St37State {
   /** Each well's legs by licence number, the main leg first (F-257). */
   legsOf: ReadonlyMap<string, St37MapWell[]>;
   onViewChange: (bbox: Bbox | null) => void;
-  panel: (tone: 'light' | 'dark', goTo: (bounds: MapBounds) => void) => React.ReactNode;
+  /** Each play loaded whole, for the card's Jump to buttons (F-267). */
+  formations: readonly { key: string; name: string; area: Bbox }[];
+  /** Makes a play the one the section is about. */
+  choose: (key: string) => void;
+  /** When the wells were last loaded; null before an answer. */
+  updated: string | null;
+  section: (props: {
+    open: boolean;
+    onToggle: () => void;
+    tone: 'light' | 'dark';
+    goTo: (bounds: MapBounds) => void;
+  }) => React.ReactNode;
+  /** What each line's colour means, with the wells in view; null when the wells are off. */
+  legend: (tone: 'light' | 'dark') => React.ReactNode;
+  /** What the section shows and where it comes from, for Sources & licence. */
+  about: () => React.ReactNode;
 }
 
 export function useSt37Wells(organizationId: string, token: string): St37State {
   const [on, setOn] = useState(true);
   const [hidden, setHidden] = useState<ReadonlySet<St37StatusClass>>(new Set());
   const [chosen, setChosen] = useState<string | null>(null);
-  const [parts, setParts] = useState<St37Parts>(ST37_ALL_PARTS);
+  const [operator, setOperator] = useState('');
   const [view, setView] = useState<Bbox | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
 
@@ -154,7 +178,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
 
   const answer = settled?.answer ?? null;
   const wells = useMemo(() => answer?.wells ?? [], [answer]);
-  const features = useMemo(() => st37Features(wells), [wells]);
+  // The wells drawn: those of an operator whose name holds the text typed (F-267). A clicked
+  // well's panel still reads every well loaded.
+  const listed = useMemo(() => st37ByOperator(wells, operator), [wells, operator]);
+  const features = useMemo(() => st37Features(listed), [listed]);
   const byUwi = useMemo(() => new Map(wells.map((w) => [w.uwi, w])), [wells]);
   const legsOf = useMemo(() => st37Legs(wells), [wells]);
   const shown = useMemo(
@@ -162,7 +189,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     [hidden],
   );
   const formations = useMemo(() => answer?.formations ?? [], [answer]);
-  // The play the panel is about: the one chosen, or the first (the latest loaded).
+  // The play the section is about: the one chosen, or the first (the latest loaded).
   const formation = formations.find((f) => f.key === chosen) ?? formations[0] ?? null;
   const outline = formation ? (ST37_OUTLINES[formation.key] ?? null) : null;
   const outlineUrl = outline?.url ?? null;
@@ -172,24 +199,18 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     const list = JSON.parse(zonesKey) as St37MapZone[];
     return list.length > 0 ? st37ZoneFeatures(list) : null;
   }, [zonesKey]);
+  // Every part of a well is drawn: its main leg, its other legs and its planned line. Their
+  // switches were taken off the panel (the owner, 2026-11-22, F-267).
   const mapView = useMemo<St37View | null>(
-    () => (on ? { wells: features, shown, parts, outline: outlineUrl, zones } : null),
-    [on, features, shown, parts, outlineUrl, zones],
-  );
-  // How many of each part are in view, beside its switch.
-  const partCounts = useMemo(
-    () => ({
-      legs: legsOf.size,
-      otherLegs: wells.length - legsOf.size,
-      planned: wells.filter((w) => w.plannedBottom !== null).length,
-    }),
-    [wells, legsOf],
+    () =>
+      on ? { wells: features, shown, parts: ST37_ALL_PARTS, outline: outlineUrl, zones } : null,
+    [on, features, shown, outlineUrl, zones],
   );
   const counts = useMemo(() => {
     const out = new Map<St37StatusClass, number>();
-    for (const w of wells) out.set(w.statusClass, (out.get(w.statusClass) ?? 0) + 1);
+    for (const w of listed) out.set(w.statusClass, (out.get(w.statusClass) ?? 0) + 1);
     return out;
-  }, [wells]);
+  }, [listed]);
 
   const onViewChange = useCallback((bbox: Bbox | null) => {
     setView(bbox);
@@ -204,210 +225,250 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     });
   };
 
-  const panel = (tone: 'light' | 'dark', goTo: (bounds: MapBounds) => void) => (
-    <div
-      className="flex w-72 flex-col gap-3 rounded-card border bg-card/95 p-3 shadow-xs"
-      role="group"
-      aria-label="Wells"
-    >
-      <label className="flex items-center justify-between gap-2 text-sm font-semibold">
-        Wells
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={(event) => {
-            setOn(event.target.checked);
-          }}
-        />
-      </label>
-      {on && (
-        <>
-          {formations.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                {formations.length === 1 ? 'Formation' : 'Formations'}
-              </p>
-              {formations.map((f) => (
-                <Button
-                  key={f.key}
-                  size="sm"
-                  variant="outline"
-                  className="justify-between"
-                  aria-pressed={formations.length > 1 ? f.key === formation?.key : undefined}
-                  onClick={() => {
-                    setChosen(f.key);
-                    goTo([f.area.west, f.area.south, f.area.east, f.area.north]);
-                  }}
-                >
-                  <span>{f.name}</span>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {formationTotal(f.totals).toLocaleString('en-CA')} wells
-                  </span>
-                </Button>
-              ))}
-            </div>
-          )}
-          {formation && (
-            <FormationProduction
-              formation={formation.key}
-              name={formation.name}
-              organizationId={organizationId}
-              token={token}
+  const section = ({
+    open,
+    onToggle,
+    tone,
+    goTo,
+  }: {
+    open: boolean;
+    onToggle: () => void;
+    tone: 'light' | 'dark';
+    goTo: (bounds: MapBounds) => void;
+  }) => (
+    <MapSection
+      title="Wells & licences"
+      open={open}
+      onToggle={onToggle}
+      on={on}
+      onSwitch={setOn}
+      chip={formation?.name ?? null}
+      sample={
+        <span aria-hidden="true" className="flex shrink-0 items-center gap-0.5">
+          {(['producing', 'suspended', 'abandoned', 'drilling'] as const).map((status) => (
+            <span
+              key={status}
+              className="size-2 rounded-full"
+              style={{ backgroundColor: ST37_COLOURS[tone][status] }}
             />
-          )}
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Colour by status
-            </p>
-            <ul className="flex flex-col gap-0.5" aria-label="Statuses shown">
-              {ST37_STATUS_CLASSES.map((status) => {
-                const showing = !hidden.has(status);
-                return (
-                  <li key={status}>
-                    <button
-                      type="button"
-                      aria-pressed={showing}
-                      onClick={() => {
-                        toggle(status);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-sm px-1 py-0.5 text-left text-sm hover:bg-muted aria-[pressed=false]:opacity-45"
-                    >
-                      <svg width="22" height="8" aria-hidden="true" className="shrink-0">
-                        <line
-                          x1="1"
-                          y1="4"
-                          x2="16"
-                          y2="4"
-                          stroke={ST37_COLOURS[tone][status]}
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                        />
-                        <circle cx="18" cy="4" r="2.5" fill={ST37_COLOURS[tone][status]} />
-                      </svg>
-                      <span className="grow">{ST37_STATUS_LABELS[status]}</span>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {(counts.get(status) ?? 0).toLocaleString('en-CA')}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Show
-            </p>
-            <ul className="flex flex-col gap-0.5" aria-label="Parts of a well shown">
-              {PARTS.map(({ key, label }) => (
-                <li key={key}>
-                  <label className="flex items-center gap-2 rounded-sm px-1 py-0.5 text-sm hover:bg-muted">
-                    <input
-                      type="checkbox"
-                      checked={parts[key]}
-                      onChange={(event) => {
-                        setParts((before) => ({ ...before, [key]: event.target.checked }));
-                      }}
-                    />
-                    <span className="grow">{label}</span>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {partCounts[key].toLocaleString('en-CA')}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </div>
-          {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
-          {failed && (
-            <p className="text-xs text-destructive">
-              The wells could not be loaded. Move the map to try again.
-            </p>
-          )}
-          {answer?.truncated && (
-            <p className="text-xs text-muted-foreground">
-              More wells than can be drawn at once here: zoom in to see every one.
-            </p>
-          )}
-          {answer?.source.area && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                const a = answer.source.area;
-                if (a) goTo([a.west, a.south, a.east, a.north]);
+          ))}
+        </span>
+      }
+    >
+      <div className="grid grid-cols-2 gap-2">
+        {formations.length > 0 && (
+          <label className="flex flex-col gap-1.5">
+            <span className={SIDE_LABEL}>Producing formation</span>
+            <select
+              className={SIDE_SELECT}
+              value={formation?.key ?? ''}
+              onChange={(event) => {
+                const f = formations.find((one) => one.key === event.target.value);
+                if (!f) return;
+                setChosen(f.key);
+                goTo([f.area.west, f.area.south, f.area.east, f.area.north]);
               }}
             >
-              Go to the wells loaded
-            </Button>
-          )}
-          {/* What the panel shows and where it comes from, out of the way until asked for (the
-              owner, 2026-11-20). The sources stay here: their terms ask that they be named. */}
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none hover:text-foreground">
-              About this data
-            </summary>
-            <div className="mt-1.5 flex flex-col gap-1.5">
-              {formation && (
-                <p>
-                  Every well of a formation, whatever its status. The counts are those of the wells
-                  in view. Shaded zones: where its drilled wells cluster.
-                </p>
-              )}
-              {formation && (
-                <FormationProductionAbout
-                  formation={formation.key}
-                  organizationId={organizationId}
-                  token={token}
-                />
-              )}
-              <p>
-                Zoomed out: how dense the wells are. Zoom in for each well and its drilled path;
-                point at one for its details. A dashed line is a plan: straight from the surface
-                location to the planned bottom hole of a well not drilled yet; zoomed out, where the
-                line is too short to see, it is one dot where it starts.
-              </p>
-              <p>
-                A well is every leg drilled under one licence. Its main leg is the most active one;
-                its other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list
-                does not say which kind. With main legs off, a well is one dot at its surface
-                location. Point at a leg, from about the 10 km distance bar and closer: that leg is
-                drawn a little bolder and a box at the pointer gives its details. Click it for the
-                whole well in a panel on the right: every leg, and its production, which is its
-                legs' added together; a dashed line on its charts marks the month a later leg
-                starts. Click a leg, on the map or in the panel, for that leg's own production under
-                the well's.
-              </p>
-              {outline && <p>{outline.credit}</p>}
-              {answer && (
-                <p>
-                  {answer.source.loadedAt
-                    ? `${answer.source.name}${
-                        answer.source.sourceDate ? `, list of ${answer.source.sourceDate}` : ''
-                      }${answer.source.licenceSource ? `; ${answer.source.licenceSource}` : ''}; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for ${
-                        formations.length > 0
-                          ? `the ${formations.map((f) => f.name).join(', ')} only`
-                          : 'one area'
-                      } so far. Fields and pools named from the Alberta Energy Regulator's ST103 list. Not an official record.`
-                    : 'No wells loaded yet.'}
-                </p>
-              )}
-            </div>
-          </details>
-        </>
+              {formations.map((f) => (
+                <option key={f.key} value={f.key}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="flex flex-col gap-1.5">
+          <span className={SIDE_LABEL}>Operator</span>
+          <input
+            type="search"
+            className={SIDE_INPUT}
+            placeholder="Any operator"
+            value={operator}
+            onChange={(event) => {
+              setOperator(event.target.value);
+            }}
+          />
+        </label>
+      </div>
+      <div className="flex items-start gap-3">
+        <span className={`${SIDE_LABEL} pt-2`}>Show</span>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Statuses shown">
+          {ST37_STATUS_CLASSES.map((status) => (
+            <FilterChip
+              key={status}
+              dot={ST37_COLOURS[tone][status]}
+              pressed={!hidden.has(status)}
+              onClick={() => {
+                toggle(status);
+              }}
+            >
+              {CHIP_LABELS[status]}
+            </FilterChip>
+          ))}
+        </div>
+      </div>
+      {formation && (
+        <p className="text-xs text-muted-foreground">
+          {formationTotal(formation.totals).toLocaleString('en-CA')} wells in the {formation.name},
+          every status; {listed.length.toLocaleString('en-CA')} in view
+          {operator.trim() ? ' for this operator' : ''}.
+        </p>
       )}
-    </div>
+      {formation && (
+        <Fold label="Production" note={`${formation.name} · by month`}>
+          <FormationProduction
+            formation={formation.key}
+            name={formation.name}
+            organizationId={organizationId}
+            token={token}
+          />
+        </Fold>
+      )}
+      {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
+      {failed && (
+        <p className="text-xs text-destructive">
+          The wells could not be loaded. Move the map to try again.
+        </p>
+      )}
+      {answer?.truncated && (
+        <p className="text-xs text-muted-foreground">
+          More wells than can be drawn at once here: zoom in to see every one.
+        </p>
+      )}
+      {answer?.source.area && (
+        <button
+          type="button"
+          className="self-start text-[0.8125rem] font-medium underline-offset-2 hover:underline"
+          style={{ color: SIDE_ACCENT }}
+          onClick={() => {
+            const a = answer.source.area;
+            if (a) goTo([a.west, a.south, a.east, a.north]);
+          }}
+        >
+          Go to the wells loaded →
+        </button>
+      )}
+    </MapSection>
   );
 
-  return { on, view: mapView, byUwi, legsOf, onViewChange, panel };
+  const legend = (tone: 'light' | 'dark') =>
+    !on ? null : (
+      <div role="group" aria-label="Wells legend">
+        <LegendTitle>Wells</LegendTitle>
+        <ul className="mt-2 flex flex-col gap-1">
+          {ST37_STATUS_CLASSES.map((status) => (
+            <li
+              key={status}
+              className={`flex items-center gap-2 ${hidden.has(status) ? 'opacity-45' : ''}`}
+            >
+              <svg width="22" height="8" aria-hidden="true" className="shrink-0">
+                <line
+                  x1="1"
+                  y1="4"
+                  x2="16"
+                  y2="4"
+                  stroke={ST37_COLOURS[tone][status]}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+                <circle cx="18" cy="4" r="2.5" fill={ST37_COLOURS[tone][status]} />
+              </svg>
+              <span className="grow">{ST37_STATUS_LABELS[status]}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {(counts.get(status) ?? 0).toLocaleString('en-CA')}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1.5 text-muted-foreground">
+          The numbers are the wells in view. Zoom in to see every well.
+        </p>
+        {formation && outline && (
+          <p className="mt-1.5 flex items-center gap-2">
+            <span aria-hidden="true" className="h-0.5 w-5 shrink-0 bg-foreground/70" />
+            {formation.name} outline
+          </p>
+        )}
+      </div>
+    );
+
+  const about = () => (
+    <>
+      <p>
+        <strong className="font-medium text-foreground">Wells &amp; licences.</strong>{' '}
+        {formation
+          ? 'Every well of a formation, whatever its status. Shaded zones: where its drilled wells cluster. '
+          : ''}
+        Zoomed out: how dense the wells are. Zoom in for each well and its drilled path; point at
+        one for its details. A dashed line is a plan: straight from the surface location to the
+        planned bottom hole of a well not drilled yet; zoomed out, where the line is too short to
+        see, it is one dot where it starts.
+      </p>
+      {formation && (
+        <FormationProductionAbout
+          formation={formation.key}
+          organizationId={organizationId}
+          token={token}
+        />
+      )}
+      <p>
+        A well is every leg drilled under one licence. Its main leg is the most active one; its
+        other legs are the rest (an earlier hole, a sidetrack, an extra leg): the list does not say
+        which kind. Point at a leg, from about the 10 km distance bar and closer: that leg is drawn
+        a little bolder and a box at the pointer gives its details. Click it for the whole well in a
+        panel on the right: every leg, and its production, which is its legs' added together; a
+        dashed line on its charts marks the month a later leg starts. Click a leg, on the map or in
+        the panel, for that leg's own production under the well's.
+      </p>
+      {outline && <p>{outline.credit}</p>}
+      {answer && (
+        <p>
+          {answer.source.loadedAt
+            ? `${answer.source.name}${
+                answer.source.sourceDate ? `, list of ${answer.source.sourceDate}` : ''
+              }${answer.source.licenceSource ? `; ${answer.source.licenceSource}` : ''}; loaded ${formatAlberta(answer.source.loadedAt, { weekday: false })}, for ${
+                formations.length > 0
+                  ? `the ${formations.map((f) => f.name).join(', ')} only`
+                  : 'one area'
+              } so far. Fields and pools named from the Alberta Energy Regulator's ST103 list. Not an official record.`
+            : 'No wells loaded yet.'}
+        </p>
+      )}
+    </>
+  );
+
+  return {
+    on,
+    view: mapView,
+    byUwi,
+    legsOf,
+    onViewChange,
+    formations,
+    choose: setChosen,
+    updated: answer?.source.loadedAt ?? null,
+    section,
+    legend,
+    about,
+  };
 }
 
-/** The parts of a well the panel switches on and off (F-257), in its order. */
-const PARTS: { key: keyof St37Parts; label: string }[] = [
-  { key: 'legs', label: 'Main legs' },
-  { key: 'otherLegs', label: 'Other legs' },
-  { key: 'planned', label: 'Planned lines' },
-];
+/** The wells of the operators whose name holds the text typed; every well for no text. */
+export function st37ByOperator(wells: readonly St37MapWell[], operator: string): St37MapWell[] {
+  const text = operator.trim().toLowerCase();
+  if (text === '') return [...wells];
+  return wells.filter((w) => (w.licensee ?? '').toLowerCase().includes(text));
+}
+
+/** The statuses in a word or two, for the chips; the legend gives them in full. */
+const CHIP_LABELS: Record<St37StatusClass, string> = {
+  producing: 'Producing',
+  awaiting: 'Awaiting production',
+  drilling: 'Drilling',
+  inactive: 'Closed',
+  suspended: 'Suspended',
+  abandoned: 'Abandoned',
+  licensed: 'Licensed',
+};
 
 function formationTotal(totals: Partial<Record<St37StatusClass, number>>): number {
   return Object.values(totals).reduce((sum, n) => sum + n, 0);

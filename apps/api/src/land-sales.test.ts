@@ -223,6 +223,7 @@ describe('GET /api/v1/petroleum/land-sales', () => {
       averagePerHectare: '130.64',
       highPerHectare: '222.22',
       nextSale: { date: '2026-12-02', parcels: 4 },
+      sales: [{ date: '2026-12-02', parcels: 4, sold: 0, held: false }],
       quarters: [{ quarter: '2026-Q4', bonus: '66888.32', sold: 2 }],
     });
     const res = await get('land-sales/summary');
@@ -234,10 +235,19 @@ describe('GET /api/v1/petroleum/land-sales', () => {
       bonus: '66888.32',
       averagePerHectare: '130.64',
       nextSale: { date: '2026-12-02', parcels: 4 },
+      sales: [{ date: '2026-12-02', parcels: 4, sold: 0, held: false }],
     });
     expect(petroleum.landSaleSummary).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a' }),
       { zones: null, since: null, until: null, outline: null },
     );
+    // One sale's totals: from its day to the day after (F-267).
+    await get('land-sales/summary?since=2026-11-18&until=2026-11-19');
+    expect(petroleum.landSaleSummary).toHaveBeenLastCalledWith(expect.anything(), {
+      zones: null,
+      since: '2026-11-18',
+      until: '2026-11-19',
+      outline: null,
+    });
   });
 });

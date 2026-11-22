@@ -48,8 +48,8 @@ export interface LandSaleLoad {
 
 /**
  * What narrows the parcels: the hashes (md5) of the zones that include a play's rights, sales
- * from a date on and, for the parcels (not their totals), sales before a date: the page reads
- * every year a few years at a time (F-263). And a play's outline: the parcels and the totals
+ * from a date on and sales before a date: the page reads every year a few years at a time
+ * (F-263), and asks for the totals of one sale (F-267). And a play's outline: the parcels and the totals
  * are then of the parcels lying inside it (F-264).
  */
 export interface LandSaleFilter {
@@ -70,6 +70,11 @@ export interface LandSaleSummary {
   highPerHectare: string | null;
   /** The next sale not held yet, with how many of its parcels are kept. */
   nextSale: { date: string; parcels: number } | null;
+  /**
+   * Every sale the rights keep a parcel of, the newest first, whatever the dates asked for:
+   * how many of its parcels are kept, how many sold, and whether it has results (F-267).
+   */
+  sales: { date: string; parcels: number; sold: number; held: boolean }[];
   /** The bonus paid by quarter, over every year loaded (the filter's rights, not its date). */
   quarters: { quarter: string; bonus: string; sold: number }[];
 }
@@ -240,7 +245,8 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
                  max(dollars_per_hectare) filter (where status = 'ACCEPTED')::text as high
           from petro.land_sale_parcels
           where ${rights}
-            and (${filter.since}::date is null or sale_date >= ${filter.since}::date)`;
+            and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
+            and (${filter.until ?? null}::date is null or sale_date < ${filter.until ?? null}::date)`;
         const [next] = await tx<{ sale_date: string; parcels: number }[]>`
           with ${outline}
           select sale_date::text as sale_date, count(*)::int as parcels
@@ -248,6 +254,16 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
           where status is null and ${rights}
             and sale_date >= (now() at time zone 'America/Edmonton')::date
           group by sale_date order by sale_date limit 1`;
+        const sales = await tx<
+          { sale_date: string; parcels: number; sold: number; held: boolean }[]
+        >`
+          with ${outline}
+          select sale_date::text as sale_date, count(*)::int as parcels,
+                 count(*) filter (where status = 'ACCEPTED')::int as sold,
+                 coalesce(bool_or(status is not null), false) as held
+          from petro.land_sale_parcels
+          where ${rights}
+          group by sale_date order by sale_date desc`;
         const quarters = await tx<{ quarter: string; bonus: string; sold: number }[]>`
           with ${outline}
           select to_char(date_trunc('quarter', sale_date), 'YYYY"-Q"Q') as quarter,
@@ -263,6 +279,12 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
           averagePerHectare: totals?.average ?? null,
           highPerHectare: totals?.high ?? null,
           nextSale: next ? { date: next.sale_date, parcels: next.parcels } : null,
+          sales: sales.map((s) => ({
+            date: s.sale_date,
+            parcels: s.parcels,
+            sold: s.sold,
+            held: s.held,
+          })),
           quarters: quarters.map((q) => ({ quarter: q.quarter, bonus: q.bonus, sold: q.sold })),
         };
       });

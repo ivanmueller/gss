@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { st37Features, st37Legs, st37Pads, type St37MapWell } from '../lib/st37Map';
-import { st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
+import { st37ByOperator, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -214,5 +214,22 @@ describe('st37Place', () => {
       "O'Example-West field · pool 728098",
     );
     expect(st37Place(well(uwi))).toBeNull();
+  });
+});
+
+describe('st37ByOperator (F-267)', () => {
+  const list = [
+    well('100/01-01-060-20W5/00'),
+    well('100/02-01-060-20W5/00', { licensee: 'Sample Resources Inc.' }),
+    well('100/03-01-060-20W5/00', { licensee: null }),
+  ];
+
+  it('keeps the wells of the operators whose name holds the text typed', () => {
+    expect(st37ByOperator(list, ' sample ').map((w) => w.uwi)).toEqual(['100/02-01-060-20W5/00']);
+    expect(st37ByOperator(list, 'ENERGY').map((w) => w.uwi)).toEqual(['100/01-01-060-20W5/00']);
+  });
+
+  it('keeps every well for no text', () => {
+    expect(st37ByOperator(list, '  ')).toHaveLength(3);
   });
 });
