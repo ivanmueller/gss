@@ -350,12 +350,6 @@ function shownFilter(
   return filter as FilterSpecification;
 }
 
-/**
- * The shading's strength where it is strongest, far out (the owner, 2026-11-21: "much less
- * opaque"; it was 0.85).
- */
-const SHADING_OPACITY = 0.4;
-
 /** A small hollow square for the hovered well's surface hole, drawn without a canvas. */
 function squareImage(colour: string) {
   const size = 11;
@@ -420,19 +414,22 @@ export function syncSt37(
         paint: {
           'heatmap-weight': 1,
           // A wide, weak spread per well, so a cluster reads as one soft shadow and a lone
-          // well barely shows (F-260).
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.25, 8, 0.45],
-          'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 5, 7, 8, 30],
-          // Gives way to the wells as they come in.
-          'heatmap-opacity': [
+          // well barely shows (F-260). Weak enough that only the densest ground reaches the
+          // darkest tone: stronger, a whole zone filled up to one flat silver (the owner,
+          // 2026-11-21). Set on the Duvernay's wells of a local load: about an eighth of the
+          // shaded ground at the darkest tone, at every zoom the shading shows.
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 5, 0.085, DETAIL_FULL, 0.14],
+          'heatmap-radius': [
             'interpolate',
-            ['linear'],
+            ['exponential', 1.83],
             ['zoom'],
-            DETAIL_GONE,
-            SHADING_OPACITY,
+            5,
+            5.5,
             DETAIL_FULL,
-            0,
+            30,
           ],
+          // Gives way to the wells as they come in.
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], DETAIL_GONE, 1, DETAIL_FULL, 0],
         },
       },
       before,
@@ -604,8 +601,9 @@ export function syncSt37(
 
   const colour = colourBy(tone);
   // Wells are dense where they count: zoomed out, a grey shading of how many there are. On the
-  // light map's land (#f2f0e8) its darkest part read as about #9b9790 at a strength of 0.85
-  // (the owner, 2026-11-21); the same colour since, at SHADING_OPACITY.
+  // light map, as on the picture the owner gave to match (2026-11-21): warm dark patches where
+  // wells are dense, about #a7a39c at their darkest over a zone's fill, soft at the edges, the
+  // ground between them left light.
   const shade = tone === 'light' ? '13, 6, 0' : '230, 228, 226';
   map.setPaintProperty(ST37_LAYERS.density, 'heatmap-color', [
     'interpolate',
@@ -613,14 +611,14 @@ export function syncSt37(
     ['heatmap-density'],
     0,
     `rgba(${shade}, 0)`,
-    0.1,
-    `rgba(${shade}, 0.04)`,
-    0.3,
-    `rgba(${shade}, 0.13)`,
-    0.6,
-    `rgba(${shade}, 0.25)`,
+    0.15,
+    `rgba(${shade}, 0.02)`,
+    0.4,
+    `rgba(${shade}, 0.1)`,
+    0.7,
+    `rgba(${shade}, 0.21)`,
     1,
-    `rgba(${shade}, 0.4)`,
+    `rgba(${shade}, 0.27)`,
   ]);
   map.setFilter(ST37_LAYERS.density, shownFilter('surface', view.shown));
   map.setPaintProperty(ST37_LAYERS.paths, 'line-color', colour);
@@ -724,8 +722,9 @@ function syncZones(
         type: 'fill',
         source: ZONES_SOURCE,
         paint: {
-          // Lighter close in, where each well shows for itself.
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.16, 9, 0.1, 12, 0.06],
+          // A light wash, so the shading's patches stand out on it (the owner, 2026-11-21);
+          // lighter still close in, where each well shows for itself.
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.09, 9, 0.08, 12, 0.06],
         },
       },
       map.getLayer(ST37_LAYERS.density) ? ST37_LAYERS.density : before,
