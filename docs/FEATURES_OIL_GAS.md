@@ -291,7 +291,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 
 ## F-261 — The wells in 3D, under the ground
 
-**Status:** Needs owner input. **Asked:** the owner, 2026-11-21, with three pictures (stacked horizontal wells in named layers; a mine's ore body with its tunnels; coloured formation surfaces with wells through them): "Do we have enough data to build an underground well 3D model like the photos attached?", then "add it to the list and do the check". Proposed after F-253 (it shows the data, it is not analysis); the order is the owner's.
+**Status:** Needs owner input. **Asked:** the owner, 2026-11-21, with three pictures (stacked horizontal wells in named layers; a mine's ore body with its tunnels; coloured formation surfaces with wells through them): "Do we have enough data to build an underground well 3D model like the photos attached?", then "add it to the list and do the check". After F-253, type curves and declines (the owner, 2026-11-21).
 
 **Found on 2026-11-21 (an agent, from the files and pages themselves; nothing built on it):**
 - **The wells' paths have depth.** In the AER's ST37 geodatabase downloaded that day, the layer of drilled paths (`ST37_Well_Geometry_NAD83_10TM_AEP_Forest`) is three-dimensional: each point of a path has an elevation in metres above sea level, starting at the well's kelly bushing elevation. Each path is marked `Surveyed` (193,075 of 535,759 in the province) or `Calculated` (342,684; the one looked at was a straight vertical line from the kelly bushing down by the total depth). One long surveyed Duvernay well looked at: 291 points, from 904 m above sea level down to about 1,360 m below it, then level along the lateral, agreeing with its kelly bushing elevation less its maximum true vertical depth. The layers also carry `Kelly_Bushing_Elevation` and `Ground_Elevation`. **Our loader drops all of this today:** `.github/workflows/load-st37.yml` cuts the layers with `-dim XY`, and `petro.st37_wells` keeps flat paths and no elevations. Not counted: how many of the Duvernay's wells are surveyed.
@@ -306,7 +306,7 @@ Same rules as `docs/FEATURES.md` (IDs never reused, every request recorded befor
 3. **The view:** a 3D view of the wells in view, each drawn along its real path, the top and base as two translucent sheets, coloured by status as on the map, vertical scale stretched and said so; calculated paths and planned lines drawn differently from surveyed ones. The library for it (Mapbox's own 3D, or a separate 3D scene) is a choice to make with the plan.
 
 **Questions for the owner:**
-1. **When:** after type curves and declines (F-253, proposed), or before?
+1. **When:** after type curves and declines (F-253, proposed), or before? **The owner, 2026-11-21: "After curves and declines".**
 2. **Where:** a 3D button on the map that tilts the same map and shows the wells below it, or a separate 3D window for the wells in view (easier to read, as in the pictures)?
 3. **How much:** the Duvernay's wells with its top and base only, or the layers above it too (for example the Ireton above, the Majeau Lake below), as in the third picture?
 
