@@ -80,6 +80,80 @@ describe('the ST37 wells as petro_api', () => {
     }
   });
 
+  it('reads a well with its depths, its other legs and the wells nearby, the nearest first (F-261)', async () => {
+    const admin = postgres(ADMIN, { max: 1 });
+    const db = postgresPetroleum(PETRO_URL);
+    // One well of two legs (one not drilled yet), a well 1 km away, one 2 km away with no
+    // depths, and one far beyond the 3 km asked for.
+    const [LEG, NEAR, FLAT, FAR] = [
+      '02/01-01-125-01W6/0',
+      '00/03-01-125-01W6/0',
+      '00/04-01-125-01W6/0',
+      '00/05-01-125-01W6/0',
+    ];
+    const ALL = [...UWIS, LEG, NEAR, FLAT, FAR];
+    const deep = (lon: number, lat: number) =>
+      admin.json([
+        [lon, lat, 700.5],
+        [lon, lat, -1500],
+        [lon - 0.02, lat, -1550.2],
+      ]);
+    try {
+      await admin`delete from petro.st37_wells where uwi in ${admin(ALL)}`;
+      await admin`
+        insert into petro.st37_wells (uwi, licence_number, licensee, status_class,
+          surface_longitude, surface_latitude, bottom_longitude, bottom_latitude, path_3d,
+          path_surveyed, kb_elevation_m, ground_elevation_m)
+        values
+          (${ONE}, '0999001', 'Example Energy Ltd.', 'producing', -119.9, 59.95, -119.92, 59.95,
+           ${deep(-119.9, 59.95)}, true, 700.5, 695),
+          (${LEG}, '0999001', 'Example Energy Ltd.', 'licensed', -119.9, 59.95, -119.9, 59.95,
+           null, null, null, null),
+          (${NEAR}, '0999003', 'Example Resources Inc', 'suspended', -119.9, 59.959, -119.92,
+           59.959, ${deep(-119.9, 59.959)}, false, 701, null),
+          (${TWO}, '0999002', null, 'abandoned', -119.9, 59.955, -119.92, 59.955,
+           ${deep(-119.9, 59.955)}, true, null, null),
+          (${FLAT}, '0999004', null, 'producing', -119.9, 59.968, -119.9, 59.968, null, null,
+           null, null),
+          (${FAR}, '0999005', null, 'producing', -119.9, 59.99, -119.92, 59.99,
+           ${deep(-119.9, 59.99)}, true, null, null)`;
+
+      const { legs, loadedAt } = await db.st37Well3d(member(), ONE, 3, 10);
+      // The leg asked for, its well's other leg, then the others by distance; not the well
+      // without depths, nor the one beyond 3 km.
+      expect(legs.map((leg) => [leg.uwi, leg.own])).toEqual([
+        [ONE, true],
+        [LEG, true],
+        [TWO, false],
+        [NEAR, false],
+      ]);
+      expect(legs[0]).toMatchObject({
+        licenceNumber: '0999001',
+        licensee: 'Example Energy Ltd.',
+        statusClass: 'producing',
+        surveyed: true,
+        surface: [-119.9, 59.95],
+        kbElevationM: 700.5,
+        groundElevationM: 695,
+      });
+      expect(legs[0]?.points?.[2]).toEqual([-119.92, 59.95, -1550.2]);
+      expect(legs[1]?.points).toBeNull();
+      expect(legs[3]).toMatchObject({ surveyed: false, kbElevationM: 701 });
+      expect(loadedAt === null || typeof loadedAt === 'string').toBe(true);
+
+      // One more than the limit comes back, so the route can say there are more.
+      expect((await db.st37Well3d(member(), ONE, 3, 1)).legs).toHaveLength(4);
+      expect((await db.st37Well3d(member(), ONE, 3, 0)).legs).toHaveLength(3);
+      // A well that is not loaded, and a caller who is no member: nothing.
+      expect((await db.st37Well3d(member(), '00/16-36-126-01W6/0', 3, 10)).legs).toEqual([]);
+      expect((await db.st37Well3d({ ...member(), role: 'stranger' }, ONE, 3, 10)).legs).toEqual([]);
+    } finally {
+      await admin`delete from petro.st37_wells where uwi in ${admin(ALL)}`;
+      await admin.end();
+      await db.close();
+    }
+  });
+
   it("reads each play's latest load, a well's field and pool by name, and a play's drilled wells", async () => {
     const admin = postgres(ADMIN, { max: 1 });
     const db = postgresPetroleum(PETRO_URL);

@@ -88,8 +88,8 @@ jobs:
             exit 1
           fi
           version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
-          if [ "$version" -lt 8 ]; then
-            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 8)."
+          if [ "$version" -lt 12 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 12)."
             exit 1
           fi
           grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
@@ -122,16 +122,17 @@ jobs:
           [ -n "$gdb" ] || { echo "::error::No geodatabase in the AER's file."; exit 1; }
           mkdir -p out
           cut_layer() {
-            # $1: layer, $2: output. The loader thins the drilled paths.
+            # $1: layer, $2: output, $3: XY, or XYZ for the paths, whose every point has an
+            # elevation (the 3D view, F-261). The loader thins the drilled paths.
             docker run --rm -v "$PWD:/data" ghcr.io/osgeo/gdal:alpine-small-3.10.0 \
-              ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim XY \
+              ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim "$3" \
               -spat "$WEST" "$SOUTH" "$EAST" "$NORTH" -spat_srs EPSG:4326 \
               "/data/out/$2" "/data/$gdb" "$1"
           }
-          cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson
-          cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson
-          cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson
-          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson
+          cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson XY
+          cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson XY
+          cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson XY
+          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson XYZ
           ls -la out
       - name: Cut out the formation
         if: inputs.formation != 'area'
@@ -149,11 +150,15 @@ jobs:
             *) echo "::error::Unknown formation."; exit 1 ;;
           esac
           gdal() {
+            # $1: XY, or XYZ for the paths, whose every point has an elevation (the 3D view,
+            # F-261).
+            dim=$1
+            shift
             docker run --rm -v "$PWD:/data" ghcr.io/osgeo/gdal:alpine-small-3.10.0 \
-              ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim XY "$@"
+              ogr2ogr -f GeoJSON -t_srs EPSG:4326 -dim "$dim" "$@"
           }
           # 1. The production strings in the formation's pools.
-          gdal -where "$pools" /data/out/pool.geojson "/data/$gdb" \
+          gdal XY -where "$pools" /data/out/pool.geojson "/data/$gdb" \
             ST37_Production_String_NAD83_10TM_AEP_Forest
           # 2. Petrinex's public Well Licence file (a zip in a zip): the licences aimed at it.
           curl -sSfL --retry 3 -o licence.zip \
@@ -166,13 +171,13 @@ jobs:
             "$FORMATION" out/pool.geojson "$csv" out
           # 3. Every record of those licences, from the four layers.
           cut_layer() {
-            gdal -dialect SQLITE -sql "select * from $1 where trim(Well_Licence_Number) in (select licence from '/data/out/licences.csv'.licences)" \
+            gdal "$3" -dialect SQLITE -sql "select * from $1 where trim(Well_Licence_Number) in (select licence from '/data/out/licences.csv'.licences)" \
               "/data/out/$2" "/data/$gdb"
           }
-          cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson
-          cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson
-          cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson
-          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson
+          cut_layer ST37_Surface_Hole_NAD83_10TM_AEP_Forest surface.geojson XY
+          cut_layer ST37_Bottom_Hole_NAD83_10TM_AEP_Forest bottom.geojson XY
+          cut_layer ST37_Production_String_NAD83_10TM_AEP_Forest strings.geojson XY
+          cut_layer ST37_Well_Geometry_NAD83_10TM_AEP_Forest paths.geojson XYZ
           ls -la out
       - name: Load the wells
         env:

@@ -8,6 +8,7 @@ import { MapPanel, MapTip, PanelBadge, PanelSection, PanelTiles } from './MapPan
 import { WellProduction } from './Production';
 import { st37Place, st37Plan } from './St37Wells';
 import { Button } from './ui/button';
+import { Well3d } from './Well3d';
 
 /**
  * A well on the oil and gas map, shown two ways (F-265; the owner, 2026-11-22): a box at the
@@ -194,6 +195,16 @@ export function St37Panel({
             Zoom to well
           </Button>
         </div>
+      )}
+      {member && well.statusClass !== 'licensed' && (
+        <PanelSection title="Under the ground, in 3D">
+          <Well3d
+            uwi={well.uwi}
+            chosen={alone?.uwi ?? null}
+            organizationId={member.organizationId}
+            token={member.token}
+          />
+        </PanelSection>
       )}
       <PanelSection title="Licence">
         <p>{well.licensee ?? 'No licensee named'}</p>

@@ -1,6 +1,6 @@
 import { ST37_FORMATIONS, st37Zones, type St37Zone, type ZoneWell } from '@grain/domain';
 
-import type { St37Box, St37Load, St37WellRow } from './st37-db';
+import type { St37Box, St37DeepLeg, St37Load, St37WellRow } from './st37-db';
 
 /**
  * The AER's ST37 wells on the oil and gas map (F-243 part 4; docs/FEATURES_OIL_GAS.md). Data
@@ -10,6 +10,15 @@ import type { St37Box, St37Load, St37WellRow } from './st37-db';
 
 /** The oil and gas schema version the ST37 wells need (20261125010000_petro_plays_fields_pools.sql). */
 export const ST37_SCHEMA_VERSION = 8;
+
+/** The oil and gas schema version the 3D view needs (20261129010000_petro_st37_depths.sql). */
+export const ST37_3D_SCHEMA_VERSION = 12;
+
+/** A well's 3D view shows the other wells whose surface hole lies within this many kilometres. */
+export const ST37_3D_NEARBY_KM = 3;
+
+/** At most this many legs of other wells in a 3D answer, the nearest first. */
+export const ST37_3D_MAX_NEARBY = 120;
 
 /** At most this many wells per answer; a view holding more is drawn from the first ones. */
 export const ST37_MAX_WELLS = 20_000;
@@ -104,5 +113,48 @@ export function st37Answer(
     ),
     truncated,
     wells: truncated ? rows.slice(0, ST37_MAX_WELLS) : rows,
+  };
+}
+
+/**
+ * A well under the ground (F-261): the legs of the well asked for and of the wells nearby, each
+ * with its path's points and their elevations. Null when the well is not in the copy. A leg
+ * with no path with depth (not drilled yet, or loaded before the depths were kept) is left out;
+ * `well` still says where the well is.
+ */
+export function st37Well3dAnswer(uwi: string, loadedAt: string | null, rows: St37DeepLeg[]) {
+  const asked = rows.find((leg) => leg.uwi === uwi);
+  if (!asked) return null;
+  const own = rows.filter((leg) => leg.own);
+  const nearby = rows.filter((leg) => !leg.own);
+  // The well's elevations: the leg asked for, else whichever of its legs has them.
+  const first = (read: (leg: St37DeepLeg) => number | null): number | null =>
+    read(asked) ?? own.map(read).find((value) => value !== null) ?? null;
+  return {
+    source: { name: ST37_SOURCE_NAME, loadedAt },
+    well: {
+      uwi,
+      licenceNumber: asked.licenceNumber,
+      surface: asked.surface,
+      kbElevationM: first((leg) => leg.kbElevationM),
+      groundElevationM: first((leg) => leg.groundElevationM),
+    },
+    nearbyKm: ST37_3D_NEARBY_KM,
+    truncated: nearby.length > ST37_3D_MAX_NEARBY,
+    legs: [...own, ...nearby.slice(0, ST37_3D_MAX_NEARBY)].flatMap((leg) =>
+      leg.points
+        ? [
+            {
+              uwi: leg.uwi,
+              licenceNumber: leg.licenceNumber,
+              licensee: leg.licensee,
+              statusClass: leg.statusClass,
+              surveyed: leg.surveyed,
+              own: leg.own,
+              points: leg.points,
+            },
+          ]
+        : [],
+    ),
   };
 }

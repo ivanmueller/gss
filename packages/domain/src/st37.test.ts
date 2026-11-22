@@ -10,6 +10,7 @@ import {
   st37PlanBottoms,
   st37Reach,
   st37Simplify,
+  st37Simplify3d,
   st37StatusClass,
   st37UwiLsd,
   type St37Feature,
@@ -206,6 +207,66 @@ describe('buildSt37Wells', () => {
     expect(at(2).path).toBeNull();
   });
 
+  it('keeps the depth along a path, also of a vertical well, and none from a flat layer (F-261)', () => {
+    // Straight down 100 m, then out to the north: the bend stays.
+    expect(at(0).path3d).toEqual([
+      [-113.6, 53.3, 700],
+      [-113.6, 53.3, 600],
+      [-113.6, 53.32, 0],
+    ]);
+    expect(at(0).pathSurveyed).toBeNull();
+    // A layer cut without elevations gives no path with depth.
+    expect(at(1).path3d).toBeNull();
+    expect(at(2).path3d).toBeNull();
+
+    const deep = buildSt37Wells(
+      {
+        surface: [
+          {
+            properties: {
+              Well_Licence_Number: '0340721',
+              SH_Actual_Longitude: -113.5,
+              SH_Actual_Latitude: 53.2,
+              Ground_Elevation: 845.84,
+            },
+            geometry: null,
+          },
+        ],
+        bottom: [bottom(V, '0340721', -113.5, 53.2, { Kelly_Bushing_Elevation: 850.12 })],
+        strings: [],
+        paths: [
+          {
+            properties: {
+              UWI_Label: V,
+              Well_Geometry_Source: 'Calculated',
+              Kelly_Bushing_Elevation: 850.1,
+            },
+            geometry: {
+              type: 'MultiLineString',
+              coordinates: [
+                [
+                  [-113.5, 53.2, 850.12],
+                  [-113.5, 53.2, 300],
+                  [-113.5, 53.2, -289.04],
+                ],
+              ],
+            },
+          },
+        ],
+      },
+      AREA,
+    ).wells[0];
+    // A vertical well: no flat path for the map, yet its path with depth, thinned to its ends.
+    expect(deep?.path).toBeNull();
+    expect(deep?.path3d).toEqual([
+      [-113.5, 53.2, 850.1],
+      [-113.5, 53.2, -289],
+    ]);
+    expect(deep?.pathSurveyed).toBe(false);
+    expect(deep?.kbElevationM).toBe(850.1);
+    expect(deep?.groundElevationM).toBe(845.8);
+  });
+
   it('cleans the AER text and depths', () => {
     const h1 = at(0);
     expect(h1.wellName).toBe('EXAMPLE HZ 1-2-3-4');
@@ -239,6 +300,25 @@ const LICENCE_HEADER =
   'LicenceType,LicenceNumber,LicenceIssueDate,LicenceStatus,LicenceStatusDate,Licensee,LicenseeName,LicenceLocation,LicenceLegalSubdivision,LicenceSection,LicenceTownship,LicenceRange,LicenceMeridian,DrillingOperationType,WellPurpose,WellLicenceType,WellSubstance,ProjectedFormation,TerminatingFormation,ProjectedTotalDepth,AERClass,HeadLessor,WellCompletionType,TargetPool,OrphanWellFlg';
 const licenceLine = (number: string, status: string, projected: string, depth = '5300.000000000') =>
   `WELL,${number},2026-11-19,${status},2026-11-19,X001,"EXAMPLE ENERGY, LTD.",01-09-043-06W5,1,9,43,6,5,HORIZONTAL,NEW WELL,PRODUCTION,GAS,${projected},DUVERNAY FM,${depth},DEVELOPMENT WELL,ALBERTA CROWN,,,N`;
+
+describe('st37Simplify3d', () => {
+  it('drops the points on the straight line in all three directions, and keeps a bend in depth', () => {
+    // Down 1,000 m in a straight line, then level to the north: flat on the map, bent in depth.
+    const line: [number, number, number][] = [
+      [-113.6, 53.3, 900],
+      [-113.6, 53.3, 400],
+      [-113.6, 53.3, -100],
+      [-113.6, 53.31, -100],
+      [-113.6, 53.32, -100],
+    ];
+    expect(st37Simplify3d(line, 2)).toEqual([
+      [-113.6, 53.3, 900],
+      [-113.6, 53.3, -100],
+      [-113.6, 53.32, -100],
+    ]);
+    expect(st37Simplify3d(line.slice(0, 2), 2)).toEqual(line.slice(0, 2));
+  });
+});
 
 describe('st37FormationLicences', () => {
   const csv = [

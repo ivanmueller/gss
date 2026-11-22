@@ -31,10 +31,14 @@ import {
 import type { ProductionLoad } from './production-db';
 import {
   parseSt37Box,
+  ST37_3D_MAX_NEARBY,
+  ST37_3D_NEARBY_KM,
+  ST37_3D_SCHEMA_VERSION,
   ST37_MAX_WELLS,
   ST37_SCHEMA_VERSION,
   st37Answer,
   st37LoadZones,
+  st37Well3dAnswer,
 } from './st37';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
@@ -545,6 +549,43 @@ export function petroleumRoutes(
           );
         }
         return keptJson(c, st37Answer(loads, zones, wells));
+      });
+    });
+  });
+
+  // /petroleum/st37/well-3d: one well under the ground (F-261): its legs and those of the
+  // wells nearby, each path with the elevation of every point. Membership first, as above. JSON
+  // for the view only, never another format (the AER's terms, docs/DECISIONS.md 2026-11-19).
+  routes.get('/st37/well-3d', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const asked = parseUwi(c.req.query('uwi'));
+    if (typeof asked === 'string') return apiError(c, 400, 'VALIDATION_FAILED', asked);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < ST37_3D_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { loadedAt, legs } = await petroleum.st37Well3d(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          asked.uwi,
+          ST37_3D_NEARBY_KM,
+          ST37_3D_MAX_NEARBY,
+        );
+        const answer = st37Well3dAnswer(asked.uwi, loadedAt, legs);
+        if (answer === null) return apiError(c, 404, 'NOT_FOUND', 'No such well is loaded.');
+        return keptJson(c, answer);
       });
     });
   });
