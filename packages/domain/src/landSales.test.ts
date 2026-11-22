@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   landKeyPart,
+  landKeyText,
+  landKeyTownship,
   parseSaleNotice,
   parseSaleResults,
   placeParcel,
+  saleAgreementTail,
   sectionCorners,
   sectionKey,
   sectionPartRing,
@@ -238,5 +241,28 @@ describe('placeParcel', () => {
   it('gives nothing for a parcel with no land on the grid', () => {
     expect(placeParcel(['50603419'], sections)).toBeNull();
     expect(placeParcel([], sections)).toBeNull();
+  });
+});
+
+describe('land keys for reading (F-265)', () => {
+  it('writes a section, a quarter or half, and a legal subdivision as land is usually written', () => {
+    expect(landKeyText('50103806')).toBe('6-38-1-W5');
+    expect(landKeyText('50103718NE')).toBe('NE-18-37-1-W5');
+    expect(landKeyText('41203424N')).toBe('N-24-34-12-W4');
+    expect(landKeyText('4140133301')).toBe('LSD 1-33-13-14-W4');
+    expect(landKeyText('4140133301SW')).toBe('SW of LSD 1-33-13-14-W4');
+    expect(landKeyText('not a key')).toBeNull();
+  });
+
+  it('names the township a key lies in', () => {
+    expect(landKeyTownship('50103718NE')).toBe('5-01-037');
+    expect(landKeyTownship('')).toBeNull();
+  });
+
+  it('gives the end of the number of the agreement issued from a sold parcel', () => {
+    expect(saleAgreementTail('2026-08-19', 'B0102')).toBe('26080102');
+    expect(saleAgreementTail('2004-01-07', 'A0010')).toBe('04010010');
+    expect(saleAgreementTail('2026/08/19', 'B0102')).toBeNull();
+    expect(saleAgreementTail('2026-08-19', '0102')).toBeNull();
   });
 });

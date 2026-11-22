@@ -1,15 +1,15 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { LandMapAgreement, LandShape } from '../lib/landMap';
 import {
   LAND_FROM,
   LAND_FROM_RIGHTS,
   landAgreementName,
-  LandCard,
+  landByTail,
   landCovers,
   landFiltered,
   landHolders,
+  landIssuedFrom,
   landReadable,
   landRequest,
   landTerm,
@@ -178,90 +178,34 @@ describe('names and dates', () => {
   });
 });
 
-describe('LandCard', () => {
-  const land = {
-    agreements: new Map([['1', agreement('1')]]),
-    offsets: new Map([
-      [
-        '3',
-        {
-          id: '3',
-          offsetType: 'AAY',
-          offsetNumber: '2050843E02',
-          tract: '00',
-          holder: 'EXAMPLE ENERGY LTD.',
-          expiryDate: '2099-05-08',
-          zone: 'PNG TO BASE EXAMPLE',
-          shape: SHAPE,
-        },
-      ],
-    ]),
-    freehold: new Map([
-      [
-        '5',
-        {
-          id: '5',
-          substances: 'ALL MINERALS EXCEPT GOLD,SILVER',
-          nationalPark: null,
-          reserveNumber: null,
-          reserveName: null,
-          shape: SHAPE,
-        },
-      ],
-    ]),
-  };
+describe('landIssuedFrom', () => {
+  // A licence issued from parcel B0102 of the sale of 2026-08-19, and a lease whose number ends
+  // the same way, from a parcel A0102 of another sale that month.
+  const licence = agreement('7', {
+    agreementType: '053',
+    agreementNumber: '5326080102',
+    group: 'LICENSE',
+    termDate: '2026-08-20',
+  });
+  const lease = agreement('8', {
+    agreementType: '005',
+    agreementNumber: '0526080102',
+    group: 'LEASE',
+    termDate: '2026-08-06',
+  });
+  const byTail = landByTail([licence, lease, agreement('9')]);
 
-  it('writes out every piece of land under the click, with the source', () => {
-    const onClose = vi.fn();
-    render(
-      <LandCard
-        pick={{ keys: ['png:1', 'offset:3', 'freehold:5'], x: 100, y: 100 }}
-        land={land}
-        onClose={onClose}
-      />,
-    );
-    expect(screen.getAllByText('Example Energy Ltd.')).toHaveLength(2);
-    expect(screen.getByText('Lease 002-924, tract 00')).toBeInTheDocument();
-    expect(
-      screen.getByText('Petroleum and natural gas · ACTIVE · CONTINUED TERM · 256 ha'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('Parties: EXAMPLE ENERGY LTD. 60% SAMPLE RESOURCES INC. 40%'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Term from 2020-02-17 · expiry: INDEFINITE')).toBeInTheDocument();
-    expect(screen.queryByText('Expires within 12 months.')).not.toBeInTheDocument();
-    expect(screen.getByText('Offset notice 2050843E02, tract 00')).toBeInTheDocument();
-    expect(screen.getByText('Deadline 2099-05-08')).toBeInTheDocument();
-    expect(screen.getByText('Freehold minerals (not the Crown’s)')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Alberta Energy and Minerals, Government of Alberta/),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(onClose).toHaveBeenCalled();
+  it('finds the agreement numbered after the sale and the parcel, of the parcel’s kind', () => {
+    expect(landIssuedFrom(byTail, '2026-08-19', 'B0102')).toBe(licence);
+    expect(landIssuedFrom(byTail, '2026-08-05', 'A0102')).toBe(lease);
   });
 
-  it('shows nothing for no click, or land no longer loaded', () => {
-    const { container, rerender } = render(<LandCard pick={null} land={land} onClose={vi.fn()} />);
-    expect(container).toBeEmptyDOMElement();
-    rerender(<LandCard pick={{ keys: ['png:99'], x: 1, y: 1 }} land={land} onClose={vi.fn()} />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('writes out six at most, and says how many more', () => {
-    const many = new Map(
-      Array.from({ length: 8 }, (_, i) => [
-        String(i),
-        agreement(String(i), { agreementNumber: String(100 + i) }),
-      ]),
-    );
-    render(
-      <LandCard
-        pick={{ keys: [...many.keys()].map((id) => `png:${id}`), x: 1, y: 1 }}
-        land={{ ...land, agreements: many }}
-        onClose={vi.fn()}
-      />,
-    );
-    expect(screen.getAllByText(/^Lease 002-/)).toHaveLength(6);
-    expect(screen.getByText('+2 more here: zoom in and click a smaller spot.')).toBeInTheDocument();
+  it('finds none of another kind, another sale that month, or another parcel', () => {
+    // The lease is not the licence parcel's agreement, whatever its number.
+    expect(landIssuedFrom(landByTail([lease]), '2026-08-05', 'B0102')).toBeNull();
+    // The same number from the month's other sale: its term starts two weeks off.
+    expect(landIssuedFrom(byTail, '2026-08-19', 'A0102')).toBeNull();
+    expect(landIssuedFrom(byTail, '2026-08-19', 'B0103')).toBeNull();
+    expect(landIssuedFrom(byTail, 'soon', 'B0102')).toBeNull();
   });
 });

@@ -88,6 +88,43 @@ export function landKeyPart(key: string): SectionPart | null {
   };
 }
 
+const LAND_KEY = /^([4-6])(\d{2})(\d{3})(\d{2})(\d{2})?([NSEW]{1,2})?$/;
+
+/**
+ * A land key for reading, as land is usually written (F-265): `50103806` is `6-38-1-W5`,
+ * `50103718NE` is `NE-18-37-1-W5`, `4140133301` is `LSD 1-33-13-14-W4`, and a part of a legal
+ * subdivision `NE of LSD 1-33-13-14-W4`. Null when the key is not in the notices' form.
+ */
+export function landKeyText(key: string): string | null {
+  const m = LAND_KEY.exec(key.trim());
+  if (!m) return null;
+  const [, meridian, range, township, section, lsd, part] = m;
+  const place = `${String(Number(section))}-${String(Number(township))}-${String(Number(range))}-W${String(meridian)}`;
+  if (lsd !== undefined) {
+    const within = `LSD ${String(Number(lsd))}-${place}`;
+    return part ? `${part} of ${within}` : within;
+  }
+  return part ? `${part}-${place}` : place;
+}
+
+/** The township a land key lies in, as meridian, range and township: `5-01-037`; or null. */
+export function landKeyTownship(key: string): string | null {
+  const m = LAND_KEY.exec(key.trim());
+  return m ? `${String(m[1])}-${String(m[2])}-${String(m[3])}` : null;
+}
+
+/**
+ * The last eight digits of the agreement the province issues from a sold parcel (F-265): the
+ * sale's year and month (two digits each) and the parcel's four digits; before them come two
+ * digits for the kind of agreement. A parcel `B0102` of the sale of 2026-08-19 becomes an
+ * agreement numbered `..26080102`. Null when the date or the number is not in that form.
+ */
+export function saleAgreementTail(saleDate: string, contractNo: string): string | null {
+  const date = /^\d{2}(\d{2})-(\d{2})-\d{2}$/.exec(saleDate);
+  const parcel = /^[A-Z](\d{4})$/.exec(contractNo);
+  return date && parcel ? `${String(date[1])}${String(date[2])}${String(parcel[1])}` : null;
+}
+
 /** How a section is looked up: `5-06-042-25` for section 25-042-06W5. */
 export function sectionKey(p: {
   meridian: number;

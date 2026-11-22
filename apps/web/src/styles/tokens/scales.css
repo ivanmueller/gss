@@ -217,8 +217,26 @@
   }
 }
 
+/* A panel that slides in from the right edge of the map (the oil and gas map's details of a
+   clicked parcel or well, F-265). */
+@theme {
+  --animate-panel-in: panel-in 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(calc(100% + 1rem));
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-dialog-in {
+  .animate-dialog-in,
+  .animate-panel-in {
     animation: none;
   }
 }

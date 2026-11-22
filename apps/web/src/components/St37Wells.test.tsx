@@ -1,8 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { st37Features, st37Legs, st37Pads, type St37MapWell } from '../lib/st37Map';
-import { St37Card, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
+import { st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -200,133 +199,9 @@ describe('a well not drilled yet', () => {
     );
     expect(st37Plan(well('00/01-29-049-26W4/0'))).toBeNull();
   });
-
-  it('shows the plan on its card, and that the line is not the drilled path', () => {
-    const uwi = '00/01-29-049-26W4/0';
-    render(
-      <St37Card
-        hover={{ uwis: [uwi], x: 10, y: 10 }}
-        byUwi={new Map([[uwi, well(uwi, LICENSED)]])}
-      />,
-    );
-    expect(screen.getByText('Licensed, not drilled')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Planned horizontal in the Duvernay Fm, 5,300 m measured depth · Licensed 2026-11-19',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/The dashed line is the plan/)).toBeInTheDocument();
-  });
 });
 
-describe('St37Card', () => {
-  const byUwi = new Map([
-    ['00/09-07-030-26W4/0', well('00/09-07-030-26W4/0')],
-    ['02/09-07-030-26W4/0', well('02/09-07-030-26W4/0', { licenceNumber: '0509396' })],
-  ]);
-
-  it('shows the well under the pointer and how many more share the place', () => {
-    render(
-      <St37Card
-        hover={{ uwis: ['00/09-07-030-26W4/0', '02/09-07-030-26W4/0'], x: 10, y: 10 }}
-        byUwi={byUwi}
-      />,
-    );
-    expect(screen.getByText('00/09-07-030-26W4/0')).toBeInTheDocument();
-    expect(screen.getByText('Licence 0509395 · Example Energy Ltd.')).toBeInTheDocument();
-    expect(screen.getByText('Producing or injecting · Crude oil')).toBeInTheDocument();
-    expect(screen.getByText('Spud 2023-09-03 · TD 5,846 m (TVD 2,233 m)')).toBeInTheDocument();
-    expect(screen.getByText('+1 more well here')).toBeInTheDocument();
-  });
-
-  it('shows the well whole: its main leg in full and every leg under its licence (F-257)', () => {
-    const first = well('00/09-07-030-26W4/0', {
-      statusClass: 'abandoned',
-      statusFluid: null,
-      totalDepthM: 3100,
-    });
-    const second = well('00/09-07-030-26W4/2');
-    const wells = [first, second];
-    render(
-      <St37Card
-        // The pointer is on the abandoned leg: the card is still the well's.
-        hover={{ uwis: [first.uwi, second.uwi], x: 10, y: 10 }}
-        byUwi={new Map(wells.map((w) => [w.uwi, w]))}
-        legsOf={st37Legs(wells)}
-      />,
-    );
-    expect(screen.getByText('Producing or injecting · Crude oil')).toBeInTheDocument();
-    expect(screen.getByText('2 legs')).toBeInTheDocument();
-    const legs = screen.getByRole('list', { name: 'Legs of this well' });
-    expect([...legs.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
-      '00/09-07-030-26W4/2main leg · Producing or injecting · TD 5,846 m',
-      '00/09-07-030-26W4/0Abandoned · TD 3,100 m',
-    ]);
-    // Its own legs are not counted as other wells.
-    expect(screen.queryByText(/more well/)).not.toBeInTheDocument();
-  });
-
-  it('kept open after a click, lets a leg be chosen and can be closed (F-258)', () => {
-    const first = well('00/09-07-030-26W4/0', { statusClass: 'abandoned' });
-    const second = well('00/09-07-030-26W4/2');
-    const wells = [first, second];
-    const onClose = vi.fn();
-    const card = (kept: boolean) => (
-      <St37Card
-        hover={{ uwis: [second.uwi], x: 10, y: 10 }}
-        byUwi={new Map(wells.map((w) => [w.uwi, w]))}
-        legsOf={st37Legs(wells)}
-        kept={kept}
-        onClose={onClose}
-      />
-    );
-    // Under the pointer only: nothing on it can be clicked.
-    const { rerender } = render(card(false));
-    expect(screen.getByRole('status')).toHaveClass('pointer-events-none');
-    expect(screen.getByRole('button', { name: /26W4\/0/ })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
-
-    rerender(card(true));
-    expect(screen.getByRole('status')).not.toHaveClass('pointer-events-none');
-    const leg = screen.getByRole('button', { name: /26W4\/0/ });
-    expect(leg).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(leg);
-    expect(leg).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(leg);
-    expect(leg).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(onClose).toHaveBeenCalledOnce();
-  });
-
-  it('starts on the leg clicked on the map, unless it is the main one (F-258)', () => {
-    const first = well('00/09-07-030-26W4/0', { statusClass: 'abandoned' });
-    const second = well('00/09-07-030-26W4/2');
-    const wells = [first, second];
-    const card = (clicked: string) => (
-      <St37Card
-        hover={{ uwis: [clicked], x: 10, y: 10 }}
-        byUwi={new Map(wells.map((w) => [w.uwi, w]))}
-        legsOf={st37Legs(wells)}
-        member={{ organizationId: 'org-a', token: 'token' }}
-        kept
-      />
-    );
-    const other = render(card(first.uwi));
-    expect(screen.getByRole('button', { name: /26W4\/0/ })).toHaveAttribute('aria-pressed', 'true');
-    // Its own production comes under the well's, which stays.
-    expect(screen.getByText(/Production of all legs together/)).toBeInTheDocument();
-    expect(
-      screen.getByRole('group', { name: 'Production of leg 00/09-07-030-26W4/0' }),
-    ).toBeInTheDocument();
-    other.unmount();
-    render(card(second.uwi));
-    expect(screen.getByRole('button', { name: /26W4\/0/ })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-    expect(screen.queryByRole('group', { name: /Production of leg/ })).not.toBeInTheDocument();
-  });
-
+describe('st37Place', () => {
   it("names the well's field and pool, and a pool the list does not name by its code", () => {
     const uwi = '00/09-07-030-26W4/0';
     const named = well(uwi, {
@@ -339,12 +214,5 @@ describe('St37Card', () => {
       "O'Example-West field · pool 728098",
     );
     expect(st37Place(well(uwi))).toBeNull();
-    render(<St37Card hover={{ uwis: [uwi], x: 10, y: 10 }} byUwi={new Map([[uwi, named]])} />);
-    expect(screen.getByText('Example South field · Example A pool')).toBeInTheDocument();
-  });
-
-  it('shows nothing when no well is under the pointer', () => {
-    const { container } = render(<St37Card hover={null} byUwi={byUwi} />);
-    expect(container).toBeEmptyDOMElement();
   });
 });

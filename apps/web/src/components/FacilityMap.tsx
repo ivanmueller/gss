@@ -19,7 +19,13 @@ import {
 } from '../lib/mapbox';
 import type { LaneAreas } from '../lib/lanes';
 import { drawPin, PIN_KINDS, PIN_RATIO, PIN_TONES, pinImageId } from '../lib/mapPinImages';
-import { LAND_PICKABLE, syncLand, type LandView } from '../lib/landMap';
+import {
+  LAND_PICKABLE,
+  syncLand,
+  syncLandHover,
+  type LandShape,
+  type LandView,
+} from '../lib/landMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
 import {
   highlightSt37,
@@ -137,6 +143,18 @@ export interface FacilityMapProps {
    * on none, or on a well (the well's card comes first).
    */
   onLandClick?: (pick: { keys: string[]; x: number; y: number } | null) => void;
+  /**
+   * The land under the pointer when no well is (F-265): the key of the topmost shape there, a
+   * sale parcel before the land held; null when the pointer leaves it. Told only when it changes.
+   */
+  onLandHover?: (key: string | null) => void;
+  /** The shape of the land under the pointer, outlined over everything else; null for none. */
+  landHover?: LandShape | null;
+  /**
+   * What is shown at the pointer (F-265): the simple lines of the well or land under it. The
+   * map moves the box with the pointer itself, so following it draws nothing of the page again.
+   */
+  hoverBox?: React.ReactNode;
   /** Map layers that are switched on, in order, drawn under the lanes and the pins. */
   overlays?: readonly MapOverlay[];
   /** The person's sign-in, sent with a layer's pictures (they come from the app's API). */
@@ -480,6 +498,10 @@ export default function FacilityMap(props: FacilityMapProps) {
   const st37Hovered = useRef<string | null>(null);
   // The wells the page was last told are under the pointer (their UWIs joined); '' for none.
   const st37Told = useRef('');
+  // The land the page was last told is under the pointer (its key); null for none.
+  const landTold = useRef<string | null>(null);
+  // The box at the pointer, moved with it (F-265).
+  const tip = useRef<HTMLDivElement>(null);
   // The box on the map: where the chosen pin is on screen, and the pin whose box was closed.
   const [anchor, setAnchor] = useState<PinAnchor | null>(null);
   const [closedId, setClosedId] = useState<string | null>(null);
@@ -616,6 +638,11 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncLandHover(
+        instance,
+        latest.current.landHover ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+      );
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
@@ -650,28 +677,62 @@ export default function FacilityMap(props: FacilityMapProps) {
       }
       return { uwis: [...uwis], licence, leg };
     };
-    // `clicked`: the click that keeps a well's card open lights the leg clicked, also while
-    // another well's card is kept open (it used to leave the earlier one lit).
+    // The land under the pointer, when no well is: the topmost shape, a sale parcel first.
+    const landAt = (point: mapboxgl.Point): string | null => {
+      const layers = [...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) => instance.getLayer(id));
+      if (layers.length === 0) return null;
+      for (const feature of instance.queryRenderedFeatures(point, { layers })) {
+        const key: unknown = feature.properties?.key;
+        if (typeof key === 'string') return key;
+      }
+      return null;
+    };
+    // The box at the pointer follows it: to its right and below, or the other way near the
+    // map's right and bottom edges.
+    const placeTip = (point: mapboxgl.Point) => {
+      const box = tip.current;
+      if (!box) return;
+      const within = instance.getContainer();
+      const left = point.x > within.clientWidth - 300;
+      const up = point.y > within.clientHeight - 190;
+      box.style.left = `${String(point.x)}px`;
+      box.style.top = `${String(point.y)}px`;
+      box.style.transform = `translate(${left ? 'calc(-100% - 14px)' : '14px'}, ${up ? 'calc(-100% - 14px)' : '14px'})`;
+    };
+    // `clicked`: the click that keeps a well's panel open lights the leg clicked, also while
+    // another well's panel is kept open (it used to leave the earlier one lit).
     const hover = (point: mapboxgl.Point, clicked = false) => {
       const onHover = latest.current.onSt37Hover;
-      if (!onHover) return null;
-      const { uwis, licence, leg } = wellsAt(point);
+      const onLand = latest.current.onLandHover;
+      if (!onHover && !onLand) return null;
+      const { uwis, licence, leg } = onHover
+        ? wellsAt(point)
+        : { uwis: [], licence: null, leg: null };
       const first = uwis[0] ?? null;
-      instance.getCanvas().style.cursor = first ? 'pointer' : '';
       const found = first ? { uwis, x: point.x, y: point.y } : null;
-      // While a well's card is kept open, that well stays the one shown.
+      // Land answers the pointer only where no well does.
+      const land = onLand && !first ? landAt(point) : null;
+      instance.getCanvas().style.cursor = first || land ? 'pointer' : '';
+      placeTip(point);
+      // The page is told only when what is under the pointer changes, not at every move of
+      // it: each telling draws the whole page again (F-263). A click tells it of nothing: the
+      // panel it opens takes the place of the box at the pointer (F-265).
+      const told = clicked ? '' : uwis.join('|');
+      if (told !== st37Told.current) {
+        st37Told.current = told;
+        onHover?.(clicked ? null : found);
+      }
+      const landNow = clicked ? null : land;
+      if (landNow !== landTold.current) {
+        landTold.current = landNow;
+        onLand?.(landNow);
+      }
+      // While a well's panel is kept open, that well stays the one lit.
       if (latest.current.st37Locked && !(clicked && found)) return found;
       const lit = licence !== null && leg !== null ? `${licence}|${leg}` : licence;
       if (lit !== st37Hovered.current) {
         st37Hovered.current = lit;
         highlightSt37(instance, licence, leg);
-      }
-      // The page is told only when the wells under the pointer change, not at every move of
-      // it: each telling draws the whole page again (F-263).
-      const told = uwis.join('|');
-      if (told !== st37Told.current) {
-        st37Told.current = told;
-        onHover(found);
       }
       return found;
     };
@@ -716,14 +777,18 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     instance.on('mouseout', () => {
       pointer = null;
-      if (latest.current.st37Locked) return;
-      if (st37Hovered.current !== null) {
-        st37Hovered.current = null;
-        highlightSt37(instance, null);
+      if (landTold.current !== null) {
+        landTold.current = null;
+        latest.current.onLandHover?.(null);
       }
       if (st37Told.current !== '') {
         st37Told.current = '';
         latest.current.onSt37Hover?.(null);
+      }
+      if (latest.current.st37Locked) return;
+      if (st37Hovered.current !== null) {
+        st37Hovered.current = null;
+        highlightSt37(instance, null);
       }
     });
     instance.on('move', () => {
@@ -863,12 +928,6 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (locked !== null && (lit === locked || lit?.startsWith(`${locked}|`))) return;
     st37Hovered.current = locked;
     highlightSt37(instance, locked);
-    // Let go: the page forgets the well it showed, and hears of the next one pointed at.
-    if (locked === null && st37Told.current !== '') {
-      st37Told.current = '';
-      props.onSt37Hover?.(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change of the well kept.
   }, [locked]);
 
   const { st37 } = props;
@@ -888,6 +947,14 @@ export default function FacilityMap(props: FacilityMapProps) {
       syncLandSales(instance, landSales ?? null, st37Tone(basemap, theme), PINS);
     }
   }, [landSales, basemap, theme]);
+
+  const { landHover } = props;
+  useEffect(() => {
+    const instance = map.current;
+    if (instance && styleReady.current) {
+      syncLandHover(instance, landHover ?? null, st37Tone(basemap, theme));
+    }
+  }, [landHover, basemap, theme]);
 
   const { land } = props;
   useEffect(() => {
@@ -912,6 +979,10 @@ export default function FacilityMap(props: FacilityMapProps) {
   return (
     <div className="relative size-full">
       <div ref={container} className="size-full" />
+      {/* Moved with the pointer by the map itself; empty when nothing is under it. */}
+      <div ref={tip} className="pointer-events-none absolute top-0 left-0 z-30">
+        {props.hoverBox}
+      </div>
       {details && selectedId !== closedId && (
         <PinDetailsBox details={details} anchor={anchor} onClose={closeBox} />
       )}

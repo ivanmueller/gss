@@ -374,3 +374,47 @@ export function syncLand(
   map.setPaintProperty(LAND_LAYERS.picked, 'line-color', tone === 'light' ? '#1c1917' : '#fafaf9');
   map.setFilter(LAND_LAYERS.picked, ['in', ['get', 'key'], ['literal', [...view.picked]]]);
 }
+
+const HOVER_SOURCE = 'land-hover';
+export const LAND_HOVER_LAYER = 'land-hover-line';
+
+/** What each map's hover outline was last given. */
+const hovered = new WeakMap<MapboxMap, LandShape | null>();
+
+/**
+ * The outline of the land under the pointer (F-265): every piece of a sale parcel, or one
+ * tract of an agreement, in the map's ink over everything else. It has a small source of its
+ * own, so pointing at land reads none of the land or the parcels again.
+ */
+export function syncLandHover(map: MapboxMap, shape: LandShape | null, tone: 'light' | 'dark') {
+  const data: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: shape
+      ? [
+          {
+            type: 'Feature',
+            geometry: { type: 'MultiPolygon', coordinates: shape },
+            properties: {},
+          },
+        ]
+      : [],
+  };
+  const existing = map.getSource<GeoJSONSource>(HOVER_SOURCE);
+  if (!existing) {
+    if (shape === null) return;
+    map.addSource(HOVER_SOURCE, { type: 'geojson', data });
+  } else if (hovered.get(map) !== shape) {
+    existing.setData(data);
+  }
+  hovered.set(map, shape);
+  if (!map.getLayer(LAND_HOVER_LAYER)) {
+    map.addLayer({
+      id: LAND_HOVER_LAYER,
+      type: 'line',
+      source: HOVER_SOURCE,
+      layout: { 'line-join': 'round' },
+      paint: { 'line-width': 1.6 },
+    });
+  }
+  map.setPaintProperty(LAND_HOVER_LAYER, 'line-color', tone === 'light' ? '#1c1917' : '#fafaf9');
+}

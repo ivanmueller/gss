@@ -14,13 +14,13 @@ import {
   type LandSalesView,
 } from '../lib/landSalesMap';
 import { ST37_OUTLINES } from '../lib/st37Map';
-import { landReadable, landRequest, landToday } from './Land';
+import { landRequest, landToday } from './Land';
 
 /**
  * Crown land sales on the oil and gas map (F-242): a "Land sales" panel (the next sale, the
  * rights and buyer asked for, the bonus paid over a period with its totals and its history by
- * quarter, the statuses shown), a legend of the bonus per hectare, and a parcel's lines on the
- * card of the land clicked. Data from Alberta Energy and Minerals, named wherever it is shown
+ * quarter, the statuses shown) and a legend of the bonus per hectare. A parcel's box at the
+ * pointer and its panel on the right are in LandPanel.tsx (F-265). Data from Alberta Energy and Minerals, named wherever it is shown
  * (docs/DECISIONS.md, 2026-11-21). Every figure is the province's own or a sum of them made by
  * the database; nothing is estimated.
  */
@@ -102,7 +102,7 @@ export function saleMoney(text: string | null): string {
 }
 
 /** Dollars to the cent, as published: `$2,296.32`. */
-function saleExact(text: string): string {
+export function saleExact(text: string): string {
   const [whole = '0', cents] = text.split('.');
   return `$${Number(whole).toLocaleString('en-CA')}${cents ? `.${cents}` : ''}`;
 }
@@ -164,8 +164,8 @@ export interface LandSalesState {
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
   /** The parcels whose card is open, drawn with a bold outline. */
   setPicked: (keys: readonly string[]) => void;
-  /** A clicked parcel's lines for the land card; null when it is not one loaded. */
-  cardRow: (id: string) => React.ReactNode;
+  /** The parcels shown, by their id: for the box at the pointer and the panel (F-265). */
+  parcels: ReadonlyMap<string, LandSaleParcel>;
   panel: () => React.ReactNode;
   legend: () => React.ReactNode;
 }
@@ -334,50 +334,6 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   // A play's sales are those inside its outline, when the map has one for it (F-264).
   const outlined = rights !== null && Object.hasOwn(ST37_OUTLINES, rights);
   const periodLabel = SALE_PERIODS.find((p) => p.key === period)?.label.toLowerCase() ?? '';
-
-  const cardRow = (id: string) => {
-    const p = byId.get(id);
-    if (!p) return null;
-    const state = landSaleState(p, today);
-    return (
-      <li key={`sale:${id}`}>
-        <p className="font-semibold">
-          Sale of {p.saleDate} · {p.contractType === 'LICENCE' ? 'Licence' : 'Lease'} {p.contractNo}
-        </p>
-        <p>
-          {state === 'upcoming'
-            ? 'Upcoming sale: not sold yet'
-            : state === 'sold'
-              ? `Sold${p.bonus ? ` for ${saleExact(p.bonus)}` : ''}${
-                  p.dollarsPerHectare ? ` (${saleExact(p.dollarsPerHectare)}/ha)` : ''
-                }`
-              : p.status === 'NO OFFERS'
-                ? 'No offers'
-                : p.status === null
-                  ? 'No result published for this parcel'
-                  : `Not sold: ${p.status}`}
-        </p>
-        {p.buyers && (
-          <p className="text-xs text-muted-foreground">Buyer: {landReadable(p.buyers)}</p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          {[
-            p.hectares !== null ? saleHectares(p.hectares) : null,
-            p.region && landReadable(p.region),
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
-        {p.zone && <p className="text-xs text-muted-foreground">{p.zone}</p>}
-        {p.inexact && (
-          <p className="text-xs text-muted-foreground">
-            The shape is not exact: part of this parcel is a portion of its land, or lies outside
-            the area loaded.
-          </p>
-        )}
-      </li>
-    );
-  };
 
   const panel = () => (
     <div
@@ -622,7 +578,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       </div>
     );
 
-  return { view, onViewChange, setPicked, cardRow, panel, legend };
+  return { view, onViewChange, setPicked, parcels: byId, panel, legend };
 }
 
 function Tile({ label, value, note }: { label: string; value: string; note?: string }) {
