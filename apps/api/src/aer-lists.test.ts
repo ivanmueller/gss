@@ -105,7 +105,18 @@ describe('fetchAerList', () => {
   it('keeps a plain text list and refuses redirects, errors, HTML and oversized files', async () => {
     const ok = vi.fn<typeof fetch>(() => Promise.resolve(text(ST1)));
     expect(await fetchAerList('https://x.test/a', ok)).toMatchObject({ kind: 'ok', body: ST1 });
-    expect(ok.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' });
+    // 'manual': Cloudflare Workers refuse 'error' outright (every fetch failed on staging, F-282);
+    // a redirect answers 3xx, which is not 200, so it is never followed.
+    expect(ok.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+    const moved = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(null, { status: 301, headers: { Location: 'https://elsewhere.test/' } }),
+      ),
+    );
+    expect(await fetchAerList('https://x.test/a', moved)).toEqual({
+      kind: 'failed',
+      reason: 'status 301',
+    });
 
     const thrown = vi.fn<typeof fetch>(() => Promise.reject(new TypeError('redirect')));
     expect(await fetchAerList('https://x.test/a', thrown)).toMatchObject({ kind: 'failed' });
