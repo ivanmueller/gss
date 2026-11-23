@@ -41,3 +41,29 @@ describe('the twice-daily trigger', () => {
     expect(refreshWells).not.toHaveBeenCalled();
   });
 });
+
+describe('the hourly trigger (F-282)', () => {
+  it('runs the AER lists alone, not the exchange rate', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(() => Promise.resolve(new Response('', { status: 404 })));
+    vi.stubGlobal('fetch', fetchImpl);
+    for (const level of ['log', 'warn', 'error'] as const) {
+      vi.spyOn(console, level).mockImplementation(() => undefined);
+    }
+    const waits: Promise<unknown>[] = [];
+    worker.scheduled(
+      { cron: '30 * * * *', scheduledTime: Date.now(), noRetry: () => undefined },
+      ENV,
+      {
+        waitUntil: (p: Promise<unknown>) => waits.push(p),
+        passThroughOnException: () => undefined,
+        props: {},
+      } as unknown as ExecutionContext,
+    );
+    await Promise.allSettled(waits);
+    expect(waits).toHaveLength(1);
+    const asked = fetchImpl.mock.calls.map(([u]) =>
+      typeof u === 'string' ? u : u instanceof URL ? u.href : u.url,
+    );
+    expect(asked.some((u) => u.includes('bankofcanada'))).toBe(false);
+  });
+});
