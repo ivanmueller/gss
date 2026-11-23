@@ -254,17 +254,20 @@ const OIL_SERIES: readonly PriceSeriesKey[] = [
  * on its first page, between "$/M3" and "For further information". Anything else refuses it.
  */
 export function parLetterPrices(rawText: string, month: string): PriceRow[] {
-  const said = /Par Prices\s*(?:-|for)\s*([A-Za-z]+)\s+(\d{4})\s+Production Month/i.exec(rawText);
+  // A hyphen or a dash, as the PDF tool gives it (poppler: "–"; xpdf: "-").
+  const said = /Par Prices\s*(?:[-–—]|for)\s*([A-Za-z]+)\s+(\d{4})\s+Production Month/i.exec(
+    rawText,
+  );
   const letterMonth = said ? monthOf(said[1] ?? '', said[2] ?? '') : null;
   if (letterMonth !== month) {
     throw new LetterMonthError(`${month}: the letter is for ${String(letterMonth)}`);
   }
-  const start = rawText.indexOf('$/M3');
+  // "$/M3", or "$/M" and its superscript 3 on the next line (poppler).
+  const unit = /\$\/M\s*3/.exec(rawText);
   const end = rawText.search(/For further information/i);
-  if (start < 0 || end < start) throw new PriceSheetError(`${month}: no par price table`);
-  const prices = [...rawText.slice(start + 4, end).matchAll(/\$?(\d{1,4}\.\d{2})\b/g)].map(
-    (m) => m[1] ?? '',
-  );
+  if (!unit || end < unit.index) throw new PriceSheetError(`${month}: no par price table`);
+  const table = rawText.slice(unit.index + unit[0].length, end);
+  const prices = [...table.matchAll(/\$?(\d{1,4}\.\d{2})\b/g)].map((m) => m[1] ?? '');
   if (prices.length !== 4) {
     throw new PriceSheetError(`${month}: ${String(prices.length)} par prices, expected 4`);
   }

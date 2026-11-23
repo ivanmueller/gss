@@ -194,6 +194,19 @@ describe('parLetterPrices', () => {
       { series: 'oil_heavy_par', month: '2031-01', price: '3.30' },
       { series: 'oil_ultra_heavy_par', month: '2031-01', price: '44.44' },
     ]);
+    // As poppler's pdftotext gives the older letters: a dash, and the unit's 3 on its own line.
+    const poppler = letter('Par Prices – January 2031 Production Month', [
+      '1.11',
+      '2.22',
+      '3.33',
+      '4.44',
+    ]).replace('$/M3', '$/M\n3');
+    expect(parLetterPrices(poppler, '2031-01').map((r) => r.price)).toEqual([
+      '1.11',
+      '2.22',
+      '3.33',
+      '4.44',
+    ]);
     // The older heading.
     expect(
       parLetterPrices(
