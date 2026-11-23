@@ -42,6 +42,7 @@ import {
   type PipelinesView,
 } from '../lib/pipelinesMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
+import { placeRigs, RIG_PICKABLE, syncRigs, type RigsView } from '../lib/rigsMap';
 import {
   highlightSt37,
   ST37_HOVER_FROM,
@@ -174,6 +175,11 @@ export interface FacilityMapProps {
    * ("pipeline:ID") answer the pointer and the click after the facilities', before the land's.
    */
   pipelines?: PipelinesView | null;
+  /**
+   * Rigs (F-282), over everything else drawn from the oil and gas data. Their keys ("rig:N")
+   * answer the pointer and the click before the wells and the land.
+   */
+  rigs?: RigsView | null;
   /**
    * Each township's numbers and box (F-271): the ranges along the map's top and the townships
    * down its right side, from EDGE_LABELS_FROM in; null for none.
@@ -708,6 +714,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncRigs(
+        instance,
+        latest.current.rigs ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
@@ -741,6 +753,20 @@ export default function FacilityMap(props: FacilityMapProps) {
         uwis.add(uwi);
       }
       return { uwis: [...uwis], licence, leg };
+    };
+    // A rig under the pointer (F-282): found before the wells, which it stands on.
+    const rigAt = (point: mapboxgl.Point): string | null => {
+      const layers = RIG_PICKABLE.filter((id) => instance.getLayer(id));
+      if (layers.length === 0) return null;
+      const box: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+        [point.x - 4, point.y - 4],
+        [point.x + 4, point.y + 4],
+      ];
+      for (const feature of instance.queryRenderedFeatures(box, { layers })) {
+        const key: unknown = feature.properties?.key;
+        if (typeof key === 'string') return key;
+      }
+      return null;
     };
     // The land under the pointer, when no well is: the topmost shape, a facility first, then a
     // pipeline, then a sale parcel.
@@ -776,13 +802,14 @@ export default function FacilityMap(props: FacilityMapProps) {
       const onHover = latest.current.onSt37Hover;
       const onLand = latest.current.onLandHover;
       if (!onHover && !onLand) return null;
-      const { uwis, licence, leg } = onHover
-        ? wellsAt(point)
-        : { uwis: [], licence: null, leg: null };
+      // A rig answers first, then a well, then land (F-282).
+      const rig = onLand ? rigAt(point) : null;
+      const { uwis, licence, leg } =
+        onHover && rig === null ? wellsAt(point) : { uwis: [], licence: null, leg: null };
       const first = uwis[0] ?? null;
       const found = first ? { uwis, x: point.x, y: point.y } : null;
       // Land answers the pointer only where no well does.
-      const land = onLand && !first ? landAt(point) : null;
+      const land = onLand && !first ? (rig ?? landAt(point)) : null;
       instance.getCanvas().style.cursor = first || land ? 'pointer' : '';
       placeTip(point);
       // The page is told only when what is under the pointer changes, not at every move of
@@ -835,8 +862,9 @@ export default function FacilityMap(props: FacilityMapProps) {
       // Land under the click, when no well is: every shape there, agreements first (F-241).
       const onLand = latest.current.onLandClick;
       if (!onLand) return;
-      // Facilities first, then pipelines, then sale parcels: each is drawn over what follows it.
+      // Rigs first, then facilities, pipelines and sale parcels: each is drawn over what follows.
       const layers = [
+        ...RIG_PICKABLE,
         ...FACILITY_PICKABLE,
         ...PIPELINE_PICKABLE,
         ...SALE_PICKABLE,
@@ -1082,6 +1110,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
       placeFormations(instance, PINS);
+      placeRigs(instance, PINS);
     }
   }, [st37, basemap, theme]);
 
@@ -1095,6 +1124,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
       placeFormations(instance, PINS);
+      placeRigs(instance, PINS);
     }
   }, [landSales, basemap, theme]);
 
@@ -1116,6 +1146,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
       placeFormations(instance, PINS);
+      placeRigs(instance, PINS);
     }
   }, [land, basemap, theme]);
 
@@ -1132,6 +1163,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       syncFacilities(instance, facilities ?? null, st37Tone(basemap, theme), PINS);
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
+      placeRigs(instance, PINS);
     }
   }, [facilities, basemap, theme]);
 
@@ -1142,6 +1174,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && styleReady.current) {
       syncPipelines(instance, pipelines ?? null, PINS);
       placeGrid(instance, PINS);
+      placeRigs(instance, PINS);
     }
   }, [pipelines]);
 
@@ -1152,6 +1185,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && styleReady.current) {
       syncGrid(instance, grid ?? null, st37Tone(basemap, theme), PINS);
       placeFormations(instance, PINS);
+      placeRigs(instance, PINS);
     }
   }, [grid, basemap, theme]);
 
@@ -1161,8 +1195,18 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the outlines as they are then.
     if (instance && styleReady.current) {
       syncFormations(instance, formations ?? null, st37Tone(basemap, theme), PINS);
+      placeRigs(instance, PINS);
     }
   }, [formations, basemap, theme]);
+
+  const { rigs } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the rigs as they are then.
+    if (instance && styleReady.current) {
+      syncRigs(instance, rigs ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [rigs, basemap, theme]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

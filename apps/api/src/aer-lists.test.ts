@@ -12,6 +12,7 @@ import {
   pointsFromGrid,
   readAerFile,
   refreshAerLists,
+  RIGS_SCHEMA_VERSION,
   rigsAnswer,
 } from './aer-lists';
 import type { AerLicenceServed, AerRigServed } from './aer-lists-db';
@@ -322,7 +323,7 @@ describe('refreshAerLists', () => {
     expect(petroleum.aerFilesToRead).toHaveBeenCalledWith(
       AER_READER_VERSION,
       ['file-st1', 'file-st49'],
-      50,
+      150,
     );
     expect(petroleum.aerStoreReading).toHaveBeenCalledWith(
       'file-st1',
@@ -427,13 +428,16 @@ describe('the answers', () => {
       wellId: '02/02-27-017-13W4/0',
       wellName: 'EXAMPLE',
       licenceNumber: '0526001',
+      licenseeBaId: 'A1XX',
       licenseeName: 'Example Energy Ltd.',
+      contractorBaId: 'A2XX',
       contractorName: 'Example Drilling Inc.',
       rigNumber: '11',
       activityType: 'Drill to LD',
       activityAt: '2026-11-16T02:30:15.000Z',
       listDate: '2026-11-17',
       surfaceLocation: null,
+      place: null,
       longitude: null,
       latitude: null,
     };
@@ -500,16 +504,37 @@ describe('GET /api/v1/petroleum/aer/licences and /rigs', () => {
       expect.objectContaining({ userId: USER_ID, organizationId: 'org-a', role: 'viewer' }),
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as string,
     );
-    const rigs = await app.request('/api/v1/petroleum/aer/rigs', { headers: AUTH }, WITH_PETROLEUM);
+    // Before the rigs' migration the rigs are not served (F-282).
+    const early = await app.request(
+      '/api/v1/petroleum/aer/rigs',
+      { headers: AUTH },
+      WITH_PETROLEUM,
+    );
+    expect(early.status).toBe(503);
+    expect(petroleum.aerRigs).not.toHaveBeenCalled();
+    petroleum.schemaVersion.mockResolvedValue(RIGS_SCHEMA_VERSION);
+    petroleum.aerRigs.mockResolvedValue({
+      rows: [],
+      dates: { latestListDate: '2026-11-22', lastSeenAt: null },
+      listDates: ['2026-11-21', '2026-11-22'],
+    });
+    const rigs = await app.request(
+      '/api/v1/petroleum/aer/rigs?days=90',
+      { headers: AUTH },
+      WITH_PETROLEUM,
+    );
     expect(rigs.status).toBe(200);
-    expect(await rigs.json()).toMatchObject({ days: 7 });
+    expect(await rigs.json()).toMatchObject({
+      days: 90,
+      listDates: ['2026-11-21', '2026-11-22'],
+    });
   });
 
   it('refuses a period it does not offer', async () => {
     for (const path of [
       '/api/v1/petroleum/aer/licences?days=14',
       '/api/v1/petroleum/aer/licences?days=30.0',
-      '/api/v1/petroleum/aer/rigs?days=90',
+      '/api/v1/petroleum/aer/rigs?days=60',
     ]) {
       const res = await app.request(path, { headers: AUTH }, WITH_PETROLEUM);
       expect(res.status).toBe(400);

@@ -33,6 +33,8 @@ import { useLand, type LandPick } from './Land';
 import { LandPanel, LandTip } from './LandPanel';
 import { saleDay, useLandSales } from './LandSales';
 import { SIDE_LABEL } from './MapSide';
+import { RigPanel, RigTip } from './RigPanel';
+import { useRigs } from './Rigs';
 import { St37Panel, St37Tip } from './St37Panel';
 import { useSt37Wells } from './St37Wells';
 import { GridPanel, useTownshipGrid } from './TownshipGrid';
@@ -79,8 +81,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [basemap, setBasemap] = useState<Basemap>('map');
   const [theme] = useTheme();
   const layers = useMapLayers(mapbox.status === 'ok' && !refused ? session : null);
-  // The AER's new licences and rigs (F-243 part 2) are off the map for now (the owner,
-  // 2026-11-19); their code and daily job stay. The ST37 wells take their place (F-243 part 4).
+  // The AER's new licences (F-243 part 2) are off the map for now (the owner, 2026-11-19); their
+  // code and daily job stay. The ST37 wells take their place (F-243 part 4).
   const wells = useSt37Wells(session.organization.id, session.token);
   // The well or leg under the pointer: a box at the pointer with its simple lines (F-265).
   const [hover, setHover] = useState<St37Hover | null>(null);
@@ -104,6 +106,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [pipelinePicked, setPipelinePicked] = useState<PipelineEntry | null>(null);
   // The formations' outlines (F-280), each switched by itself, not tied to the wells.
   const formations = useFormations();
+  // Rigs, all of Alberta (F-282): their keys answer the pointer and the click before the wells.
+  const rigs = useRigs(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {
     if (pick) grid.clearPick();
     setLandPick(pick);
@@ -111,6 +115,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     sales.setPicked(pick?.keys ?? []);
     facilities.setPicked(pick?.keys.slice(0, 1) ?? []);
     pipelines.setPicked(pick?.keys.slice(0, 1) ?? []);
+    rigs.setPicked(pick?.keys.slice(0, 1) ?? []);
     const first = pick?.keys[0];
     setPipelinePicked(first?.startsWith('pipeline:') ? (pipelines.byKey.get(first) ?? null) : null);
   };
@@ -121,6 +126,10 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       ? (facilities.byKey.get(landPick.keys[0]) ?? null)
       : null;
   const pipelineOpen = landPick?.keys[0]?.startsWith('pipeline:') === true ? pipelinePicked : null;
+  const rigPicked =
+    landPick?.keys[0]?.startsWith('rig:') === true
+      ? (rigs.byKey.get(landPick.keys[0]) ?? null)
+      : null;
   // The land under the pointer, where no well is: a box at the pointer, and its outline.
   const [landHover, setLandHover] = useState<string | null>(null);
   const hoverShape = useMemo(() => {
@@ -150,7 +159,14 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     setSection((before) => (before === name ? null : name));
   };
   const updated =
-    [wells.updated, land.updated, sales.updated, facilities.updated, pipelines.updated]
+    [
+      wells.updated,
+      land.updated,
+      sales.updated,
+      facilities.updated,
+      pipelines.updated,
+      rigs.updated,
+    ]
       .filter((at): at is string => at !== null)
       .sort()
       .at(-1) ?? null;
@@ -179,9 +195,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             ? facilities.legend()
             : name === 'pipelines'
               ? pipelines.legend()
-              : name === 'formations'
-                ? formations.legend(tone)
-                : wells.legend(tone),
+              : name === 'rigs'
+                ? rigs.legend()
+                : name === 'formations'
+                  ? formations.legend(tone)
+                  : wells.legend(tone),
   }));
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
@@ -215,6 +233,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           onEmptyClick={grid.identify}
           facilities={facilities.view}
           pipelines={pipelines.view}
+          rigs={rigs.view}
           formations={formations.view}
           onLandClick={pickLand}
           onLandHover={setLandHover}
@@ -226,6 +245,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               <FacilityTip facility={facilities.byKey.get(landHover) ?? null} />
             ) : landHover?.startsWith('pipeline:') ? (
               <PipelineTip pipeline={pipelines.byKey.get(landHover) ?? null} />
+            ) : landHover?.startsWith('rig:') ? (
+              <RigTip move={rigs.byKey.get(landHover) ?? null} />
             ) : (
               <LandTip landKey={landHover} land={land} sales={sales} />
             )
@@ -239,6 +260,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             grid.onViewChange(bbox, zoom);
             facilities.onViewChange(bbox, zoom);
             pipelines.onViewChange(bbox, zoom);
+            rigs.onViewChange(bbox, zoom);
           }}
           onOverlayClick={layers.setPicked}
           onLayersStale={layers.onStale}
@@ -303,7 +325,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               <div>
                 <h1 className="text-xl font-semibold tracking-tight">Alberta oil and gas</h1>
                 <p className="text-[0.8125rem] text-muted-foreground">
-                  Crown land sales, who holds the land, wells and production
+                  Crown land sales, who holds the land, wells, rigs and production
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -384,6 +406,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               open: section === 'pipelines',
               onToggle: openOnly('pipelines'),
             })}
+            {rigs.section({ open: section === 'rigs', onToggle: openOnly('rigs') })}
             {wells.section({
               open: section === 'wells',
               onToggle: openOnly('wells'),
@@ -408,6 +431,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {wells.about()}
                 {facilities.about()}
                 {pipelines.about()}
+                {rigs.about()}
                 {formations.about()}
                 {grid.about()}
               </div>
@@ -420,7 +444,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <LandPanel
         // A panel of its own for each click: it starts on the first piece of land under it.
         key={landPick ? `land:${landPick.keys.join(',')}` : 'land'}
-        pick={kept || facilityPicked || pipelineOpen ? null : landPick}
+        pick={kept || facilityPicked || pipelineOpen || rigPicked ? null : landPick}
         land={land}
         sales={sales}
         goTo={goTo}
@@ -443,6 +467,14 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         pipeline={kept ? null : pipelineOpen}
         member={{ organizationId: session.organization.id, token: session.token }}
         fileDate={pipelines.fileDate}
+        goTo={goTo}
+        onClose={() => {
+          pickLand(null);
+        }}
+      />
+      <RigPanel
+        move={kept ? null : rigPicked}
+        movesOf={rigs.movesOf}
         goTo={goTo}
         onClose={() => {
           pickLand(null);
@@ -506,11 +538,19 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   );
 }
 
-type SideSection = 'sales' | 'land' | 'facilities' | 'pipelines' | 'wells' | 'formations';
+type SideSection = 'sales' | 'land' | 'facilities' | 'pipelines' | 'rigs' | 'wells' | 'formations';
 
 /** The sections' legends in order: the open one first, the rest as the card lists them. */
 export function sideOrder(open: SideSection | null): SideSection[] {
-  const all: SideSection[] = ['sales', 'land', 'facilities', 'pipelines', 'wells', 'formations'];
+  const all: SideSection[] = [
+    'sales',
+    'land',
+    'facilities',
+    'pipelines',
+    'rigs',
+    'wells',
+    'formations',
+  ];
   return open === null ? all : [open, ...all.filter((name) => name !== open)];
 }
 

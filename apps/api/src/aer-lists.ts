@@ -1,10 +1,15 @@
 import {
+  AER_LICENCE_LIST_URL,
   AER_LIST_MAX_CHARS,
   AER_READER_VERSION,
+  aerLicenceListNumber,
   albertaDay,
   albertaToUtc,
+  isAerLicenceListHeader,
+  parseAerLicenceListLine,
   parseSt1,
   parseSt49,
+  type AerLicenceLocation,
   type AtsLsd,
 } from '@grain/domain';
 
@@ -23,6 +28,7 @@ import {
   type PetroleumFactory,
 } from './petroleum-db';
 import { failureSummary, type ApiEnv } from './respond';
+import { readZip, ZipError } from './zip';
 
 /**
  * The Alberta Energy Regulator's daily licence (ST1) and rig activity (ST49) lists (F-243 part 1;
@@ -59,8 +65,185 @@ export const ATS_LSD_QUERY =
 export const AER_PLACEMENT_VERSION = 1;
 
 const FETCH_TIMEOUT_MS = 20_000;
-/** Files read (or read again after a reader change) in one run. */
-const READS_PER_RUN = 50;
+/**
+ * Files read (or read again after a reader change) in one run: a month of the rig archives is
+ * about 30 files (F-282), so three months and the daily lists are read in one run.
+ */
+const READS_PER_RUN = 150;
+
+/**
+ * F-282, rigs on the map: the oil and gas database's version with the rig archives' addresses
+ * and the licences' locations (20261204010000_petro_rigs.sql).
+ */
+export const RIGS_SCHEMA_VERSION = 17;
+/** The longest period of rigs shown, in days; the archives and the locating cover a little more. */
+export const RIG_HISTORY_DAYS = 90;
+const RIG_HISTORY_MARGIN_DAYS = 5;
+/** The largest monthly archive taken (about 60 KB in 2026). */
+const ARCHIVE_MAX_BYTES = 5_000_000;
+/** The list of every licence: about 60 MB and a minute to download on 2026-11-23. */
+const LICENCE_LIST_MAX_BYTES = 250_000_000;
+const LICENCE_LIST_TIMEOUT_MS = 300_000;
+/** Licences located in one run. */
+const LICENCES_PER_RUN = 3_000;
+
+/** The address of the AER's archive of a month's daily rig lists ('2026-09'). */
+export function rigArchiveUrl(month: string): string {
+  return `https://static.aer.ca/prd/data/wells/spud${month}.zip`;
+}
+
+/**
+ * The months whose archives cover the rigs shown: from the month of the period's first day to
+ * the month before this one in Alberta (this month's archive is not posted until the next).
+ */
+export function rigArchiveMonths(now: Date): string[] {
+  const first = albertaDay(
+    new Date(now.getTime() - (RIG_HISTORY_DAYS + RIG_HISTORY_MARGIN_DAYS) * 86_400_000),
+  ).slice(0, 7);
+  const current = albertaDay(now).slice(0, 7);
+  const months: string[] = [];
+  let [year, month] = first.split('-').map(Number) as [number, number];
+  for (;;) {
+    const text = `${String(year)}-${String(month).padStart(2, '0')}`;
+    if (text >= current) break;
+    months.push(text);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+/** A day's file in an archive, by its name without folders: `SPUD0901.txt`. */
+export function archiveDayName(name: string): string | null {
+  const base = name.split('/').at(-1) ?? '';
+  return /^spud[0-9]{4}\.txt$/i.test(base) ? base : null;
+}
+
+/** Fetches a month's archive: its day files, or why not. */
+export async function fetchRigArchive(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<
+  | { kind: 'ok'; files: { name: string; body: string }[]; fetchedAt: Date }
+  | { kind: 'refused' | 'failed'; reason: string }
+> {
+  let res: Response;
+  const fetchedAt = new Date();
+  try {
+    res = await fetchImpl(url, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch {
+    return { kind: 'failed', reason: 'no answer' };
+  }
+  if (res.status !== 200) {
+    await res.body?.cancel().catch(() => undefined);
+    // 404: the month is not posted yet; asked again next run.
+    return { kind: 'failed', reason: `status ${String(res.status)}` };
+  }
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await boundedBytes(res, ARCHIVE_MAX_BYTES);
+  } catch {
+    return { kind: 'failed', reason: 'cut short' };
+  }
+  if (bytes === null) return { kind: 'refused', reason: 'too large' };
+  try {
+    const files = [];
+    for (const entry of await readZip(bytes, AER_LIST_MAX_CHARS)) {
+      const name = archiveDayName(entry.name);
+      if (name === null) continue;
+      const body = new TextDecoder('windows-1252').decode(entry.bytes);
+      if (body.trim() !== '') files.push({ name, body });
+    }
+    if (files.length === 0) return { kind: 'refused', reason: 'no day files' };
+    return { kind: 'ok', files, fetchedAt };
+  } catch (error) {
+    return {
+      kind: 'refused',
+      reason: error instanceof ZipError ? error.message : 'not a readable zip',
+    };
+  }
+}
+
+/**
+ * Reads the AER's list of every licence for the licences wanted: the ones found, and whether the
+ * whole list was read (only then are the others known to be missing from it).
+ */
+export async function readLicenceList(
+  wanted: ReadonlySet<string>,
+  fetchImpl: typeof fetch,
+): Promise<
+  | { kind: 'ok'; found: AerLicenceLocation[]; whole: boolean }
+  | { kind: 'refused' | 'failed'; reason: string }
+> {
+  let res: Response;
+  try {
+    res = await fetchImpl(AER_LICENCE_LIST_URL, {
+      redirect: 'error',
+      headers: { Accept: 'text/csv' },
+      signal: AbortSignal.timeout(LICENCE_LIST_TIMEOUT_MS),
+    });
+  } catch {
+    return { kind: 'failed', reason: 'no answer' };
+  }
+  if (res.status !== 200) {
+    await res.body?.cancel().catch(() => undefined);
+    return { kind: 'failed', reason: `status ${String(res.status)}` };
+  }
+  const reader = (res.body as ReadableStream<Uint8Array> | null)?.getReader();
+  if (!reader) return { kind: 'refused', reason: 'empty' };
+  const decoder = new TextDecoder('windows-1252');
+  const found = new Map<string, AerLicenceLocation>();
+  let rest = '';
+  let size = 0;
+  // Whether the first line was the list's header; null before it is read.
+  const seen: { header: boolean | null } = { header: null };
+  const take = (line: string) => {
+    if (seen.header === null) {
+      seen.header = isAerLicenceListHeader(line);
+      return;
+    }
+    const number = aerLicenceListNumber(line);
+    if (number === null || !wanted.has(number) || found.has(number)) return;
+    const row = parseAerLicenceListLine(line);
+    if (row) found.set(number, row);
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > LICENCE_LIST_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { kind: 'refused', reason: 'too large' };
+      }
+      const lines = (rest + decoder.decode(value, { stream: true })).split('\n');
+      rest = lines.pop() ?? '';
+      for (const line of lines) take(line);
+      if (seen.header === false) {
+        await reader.cancel().catch(() => undefined);
+        return { kind: 'refused', reason: 'another header' };
+      }
+      if (found.size === wanted.size) {
+        // Every licence wanted is found: the rest of the list is not needed.
+        await reader.cancel().catch(() => undefined);
+        return { kind: 'ok', found: [...found.values()], whole: false };
+      }
+    }
+  } catch {
+    // Cut short: what was found is kept; nothing is marked missing.
+    return { kind: 'ok', found: [...found.values()], whole: false };
+  }
+  rest += decoder.decode();
+  if (rest !== '') take(rest);
+  if (seen.header !== true) return { kind: 'refused', reason: 'another header' };
+  return { kind: 'ok', found: [...found.values()], whole: true };
+}
 /** Subdivisions asked of the township grid in one run, and in one request. */
 const LOCATE_PER_RUN = 300;
 const LOCATE_BATCH = 40;
@@ -460,6 +643,40 @@ export async function refreshAerLists(
       );
     }
 
+    // The AER's monthly rig archives for the months the rigs shown cover (F-282), each month
+    // once: its day files are kept as the daily ones are, then read with them.
+    const rigsReady = (await db.schemaVersion()) >= RIGS_SCHEMA_VERSION;
+    if (rigsReady) {
+      const kept = new Set(await db.aerArchiveMonthsKept());
+      for (const month of rigArchiveMonths(new Date()).filter((m) => !kept.has(m))) {
+        const url = rigArchiveUrl(month);
+        const archive = await fetchRigArchive(url, fetchImpl);
+        if (archive.kind !== 'ok') {
+          console.warn(`AER ST49 archive ${month}: ${archive.kind}, ${archive.reason}`);
+          continue;
+        }
+        let stored = 0;
+        for (const file of archive.files) {
+          try {
+            const capture = await db.aerCapture(
+              'st49',
+              `${url}#${file.name}`,
+              file.body,
+              await bodySha256(file.body),
+              archive.fetchedAt,
+            );
+            if (capture.newEdition) stored += 1;
+            if (capture.newFile) captured.push(capture.fileId);
+          } catch (error) {
+            console.error(`AER ST49 archive ${month} not kept: ${failureSummary(error)}`);
+          }
+        }
+        console.log(
+          `AER ST49 archive ${month}: ${String(archive.files.length)} day files, ${String(stored)} kept`,
+        );
+      }
+    }
+
     // Reading: the files just captured first, then any stored file the current reader has not
     // read yet (after a reader change), at most READS_PER_RUN.
     for (const file of await db.aerFilesToRead(AER_READER_VERSION, captured, READS_PER_RUN)) {
@@ -511,6 +728,27 @@ export async function refreshAerLists(
       `AER locations: ${String(counts.asked)} asked, ${String(counts.found)} found, ` +
         `${String(counts.notFound)} not found, ${String(counts.failed)} failed`,
     );
+
+    // Where each rig's licence is (F-282): the AER's list of every licence, read only when rigs
+    // are on licences with no location yet.
+    if (rigsReady) {
+      const since = periodStart(new Date(), RIG_HISTORY_DAYS + RIG_HISTORY_MARGIN_DAYS);
+      const wanted = await db.aerLicencesToLocate(since, LICENCES_PER_RUN);
+      if (wanted.length > 0) {
+        const list = await readLicenceList(new Set(wanted), fetchImpl);
+        if (list.kind !== 'ok') {
+          console.warn(`AER licence list: ${list.kind}, ${list.reason}`);
+        } else {
+          const found = new Set(list.found.map((l) => l.licenceNumber));
+          const missing = list.whole ? wanted.filter((n) => !found.has(n)) : [];
+          await db.aerStoreLicenceLocations(list.found, missing);
+          console.log(
+            `AER licence list: ${String(wanted.length)} asked, ${String(list.found.length)} found, ` +
+              `${String(missing.length)} not in the list${list.whole ? '' : ' (read in part)'}`,
+          );
+        }
+      }
+    }
     return { status: 'done' };
   } catch (error) {
     console.error(`AER lists not refreshed: ${failureSummary(error)}`);
@@ -522,7 +760,7 @@ export async function refreshAerLists(
 
 /** The periods the routes offer, in days. */
 export const LICENCE_DAYS = [7, 30, 90] as const;
-export const RIG_DAYS = [7, 30] as const;
+export const RIG_DAYS = [7, 30, 90] as const;
 
 /** The first list date in a period of `days` ending today in Alberta. */
 export function periodStart(now: Date, days: number): string {
@@ -570,8 +808,16 @@ export function licencesAnswer(rows: AerLicenceServed[], dates: AerSourceDates, 
   };
 }
 
-/** GET /petroleum/aer/rigs: rigs placed at their licence's surface location; the rest listed. */
-export function rigsAnswer(rows: AerRigServed[], dates: AerSourceDates, days: number) {
+/**
+ * GET /petroleum/aer/rigs: rigs placed at their licence's surface location (the well's own point,
+ * or its subdivision's centre: `place`); the rest listed; the list dates held in the period.
+ */
+export function rigsAnswer(
+  rows: AerRigServed[],
+  dates: AerSourceDates,
+  days: number,
+  listDates: string[] = [],
+) {
   const truncated = rows.length > AER_MAX_FEATURES;
   const kept = rows.slice(0, AER_MAX_FEATURES);
   const features: PointFeature<
@@ -592,6 +838,7 @@ export function rigsAnswer(rows: AerRigServed[], dates: AerSourceDates, days: nu
   return {
     source: source(RIG_SOURCE, dates),
     days,
+    listDates,
     located: { type: 'FeatureCollection' as const, features },
     unlocated,
     truncated,
