@@ -26,6 +26,7 @@ import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { useFacilities } from './Facilities';
 import { FacilityPanel, FacilityTip } from './FacilityPanel';
+import { useFormations } from './Formations';
 import { PipelinePanel, PipelineTip } from './PipelinePanel';
 import { usePipelines, type PipelineEntry } from './Pipelines';
 import { useLand, type LandPick } from './Land';
@@ -101,6 +102,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const pipelines = usePipelines(session.organization.id, session.token);
   // The segment a click opened, kept as it was: the map may move on past its square.
   const [pipelinePicked, setPipelinePicked] = useState<PipelineEntry | null>(null);
+  // The formations' outlines (F-280), each switched by itself, not tied to the wells.
+  const formations = useFormations();
   const pickLand = (pick: LandPick | null) => {
     if (pick) grid.clearPick();
     setLandPick(pick);
@@ -176,7 +179,9 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             ? facilities.legend()
             : name === 'pipelines'
               ? pipelines.legend()
-              : wells.legend(tone),
+              : name === 'formations'
+                ? formations.legend(tone)
+                : wells.legend(tone),
   }));
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
@@ -210,6 +215,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           onEmptyClick={grid.identify}
           facilities={facilities.view}
           pipelines={pipelines.view}
+          formations={formations.view}
           onLandClick={pickLand}
           onLandHover={setLandHover}
           landHover={hoverShape}
@@ -384,6 +390,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               tone,
               goTo,
             })}
+            {formations.section({
+              open: section === 'formations',
+              onToggle: openOnly('formations'),
+              tone,
+            })}
             {/* What the card shows and where it comes from, out of the way until asked for.
                 The sources stay here: their terms ask that they be named. */}
             <details className="mt-auto border-t px-4 py-3 text-xs text-muted-foreground">
@@ -397,6 +408,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {wells.about()}
                 {facilities.about()}
                 {pipelines.about()}
+                {formations.about()}
                 {grid.about()}
               </div>
             </details>
@@ -494,11 +506,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   );
 }
 
-type SideSection = 'sales' | 'land' | 'facilities' | 'pipelines' | 'wells';
+type SideSection = 'sales' | 'land' | 'facilities' | 'pipelines' | 'wells' | 'formations';
 
 /** The sections' legends in order: the open one first, the rest as the card lists them. */
 export function sideOrder(open: SideSection | null): SideSection[] {
-  const all: SideSection[] = ['sales', 'land', 'facilities', 'pipelines', 'wells'];
+  const all: SideSection[] = ['sales', 'land', 'facilities', 'pipelines', 'wells', 'formations'];
   return open === null ? all : [open, ...all.filter((name) => name !== open)];
 }
 

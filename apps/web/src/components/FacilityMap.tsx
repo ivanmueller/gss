@@ -33,6 +33,7 @@ import {
   type FacilitiesView,
 } from '../lib/facilitiesMap';
 import { EDGE_LABELS_FROM, gridEdgeLabels, type GridTownship } from '../lib/gridEdges';
+import { placeFormations, syncFormations, type FormationsView } from '../lib/formationsMap';
 import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
 import {
   PIPELINE_PICKABLE,
@@ -158,6 +159,11 @@ export interface FacilityMapProps {
   landSales?: LandSalesView | null;
   /** The township grid (F-240, F-271), over the land and under the wells. */
   grid?: GridView | null;
+  /**
+   * The formations' outlines switched on (F-280), over the land and the sale parcels, under the
+   * wells' zones and the grid.
+   */
+  formations?: FormationsView | null;
   /**
    * The AER's facilities (F-278), over the land and the grid, under the wells. Their keys
    * ("facility:ID") answer the pointer and the click as land does, before it.
@@ -696,6 +702,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncFormations(
+        instance,
+        latest.current.formations ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
@@ -1069,6 +1081,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       placeFacilities(instance, PINS);
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
+      placeFormations(instance, PINS);
     }
   }, [st37, basemap, theme]);
 
@@ -1081,6 +1094,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       placeFacilities(instance, PINS);
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
+      placeFormations(instance, PINS);
     }
   }, [landSales, basemap, theme]);
 
@@ -1101,6 +1115,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       placeFacilities(instance, PINS);
       placePipelines(instance, PINS);
       placeGrid(instance, PINS);
+      placeFormations(instance, PINS);
     }
   }, [land, basemap, theme]);
 
@@ -1136,8 +1151,18 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the grid as it is then.
     if (instance && styleReady.current) {
       syncGrid(instance, grid ?? null, st37Tone(basemap, theme), PINS);
+      placeFormations(instance, PINS);
     }
   }, [grid, basemap, theme]);
+
+  const { formations } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the outlines as they are then.
+    if (instance && styleReady.current) {
+      syncFormations(instance, formations ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [formations, basemap, theme]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

@@ -238,10 +238,10 @@ export function syncLandSales(
   drawn.set(map, view.parcels);
 
   if (!map.getLayer(SALE_LAYERS.fill)) {
+    // The formations' outlines are moved over the parcels after (placeFormations, F-280).
     const under =
-      [ST37_LAYERS.outlineFill, ST37_LAYERS.zones, ST37_LAYERS.density].find((id) =>
-        map.getLayer(id),
-      ) ?? (beforeId && map.getLayer(beforeId) ? beforeId : undefined);
+      [ST37_LAYERS.zones, ST37_LAYERS.density].find((id) => map.getLayer(id)) ??
+      (beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     const area = (...more: unknown[]) =>
       ['all', ['==', ['get', 'part'], 'area'], ...more] as ExpressionSpecification;
     map.addLayer(

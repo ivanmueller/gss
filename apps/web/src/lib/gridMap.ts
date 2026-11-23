@@ -35,20 +35,21 @@ export const GRID_LAYERS = {
 const ORDER = Object.values(GRID_LAYERS);
 
 /**
- * The townships come in on the second scroll after the distance bar reads 30 km (zoom 7.8 around
- * the Duvernay, mapDetail.ts), and darken as the map is zoomed in to the strengths read from the
- * owner's reference pictures (2026-11-22, on the warm grey land, 243 240 232): about 8% darker
- * at first (223 220 213), 19% a little closer (197 194 184), 26% from the 10 km bar (179 177
- * 169), each a 1-pixel line.
+ * The townships start to fade in as the distance bar turns to 30 km, zooming in toward 20 km
+ * (the owner, 2026-11-23; zoom 7.5 and 8.1 around the Duvernay, mapDetail.ts; it was the second
+ * scroll after the bar read 30 km, zoom 7.8), and darken as the map is zoomed in to the
+ * strengths read from the owner's reference pictures (2026-11-22, on the warm grey land, 243 240
+ * 232): about 8% darker by the second scroll (223 220 213), 19% at the 20 km bar (197 194 184),
+ * 26% from the 10 km bar (179 177 169), each a 1-pixel line.
  */
-export const GRID_FROM = 7.8;
+export const GRID_FROM = 7.5;
 const TOWNSHIP_OPACITY: ExpressionSpecification = [
   'interpolate',
   ['linear'],
   ['zoom'],
   GRID_FROM,
   0,
-  7.95,
+  7.8,
   0.08,
   8.1,
   0.19,

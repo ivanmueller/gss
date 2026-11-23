@@ -61,14 +61,15 @@ export interface St37Parts {
 
 export const ST37_ALL_PARTS: St37Parts = { legs: true, otherLegs: true, planned: true };
 
-/** What FacilityMap draws: the wells, the statuses switched on, and the formation's outline. */
+/**
+ * What FacilityMap draws: the wells, the statuses switched on, and the zones. A formation's
+ * outline is the Formations section's (formationsMap.ts, F-280), not tied to the wells.
+ */
 export interface St37View {
   wells: GeoJSON.FeatureCollection;
   shown: readonly St37StatusClass[];
   /** The parts switched on; all of them when left out. */
   parts?: St37Parts;
-  /** The address of the outline (GeoJSON) of the formation loaded whole, or null. */
-  outline: string | null;
   /** The zones where the formation's drilled wells cluster (F-255), or null. */
   zones: GeoJSON.FeatureCollection | null;
 }
@@ -91,17 +92,14 @@ export function st37ZoneFeatures(zones: readonly St37MapZone[]): GeoJSON.Feature
 }
 
 /**
- * The outlines of the formations a load can hold whole, by the formation's key (F-252). Files in
- * the web app's public folder, made once from the Alberta Geological Survey's Digital Dataset
- * 2013-0024 (Rokosh et al., 2013: the areas its 2012 shale report evaluated), which the AER/AGS
- * licenses under the Open Government Licence – Alberta; the credit is shown with the wells.
+ * The plays whose land sales are counted inside their outline (F-252, F-264), by the play's key:
+ * the same points as apps/api/src/play-outlines.ts. Files in the web app's public folder, made
+ * from the Alberta Geological Survey's Digital Dataset 2013-0024 (Rokosh et al., 2013: the areas
+ * its 2012 shale report evaluated), which the AER/AGS licenses under the Open Government Licence
+ * – Alberta. Drawn by the Formations section (F-280), with the dataset's other five outlines.
  */
-export const ST37_OUTLINES: Record<string, { url: string; credit: string }> = {
-  duvernay: {
-    url: '/outlines/duvernay.geojson',
-    credit:
-      'Outline: Alberta Energy Regulator / Alberta Geological Survey, Digital Dataset 2013-0024 (the area evaluated in its 2012 shale report). Contains information licensed under the Open Government Licence – Alberta.',
-  },
+export const ST37_OUTLINES: Record<string, { url: string }> = {
+  duvernay: { url: '/outlines/duvernay.geojson' },
 };
 
 /** The colour of each status, on a light map and on a dark or satellite one. */
@@ -134,11 +132,8 @@ export const ST37_COLOURS: Record<'light' | 'dark', Record<St37StatusClass, stri
 export const ST37_HOVER_FROM = 8;
 
 const SOURCE = 'st37-wells';
-const OUTLINE_SOURCE = 'st37-outline';
 const ZONES_SOURCE = 'st37-zones';
 export const ST37_LAYERS = {
-  outlineFill: 'st37-outline-fill',
-  outlineLine: 'st37-outline-line',
   zones: 'st37-zones-fill',
   density: 'st37-density',
   paths: 'st37-paths',
@@ -351,12 +346,11 @@ function shownFilter(
 }
 
 /**
- * What a map's wells were last drawn from, so the same wells and outline are never handed to
- * the map twice (it reads them all again each time), and which well is lit (F-263).
+ * What a map's wells were last drawn from, so the same wells are never handed to the map twice
+ * (it reads them all again each time), and which well is lit (F-263).
  */
 interface Drawn {
   wells: GeoJSON.FeatureCollection | null;
-  outline: string | null;
   /** The well or leg to light, kept so that it is lit again when the wells are drawn anew. */
   target: { licence: string; uwi: string | null } | null;
   /** The features now lit, by their place in `wells` (the ids the map gives them). */
@@ -366,7 +360,7 @@ const drawn = new WeakMap<MapboxMap, Drawn>();
 function drawnOn(map: MapboxMap): Drawn {
   let state = drawn.get(map);
   if (!state) {
-    state = { wells: null, outline: null, target: null, lit: [] };
+    state = { wells: null, target: null, lit: [] };
     drawn.set(map, state);
   }
   return state;
@@ -450,14 +444,12 @@ export function syncSt37(
   if (view === null) {
     for (const id of layers) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource(SOURCE)) map.removeSource(SOURCE);
-    if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
     if (map.getSource(ZONES_SOURCE)) map.removeSource(ZONES_SOURCE);
     drawn.delete(map);
     return;
   }
   const state = drawnOn(map);
   const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
-  syncOutline(map, view.outline, tone, before);
   syncZones(map, view.zones, tone, before);
   const existing = map.getSource<GeoJSONSource>(SOURCE);
   // The same wells again (a status switched, a new tone) are not read again by the map; new
@@ -738,65 +730,8 @@ export function syncSt37(
 }
 
 /**
- * The formation's outline, under the wells: a faint fill and a line, as the Survey drew the
- * area (holes where the formation is absent). Removed when there is none.
- */
-function syncOutline(
-  map: MapboxMap,
-  url: string | null,
-  tone: 'light' | 'dark',
-  before: string | undefined,
-) {
-  const ids = [ST37_LAYERS.outlineFill, ST37_LAYERS.outlineLine];
-  if (url === null) {
-    for (const id of ids) if (map.getLayer(id)) map.removeLayer(id);
-    if (map.getSource(OUTLINE_SOURCE)) map.removeSource(OUTLINE_SOURCE);
-    drawnOn(map).outline = null;
-    return;
-  }
-  const existing = map.getSource<GeoJSONSource>(OUTLINE_SOURCE);
-  const state = drawnOn(map);
-  // The same outline is not fetched and read again each time the wells are drawn (F-263).
-  if (existing && state.outline !== url) existing.setData(url);
-  else if (!existing) map.addSource(OUTLINE_SOURCE, { type: 'geojson', data: url });
-  state.outline = url;
-  // Under the wells' own layers when they exist already, else under the pins.
-  const under = map.getLayer(ST37_LAYERS.density) ? ST37_LAYERS.density : before;
-  if (!map.getLayer(ST37_LAYERS.outlineFill)) {
-    map.addLayer(
-      {
-        id: ST37_LAYERS.outlineFill,
-        type: 'fill',
-        source: OUTLINE_SOURCE,
-        paint: {
-          // Fades as the map closes in, where the wells themselves show the formation.
-          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.07, 10, 0.03],
-        },
-      },
-      under,
-    );
-    map.addLayer(
-      {
-        id: ST37_LAYERS.outlineLine,
-        type: 'line',
-        source: OUTLINE_SOURCE,
-        layout: { 'line-join': 'round' },
-        paint: {
-          'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.2, 10, 1.8],
-          'line-opacity': 0.75,
-        },
-      },
-      under,
-    );
-  }
-  const ink = tone === 'light' ? '#44403c' : '#e7e5e4';
-  map.setPaintProperty(ST37_LAYERS.outlineFill, 'fill-color', ink);
-  map.setPaintProperty(ST37_LAYERS.outlineLine, 'line-color', ink);
-}
-
-/**
  * The zones where the formation's drilled wells cluster (F-255): a soft shading over the
- * outline and under the wells, with no edge line. Removed when there are none.
+ * formations' outlines and under the wells, with no edge line. Removed when there are none.
  */
 function syncZones(
   map: MapboxMap,

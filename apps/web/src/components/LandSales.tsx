@@ -555,7 +555,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       </div>
       <p className="text-xs text-muted-foreground">
         {outlined
-          ? `Parcels whose rights include it, inside the ${rightsName ?? ''} outline drawn on the map (solid line).`
+          ? `Parcels whose rights include it, inside the ${rightsName ?? ''} outline (shown under Formations).`
           : rightsName
             ? `Parcels whose rights include the ${rightsName}, in the area loaded.`
             : 'Every parcel in the area loaded: zoom in to see them.'}

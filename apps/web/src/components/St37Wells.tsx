@@ -12,7 +12,6 @@ import type { MapBounds } from '../lib/mapbox';
 import {
   ST37_ALL_PARTS,
   ST37_COLOURS,
-  ST37_OUTLINES,
   st37Features,
   st37Legs,
   st37ZoneFeatures,
@@ -191,8 +190,6 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   const formations = useMemo(() => answer?.formations ?? [], [answer]);
   // The play the section is about: the one chosen, or the first (the latest loaded).
   const formation = formations.find((f) => f.key === chosen) ?? formations[0] ?? null;
-  const outline = formation ? (ST37_OUTLINES[formation.key] ?? null) : null;
-  const outlineUrl = outline?.url ?? null;
   // The same zones come with every answer: kept as one object while they do not change.
   const zonesKey = JSON.stringify(formations.flatMap((f) => f.zones ?? []));
   const zones = useMemo(() => {
@@ -200,11 +197,11 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     return list.length > 0 ? st37ZoneFeatures(list) : null;
   }, [zonesKey]);
   // Every part of a well is drawn: its main leg, its other legs and its planned line. Their
-  // switches were taken off the panel (the owner, 2026-11-22, F-267).
+  // switches were taken off the panel (the owner, 2026-11-22, F-267). The play's outline is the
+  // Formations section's, switched there (F-280).
   const mapView = useMemo<St37View | null>(
-    () =>
-      on ? { wells: features, shown, parts: ST37_ALL_PARTS, outline: outlineUrl, zones } : null,
-    [on, features, shown, outlineUrl, zones],
+    () => (on ? { wells: features, shown, parts: ST37_ALL_PARTS, zones } : null),
+    [on, features, shown, zones],
   );
   const counts = useMemo(() => {
     const out = new Map<St37StatusClass, number>();
@@ -383,12 +380,6 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
         <p className="mt-1.5 text-muted-foreground">
           The numbers are the wells in view. Zoom in to see every well.
         </p>
-        {formation && outline && (
-          <p className="mt-1.5 flex items-center gap-2">
-            <span aria-hidden="true" className="h-0.5 w-5 shrink-0 bg-foreground/70" />
-            {formation.name} outline
-          </p>
-        )}
       </div>
     );
 
@@ -420,7 +411,6 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
         dashed line on its charts marks the month a later leg starts. Click a leg, on the map or in
         the panel, for that leg's own production under the well's.
       </p>
-      {outline && <p>{outline.credit}</p>}
       {answer && (
         <p>
           {answer.source.loadedAt
