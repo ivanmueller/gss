@@ -1,5 +1,6 @@
 import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
+import { FACILITY_LAYERS } from './facilitiesMap';
 import { SALE_LAYERS } from './landSalesMap';
 import { ST37_LAYERS } from './st37Map';
 
@@ -40,9 +41,11 @@ const drawn = new WeakMap<MapboxMap, GridView>();
 
 const level = (name: string): ExpressionSpecification => ['==', ['get', 'level'], name];
 
-/** The layer the grid goes under: the sales' dots, else the wells, else the pins. */
+/** The layer the grid goes under: the facilities, the sales' dots, the wells, else the pins. */
 function anchorOf(map: MapboxMap, beforeId?: string): string | undefined {
   const first = [
+    FACILITY_LAYERS.squares,
+    FACILITY_LAYERS.picked,
     SALE_LAYERS.dots,
     ST37_LAYERS.paths,
     ST37_LAYERS.planned,

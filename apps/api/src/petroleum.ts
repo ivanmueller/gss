@@ -41,6 +41,7 @@ import {
   st37LoadZones,
   st37Well3dAnswer,
 } from './st37';
+import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
 import { gridSquareAnswer, parseGridLevel, parseGridSquare } from './township-grid';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
@@ -683,6 +684,34 @@ export function petroleumRoutes(
         });
         const rows = await petroleum.land(who, box, landLimits(kinds), zones);
         return keptJson(c, landAnswer(rows));
+      });
+    });
+  });
+
+  // /petroleum/facilities: every facility of the latest "Load facilities" (F-278), the AER's ST102
+  // list, in one answer the browser keeps until a load changes it. Membership first. JSON for
+  // the map only, never another format (the AER's terms, docs/DECISIONS.md 2026-11-19).
+  routes.get('/facilities', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < FACILITIES_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { load, rows } = await petroleum.facilities({
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        });
+        return keptJson(c, facilitiesAnswer(load, rows));
       });
     });
   });
