@@ -32,6 +32,7 @@ export * from './emailAttachments';
 export * from './wells';
 export * from './petrinex';
 export * from './formationZones';
+export * from './formationOutlines';
 export * from './st37';
 export * from './st37Zones';
 export * from './land';

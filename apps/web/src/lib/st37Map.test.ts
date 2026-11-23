@@ -9,7 +9,6 @@ import {
   highlightSt37,
   ST37_HOVER_FROM,
   ST37_LAYERS,
-  ST37_OUTLINES,
   st37Features,
   st37ZoneFeatures,
   syncSt37,
@@ -103,7 +102,6 @@ const PAD_WELLS = [
 ];
 const PAD = st37Features(PAD_WELLS);
 
-const OUTLINE = '/outlines/duvernay.geojson';
 /** One made-up zone. */
 const ZONES = st37ZoneFeatures([
   {
@@ -126,7 +124,6 @@ describe('syncSt37', () => {
         {
           wells: WELLS,
           shown: ['producing', 'licensed'],
-          outline: '/outlines/duvernay.geojson',
           zones: ZONES,
         },
         tone,
@@ -136,7 +133,6 @@ describe('syncSt37', () => {
         version: 8,
         sources: {
           'st37-wells': { type: 'geojson', data: WELLS },
-          'st37-outline': { type: 'geojson', data: '/outlines/duvernay.geojson' },
           'st37-zones': { type: 'geojson', data: ZONES },
         },
         layers: [...layers.values()],
@@ -148,7 +144,7 @@ describe('syncSt37', () => {
 
   it('lights the well under the pointer, or the one leg pointed at, by paint alone (F-257, F-259, F-263)', () => {
     const { map, layers, lit, reads } = fakeMap();
-    const view = { wells: PAD, shown: ['producing' as const], outline: OUTLINE, zones: null };
+    const view = { wells: PAD, shown: ['producing' as const], zones: null };
     syncSt37(map, view, 'light');
     const litNow = () =>
       [...lit]
@@ -291,26 +287,15 @@ describe('syncSt37', () => {
 
   it('removes everything when the wells are switched off', () => {
     const { map, layers, sources } = fakeMap();
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE, zones: ZONES }, 'light');
+    syncSt37(map, { wells: WELLS, shown: ['producing'], zones: ZONES }, 'light');
     syncSt37(map, null, 'light');
     expect(layers.size).toBe(0);
     expect(sources.size).toBe(0);
   });
 
-  it("draws a formation's outline under the wells, and takes it away without one", () => {
-    const { map, layers, sources } = fakeMap();
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: OUTLINE, zones: null }, 'light');
-    expect(sources.get('st37-outline')).toEqual({ type: 'geojson', data: OUTLINE });
-    expect(layers.has(ST37_LAYERS.outlineLine)).toBe(true);
-    syncSt37(map, { wells: WELLS, shown: ['producing'], outline: null, zones: null }, 'light');
-    expect(sources.has('st37-outline')).toBe(false);
-    expect(layers.has(ST37_LAYERS.outlineFill)).toBe(false);
-    expect(layers.has(ST37_LAYERS.density)).toBe(true);
-  });
-
   it('shades the zones under the wells, and takes them away without any', () => {
     const { map, layers, sources } = fakeMap();
-    const view = { wells: WELLS, shown: ['producing' as const], outline: null };
+    const view = { wells: WELLS, shown: ['producing' as const] };
     syncSt37(map, { ...view, zones: ZONES }, 'light');
     expect(sources.get('st37-zones')).toEqual({ type: 'geojson', data: ZONES });
     expect(ZONES.features[0]?.properties).toEqual({ wells: 30 });
@@ -318,11 +303,5 @@ describe('syncSt37', () => {
     syncSt37(map, { ...view, zones: null }, 'light');
     expect(sources.has('st37-zones')).toBe(false);
     expect(layers.has(ST37_LAYERS.zones)).toBe(false);
-  });
-
-  it("names the Survey and its licence for the Duvernay's outline", () => {
-    expect(ST37_OUTLINES.duvernay?.credit).toMatch(
-      /Alberta Geological Survey.*Open Government Licence – Alberta/,
-    );
   });
 });

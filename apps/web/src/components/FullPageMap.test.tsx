@@ -29,6 +29,7 @@ vi.mock('./FacilityMap', () => ({
         Click a shape
       </button>
       <p>{`Asked again: ${String(props.layersRetry ?? 0)}`}</p>
+      <p>{`Outlines: ${[...new Set((props.formations?.outlines.features ?? []).map((f) => String(f.properties?.key)))].join(' ') || 'none'}`}</p>
       <button type="button" onClick={() => props.onLayersStale?.('missing')}>
         A picture is refused
       </button>
@@ -46,6 +47,34 @@ vi.mock('./FacilityMap', () => ({
 }));
 
 const LINES_ID = '00000000-0000-4000-8000-0000000a1a02';
+
+/** The township grid's file and the formations' outlines come with the app, not the API. */
+const servedWithTheApp = (path: string) => path === TOWNSHIP_FILE || path.startsWith('/outlines/');
+
+/** A made-up outline: one square, served as a formation's file would be. */
+const OUTLINE_FILE = () =>
+  Response.json({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { Shale_Unit: 'Synthetic' },
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: [
+            [
+              [
+                [-116, 54],
+                [-115, 54],
+                [-115, 55],
+                [-116, 54],
+              ],
+            ],
+          ],
+        },
+      },
+    ],
+  });
 
 // A zoomed-out view is never prepared on the oil and gas side: the test fails if it is tried.
 const prepare = vi.hoisted(() => vi.fn());
@@ -158,10 +187,48 @@ describe('the side card (F-267)', () => {
   });
 
   it('leads the legend with the open section', () => {
-    expect(sideOrder('sales')).toEqual(['sales', 'land', 'facilities', 'pipelines', 'wells']);
-    expect(sideOrder('wells')).toEqual(['wells', 'sales', 'land', 'facilities', 'pipelines']);
-    expect(sideOrder('pipelines')).toEqual(['pipelines', 'sales', 'land', 'facilities', 'wells']);
-    expect(sideOrder(null)).toEqual(['sales', 'land', 'facilities', 'pipelines', 'wells']);
+    const all = ['sales', 'land', 'facilities', 'pipelines', 'wells', 'formations'];
+    expect(sideOrder('sales')).toEqual(all);
+    expect(sideOrder('wells')).toEqual([
+      'wells',
+      'sales',
+      'land',
+      'facilities',
+      'pipelines',
+      'formations',
+    ]);
+    expect(sideOrder('formations')).toEqual(['formations', ...all.slice(0, 5)]);
+    expect(sideOrder(null)).toEqual(all);
+  });
+
+  it('switches each formation by itself, the Duvernay on at first, the wells untouched (F-280)', async () => {
+    const calls = mockApi({
+      [LIST]: listOf(),
+      ...noLegend,
+      'GET /outlines/duvernay.geojson': OUTLINE_FILE,
+      'GET /outlines/montney.geojson': OUTLINE_FILE,
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    expect(within(card).getByRole('switch', { name: 'Formations' })).toBeChecked();
+    expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: 'Formations' }));
+    const list = within(card).getByRole('group', { name: 'Formations shown' });
+    for (const name of ['Wilrich', 'North Nordegg', 'Basal Banff / Exshaw', 'Muskwa']) {
+      expect(within(list).getByRole('switch', { name })).not.toBeChecked();
+    }
+    expect(within(list).getByRole('switch', { name: 'Duvernay' })).toBeChecked();
+    // A formation switched on is fetched once and drawn beside the others.
+    await userEvent.click(within(list).getByRole('switch', { name: 'Montney' }));
+    expect(await screen.findByText('Outlines: montney duvernay')).toBeInTheDocument();
+    await userEvent.click(within(list).getByRole('switch', { name: 'Duvernay' }));
+    expect(await screen.findByText('Outlines: montney')).toBeInTheDocument();
+    // The section's own switch takes every outline off; the wells' section stays as it was.
+    await userEvent.click(within(card).getByRole('switch', { name: 'Formations' }));
+    expect(await screen.findByText('Outlines: none')).toBeInTheDocument();
+    expect(within(card).getByRole('switch', { name: 'Wells & licences' })).toBeChecked();
+    expect(calls.filter((c) => c.path === '/outlines/montney.geojson')).toHaveLength(1);
+    expect(calls.filter((c) => c.path === '/outlines/duvernay.geojson')).toHaveLength(1);
   });
 });
 
@@ -214,7 +281,7 @@ describe('FullPageMap', () => {
     expect(screen.getByRole('button', { name: 'Layers (1)' })).toBeInTheDocument();
     // Every request to the API names the organization (F-247-2-D1-04); the township grid's file
     // is served with the app, not by the API (F-271).
-    const api = calls.filter((call) => call.path !== TOWNSHIP_FILE);
+    const api = calls.filter((call) => !servedWithTheApp(call.path));
     expect(api.length).toBeGreaterThan(0);
     for (const call of api) expect(call.path).toContain(ORGANIZATION);
   });
@@ -311,7 +378,7 @@ describe('FullPageMap', () => {
     await userEvent.click(within(settings).getByRole('button', { name: 'Remove' }));
     await userEvent.click(within(settings).getByRole('button', { name: 'Remove for everyone' }));
     expect(await screen.findByText('Drawn: nothing')).toBeInTheDocument();
-    for (const call of calls.filter((c) => c.path !== TOWNSHIP_FILE)) {
+    for (const call of calls.filter((c) => !servedWithTheApp(c.path))) {
       expect(call.path).toContain(ORGANIZATION);
     }
     expect(calls.some((call) => call.path.startsWith('/map-layers'))).toBe(false);

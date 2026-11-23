@@ -256,11 +256,11 @@ export function syncLand(
 
   if (!map.getLayer(LAND_LAYERS.agreementFill)) {
     // Under the sale parcels when they are on the map, else under the wells' lowest layer, so
-    // neither a parcel nor a well is covered.
+    // neither a parcel nor a well is covered. The formations' outlines are moved over the land
+    // after (placeFormations, F-280).
     const under =
-      [SALE_LAYERS.fill, ST37_LAYERS.outlineFill, ST37_LAYERS.zones, ST37_LAYERS.density].find(
-        (id) => map.getLayer(id),
-      ) ?? (beforeId && map.getLayer(beforeId) ? beforeId : undefined);
+      [SALE_LAYERS.fill, ST37_LAYERS.zones, ST37_LAYERS.density].find((id) => map.getLayer(id)) ??
+      (beforeId && map.getLayer(beforeId) ? beforeId : undefined);
     const thin: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 7, 0.3, 12, 0.9];
     // Every layer fades out with the wells' legs as the map is zoomed out, and is gone at
     // DETAIL_GONE (F-260; the owner, 2026-11-21).
