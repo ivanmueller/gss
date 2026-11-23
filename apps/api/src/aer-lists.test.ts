@@ -12,7 +12,7 @@ import {
   pointsFromGrid,
   readAerFile,
   refreshAerLists,
-  RIGS_SCHEMA_VERSION,
+  RIG_TARGETS_SCHEMA_VERSION,
   rigsAnswer,
 } from './aer-lists';
 import type { AerLicenceServed, AerRigServed } from './aer-lists-db';
@@ -449,6 +449,7 @@ describe('the answers', () => {
       listDate: '2026-11-17',
       surfaceLocation: null,
       place: null,
+      targetZone: null,
       longitude: null,
       latitude: null,
     };
@@ -523,7 +524,7 @@ describe('GET /api/v1/petroleum/aer/licences and /rigs', () => {
     );
     expect(early.status).toBe(503);
     expect(petroleum.aerRigs).not.toHaveBeenCalled();
-    petroleum.schemaVersion.mockResolvedValue(RIGS_SCHEMA_VERSION);
+    petroleum.schemaVersion.mockResolvedValue(RIG_TARGETS_SCHEMA_VERSION);
     petroleum.aerRigs.mockResolvedValue({
       rows: [],
       dates: { latestListDate: '2026-11-22', lastSeenAt: null },

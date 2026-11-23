@@ -21,6 +21,7 @@ import {
   type AerReport,
   type AerRigServed,
   type AerSourceDates,
+  type LicenceTarget,
 } from './aer-lists-db';
 import {
   PETROLEUM_SCHEMA_VERSION,
@@ -28,7 +29,7 @@ import {
   type PetroleumFactory,
 } from './petroleum-db';
 import { failureSummary, type ApiEnv } from './respond';
-import { readZip, ZipError } from './zip';
+import { readZip, ZipError, type ZipEntry } from './zip';
 
 /**
  * The Alberta Energy Regulator's daily licence (ST1) and rig activity (ST49) lists (F-243 part 1;
@@ -168,6 +169,136 @@ export async function fetchRigArchive(
       reason: error instanceof ZipError ? error.message : 'not a readable zip',
     };
   }
+}
+
+/**
+ * F-283, what each rig is drilling for: the oil and gas database's version with the licences'
+ * targets (20261205010000_petro_rig_targets.sql).
+ */
+export const RIG_TARGETS_SCHEMA_VERSION = 18;
+/** The first year of the AER's ST1 archives on its ST1 page. */
+export const LICENCE_ARCHIVE_FIRST_YEAR = 2017;
+
+const ST1_ARCHIVES = 'https://static.aer.ca/prd/data/well-lic';
+
+/**
+ * The AER's ST1 archives, newest first: this year's months before this one, then each earlier
+ * year's file back to 2017. A year's file holds a zip a month, each a file a day.
+ */
+export function licenceArchiveUrls(now: Date): { url: string; year: number; monthly: boolean }[] {
+  const today = albertaDay(now);
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  const urls: { url: string; year: number; monthly: boolean }[] = [];
+  for (let m = month - 1; m >= 1; m -= 1) {
+    urls.push({
+      url: `${ST1_ARCHIVES}/dwll${String(year)}-${String(m).padStart(2, '0')}.zip`,
+      year,
+      monthly: true,
+    });
+  }
+  for (let y = year - 1; y >= LICENCE_ARCHIVE_FIRST_YEAR; y -= 1) {
+    urls.push({ url: `${ST1_ARCHIVES}/dwll${String(y)}.zip`, year: y, monthly: false });
+  }
+  return urls;
+}
+
+/** A day's file of the licence archives, by its name without folders: `WELLS0901.TXT`. */
+export function licenceDayName(name: string): string | null {
+  const base = name.split('/').at(-1) ?? '';
+  return /^wells[0-9]{4}\.txt$/i.test(base) ? base : null;
+}
+
+/** Fetches a zip and gives its files, the files of the zips inside it included. */
+export async function fetchZipEntries(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<{ kind: 'ok'; entries: ZipEntry[] } | { kind: 'refused' | 'failed'; reason: string }> {
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch {
+    return { kind: 'failed', reason: 'no answer' };
+  }
+  if (res.status !== 200) {
+    await res.body?.cancel().catch(() => undefined);
+    return { kind: 'failed', reason: `status ${String(res.status)}` };
+  }
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await boundedBytes(res, ARCHIVE_MAX_BYTES);
+  } catch {
+    return { kind: 'failed', reason: 'cut short' };
+  }
+  if (bytes === null) return { kind: 'refused', reason: 'too large' };
+  try {
+    const entries: ZipEntry[] = [];
+    for (const entry of await readZip(bytes, AER_LIST_MAX_CHARS)) {
+      if (entry.name.toLowerCase().endsWith('.zip')) {
+        entries.push(...(await readZip(entry.bytes, AER_LIST_MAX_CHARS)));
+      } else entries.push(entry);
+    }
+    return { kind: 'ok', entries };
+  } catch (error) {
+    return {
+      kind: 'refused',
+      reason: error instanceof ZipError ? error.message : 'not a readable zip',
+    };
+  }
+}
+
+/**
+ * Reads the AER's ST1 archives, newest first, for the licences wanted: each one's terminating
+ * zone from the newest list that names it. Stops once every licence is found. `whole`: every
+ * archive was read (a month not posted yet, answered 404, counts as read), so the licences not
+ * found are in none of them.
+ */
+export async function readLicenceTargets(
+  wanted: ReadonlySet<string>,
+  fetchImpl: typeof fetch,
+  now: Date,
+): Promise<{ found: LicenceTarget[]; whole: boolean; read: number; failed: number }> {
+  const found = new Map<string, LicenceTarget>();
+  let whole = true;
+  let read = 0;
+  let failed = 0;
+  const take = (entries: ZipEntry[]) => {
+    for (const entry of entries) {
+      if (licenceDayName(entry.name) === null) continue;
+      const list = parseSt1(new TextDecoder('windows-1252').decode(entry.bytes));
+      if (list.listDate === null) continue;
+      for (const row of list.rows) {
+        const zone = row.terminatingZone.trim();
+        if (!wanted.has(row.licenceNumber) || zone === '') continue;
+        const before = found.get(row.licenceNumber);
+        if (!before || list.listDate > before.listDate) {
+          found.set(row.licenceNumber, {
+            licenceNumber: row.licenceNumber,
+            terminatingZone: zone,
+            listDate: list.listDate,
+          });
+        }
+      }
+    }
+  };
+  for (const source of licenceArchiveUrls(now)) {
+    if (found.size === wanted.size) break;
+    const got = await fetchZipEntries(source.url, fetchImpl);
+    if (got.kind === 'ok') {
+      read += 1;
+      take(got.entries);
+      continue;
+    }
+    // A month of this year not posted yet: its licences are asked again after a week.
+    if (source.monthly && got.reason === 'status 404') continue;
+    failed += 1;
+    whole = false;
+    console.warn(`AER ST1 archive ${source.url.slice(-15)}: ${got.kind}, ${got.reason}`);
+  }
+  return { found: [...found.values()], whole, read, failed };
 }
 
 /**
@@ -747,6 +878,24 @@ export async function refreshAerLists(
               `${String(missing.length)} not in the list${list.whole ? '' : ' (read in part)'}`,
           );
         }
+      }
+    }
+
+    // What each rig is drilling for (F-283): the terminating zone of its licence, from the AER's
+    // ST1 archives, read only for rigs whose licence is not in the daily lists kept.
+    if ((await db.schemaVersion()) >= RIG_TARGETS_SCHEMA_VERSION) {
+      const since = periodStart(new Date(), RIG_HISTORY_DAYS + RIG_HISTORY_MARGIN_DAYS);
+      const wanted = await db.aerTargetsToFind(since, LICENCES_PER_RUN);
+      if (wanted.length > 0) {
+        const targets = await readLicenceTargets(new Set(wanted), fetchImpl, new Date());
+        const found = new Set(targets.found.map((t) => t.licenceNumber));
+        const missing = targets.whole ? wanted.filter((n) => !found.has(n)) : [];
+        await db.aerStoreTargets(targets.found, missing);
+        console.log(
+          `AER licence targets: ${String(wanted.length)} asked, ${String(targets.found.length)} found, ` +
+            `${String(missing.length)} in no archive; ${String(targets.read)} archives read, ` +
+            `${String(targets.failed)} failed`,
+        );
       }
     }
     return { status: 'done' };

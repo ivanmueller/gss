@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   archiveDayName,
   fetchRigArchive,
+  fetchZipEntries,
+  licenceArchiveUrls,
+  licenceDayName,
+  readLicenceTargets,
+  RIG_TARGETS_SCHEMA_VERSION,
   readLicenceList,
   refreshAerLists,
   rigArchiveMonths,
@@ -24,13 +29,13 @@ import { readZip, ZipError } from './zip';
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 /** A zip of the given files, deflated (or stored), as the AER's archives are made. */
-function zipOf(files: { name: string; body: string; stored?: boolean }[]): Uint8Array {
+function zipOf(files: { name: string; body: string | Uint8Array; stored?: boolean }[]): Uint8Array {
   const locals: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
   for (const file of files) {
     const name = bytes(file.name);
-    const raw = bytes(file.body);
+    const raw = typeof file.body === 'string' ? bytes(file.body) : file.body;
     const data = file.stored ? raw : new Uint8Array(deflateRawSync(raw));
     const local = new Uint8Array(30 + name.length + data.length);
     const lv = new DataView(local.buffer);
@@ -69,6 +74,11 @@ function zipOf(files: { name: string; body: string; stored?: boolean }[]): Uint8
     at += part.length;
   }
   return out;
+}
+
+/** A zip of zips (or any bytes), stored as they are given. */
+function zipOfBytes(files: { name: string; bytes: Uint8Array }[]): Uint8Array {
+  return zipOf(files.map((f) => ({ name: f.name, body: f.bytes })));
 }
 
 function urlOf(input: RequestInfo | URL): string {
@@ -301,5 +311,174 @@ describe('the job, rigs on the map', () => {
     await refreshAerLists(env, open, fetchImpl);
     expect(petroleum.aerArchiveMonthsKept).not.toHaveBeenCalled();
     expect(petroleum.aerLicencesToLocate).not.toHaveBeenCalled();
+  });
+});
+
+// What each rig is drilling for (F-283): the licence's terminating zone from the AER's ST1
+// archives. Made-up lists in the ST1 layout only.
+
+function at(...cells: [number, string][]): string {
+  let line = '';
+  for (const [column, text] of cells) line = line.padEnd(column) + text;
+  return line;
+}
+
+/** A made-up daily licence list of one licence. */
+function st1(date: string, licence: string, zone: string): string {
+  return [
+    at([40, 'ALBERTA ENERGY REGULATOR']),
+    at([35, 'WELL LICENCES ISSUED  DAILY LIST']),
+    `    DATE:  ${date}`,
+    '    ' + '-'.repeat(92),
+    at([4, 'WELL NAME'], [28, 'LICENCE NUMBER']),
+    '    ' + '-'.repeat(92),
+    '',
+    at([4, 'EXAMPLE HZ TESTVILLE 1-2-3-4'], [41, licence], [51, 'ALBERTA CROWN'], [72, '700.1M']),
+    at(
+      [4, '100/01-02-003-04W5/00'],
+      [27, 'S  120.5M  W  80.0M'],
+      [51, 'RED DEER'],
+      [72, '2500.0M'],
+    ),
+    at([4, 'DEV (NC)'], [41, 'TESTFIELD'], [72, zone]),
+    at([4, 'HORIZONTAL'], [41, 'NEW'], [51, 'PRODUCTION'], [72, 'CRUDE OIL']),
+    at([4, 'EXAMPLE ENERGY LTD.'], [72, '10-12-095-05W4']),
+    '',
+    '    -------------------- END OF WELL LICENCES DAILY LIST  -------------------- ',
+  ].join('\n');
+}
+
+const zipBytes = (files: { name: string; body: string }[]) => zipOf(files);
+/** A year's file: a zip of monthly zips, as the AER makes them. */
+function yearZip(months: { name: string; files: { name: string; body: string }[] }[]) {
+  return zipOfBytes(months.map((m) => ({ name: m.name, bytes: zipBytes(m.files) })));
+}
+
+describe('the licence archives (F-283)', () => {
+  it('are this year’s months before this one, newest first, then each year back to 2017', () => {
+    const urls = licenceArchiveUrls(new Date('2026-03-10T18:00:00Z'));
+    expect(urls.slice(0, 3)).toEqual([
+      {
+        url: 'https://static.aer.ca/prd/data/well-lic/dwll2026-02.zip',
+        year: 2026,
+        monthly: true,
+      },
+      {
+        url: 'https://static.aer.ca/prd/data/well-lic/dwll2026-01.zip',
+        year: 2026,
+        monthly: true,
+      },
+      { url: 'https://static.aer.ca/prd/data/well-lic/dwll2025.zip', year: 2025, monthly: false },
+    ]);
+    expect(urls.at(-1)?.url).toBe('https://static.aer.ca/prd/data/well-lic/dwll2017.zip');
+    expect(licenceDayName('dwll2026-09/WELLS0901.TXT')).toBe('WELLS0901.TXT');
+    expect(licenceDayName('dwll2026-09/SPUD0901.txt')).toBeNull();
+  });
+
+  it('opens the zips inside a year’s file', async () => {
+    const year = yearZip([
+      { name: 'dwll2025-01.zip', files: [{ name: 'WELLS0102.TXT', body: 'one' }] },
+      { name: 'dwll2025-02.zip', files: [{ name: 'WELLS0203.TXT', body: 'two' }] },
+    ]);
+    const got = await fetchZipEntries('https://x.test/y.zip', () =>
+      Promise.resolve(new Response(year, { status: 200 })),
+    );
+    expect(got.kind === 'ok' ? got.entries.map((e) => e.name) : got).toEqual([
+      'WELLS0102.TXT',
+      'WELLS0203.TXT',
+    ]);
+  });
+
+  it('takes each licence’s zone from its newest list, stops once all are found, and counts a month not posted as read', async () => {
+    const asked: string[] = [];
+    const answers: Record<string, () => Response> = {
+      // February not posted yet; January has an amendment of an older licence.
+      'https://static.aer.ca/prd/data/well-lic/dwll2026-01.zip': () =>
+        new Response(
+          zipBytes([
+            { name: 'WELLS0115.TXT', body: st1('15 January 2026', '0500001', 'MONTNEY FM') },
+          ]),
+          { status: 200 },
+        ),
+      'https://static.aer.ca/prd/data/well-lic/dwll2025.zip': () =>
+        new Response(
+          yearZip([
+            {
+              name: 'dwll2025-06.zip',
+              files: [
+                { name: 'WELLS0602.TXT', body: st1('2 June 2025', '0500001', 'DOIG FM') },
+                { name: 'WELLS0603.TXT', body: st1('3 June 2025', '0500002', 'CARDIUM FM') },
+              ],
+            },
+          ]),
+          { status: 200 },
+        ),
+    };
+    const fetchImpl = vi.fn<typeof fetch>((input) => {
+      const url = urlOf(input);
+      asked.push(url);
+      return Promise.resolve(answers[url]?.() ?? new Response('missing', { status: 404 }));
+    });
+    const result = await readLicenceTargets(
+      new Set(['0500001', '0500002']),
+      fetchImpl,
+      new Date('2026-03-10T18:00:00Z'),
+    );
+    expect(result.found).toEqual(
+      expect.arrayContaining([
+        { licenceNumber: '0500001', terminatingZone: 'MONTNEY FM', listDate: '2026-01-15' },
+        { licenceNumber: '0500002', terminatingZone: 'CARDIUM FM', listDate: '2025-06-03' },
+      ]),
+    );
+    // Both found by 2025: 2024 and earlier are never asked for.
+    expect(asked).not.toContain('https://static.aer.ca/prd/data/well-lic/dwll2024.zip');
+    expect(result.whole).toBe(true);
+  });
+
+  it('says it did not read every archive when a year cannot be fetched', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = await readLicenceTargets(
+      new Set(['0599999']),
+      () => Promise.resolve(new Response('missing', { status: 404 })),
+      new Date('2026-03-10T18:00:00Z'),
+    );
+    // The months not posted are fine; the years that 404 are failures.
+    expect(result).toMatchObject({ found: [], whole: false, failed: 2025 - 2017 + 1 });
+  });
+
+  it('runs in the job only for licences with no target, marking the rest only after every archive', async () => {
+    const env = {
+      ...ENV,
+      PETROLEUM_DATABASE_URL: 'postgresql://petro_api:x@db.example.test/postgres',
+    };
+    const petroleum = fakePetroleum();
+    petroleum.schemaVersion.mockResolvedValue(RIG_TARGETS_SCHEMA_VERSION);
+    petroleum.aerTargetsToFind.mockResolvedValue(['0500002']);
+    for (const level of ['log', 'warn', 'error'] as const) {
+      vi.spyOn(console, level).mockImplementation(() => undefined);
+    }
+    const year = new Date().getUTCFullYear();
+    const fetchImpl = vi.fn<typeof fetch>((input) =>
+      Promise.resolve(
+        urlOf(input).endsWith(`/dwll${String(year - 1)}.zip`)
+          ? new Response(
+              yearZip([
+                {
+                  name: 'dwll-06.zip',
+                  files: [
+                    { name: 'WELLS0603.TXT', body: st1('3 June 2025', '0500002', 'VIKING FM') },
+                  ],
+                },
+              ]),
+              { status: 200 },
+            )
+          : new Response('missing', { status: 404 }),
+      ),
+    );
+    await refreshAerLists(env, () => petroleum, fetchImpl);
+    expect(petroleum.aerStoreTargets).toHaveBeenCalledWith(
+      [{ licenceNumber: '0500002', terminatingZone: 'VIKING FM', listDate: '2025-06-03' }],
+      [],
+    );
   });
 });

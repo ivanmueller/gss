@@ -82,6 +82,13 @@ export interface AerPoint extends AtsLsd {
   point: { longitude: number; latitude: number } | null;
 }
 
+/** A licence's terminating zone from the newest ST1 list that names it (F-283). */
+export interface LicenceTarget {
+  licenceNumber: string;
+  terminatingZone: string;
+  listDate: string;
+}
+
 export interface AerSourceDates {
   /** The newest list date served, or null with none. */
   latestListDate: string | null;
@@ -125,6 +132,11 @@ export interface AerRigServed {
    * its surface legal subdivision, from ST1; null when unplaced.
    */
   place: 'well' | 'lsd' | null;
+  /**
+   * What the rig is drilling for (F-283): the licence's terminating zone as ST1 writes it
+   * ('SPIRIT RIVER FM'), from the daily lists kept, else the archives; null when unknown.
+   */
+  targetZone: string | null;
   longitude: number | null;
   latitude: number | null;
 }
@@ -191,6 +203,13 @@ export interface AerListsDatabase {
    * not found a week ago is replaced, any other kept as it is.
    */
   aerStoreLicenceLocations(found: AerLicenceLocation[], missing: string[]): Promise<void>;
+  /**
+   * Job (F-283): the licences of rig activity on lists dated `since` or later with no target
+   * yet: not in the daily ST1 lists kept and not looked up, or not found for a week.
+   */
+  aerTargetsToFind(since: string, limit: number): Promise<string[]>;
+  /** Job (F-283): stores the targets found and the licences in no archive. */
+  aerStoreTargets(found: LicenceTarget[], missing: string[]): Promise<void>;
 }
 
 const STATEMENT_TIMEOUT = '20s';
@@ -476,12 +495,15 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
                  coalesce(w.surface_location, l.surface_location) as "surfaceLocation",
                  case when w.found then 'well' when p.longitude is not null then 'lsd' end
                    as place,
+                 coalesce(nullif(l.terminating_zone, ''), t.terminating_zone) as "targetZone",
                  coalesce(w.longitude, p.longitude)::float8 as longitude,
                  coalesce(w.latitude, p.latitude)::float8 as latitude
           from acts a
           left join petro.aer_licence_locations w
             on w.licence_number = a.licence_number and w.found
           left join petro.aer_served_licences l on l.licence_number = a.licence_number
+          left join petro.aer_licence_targets t
+            on t.licence_number = a.licence_number and t.found
           left join petro.ats_lsd_current_points p
             on (p.meridian, p.range, p.township, p.section, p.lsd)
              = (l.meridian, l.range, l.township, l.section, l.lsd)
@@ -565,6 +587,58 @@ export function aerListsQueries(sql: postgres.Sql): AerListsDatabase {
                 tried_at = now(), attempts = petro.aer_licence_locations.attempts + 1
             where not petro.aer_licence_locations.found
               and petro.aer_licence_locations.tried_at < now() - interval '7 days'`;
+      });
+    },
+
+    aerTargetsToFind(since, limit) {
+      return asJob(sql, async (tx) => {
+        const rows = await tx<{ licence_number: string }[]>`
+          select distinct a.licence_number
+          from petro.aer_rig_activities a
+          join petro.aer_served_reads s
+            on s.read_id = a.read_id and s.report = 'st49' and s.list_date >= ${since}::date
+          left join petro.aer_licence_targets t on t.licence_number = a.licence_number
+          where not exists (select 1 from petro.aer_served_licences l
+                            where l.licence_number = a.licence_number
+                              and l.terminating_zone <> '')
+            and (t.licence_number is null
+                 or (not t.found and t.tried_at < now() - interval '7 days'))
+          order by a.licence_number
+          limit ${limit}`;
+        return rows.map((r) => r.licence_number);
+      });
+    },
+
+    async aerStoreTargets(found, missing) {
+      if (found.length === 0 && missing.length === 0) return;
+      await asJob(sql, async (tx) => {
+        const rows = [
+          ...found.map((t) => ({
+            licence_number: t.licenceNumber,
+            found: true,
+            terminating_zone: t.terminatingZone.slice(0, 200),
+            list_date: t.listDate,
+          })),
+          ...missing.map((licence) => ({
+            licence_number: licence,
+            found: false,
+            terminating_zone: null,
+            list_date: null,
+          })),
+        ];
+        // Rows go as JSON: the Worker's connection does not fetch types (the repository's way).
+        await tx`
+          insert into petro.aer_licence_targets (licence_number, found, terminating_zone,
+            list_date)
+          select x.licence_number, x.found, x.terminating_zone, x.list_date
+          from jsonb_to_recordset(${tx.json(rows)}::jsonb) as x(licence_number text,
+            found boolean, terminating_zone text, list_date date)
+          on conflict (licence_number) do update
+            set found = excluded.found, terminating_zone = excluded.terminating_zone,
+                list_date = excluded.list_date, tried_at = now(),
+                attempts = petro.aer_licence_targets.attempts + 1
+            where not petro.aer_licence_targets.found
+              and petro.aer_licence_targets.tried_at < now() - interval '7 days'`;
       });
     },
   };

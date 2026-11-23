@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { triangleImage } from '../lib/rigsMap';
-import { daysAgo, missingRuns, rigMoves, rigsShown, topBy } from './Rigs';
+import { daysAgo, missingRuns, rigMoves, rigsShown, targetName, topBy } from './Rigs';
 
 // Rigs on the oil and gas map (F-282): which rig is where now, the periods and filters, the days
 // with no list. Made-up rigs only.
@@ -22,6 +22,7 @@ function served(over: Partial<Record<string, string | null>> & { activityAt: str
     listDate: over.activityAt.slice(0, 10),
     surfaceLocation: '01-02-055-05W5',
     place: 'well' as const,
+    targetZone: 'DUVERNAY FM',
     ...over,
   };
 }
@@ -145,5 +146,16 @@ describe('the rig triangle', () => {
     expect(alpha(14, 15)).toBeGreaterThan(191);
     expect(alpha(1, 1)).toBeLessThan(191);
     expect(alpha(26, 1)).toBeLessThan(191);
+  });
+});
+
+describe('what a rig is drilling for (F-283)', () => {
+  it('writes the AER’s zone out in words', () => {
+    expect(targetName('SPIRIT RIVER FM')).toBe('Spirit River Formation');
+    expect(targetName('ELLERSLIE MBR')).toBe('Ellerslie Member');
+    expect(targetName('MCMURRAY FM')).toBe('McMurray Formation');
+    expect(targetName('GLAUCONITIC SS')).toBe('Glauconitic Sandstone');
+    expect(targetName('  ')).toBeNull();
+    expect(targetName(null)).toBeNull();
   });
 });
