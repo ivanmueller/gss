@@ -1,4 +1,4 @@
-import { formatAlberta, LAND_RIGHTS, saleAgreementTail, type Bbox } from '@grain/domain';
+import { formatAlberta, LAND_RIGHTS, type Bbox } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -238,52 +238,6 @@ export function landToday(now = new Date()): string {
   return new Date(now.getTime() - 6 * 3_600_000).toISOString().slice(0, 10);
 }
 
-/** The agreements by the last eight digits of their number, for `landIssuedFrom`. */
-export function landByTail(
-  agreements: readonly LandMapAgreement[],
-): Map<string, LandMapAgreement[]> {
-  const by = new Map<string, LandMapAgreement[]>();
-  for (const a of agreements) {
-    if (a.rights !== 'png' || !/^\d{10}$/.test(a.agreementNumber)) continue;
-    const tail = a.agreementNumber.slice(-8);
-    const list = by.get(tail);
-    if (list) list.push(a);
-    else by.set(tail, [a]);
-  }
-  return by;
-}
-
-const DAY_MS = 86_400_000;
-
-/**
- * The agreement the province issued from a sold parcel, among those loaded (F-265): its number
- * ends in the sale's year and month and the parcel's four digits, it is a lease for a parcel
- * numbered A and a licence for one numbered B, and its term starts within three days of the
- * sale (on a local load of 2026-11-22 always the sale's day or the day after; two sales in one
- * month can reuse a number, which the term's date tells apart). Null when none is loaded.
- */
-export function landIssuedFrom(
-  byTail: ReadonlyMap<string, readonly LandMapAgreement[]>,
-  saleDate: string,
-  contractNo: string,
-): LandMapAgreement | null {
-  const tail = saleAgreementTail(saleDate, contractNo);
-  const group = contractNo.startsWith('A')
-    ? 'LEASE'
-    : contractNo.startsWith('B')
-      ? 'LICENSE'
-      : null;
-  if (tail === null || group === null) return null;
-  const sold = Date.parse(`${saleDate}T00:00:00Z`);
-  return (
-    byTail.get(tail)?.find((a) => {
-      if (a.group !== group || a.termDate === null) return false;
-      const days = (Date.parse(`${a.termDate}T00:00:00Z`) - sold) / DAY_MS;
-      return days >= 0 && days <= 3;
-    }) ?? null
-  );
-}
-
 /** What a click on the map found: the keys of the land under it, and where. */
 export interface LandPick {
   keys: string[];
@@ -296,8 +250,6 @@ export interface LandState {
   agreements: ReadonlyMap<string, LandMapAgreement>;
   offsets: ReadonlyMap<string, LandMapOffset>;
   freehold: ReadonlyMap<string, LandMapFreehold>;
-  /** The agreement issued from a sold parcel, when it is among those loaded (F-265). */
-  issuedFrom: (saleDate: string, contractNo: string) => LandMapAgreement | null;
   /** The shape of a piece of land by its key (`png:12`), for the outline under the pointer. */
   shapeOf: (key: string) => LandShape | null;
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
@@ -465,13 +417,6 @@ export function useLand(organizationId: string, token: string): LandState {
       freehold: viewKinds.includes('freehold') ? (seenAnswer?.freehold.items ?? []) : [],
     }),
     [loaded, heldAnswer, seenAnswer, on, viewKinds, holder, terms, today],
-  );
-  // An agreement issued from a sale is looked for among every agreement loaded, whatever the
-  // panel's holder and status filters keep.
-  const byTail = useMemo(() => landByTail(loaded), [loaded]);
-  const issuedFrom = useCallback(
-    (saleDate: string, contractNo: string) => landIssuedFrom(byTail, saleDate, contractNo),
-    [byTail],
   );
   const truncated =
     wholeKinds.some((kind) => heldAnswer?.[kind].truncated) ||
@@ -746,7 +691,6 @@ export function useLand(organizationId: string, token: string): LandState {
     agreements,
     offsets,
     freehold,
-    issuedFrom,
     shapeOf,
     onViewChange,
     setPicked,

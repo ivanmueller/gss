@@ -10,10 +10,10 @@ import type { LandSaleLoad, LandSaleParcelRow, LandSaleSummary } from './land-sa
  */
 
 /**
- * The oil and gas schema version the land sales need: a parcel's restriction and reversion
- * zone codes and each sale's documents (20261128010000_petro_land_sale_details.sql, F-265).
+ * The oil and gas schema version the land sales need: a parcel's rights tract by tract
+ * (20261201010000_petro_land_sale_tract_rights.sql, F-276).
  */
-export const LAND_SALES_SCHEMA_VERSION = 11;
+export const LAND_SALES_SCHEMA_VERSION = 14;
 
 /**
  * At most this many parcels per answer; a view holding more is drawn from the newest sales.

@@ -114,15 +114,19 @@ export function landKeyTownship(key: string): string | null {
 }
 
 /**
- * The last eight digits of the agreement the province issues from a sold parcel (F-265): the
- * sale's year and month (two digits each) and the parcel's four digits; before them come two
- * digits for the kind of agreement. A parcel `B0102` of the sale of 2026-08-19 becomes an
- * agreement numbered `..26080102`. Null when the date or the number is not in that form.
+ * The township a parcel is filed under, as meridian, range and township (F-276): the lowest
+ * among those its land keys lie in, `5-07-045` before `5-08-044`. It is the `MRT` the
+ * department's results give each parcel (the same for every one of the 239 parcels of four
+ * sales compared on 2026-11-22), worked out here so a parcel not sold yet has it too. Null
+ * when no key is in the notices' form.
  */
-export function saleAgreementTail(saleDate: string, contractNo: string): string | null {
-  const date = /^\d{2}(\d{2})-(\d{2})-\d{2}$/.exec(saleDate);
-  const parcel = /^[A-Z](\d{4})$/.exec(contractNo);
-  return date && parcel ? `${String(date[1])}${String(date[2])}${String(parcel[1])}` : null;
+export function landKeysTownship(keys: readonly string[]): string | null {
+  let lowest: string | null = null;
+  for (const key of keys) {
+    const township = landKeyTownship(key);
+    if (township !== null && (lowest === null || township < lowest)) lowest = township;
+  }
+  return lowest;
 }
 
 /** How a section is looked up: `5-06-042-25` for section 25-042-06W5. */
@@ -225,7 +229,16 @@ export interface SaleNoticeParcel {
   restrictions: string[];
   /** The codes of its deeper rights reversion zones (`D00004`), each once, in the notice's order. */
   reversionZones: string[];
+  /**
+   * The rights tract by tract, as the notice writes them (F-276): each tract's lines joined by
+   * `; `, a wording kept once however many tracts share it, in the notice's order.
+   */
+  tractRights: string[];
 }
+
+/** At most this many tract wordings, and this many characters of them, are kept for a parcel. */
+const TRACT_RIGHTS_MAX = 40;
+const TRACT_RIGHTS_CHARS = 4000;
 
 /** The codes among the values of a tag, each once, in order; anything not a code is left out. */
 function codes(xml: string, name: string): string[] {
@@ -285,7 +298,11 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
         // is never read as rights given, and it stays with the clause it follows, so the same
         // clause with and without an exception are two (F-265).
         const clauses: string[] = [];
+        // And the same lines tract by tract, as written: a line an entry, empty lines left out.
+        const tractRights: string[] = [];
+        let tractChars = 0;
         for (const description of blocks(contract, 'ZoneDescription')) {
+          const written: string[] = [];
           let clause = '';
           const end = () => {
             if (clause !== '' && !clauses.includes(clause)) clauses.push(clause);
@@ -303,9 +320,22 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
             ]
               .filter((w): w is string => w !== null)
               .join(' ');
-            if (words !== '') clause = clause === '' ? words : `${clause} ${words}`;
+            if (words !== '') {
+              clause = clause === '' ? words : `${clause} ${words}`;
+              written.push(words);
+            }
           }
           end();
+          const tract = written.join('; ');
+          if (
+            tract !== '' &&
+            !tractRights.includes(tract) &&
+            tractRights.length < TRACT_RIGHTS_MAX &&
+            tractChars + tract.length <= TRACT_RIGHTS_CHARS
+          ) {
+            tractRights.push(tract);
+            tractChars += tract.length;
+          }
         }
         parcels.push({
           contractNo,
@@ -317,6 +347,7 @@ export function parseSaleNotice(xml: string): SaleNotice | null {
           portion,
           restrictions: codes(contract, 'RestrictionCodeApplies'),
           reversionZones: codes(contract, 'DRRZDCode'),
+          tractRights,
         });
       }
     }

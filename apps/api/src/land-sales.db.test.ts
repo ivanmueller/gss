@@ -44,13 +44,19 @@ const ZONE = `PETROLEUM AND NATURAL GAS ${PLAY}`;
 // The zone's md5, as the database works it out.
 const HASH = createHash('md5').update(ZONE).digest('hex');
 const ALL = { zones: [HASH], since: null };
+const TRACTS = [
+  `${ZONE}; TO THE TOP OF THE EXAMPLE FM`,
+  'NATURAL GAS IN THE SAMPLE GRP; PETROLEUM AND NATURAL GAS BELOW THE BASE OF THE SAMPLE GRP; TO BASEMENT',
+];
 
 describe('land sales as petro_api', () => {
   it('reads the parcels touching the view and sums the money in the database', async () => {
     const admin = postgres(ADMIN, { max: 1 });
     const db = postgresPetroleum(PETRO_URL);
-    const clean = () =>
-      admin`delete from petro.land_sale_parcels where sale_date between '1990-01-01' and '1990-12-31'`;
+    const clean = async () => {
+      await admin`delete from petro.land_sale_parcels where sale_date between '1990-01-01' and '1990-12-31'`;
+      await admin`delete from petro.land_agreements where agreement_type = 'ZZ8'`;
+    };
     try {
       await clean();
       const a = square(-120, 59.95);
@@ -60,18 +66,39 @@ describe('land sales as petro_api', () => {
       await admin`
         insert into petro.land_sale_parcels
           (sale_date, contract_no, contract_type, region, hectares, zone, land, status, bonus,
-           dollars_per_hectare, buyers, restrictions, reversion_zones, bounds, shape)
+           dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, shape)
         values
           ('1990-02-07', 'A0001', 'LEASE', 'PLAINS', 256, ${zone}, '61212624', 'ACCEPTED',
            25600.10, 100.00, 'EXAMPLE LAND LTD. 100%', 'SHA010301 SHA010401', 'D00004',
-           ${a.bounds}::box, ${admin.json(a.shape)}),
+           ${admin.json(TRACTS)}, ${a.bounds}::box, ${admin.json(a.shape)}),
           ('1990-05-09', 'A0002', 'LEASE', 'PLAINS', 64, ${zone}, '61212625SW', 'ACCEPTED',
-           19200.20, 300.00, 'SAMPLE RESOURCES INC. 100%', null, null, ${b.bounds}::box,
+           19200.20, 300.00, 'SAMPLE RESOURCES INC. 100%', null, null, null, ${b.bounds}::box,
            ${admin.json(b.shape)}),
           ('1990-05-09', 'A0003', 'LICENCE', 'NORTHERN', 128, ${zone}, '61212626', 'NO OFFERS',
-           null, null, null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}),
+           null, null, null, null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}),
           ('1990-05-09', 'A0004', 'LEASE', 'PLAINS', 64, 'PETROLEUM AND NATURAL GAS IN THE OTHER FM',
-           '61212627', 'ACCEPTED', 1, 1, null, null, null, ${a.bounds}::box, ${admin.json(a.shape)})`;
+           '61212627', 'ACCEPTED', 1, 1, null, null, null, null, ${a.bounds}::box,
+           ${admin.json(a.shape)})`;
+      // Land held today (F-276): the lease issued from A0001 of the February sale, in two
+      // tracts, its term starting the day after the sale. Beside it, agreements that are not
+      // it: a licence with the same number's end, a lease from the month's other sale, a lease
+      // numbered after A0002 whose term starts weeks later, and one numbered after A0003, which
+      // drew no offers. In Alberta's far north-east corner, away from the land of other tests:
+      // where an agreement lies plays no part.
+      const away = square(-110.5, 59.5);
+      const held = (number: string, tract: string, group: string, term: string, holder: string) =>
+        admin`
+          insert into petro.land_agreements
+            (rights, agreement_type, agreement_number, tract, agreement_group, holder, term_date,
+             bounds, shape)
+          values ('png', 'ZZ8', ${number}, ${tract}, ${group}, ${holder}, ${term}::date,
+                  ${away.bounds}::box, ${admin.json(away.shape)})`;
+      await held('0190020001', '01', 'LEASE', '1990-02-08', 'SAMPLE HOLDINGS LTD.');
+      await held('0190020001', '02', 'LEASE', '1990-02-08', 'SAMPLE HOLDINGS LTD.');
+      await held('5490020001', '00', 'LICENSE', '1990-02-08', 'OTHER KIND LTD.');
+      await held('0290020001', '00', 'LEASE', '1990-02-22', 'OTHER SALE LTD.');
+      await held('0190050002', '00', 'LEASE', '1990-06-20', 'TOO LATE LTD.');
+      await held('0190050003', '00', 'LEASE', '1990-05-10', 'NO OFFERS LTD.');
 
       // The newest sale first; the parcel elsewhere and the one of other rights are left out.
       const inView = await db.landSales(member(), VIEW, ALL, 10);
@@ -94,6 +121,31 @@ describe('land sales as petro_api', () => {
       });
       // A parcel with no codes has none (F-265).
       expect(inView.parcels[0]).toMatchObject({ restrictions: null, reversionZones: null });
+      // Its rights tract by tract, and the agreement issued from it with its holder (F-276):
+      // found by the database, once, whatever land the page has loaded.
+      expect(inView.parcels[1]).toMatchObject({
+        tractRights: TRACTS,
+        heldAgreement: '0190020001',
+        heldBy: 'SAMPLE HOLDINGS LTD.',
+      });
+      // No agreement whose term starts with the sale: none, and no rights by tract yet.
+      expect(inView.parcels[0]).toMatchObject({
+        tractRights: null,
+        heldAgreement: null,
+        heldBy: null,
+      });
+      // A parcel that drew no offers has no agreement, whatever is numbered like it.
+      const wide = await db.landSales(
+        member(),
+        { ...VIEW, west: -120.05, south: 59.4, east: -119.4 },
+        ALL,
+        10,
+      );
+      expect(wide.parcels.map((p) => [p.contractNo, p.heldAgreement])).toEqual([
+        ['A0002', null],
+        ['A0003', null],
+        ['A0001', '0190020001'],
+      ]);
       // From a date on, and one more than the limit to say there is more.
       const later = await db.landSales(member(), VIEW, { ...ALL, since: '1990-03-01' }, 10);
       expect(later.parcels.map((p) => p.contractNo)).toEqual(['A0002']);

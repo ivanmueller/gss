@@ -328,6 +328,7 @@ function mainSql(argv) {
           result?.buyers,
           parcel.restrictions.slice(0, 60).join(' ') || null,
           parcel.reversionZones.slice(0, 120).join(' ') || null,
+          parcel.tractRights.length > 0 ? JSON.stringify(parcel.tractRights) : null,
           `(${String(e)},${String(n)}),(${String(w)},${String(s)})`,
           JSON.stringify(placed.shape),
         ]
@@ -344,7 +345,7 @@ function mainSql(argv) {
   );
 
   const columns =
-    'sale_date, contract_no, contract_type, region, hectares, zone, land, inexact, status, bonus, dollars_per_hectare, buyers, restrictions, reversion_zones, bounds, shape';
+    'sale_date, contract_no, contract_type, region, hectares, zone, land, inexact, status, bonus, dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, shape';
   const documents = readDocuments(dir, sales);
   const out = [
     '\\set ON_ERROR_STOP on',

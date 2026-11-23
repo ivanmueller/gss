@@ -31,7 +31,25 @@ export interface LandSaleParcelRow {
   restrictions: string | null;
   /** Its deeper rights reversion zone codes, the same way; null for none. */
   reversionZones: string | null;
+  /**
+   * Its rights tract by tract, as the notice writes them, each tract's lines joined by `; `
+   * (F-276); null until the load has kept them.
+   */
+  tractRights: string[] | null;
+  /**
+   * The agreement the province issued from it, among the land held today that is loaded, and
+   * who holds it (F-276); null when the parcel was not sold or no such agreement is loaded.
+   */
+  heldAgreement: string | null;
+  heldBy: string | null;
   shape: LandShape;
+}
+
+/** A list of texts as the database keeps one (jsonb); null for anything else or none. */
+function textList(value: unknown): string[] | null {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string')
+    ? value
+    : null;
 }
 
 export interface LandSaleLoad {
@@ -160,25 +178,59 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             buyers: string | null;
             restrictions: string | null;
             reversion_zones: string | null;
+            tract_rights: unknown;
+            held_agreement: string | null;
+            held_by: string | null;
             shape: LandShape;
           }[]
         >`
-          with ${outlineRings(tx, filter)}
-          select id::text as id, sale_date::text as sale_date, contract_no, contract_type, region,
-                 hectares::text as hectares, zone, land, inexact, status, bonus::text as bonus,
-                 dollars_per_hectare::text as dollars_per_hectare, buyers, restrictions,
-                 reversion_zones, shape
-          from petro.land_sale_parcels
-          where bounds && box(point(${box.west}::float8, ${box.south}::float8),
-                              point(${box.east}::float8, ${box.north}::float8))
-            and (${filter.zones === null}::boolean
-                 or md5(zone) in (select jsonb_array_elements_text(
-                   (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
-            and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
-            and (${filter.until ?? null}::date is null or sale_date < ${filter.until ?? null}::date)
-            and ${inOutline(tx, filter)}
-          order by sale_date desc, contract_no
-          limit ${limit + 1}`;
+          with ${outlineRings(tx, filter)},
+          kept as materialized (
+            select id, sale_date, contract_no, status
+            from petro.land_sale_parcels
+            where bounds && box(point(${box.west}::float8, ${box.south}::float8),
+                                point(${box.east}::float8, ${box.north}::float8))
+              and (${filter.zones === null}::boolean
+                   or md5(zone) in (select jsonb_array_elements_text(
+                     (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
+              and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
+              and (${filter.until ?? null}::date is null
+                   or sale_date < ${filter.until ?? null}::date)
+              and ${inOutline(tx, filter)}
+            order by sale_date desc, contract_no
+            limit ${limit + 1}),
+          -- The agreement the province issues from a sold parcel (F-265, F-276): its number is
+          -- two digits for its kind, the sale's year and month and the parcel's four digits; it
+          -- is a lease for a parcel numbered A and a licence for one numbered B; and its term
+          -- starts within three days of the sale (two sales of one month can reuse a number).
+          -- Looked for among the land held today that is loaded, whatever the page shows.
+          issued as (
+            select distinct on (right(agreement_number, 8), agreement_group, term_date)
+                   right(agreement_number, 8) as tail, agreement_group, term_date,
+                   agreement_number, holder
+            from petro.land_agreements
+            where rights = 'png' and agreement_number ~ '^[0-9]{10}$'
+              and agreement_group in ('LEASE', 'LICENSE') and term_date is not null
+            order by right(agreement_number, 8), agreement_group, term_date, agreement_number),
+          held as (
+            select distinct on (k.id) k.id, i.agreement_number, i.holder
+            from kept k
+            join issued i
+              on i.tail = to_char(k.sale_date, 'YYMM') || substr(k.contract_no, 2)
+             and i.agreement_group = case left(k.contract_no, 1)
+                                       when 'A' then 'LEASE' when 'B' then 'LICENSE' end
+             and i.term_date between k.sale_date and k.sale_date + 3
+            where k.status = 'ACCEPTED'
+            order by k.id, i.term_date, i.agreement_number)
+          select p.id::text as id, p.sale_date::text as sale_date, p.contract_no, p.contract_type,
+                 p.region, p.hectares::text as hectares, p.zone, p.land, p.inexact, p.status,
+                 p.bonus::text as bonus, p.dollars_per_hectare::text as dollars_per_hectare,
+                 p.buyers, p.restrictions, p.reversion_zones, p.tract_rights,
+                 h.agreement_number as held_agreement, h.holder as held_by, p.shape
+          from kept k
+          join petro.land_sale_parcels p on p.id = k.id
+          left join held h on h.id = k.id
+          order by k.sale_date desc, k.contract_no`;
         return {
           load: load
             ? {
@@ -210,6 +262,9 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             buyers: r.buyers,
             restrictions: r.restrictions,
             reversionZones: r.reversion_zones,
+            tractRights: textList(r.tract_rights),
+            heldAgreement: r.held_agreement,
+            heldBy: r.held_agreement === null ? null : r.held_by,
             shape: r.shape,
           })),
         };

@@ -5,11 +5,9 @@ import {
   LAND_FROM,
   LAND_FROM_RIGHTS,
   landAgreementName,
-  landByTail,
   landCovers,
   landFiltered,
   landHolders,
-  landIssuedFrom,
   landReadable,
   landRequest,
   landTerm,
@@ -175,37 +173,5 @@ describe('names and dates', () => {
   it('takes today as Alberta’s date', () => {
     expect(landToday(new Date('2026-11-22T05:59:00Z'))).toBe('2026-11-21');
     expect(landToday(new Date('2026-11-22T06:00:00Z'))).toBe('2026-11-22');
-  });
-});
-
-describe('landIssuedFrom', () => {
-  // A licence issued from parcel B0102 of the sale of 2026-08-19, and a lease whose number ends
-  // the same way, from a parcel A0102 of another sale that month.
-  const licence = agreement('7', {
-    agreementType: '053',
-    agreementNumber: '5326080102',
-    group: 'LICENSE',
-    termDate: '2026-08-20',
-  });
-  const lease = agreement('8', {
-    agreementType: '005',
-    agreementNumber: '0526080102',
-    group: 'LEASE',
-    termDate: '2026-08-06',
-  });
-  const byTail = landByTail([licence, lease, agreement('9')]);
-
-  it('finds the agreement numbered after the sale and the parcel, of the parcel’s kind', () => {
-    expect(landIssuedFrom(byTail, '2026-08-19', 'B0102')).toBe(licence);
-    expect(landIssuedFrom(byTail, '2026-08-05', 'A0102')).toBe(lease);
-  });
-
-  it('finds none of another kind, another sale that month, or another parcel', () => {
-    // The lease is not the licence parcel's agreement, whatever its number.
-    expect(landIssuedFrom(landByTail([lease]), '2026-08-05', 'B0102')).toBeNull();
-    // The same number from the month's other sale: its term starts two weeks off.
-    expect(landIssuedFrom(byTail, '2026-08-19', 'A0102')).toBeNull();
-    expect(landIssuedFrom(byTail, '2026-08-19', 'B0103')).toBeNull();
-    expect(landIssuedFrom(byTail, 'soon', 'B0102')).toBeNull();
   });
 });

@@ -43,6 +43,9 @@ const parcel = (id: string): LandSaleParcelRow => ({
   buyers: 'EXAMPLE LAND LTD. 100%',
   restrictions: 'SHA010301 SHA010401',
   reversionZones: 'D00004',
+  tractRights: ['PETROLEUM AND NATURAL GAS FROM SURFACE; TO BASEMENT'],
+  heldAgreement: '0126110001',
+  heldBy: 'SAMPLE RESOURCES INC.',
   shape: [
     [
       [
