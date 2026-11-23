@@ -20,7 +20,7 @@ import { forwardingRoutes } from './forwarding';
 import { handleEmail, replayPendingMail } from './receive-mail';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
-import { AER_CRON, refreshAerLists } from './aer-lists';
+import { refreshAerLists } from './aer-lists';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { mapLayerRoutes } from './map-layers';
@@ -197,10 +197,6 @@ export default {
   // that are due written by Claude, and
   // received mail kept while the database could not be reached (src/receive-mail.ts).
   scheduled(controller, env, ctx) {
-    if (controller.cron === AER_CRON) {
-      ctx.waitUntil(refreshAerLists(env, postgresPetroleum));
-      return;
-    }
     if (controller.cron === RECORDINGS_CRON) {
       ctx.waitUntil(runRecordingsJob(env, postgresDatabase));
       ctx.waitUntil(readNewTranscripts(env, postgresDatabase));
