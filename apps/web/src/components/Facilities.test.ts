@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { squareImage } from '../lib/facilitiesMap';
-import { facilitiesShown, facilityEntries, facilityKey, facilityLive } from './Facilities';
+import {
+  FACILITY_GROUPS_AT_START,
+  FACILITY_STATUSES_AT_START,
+  facilitiesShown,
+  facilityEntries,
+  facilityKey,
+  facilityLive,
+} from './Facilities';
 import { facilityLicence, facilityPlace } from './FacilityPanel';
 
 // Facilities on the oil and gas map (F-278): the answer read back into facilities, the filters,
@@ -70,17 +77,28 @@ describe('facilitiesShown', () => {
   const all = facilityEntries(ANSWER);
   const every = new Set(['oil_battery', 'gas_plant'] as const);
 
-  it('keeps the kinds on, the statuses not hidden, and an operator holding the text', () => {
-    expect(facilitiesShown(all, every, new Set(), '')).toHaveLength(3);
+  const both = new Set(['Active', 'Suspended']);
+
+  it('keeps the kinds on, the statuses on, and an operator holding the text', () => {
+    expect(facilitiesShown(all, every, both, '')).toHaveLength(3);
     expect(
-      facilitiesShown(all, new Set(['gas_plant'] as const), new Set(), '').map((f) => f.id),
+      facilitiesShown(all, new Set(['gas_plant'] as const), both, '').map((f) => f.id),
     ).toEqual(['ABGP0000002']);
-    expect(facilitiesShown(all, every, new Set(['Suspended']), '').map((f) => f.id)).toEqual([
+    expect(facilitiesShown(all, every, new Set(['Active']), '').map((f) => f.id)).toEqual([
       'ABBT0000001',
     ]);
-    expect(facilitiesShown(all, every, new Set(), '  other ').map((f) => f.id)).toEqual([
+    expect(facilitiesShown(all, every, both, '  other ').map((f) => f.id)).toEqual([
       'ABGP0000002',
       'ABBT0000003',
+    ]);
+  });
+
+  it('shows nothing when first switched on until a kind is picked, then active ones only (F-284)', () => {
+    expect(
+      facilitiesShown(all, FACILITY_GROUPS_AT_START, FACILITY_STATUSES_AT_START, ''),
+    ).toHaveLength(0);
+    expect(facilitiesShown(all, every, FACILITY_STATUSES_AT_START, '').map((f) => f.id)).toEqual([
+      'ABBT0000001',
     ]);
   });
 });

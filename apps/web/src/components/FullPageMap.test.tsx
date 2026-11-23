@@ -153,22 +153,25 @@ afterEach(() => {
 
 describe('the side card (F-267)', () => {
   it('opens one section at a time, each with its switch, and folds away', async () => {
-    mockApi({ [LIST]: listOf(), ...noLegend });
+    const calls = mockApi({ [LIST]: listOf(), ...noLegend });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const card = await screen.findByRole('complementary', { name: 'Map menu' });
     expect(within(card).getByRole('heading', { name: 'Alberta oil and gas' })).toBeInTheDocument();
-    for (const title of ['Land sales', 'Land today', 'Wells & licences']) {
-      expect(within(card).getByRole('switch', { name: title })).toBeChecked();
+    // When the map opens only the wells and the formations are on (F-284).
+    expect(within(card).getByRole('switch', { name: 'Wells & licences' })).toBeChecked();
+    expect(within(card).getByRole('switch', { name: 'Formations' })).toBeChecked();
+    for (const title of ['Land sales', 'Land today', 'Facilities', 'Pipelines', 'Rigs']) {
+      expect(within(card).getByRole('switch', { name: title })).not.toBeChecked();
     }
-    // Land sales is open at first; opening another closes it.
+    // The sales' totals are asked for while Land sales is off, for Jump to's next and last sale.
+    await waitFor(() => {
+      expect(calls.some((c) => c.path.startsWith('/petroleum/land-sales/summary'))).toBe(true);
+    });
+    // Wells & licences is open at first; opening another closes it.
     const sales = within(card).getByRole('button', { name: 'Land sales' });
     const wells = within(card).getByRole('button', { name: 'Wells & licences' });
-    expect(sales).toHaveAttribute('aria-expanded', 'true');
-    expect(within(card).getByRole('group', { name: 'When' })).toBeInTheDocument();
-    await userEvent.click(wells);
-    expect(sales).toHaveAttribute('aria-expanded', 'false');
     expect(wells).toHaveAttribute('aria-expanded', 'true');
-    expect(within(card).queryByRole('group', { name: 'When' })).not.toBeInTheDocument();
+    expect(sales).toHaveAttribute('aria-expanded', 'false');
     // The statuses are chips; the parts of a well have no switches any more.
     expect(within(card).getByRole('group', { name: 'Statuses shown' })).toBeInTheDocument();
     expect(within(card).getByRole('button', { name: 'Producing' })).toHaveAttribute(
@@ -177,6 +180,11 @@ describe('the side card (F-267)', () => {
     );
     expect(within(card).queryByText('Main legs')).not.toBeInTheDocument();
     expect(within(card).queryByText('Planned lines')).not.toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('switch', { name: 'Land sales' }));
+    await userEvent.click(sales);
+    expect(wells).toHaveAttribute('aria-expanded', 'false');
+    expect(sales).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(wells);
     // A section switched off shows nothing under its title.
     await userEvent.click(within(card).getByRole('switch', { name: 'Wells & licences' }));
     expect(within(card).queryByRole('group', { name: 'Statuses shown' })).not.toBeInTheDocument();
@@ -241,7 +249,11 @@ describe('the side card (F-267)', () => {
     });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const card = await screen.findByRole('complementary', { name: 'Map menu' });
-    expect(within(card).getByRole('switch', { name: 'Rigs' })).toBeChecked();
+    // Off when the map opens (F-284), and not asked for until switched on.
+    const rigsSwitch = within(card).getByRole('switch', { name: 'Rigs' });
+    expect(rigsSwitch).not.toBeChecked();
+    expect(calls.some((c) => c.path.startsWith('/petroleum/aer/rigs'))).toBe(false);
+    await userEvent.click(rigsSwitch);
     expect(await screen.findByText('Rigs drawn: 2')).toBeInTheDocument();
     await userEvent.click(within(card).getByRole('button', { name: 'Rigs' }));
     expect(within(card).getByText(/on a well now/)).toHaveTextContent('2 rigs on a well now');

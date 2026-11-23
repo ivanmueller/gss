@@ -228,7 +228,8 @@ export interface LandSalesState {
 }
 
 export function useLandSales(organizationId: string, token: string): LandSalesState {
-  const [on, setOn] = useState(true);
+  // Off when the map opens (F-284); Jump to and its section's switch turn it on.
+  const [on, setOn] = useState(false);
   const [rights, setRights] = useState<string | null>('duvernay');
   const [when, setWhen] = useState<SaleWhen>('2');
   const [buyer, setBuyer] = useState('');
@@ -352,9 +353,9 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, token]);
 
-  // The totals and the history by quarter: of every parcel loaded, not of the view.
+  // The totals and the history by quarter: of every parcel loaded, not of the view. Asked for
+  // also while the section is off, so the Jump to buttons know the next and the last sale.
   useEffect(() => {
-    if (!on) return;
     const controller = new AbortController();
     apiJson<SummaryAnswer>(`/petroleum/land-sales/summary?${query()}`, token, {
       signal: controller.signal,
@@ -370,7 +371,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     };
     // `rights` is part of `summaryFilter`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [on, summaryFilter, query, token]);
+  }, [summaryFilter, query, token]);
 
   const answer = settled?.answer ?? null;
   const shown = useMemo(

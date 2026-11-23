@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { pipeSize } from './PipelinePanel';
 import {
+  PIPELINE_GROUPS_AT_START,
+  PIPELINE_STATUSES_AT_START,
   PipelineLoader,
   pipelineEntries,
   pipelineFeatures,
@@ -9,6 +11,7 @@ import {
   pipelineSquaresFor,
   pipelinesInSquares,
   pipelinesShown,
+  type PipelineFilter,
   type PipelineSquareAnswer,
 } from './Pipelines';
 
@@ -76,7 +79,7 @@ describe('pipelinesShown', () => {
     licensee: '',
     minMm: 0,
   };
-  const ids = (filter: typeof all) => pipelinesShown(entries, filter).map((p) => p.id);
+  const ids = (filter: PipelineFilter) => pipelinesShown(entries, filter).map((p) => p.id);
 
   it('filters by status, substance, licensee and size', () => {
     expect(ids(all)).toEqual([1, 2, 3]);
@@ -85,6 +88,16 @@ describe('pipelinesShown', () => {
     expect(ids({ ...all, licensee: 'example' })).toEqual([1, 3]);
     // A segment with no size given is left out once a size is chosen.
     expect(ids({ ...all, minMm: 114.3 })).toEqual([1]);
+  });
+
+  it('shows nothing when first switched on until a substance is picked, then operating lines only (F-284)', () => {
+    const start = {
+      ...all,
+      statuses: PIPELINE_STATUSES_AT_START,
+      groups: PIPELINE_GROUPS_AT_START,
+    };
+    expect(ids(start)).toEqual([]);
+    expect(ids({ ...start, groups: all.groups })).toEqual([1]);
   });
 });
 

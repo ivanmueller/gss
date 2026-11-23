@@ -92,14 +92,14 @@ export function facilityEntries(answer: Answer): FacilityEntry[] {
 export function facilitiesShown(
   entries: readonly FacilityEntry[],
   groups: ReadonlySet<FacilityGroup>,
-  hiddenStatuses: ReadonlySet<string>,
+  statuses: ReadonlySet<string>,
   operator: string,
 ): FacilityEntry[] {
   const text = operator.trim().toLowerCase();
   return entries.filter(
     (f) =>
       groups.has(f.group) &&
-      !hiddenStatuses.has(f.status ?? '') &&
+      statuses.has(f.status ?? '') &&
       (text === '' || (f.operator?.name ?? '').toLowerCase().includes(text)),
   );
 }
@@ -122,13 +122,17 @@ export interface Facilities {
 }
 
 const ALL_GROUPS: ReadonlySet<FacilityGroup> = new Set(FACILITY_GROUPS.map((g) => g.key));
+/** When the section is first switched on (F-284): active facilities only, and no kind yet. */
+export const FACILITY_STATUSES_AT_START: ReadonlySet<string> = new Set(['Active']);
+export const FACILITY_GROUPS_AT_START: ReadonlySet<FacilityGroup> = new Set();
 
 export function useFacilities(organizationId: string, token: string): Facilities {
-  const [on, setOn] = useState(true);
+  // Off when the map opens (F-284).
+  const [on, setOn] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [groups, setGroups] = useState<ReadonlySet<FacilityGroup>>(ALL_GROUPS);
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  const [groups, setGroups] = useState<ReadonlySet<FacilityGroup>>(FACILITY_GROUPS_AT_START);
+  const [statusesOn, setStatusesOn] = useState<ReadonlySet<string>>(FACILITY_STATUSES_AT_START);
   const [operator, setOperator] = useState('');
   const [picked, setPickedKeys] = useState<readonly string[]>([]);
   const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
@@ -163,8 +167,8 @@ export function useFacilities(organizationId: string, token: string): Facilities
   const entries = useMemo(() => (answer ? facilityEntries(answer) : []), [answer]);
   const byKey = useMemo(() => new Map(entries.map((f) => [f.key, f])), [entries]);
   const shown = useMemo(
-    () => facilitiesShown(entries, groups, hidden, operator),
-    [entries, groups, hidden, operator],
+    () => facilitiesShown(entries, groups, statusesOn, operator),
+    [entries, groups, statusesOn, operator],
   );
   const points = useMemo(
     (): GeoJSON.FeatureCollection => ({
@@ -195,14 +199,23 @@ export function useFacilities(organizationId: string, token: string): Facilities
 
   // Counted in the view only close enough in for the facilities to be drawn.
   const close = at !== null && at.zoom >= FACILITIES_FROM;
-  const inView = useMemo(() => {
-    const counts = new Map<FacilityGroup, number>();
-    if (!at || !close) return null;
-    for (const f of shown) {
-      if (inside(f, at.view)) counts.set(f.group, (counts.get(f.group) ?? 0) + 1);
-    }
-    return counts;
-  }, [shown, at, close]);
+  const countInView = useCallback(
+    (list: readonly FacilityEntry[]) => {
+      const counts = new Map<FacilityGroup, number>();
+      if (!at || !close) return null;
+      for (const f of list) {
+        if (inside(f, at.view)) counts.set(f.group, (counts.get(f.group) ?? 0) + 1);
+      }
+      return counts;
+    },
+    [at, close],
+  );
+  const inView = useMemo(() => countInView(shown), [countInView, shown]);
+  // Each kind in view, chosen or not, so a chip shows what it would add.
+  const kindsInView = useMemo(
+    () => countInView(facilitiesShown(entries, ALL_GROUPS, statusesOn, operator)),
+    [countInView, entries, statusesOn, operator],
+  );
 
   const onViewChange = useCallback((bbox: Bbox | null, zoom: number) => {
     setAt(bbox ? { view: bbox, zoom } : null);
@@ -220,7 +233,7 @@ export function useFacilities(organizationId: string, token: string): Facilities
     });
   };
   const toggleStatus = (status: string) => {
-    setHidden((before) => {
+    setStatusesOn((before) => {
       const next = new Set(before);
       if (next.has(status)) next.delete(status);
       else next.add(status);
@@ -264,9 +277,9 @@ export function useFacilities(organizationId: string, token: string): Facilities
               }}
             >
               {g.name}
-              {inView && (
+              {kindsInView && (
                 <span className="font-mono text-xs opacity-70">
-                  {(inView.get(g.key) ?? 0).toLocaleString('en-CA')}
+                  {(kindsInView.get(g.key) ?? 0).toLocaleString('en-CA')}
                 </span>
               )}
             </FilterChip>
@@ -291,7 +304,7 @@ export function useFacilities(organizationId: string, token: string): Facilities
           {statuses.map((status) => (
             <FilterChip
               key={status}
-              pressed={!hidden.has(status)}
+              pressed={statusesOn.has(status)}
               onClick={() => {
                 toggleStatus(status);
               }}
@@ -301,6 +314,9 @@ export function useFacilities(organizationId: string, token: string): Facilities
           ))}
         </div>
       </div>
+      {answer?.load && groups.size === 0 && (
+        <p className="text-xs text-muted-foreground">Pick a kind to see facilities.</p>
+      )}
       {answer?.load && (
         <p className="text-xs text-muted-foreground">
           {inView

@@ -183,7 +183,8 @@ const PERIODS: { value: RigPeriod; label: string }[] = [
 ];
 
 export function useRigs(organizationId: string, token: string): Rigs {
-  const [on, setOn] = useState(true);
+  // Off when the map opens (F-284): switched on from its section.
+  const [on, setOn] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [period, setPeriod] = useState<RigPeriod>('now');
