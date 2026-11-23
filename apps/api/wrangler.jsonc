@@ -57,9 +57,9 @@
       // 16:30 Ottawa time on business days: 22:15 UTC is after that all year (17:15 or 18:15
       // in Ottawa), and 14:15 UTC the next morning picks up a rate published late or a run
       // that failed. Locally: `wrangler dev --test-scheduled`, then /__scheduled.
-      // "20,30 20 23 11 *": extra runs of the twice-daily job on 2026-11-23 only (2:20 and 2:30 pm in
+      // "15 20 23 11 *": one extra run of the twice-daily job on 2026-11-23 only (2:15 pm in
       // Alberta), the owner's forced run of the rigs (F-282); removed in the next pull request.
-      "triggers": { "crons": ["15 14,22 * * *", "*/2 * * * *", "20,30 20 23 11 *"] },
+      "triggers": { "crons": ["15 14,22 * * *", "*/2 * * * *", "15 20 23 11 *"] },
       // Keeps Workers Logs on across deploys (the API logs secret-free failure reasons).
       "observability": {
         "logs": {
