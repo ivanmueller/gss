@@ -8,7 +8,22 @@ import { LegendTitle, MapSection, SwitchRow } from './MapSide';
 // called formations. This will be where each formation can be turned on and off but it won't be
 // connected to the wells & licences section"). Each formation's outline is a file kept with the
 // app (apps/web/public/outlines/, made by scripts/build-formation-outlines.js), fetched the first
-// time it is switched on. The Duvernay starts on, as its outline was drawn before.
+// time it is switched on. The Duvernay starts on, as its outline was drawn before. Two lists:
+// the shale plays, and the other formations from the Survey's 3D model (F-281).
+
+/** The section's two lists, by where the outlines come from (F-281). */
+const GROUPS = [
+  {
+    source: 'shale-report',
+    title: 'Shale plays',
+    note: 'The areas the Alberta Geological Survey evaluated for its 2012 shale report, not each formation’s full extent.',
+  },
+  {
+    source: 'model',
+    title: 'Other formations',
+    note: 'Where each unit of the Survey’s 3D model of Alberta is present. Some units join formations; the one asked for is in brackets.',
+  },
+] as const;
 
 /** The formations on when the map opens. */
 export const FORMATIONS_AT_START: ReadonlySet<string> = new Set(['duvernay']);
@@ -125,22 +140,30 @@ export function useFormations(): Formations {
         </span>
       }
     >
-      <div className="flex flex-col gap-1.5" role="group" aria-label="Formations shown">
-        {FORMATION_OUTLINES.map((f) => (
-          <SwitchRow
-            key={f.key}
-            title={f.name}
-            note={failed.has(f.key) ? 'not loaded' : f.age}
-            checked={shown.has(f.key)}
-            onChange={() => {
-              toggle(f.key);
-            }}
-          />
-        ))}
-      </div>
+      {GROUPS.map((group) => (
+        <div
+          key={group.source}
+          className="flex flex-col gap-1.5"
+          role="group"
+          aria-label={group.title}
+        >
+          <LegendTitle>{group.title}</LegendTitle>
+          {FORMATION_OUTLINES.filter((f) => f.source === group.source).map((f) => (
+            <SwitchRow
+              key={f.key}
+              title={f.name}
+              note={failed.has(f.key) ? 'not loaded' : f.age}
+              checked={shown.has(f.key)}
+              onChange={() => {
+                toggle(f.key);
+              }}
+            />
+          ))}
+          <p className="text-xs text-muted-foreground">{group.note}</p>
+        </div>
+      ))}
       <p className="text-xs text-muted-foreground">
-        Each outline is the area the Alberta Geological Survey evaluated for its 2012 shale report,
-        not the formation’s full extent. Switching one here changes no well, sale or land shown.
+        Switching one here changes no well, sale or land shown.
       </p>
     </MapSection>
   );
@@ -168,8 +191,9 @@ export function useFormations(): Formations {
     <p>
       <strong className="font-medium text-foreground">Formations.</strong> Outlines: Alberta Energy
       Regulator / Alberta Geological Survey, Digital Dataset 2013-0024 (Rokosh et al., 2013, the
-      areas evaluated in its 2012 shale report). Contains information licensed under the Open
-      Government Licence – Alberta.
+      areas evaluated in its 2012 shale report), and the Geological Framework of Alberta, Version 4
+      (its zones’ extents). Contains information licensed under the Open Government Licence –
+      Alberta.
     </p>
   );
 

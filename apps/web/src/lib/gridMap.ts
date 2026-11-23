@@ -35,14 +35,16 @@ export const GRID_LAYERS = {
 const ORDER = Object.values(GRID_LAYERS);
 
 /**
- * The townships start to fade in as the distance bar turns to 30 km, zooming in toward 20 km
- * (the owner, 2026-11-23; zoom 7.5 and 8.1 around the Duvernay, mapDetail.ts; it was the second
- * scroll after the bar read 30 km, zoom 7.8), and darken as the map is zoomed in to the
- * strengths read from the owner's reference pictures (2026-11-22, on the warm grey land, 243 240
- * 232): about 8% darker by the second scroll (223 220 213), 19% at the 20 km bar (197 194 184),
- * 26% from the 10 km bar (179 177 169), each a 1-pixel line.
+ * The townships start to fade in as soon as the distance bar turns from 50 km to 30 km (the
+ * owner, 2026-11-23: "once the user scrolls from 50km to 30km and they just started zooming in
+ * on 30km towards 20km"). The bar (Mapbox's, 120 pixels wide) reads 30 km from about zoom 6.8 to
+ * 7.54 around the Duvernay (53.5° N), 20 km to 8.13, then 10 km: `scaleBarKm` in the tests. Zoom
+ * 7.5, used before, was the end of the 30 km bar, not its start. From there the lines darken as
+ * the owner saw them on staging (2026-11-23, "all good" but for the start), to the strengths read
+ * from the owner's reference pictures of 2026-11-22 (on the warm grey land, 243 240 232): 8% by
+ * zoom 7.8 (223 220 213), 19% by 8.1 (197 194 184), 26% from 9 (179 177 169), a 1-pixel line.
  */
-export const GRID_FROM = 7.5;
+export const GRID_FROM = 6.8;
 const TOWNSHIP_OPACITY: ExpressionSpecification = [
   'interpolate',
   ['linear'],

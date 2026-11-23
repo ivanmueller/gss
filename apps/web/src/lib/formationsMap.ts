@@ -6,7 +6,8 @@ import { PIPELINE_LAYERS } from './pipelinesMap';
 import { ST37_LAYERS } from './st37Map';
 
 // The formations' outlines on the oil and gas map (F-280; the owner, 2026-11-23: a Formations
-// section where each formation is switched on and off, not tied to Wells & licences): each a
+// section where each formation is switched on and off, not tied to Wells & licences; F-281, the
+// other formations from the Survey's 3D model): each a
 // faint fill and a line in its own colour, as the Survey drew the area (holes where the formation
 // is absent). Over the land held and the sale parcels; under the wells' zones and shading, the
 // township grid, the pipelines, the facilities and the wells.
@@ -21,6 +22,22 @@ export const FORMATION_COLOURS: Record<'light' | 'dark', Record<string, string>>
     muskwa: '#be185d',
     // The ink the Duvernay's outline has had since F-252, so the map opens as before.
     duvernay: '#44403c',
+    'horseshoe-canyon': '#4d7c0f',
+    cardium: '#0369a1',
+    'second-white-specks': '#475569',
+    dunvegan: '#047857',
+    viking: '#4338ca',
+    'spirit-river': '#a21caf',
+    mannville: '#854d0e',
+    clearwater: '#0e7490',
+    bluesky: '#1d4ed8',
+    'rock-creek': '#be123c',
+    halfway: '#991b1b',
+    doig: '#7e22ce',
+    wabamun: '#15803d',
+    nisku: '#9a3412',
+    leduc: '#8b5cf6',
+    'beaverhill-lake': '#0c4a6e',
   },
   dark: {
     wilrich: '#5eead4',
@@ -29,6 +46,22 @@ export const FORMATION_COLOURS: Record<'light' | 'dark', Record<string, string>>
     'basal-banff-exshaw': '#fde047',
     muskwa: '#f9a8d4',
     duvernay: '#e7e5e4',
+    'horseshoe-canyon': '#bef264',
+    cardium: '#7dd3fc',
+    'second-white-specks': '#cbd5e1',
+    dunvegan: '#6ee7b7',
+    viking: '#a5b4fc',
+    'spirit-river': '#f0abfc',
+    mannville: '#fef08a',
+    clearwater: '#67e8f9',
+    bluesky: '#93c5fd',
+    'rock-creek': '#fda4af',
+    halfway: '#fca5a5',
+    doig: '#d8b4fe',
+    wabamun: '#86efac',
+    nisku: '#fed7aa',
+    leduc: '#ddd6fe',
+    'beaverhill-lake': '#bae6fd',
   },
 };
 

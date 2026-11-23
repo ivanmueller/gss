@@ -95,14 +95,29 @@ describe('formationFeatures', () => {
 });
 
 describe('the outline files', () => {
-  it('has one file a formation, each the dataset unit it is named for', () => {
+  it('has one file a formation, each the dataset unit or model zone it is named for', () => {
     for (const formation of FORMATION_OUTLINES) {
       // Read from the web app's folder, where the tests run (as theme.test.ts reads index.html).
       const file = `public${formationUrl(formation.key)}`;
       const collection = JSON.parse(readFileSync(file, 'utf8')) as GeoJSON.FeatureCollection;
       expect(collection.features).toHaveLength(1);
-      expect(collection.features[0]?.properties?.Shale_Unit).toBe(formation.unit);
-      expect(collection.features[0]?.geometry.type).toBe('MultiPolygon');
+      const properties = collection.features[0]?.properties;
+      if (formation.source === 'shale-report') {
+        expect(properties?.Shale_Unit).toBe(formation.unit);
+      } else {
+        expect(properties?.Zone).toBe(formation.unit);
+      }
+      const geometry = collection.features[0]?.geometry;
+      expect(geometry?.type).toBe('MultiPolygon');
+      // Longitude and latitude in and around Alberta, not the model's web-map metres.
+      const points = (geometry as GeoJSON.MultiPolygon).coordinates.flat(2);
+      expect(points.length).toBeGreaterThan(3);
+      for (const [lon, lat] of points) {
+        expect(lon).toBeGreaterThan(-125);
+        expect(lon).toBeLessThan(-105);
+        expect(lat).toBeGreaterThan(47);
+        expect(lat).toBeLessThan(61);
+      }
     }
   });
 

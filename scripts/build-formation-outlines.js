@@ -13,6 +13,16 @@
 //     dig/shalegas_fms_py_ll.shp dig/shalegas_fms_py_ll.dbf
 //   pnpm exec prettier --write apps/web/public/outlines
 //
+// The other formations (F-281) are zones of the Survey's 3D model, the Geological Framework of
+// Alberta, Version 4 (Open Government Licence – Alberta): each zone's package from the model's
+// bulk download, of which only `Extent_Top_<code>_v4_wgs84.*` (where the zone is present, in
+// web-map coordinates despite the name) is used, each in a folder named for its code:
+//
+//   B=https://aercclrsuatagsgispub01.blob.core.windows.net/arcgis-online/projects/GFA/Bulk_download
+//   curl -o 28_K_Ca.zip $B/28_K_Ca_v4_wgs84.zip && unzip -j 28_K_Ca.zip -d zones/28_K_Ca
+//   (one for each `model` code of FORMATION_OUTLINES)
+//   node --experimental-strip-types scripts/build-formation-outlines.js --model zones
+//
 // Each outline keeps the Survey's rings as they are (longitude and latitude, NAD83, to four
 // decimal places, about 10 m), each hole with the ring it lies in.
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -99,9 +109,61 @@ export function polygonsOf(rings) {
 
 const round = (n) => Math.round(n * 1e4) / 1e4;
 
+/** A point of web-map coordinates (EPSG:3857, metres) as longitude and latitude. */
+export function fromWebMercator([x, y]) {
+  const R = 6378137;
+  return [
+    (x / R) * (180 / Math.PI),
+    (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * (180 / Math.PI),
+  ];
+}
+
+/** A zone's outline of the 3D model as its file is written: its `Zone` code, longitude and latitude. */
+export function modelOutline(code, rings) {
+  return {
+    type: 'FeatureCollection',
+    name: `Extent_Top_${code}_v4`,
+    crs: { type: 'name', properties: { name: 'urn:ogc:def:crs:OGC:1.3:CRS84' } },
+    xy_coordinate_resolution: 0.0001,
+    features: [
+      {
+        type: 'Feature',
+        properties: { Zone: code },
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: polygonsOf(rings).map((polygon) =>
+            polygon.map((ring) => ring.map((point) => fromWebMercator(point).map(round))),
+          ),
+        },
+      },
+    ],
+  };
+}
+
+/** The model's zones: each `<dir>/<code>/Extent_Top_<code>_v4_wgs84.shp`, in web-map coordinates. */
+function buildModel(dir) {
+  for (const outline of FORMATION_OUTLINES.filter((f) => f.source === 'model')) {
+    const base = `${dir}/${outline.unit}/Extent_Top_${outline.unit}_v4_wgs84`;
+    if (!readFileSync(`${base}.prj`, 'utf8').includes('Web_Mercator')) {
+      throw new Error(`${outline.unit}: not in web-map coordinates`);
+    }
+    const rings = shapefileRings(new Uint8Array(readFileSync(`${base}.shp`))).flatMap(
+      (shape) => shape ?? [],
+    );
+    writeFileSync(OUT(outline.key), `${JSON.stringify(modelOutline(outline.unit, rings))}\n`);
+    console.log(`${outline.key}: ${String(rings.length)} rings`);
+  }
+}
+
 function main([shp, dbf]) {
+  if (shp === '--model' && dbf) {
+    buildModel(dbf);
+    return;
+  }
   if (!shp || !dbf) {
-    console.error('usage: build-formation-outlines.js <outlines.shp> <outlines.dbf>');
+    console.error(
+      'usage: build-formation-outlines.js <outlines.shp> <outlines.dbf> | --model <zones dir>',
+    );
     process.exit(2);
   }
   const shapes = shapefileRings(new Uint8Array(readFileSync(shp)));
@@ -110,7 +172,9 @@ function main([shp, dbf]) {
     const record = table.record(n);
     const rings = shapes[n];
     if (!record || !rings) continue;
-    const outline = FORMATION_OUTLINES.find((f) => f.unit === record.Shale_Unit);
+    const outline = FORMATION_OUTLINES.find(
+      (f) => f.source === 'shale-report' && f.unit === record.Shale_Unit,
+    );
     if (!outline) throw new Error(`a unit not on the list: ${record.Shale_Unit}`);
     const collection = {
       type: 'FeatureCollection',
