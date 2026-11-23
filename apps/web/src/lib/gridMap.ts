@@ -2,6 +2,7 @@ import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'm
 
 import { FACILITY_LAYERS } from './facilitiesMap';
 import { SALE_LAYERS } from './landSalesMap';
+import { PIPELINE_LAYERS } from './pipelinesMap';
 import { ST37_LAYERS } from './st37Map';
 
 // The township grid on the oil and gas map (F-240, F-271): every township's lines from a file
@@ -60,9 +61,16 @@ const drawn = new WeakMap<MapboxMap, GridView>();
 
 const level = (name: string): ExpressionSpecification => ['==', ['get', 'level'], name];
 
-/** The layer the grid goes under: the facilities, the sales' dots, the wells, else the pins. */
+/**
+ * The layer the grid goes under: the pipelines, the facilities, the sales' dots, the wells, else
+ * the pins.
+ */
 function anchorOf(map: MapboxMap, beforeId?: string): string | undefined {
   const first = [
+    PIPELINE_LAYERS.lines,
+    PIPELINE_LAYERS.permitted,
+    PIPELINE_LAYERS.hit,
+    PIPELINE_LAYERS.picked,
     FACILITY_LAYERS.squares,
     FACILITY_LAYERS.picked,
     SALE_LAYERS.dots,

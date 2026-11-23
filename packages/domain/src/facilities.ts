@@ -191,39 +191,56 @@ export function utf8(bytes: Uint8Array): string {
   return out;
 }
 
-/** The records of a dBASE table, each a field's text by its name; deleted records left out. */
-export function dbaseRecords(bytes: Uint8Array): (Record<string, string> | null)[] {
+/** A dBASE table read a record at a time, for tables too large to turn into objects at once. */
+export interface DbaseTable {
+  count: number;
+  /**
+   * Record `n`, each field's text by its name (only the fields named, when some are); null for
+   * a record marked deleted, which keeps its place so the shapes stay in step.
+   */
+  record(n: number, only?: readonly string[]): Record<string, string> | null;
+}
+
+export function dbaseTable(bytes: Uint8Array): DbaseTable {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes.byteLength < 33) throw new Error('not a dBASE table');
   const count = view.getUint32(4, true);
   const headerLength = view.getUint16(8, true);
   const recordLength = view.getUint16(10, true);
-  const fields: { name: string; length: number }[] = [];
+  const fields: { name: string; offset: number; length: number }[] = [];
+  let offset = 1;
   for (let at = 32; at + 32 <= headerLength && bytes[at] !== 0x0d; at += 32) {
     let name = '';
     for (let i = 0; i < 11 && bytes[at + i] !== 0; i += 1) {
       name += String.fromCharCode(bytes[at + i] ?? 0);
     }
-    fields.push({ name, length: bytes[at + 16] ?? 0 });
+    const length = bytes[at + 16] ?? 0;
+    fields.push({ name, offset, length });
+    offset += length;
   }
   if (headerLength + count * recordLength > bytes.byteLength) {
     throw new Error('the table is cut short');
   }
+  return {
+    count,
+    record(n, only) {
+      const start = headerLength + n * recordLength;
+      if (n < 0 || n >= count || bytes[start] === 0x2a) return null;
+      const record: Record<string, string> = {};
+      for (const field of fields) {
+        if (only && !only.includes(field.name)) continue;
+        const at = start + field.offset;
+        record[field.name] = utf8(bytes.subarray(at, at + field.length)).trim();
+      }
+      return record;
+    },
+  };
+}
+
+/** The records of a dBASE table, each a field's text by its name; deleted records left out. */
+export function dbaseRecords(bytes: Uint8Array): (Record<string, string> | null)[] {
+  const table = dbaseTable(bytes);
   const records: (Record<string, string> | null)[] = [];
-  for (let n = 0; n < count; n += 1) {
-    const start = headerLength + n * recordLength;
-    // A record marked deleted (*) keeps its place, so the shapes stay in step.
-    if (bytes[start] === 0x2a) {
-      records.push(null);
-      continue;
-    }
-    const record: Record<string, string> = {};
-    let at = start + 1;
-    for (const field of fields) {
-      record[field.name] = utf8(bytes.subarray(at, at + field.length)).trim();
-      at += field.length;
-    }
-    records.push(record);
-  }
+  for (let n = 0; n < table.count; n += 1) records.push(table.record(n));
   return records;
 }

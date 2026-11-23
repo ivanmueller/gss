@@ -158,10 +158,10 @@ describe('the side card (F-267)', () => {
   });
 
   it('leads the legend with the open section', () => {
-    expect(sideOrder('sales')).toEqual(['sales', 'land', 'facilities', 'wells']);
-    expect(sideOrder('wells')).toEqual(['wells', 'sales', 'land', 'facilities']);
-    expect(sideOrder('facilities')).toEqual(['facilities', 'sales', 'land', 'wells']);
-    expect(sideOrder(null)).toEqual(['sales', 'land', 'facilities', 'wells']);
+    expect(sideOrder('sales')).toEqual(['sales', 'land', 'facilities', 'pipelines', 'wells']);
+    expect(sideOrder('wells')).toEqual(['wells', 'sales', 'land', 'facilities', 'pipelines']);
+    expect(sideOrder('pipelines')).toEqual(['pipelines', 'sales', 'land', 'facilities', 'wells']);
+    expect(sideOrder(null)).toEqual(['sales', 'land', 'facilities', 'pipelines', 'wells']);
   });
 });
 

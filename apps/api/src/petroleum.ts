@@ -1,4 +1,4 @@
-import type { St37Zone } from '@grain/domain';
+import { PIPELINE_LEVELS, type St37Zone } from '@grain/domain';
 import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
@@ -42,6 +42,15 @@ import {
   st37Well3dAnswer,
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
+import {
+  parsePipelineId,
+  parsePipelineSquare,
+  PIPELINE_SQUARE_MAX,
+  PIPELINES_SCHEMA_VERSION,
+  pipelineSegmentAnswer,
+  pipelineSquareAnswer,
+  pipelineSquareBox,
+} from './petro-pipelines';
 import {
   gridPointAnswer,
   gridSquareAnswer,
@@ -737,6 +746,62 @@ export function petroleumRoutes(
         });
         return keptJson(c, facilitiesAnswer(load, rows));
       });
+    });
+  });
+
+  // /petroleum/pipelines/segment/:id and /pipelines/:z/:x/:y: the AER's pipelines of the latest
+  // "Load pipelines" (F-249): one segment's every column for its panel, and the segments that
+  // touch one map square (at z 8 the large lines only, at z 10 every line). Membership first, as
+  // above. JSON for the map only, never another format (the AER's terms, docs/DECISIONS.md
+  // 2026-11-19).
+  const pipelines = (
+    c: Context<ApiEnv>,
+    read: (petroleum: PetroleumDatabase, ctx: PetroleumContext) => Promise<Response>,
+  ) =>
+    withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < PIPELINES_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        return read(petroleum, {
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        });
+      });
+    });
+
+  routes.get('/pipelines/segment/:id', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const id = parsePipelineId(c.req.param('id'));
+    if (id === null) return apiError(c, 404, 'NOT_FOUND', 'No such pipeline segment.');
+    return pipelines(c, async (petroleum, ctx) => {
+      const row = await petroleum.pipelineSegment(ctx, id);
+      if (row === null) return apiError(c, 404, 'NOT_FOUND', 'No such pipeline segment.');
+      return keptJson(c, pipelineSegmentAnswer(row));
+    });
+  });
+
+  routes.get('/pipelines/:z/:x/:y', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const square = parsePipelineSquare(c.req.param('z'), c.req.param('x'), c.req.param('y'));
+    if (square === null) return apiError(c, 404, 'NOT_FOUND', 'No such square of pipelines.');
+    return pipelines(c, async (petroleum, ctx) => {
+      const { load, rows } = await petroleum.pipelineSquare(
+        ctx,
+        pipelineSquareBox(square.tile),
+        PIPELINE_LEVELS[square.level].minDiameterMm,
+        PIPELINE_SQUARE_MAX + 1,
+      );
+      return keptJson(c, pipelineSquareAnswer(square.level, load, rows));
     });
   });
 
