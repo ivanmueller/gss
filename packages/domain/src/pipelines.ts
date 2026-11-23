@@ -407,26 +407,40 @@ export function shapefileLines(bytes: Uint8Array): ShapefileLines {
 }
 
 /**
- * The two ways the map asks for pipelines, square by square: the large lines, outside diameter
- * 219.1 mm (8-inch pipe) and up, from about the 10 km distance bar, in large squares and thinned
- * further; every line from about the 2 km bar, in smaller squares.
+ * The four ways the map asks for pipelines, square by square, so that lines show at every zoom
+ * (the owner, 2026-11-22: "visible across all zoom levels") and the network fills in as the map
+ * comes closer. A line is sent at a level when its outside diameter is `minDiameterMm` or more,
+ * or its length `minLengthKm` or more (every line when both are 0), thinned to `simplifyM`
+ * metres (0: as stored, about 3 m).
+ *
+ * - far, out to all of Canada: 219.1 mm (8-inch pipe) and up, or 5 km and longer, thinned to
+ *   300 m; on a local load (2026-11-22) 23,015 lines, the densest square about 1.2 MB before
+ *   compression.
+ * - mid, from the second scroll after the distance bar reads 30 km: 168.3 mm (6-inch) and up, or
+ *   2 km and longer, thinned to 60 m; 63,451 lines, the densest square about 0.7 MB.
+ * - near, from about the 3 km bar: every line, thinned to 10 m; the densest square about 1.2 MB.
+ * - all, from about the 1 km bar: every line as stored; the densest square 0.49 MB.
  */
 export const PIPELINE_LEVELS = {
-  main: { squareZoom: 8, from: 7.8, minDiameterMm: 219.1, simplifyM: 40 },
-  all: { squareZoom: 10, from: 10, minDiameterMm: 0, simplifyM: 0 },
+  far: { squareZoom: 6, from: 0, minDiameterMm: 219.1, minLengthKm: 5, simplifyM: 300 },
+  mid: { squareZoom: 8, from: 7.8, minDiameterMm: 168.3, minLengthKm: 2, simplifyM: 60 },
+  near: { squareZoom: 9, from: 9.5, minDiameterMm: 0, minLengthKm: 0, simplifyM: 10 },
+  all: { squareZoom: 10, from: 11, minDiameterMm: 0, minLengthKm: 0, simplifyM: 0 },
 } as const;
 export type PipelineLevel = keyof typeof PIPELINE_LEVELS;
 
-/** The level a map at this zoom asks for; null farther out. */
-export function pipelineLevelAt(zoom: number): PipelineLevel | null {
+/** The level a map at this zoom asks for: the closest whose zoom it has reached. */
+export function pipelineLevelAt(zoom: number): PipelineLevel {
   if (zoom >= PIPELINE_LEVELS.all.from) return 'all';
-  if (zoom >= PIPELINE_LEVELS.main.from) return 'main';
-  return null;
+  if (zoom >= PIPELINE_LEVELS.near.from) return 'near';
+  if (zoom >= PIPELINE_LEVELS.mid.from) return 'mid';
+  return 'far';
 }
 
-/** The level a square's zoom belongs to; null for a zoom neither asks at. */
+/** The level a square's zoom belongs to; null for a zoom none asks at. */
 export function pipelineLevelOfSquare(tile: Tile): PipelineLevel | null {
-  if (tile.z === PIPELINE_LEVELS.all.squareZoom) return 'all';
-  if (tile.z === PIPELINE_LEVELS.main.squareZoom) return 'main';
-  return null;
+  const found = (Object.keys(PIPELINE_LEVELS) as PipelineLevel[]).find(
+    (level) => PIPELINE_LEVELS[level].squareZoom === tile.z,
+  );
+  return found ?? null;
 }

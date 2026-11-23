@@ -751,7 +751,8 @@ export function petroleumRoutes(
 
   // /petroleum/pipelines/segment/:id and /pipelines/:z/:x/:y: the AER's pipelines of the latest
   // "Load pipelines" (F-249): one segment's every column for its panel, and the segments that
-  // touch one map square (at z 8 the large lines only, at z 10 every line). Membership first, as
+  // touch one map square (at z 6 and 8 the large and long lines only, at z 9 and 10 every line;
+  // PIPELINE_LEVELS in packages/domain/src/pipelines.ts). Membership first, as
   // above. JSON for the map only, never another format (the AER's terms, docs/DECISIONS.md
   // 2026-11-19).
   const pipelines = (
@@ -798,7 +799,10 @@ export function petroleumRoutes(
       const { load, rows } = await petroleum.pipelineSquare(
         ctx,
         pipelineSquareBox(square.tile),
-        PIPELINE_LEVELS[square.level].minDiameterMm,
+        {
+          minDiameterMm: PIPELINE_LEVELS[square.level].minDiameterMm,
+          minLengthKm: PIPELINE_LEVELS[square.level].minLengthKm,
+        },
         PIPELINE_SQUARE_MAX + 1,
       );
       return keptJson(c, pipelineSquareAnswer(square.level, load, rows));

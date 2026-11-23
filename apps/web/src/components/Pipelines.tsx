@@ -6,6 +6,7 @@ import {
   PIPELINE_SUBSTANCES,
   pipelineLevelAt,
   pipelineSubstanceOf,
+  tileBounds,
   type Bbox,
   type PipelineLevel,
   type PipelineParts,
@@ -83,7 +84,6 @@ const overlaps = (a: Bbox, b: Bbox) =>
 /** The squares a view needs at its zoom, within the area loaded once it is known. */
 export function pipelineSquaresFor(view: Bbox, zoom: number, area: Bbox | null): PipelineSquare[] {
   const level = pipelineLevelAt(zoom);
-  if (level === null) return [];
   const within = area ? clip(view, area) : view;
   if (within === null) return [];
   return gridSquares(within, PIPELINE_LEVELS[level].squareZoom).map((tile) => ({ level, tile }));
@@ -97,6 +97,18 @@ function clip(a: Bbox, b: Bbox): Bbox | null {
     east: Math.min(a.east, b.east),
     north: Math.min(a.north, b.north),
   };
+}
+
+/** What a level leaves out, in words; empty where every line is drawn. */
+export function pipelineLevelNote(level: PipelineLevel): string {
+  switch (level) {
+    case 'far':
+      return ': from this far out the large and long lines only, 8-inch pipe and up or 5 km and longer; more come in as you zoom in';
+    case 'mid':
+      return ': 6-inch pipe and up or 2 km and longer; every line from about the 3 km distance bar';
+    default:
+      return '';
+  }
 }
 
 /** Squares kept in the page at most; the oldest go first. */
@@ -215,18 +227,42 @@ export function pipelinesShown(
   );
 }
 
-/** Each segment once, from the squares the view needs, whichever square held it. */
+/** A kept square's place from its key ("z/x/y"). */
+function tileOfKey(key: string): Tile | null {
+  const [z, x, y] = key.split('/').map(Number);
+  return z === undefined || x === undefined || y === undefined ? null : { z, x, y };
+}
+
+/**
+ * Each segment once, from the squares the view needs, whichever square held it. Where a square
+ * needed has not come yet, the lines of kept squares of another level over the same ground stand
+ * in for it, so zooming across a level never leaves the map bare while the new squares come.
+ */
 export function pipelinesInSquares(
   needed: readonly PipelineSquare[],
   squares: ReadonlyMap<string, SquareRead>,
 ): PipelineEntry[] {
   const seen = new Set<number>();
   const out: PipelineEntry[] = [];
-  for (const square of needed) {
-    for (const entry of squares.get(squareKey(square))?.entries ?? []) {
+  const add = (entries: readonly PipelineEntry[]) => {
+    for (const entry of entries) {
       if (seen.has(entry.id)) continue;
       seen.add(entry.id);
       out.push(entry);
+    }
+  };
+  const missing: Bbox[] = [];
+  for (const square of needed) {
+    const read = squares.get(squareKey(square));
+    if (read) add(read.entries);
+    else missing.push(tileBounds(square.tile));
+  }
+  if (missing.length > 0) {
+    for (const [key, read] of squares) {
+      const tile = tileOfKey(key);
+      if (!tile) continue;
+      const ground = tileBounds(tile);
+      if (missing.some((gap) => overlaps(gap, ground))) add(read.entries);
     }
   }
   return out;
@@ -408,11 +444,9 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
               }}
             >
               {s.name}
-              {level !== null && (
-                <span className="font-mono text-xs opacity-70">
-                  {(counts.get(s.key) ?? 0).toLocaleString('en-CA')}
-                </span>
-              )}
+              <span className="font-mono text-xs opacity-70">
+                {(counts.get(s.key) ?? 0).toLocaleString('en-CA')}
+              </span>
             </FilterChip>
           ))}
         </div>
@@ -462,13 +496,7 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
         </select>
       </label>
       <p className="text-xs text-muted-foreground">
-        {level === null
-          ? 'Zoom in to about a 10 km distance bar to see the large lines, and to about 2 km for every line.'
-          : `${shown.length.toLocaleString('en-CA')} segments shown here${
-              level === 'main'
-                ? ': the large lines only, 8-inch pipe and up; zoom in to about a 2 km bar for every line'
-                : ''
-            }.`}
+        {`${shown.length.toLocaleString('en-CA')} segments shown here${pipelineLevelNote(level)}.`}
         {truncated && ' Some squares hold more lines than are drawn: zoom in to see them all.'}{' '}
         Faint: discontinued; fainter: abandoned or removed; dashed: permitted, not yet built.
       </p>
@@ -476,7 +504,7 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
   );
 
   const legend = () =>
-    !view || level === null || shown.length === 0 ? null : (
+    !view || shown.length === 0 ? null : (
       <div className="flex flex-col gap-1.5">
         <LegendTitle>Pipelines here</LegendTitle>
         {PIPELINE_SUBSTANCES.filter((s) => (counts.get(s.key) ?? 0) > 0).map((s) => (

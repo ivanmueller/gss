@@ -30,9 +30,10 @@ const WITH_PETROLEUM = {
 };
 const AUTH = { Authorization: `Bearer ${VALID_TOKEN}` };
 
-/** A square of every line near Fox Creek, and one of the large lines around it. */
+/** A square of every line near Fox Creek, and the larger squares of the large and long lines. */
 const ALL_SQUARE = '/api/v1/petroleum/pipelines/10/178/327';
-const MAIN_SQUARE = '/api/v1/petroleum/pipelines/8/44/81';
+const MID_SQUARE = '/api/v1/petroleum/pipelines/8/44/81';
+const FAR_SQUARE = '/api/v1/petroleum/pipelines/6/11/20';
 
 const line = (over: Partial<PipelineLineRow>): PipelineLineRow => ({
   id: '1',
@@ -67,16 +68,25 @@ afterEach(() => {
 });
 
 describe('parsePipelineSquare', () => {
-  it('takes the two square zooms the map asks at, in Alberta, and nothing else', () => {
+  it('takes the four square zooms the map asks at, in Alberta, and nothing else', () => {
     expect(parsePipelineSquare('10', '178', '327')).toEqual({
       level: 'all',
       tile: { z: 10, x: 178, y: 327 },
     });
+    expect(parsePipelineSquare('9', '89', '163')).toEqual({
+      level: 'near',
+      tile: { z: 9, x: 89, y: 163 },
+    });
     expect(parsePipelineSquare('8', '44', '81')).toEqual({
-      level: 'main',
+      level: 'mid',
       tile: { z: 8, x: 44, y: 81 },
     });
-    expect(parsePipelineSquare('9', '89', '163')).toBeNull();
+    expect(parsePipelineSquare('6', '11', '20')).toEqual({
+      level: 'far',
+      tile: { z: 6, x: 11, y: 20 },
+    });
+    expect(parsePipelineSquare('7', '22', '40')).toBeNull();
+    expect(parsePipelineSquare('11', '356', '654')).toBeNull();
     // Toronto, at a zoom the map asks at.
     expect(parsePipelineSquare('10', '284', '374')).toBeNull();
     expect(parsePipelineSquare('10', '-1', '327')).toBeNull();
@@ -135,7 +145,7 @@ describe('pipelineSquareAnswer', () => {
     // Three points almost in line: the middle one 5 m off it, kept close in, dropped far out.
     const path = [-11650000, 5410000, -11645000, 5410005, -11640000, 5410000];
     expect(pipelineSquareAnswer('all', LOAD, [line({ path })]).lines[0]?.[6]).toEqual(path);
-    expect(pipelineSquareAnswer('main', LOAD, [line({ path })]).lines[0]?.[6]).toEqual([
+    expect(pipelineSquareAnswer('mid', LOAD, [line({ path })]).lines[0]?.[6]).toEqual([
       -11650000, 5410000, -11640000, 5410000,
     ]);
   });
@@ -231,7 +241,7 @@ describe('GET /api/v1/petroleum/pipelines/:z/:x/:y', () => {
     });
     expect(box?.west).toBeCloseTo(-117.421875, 6);
     expect(box?.east).toBeCloseTo(-117.0703125, 6);
-    expect(minimum).toBe(0);
+    expect(minimum).toEqual({ minDiameterMm: 0, minLengthKm: 0 });
     expect(limit).toBe(PIPELINE_SQUARE_MAX + 1);
 
     petroleum.pipelineSquare.mockResolvedValueOnce({ load: LOAD, rows: [line({})] });
@@ -243,15 +253,22 @@ describe('GET /api/v1/petroleum/pipelines/:z/:x/:y', () => {
     expect(again.status).toBe(304);
   });
 
-  it('asks for the large lines only in the farther squares', async () => {
-    const res = await app.request(MAIN_SQUARE, { headers: AUTH }, WITH_PETROLEUM);
-    expect(res.status).toBe(200);
-    expect(petroleum.pipelineSquare.mock.calls[0]?.[2]).toBe(219.1);
+  it('asks for the large and long lines only in the farther squares', async () => {
+    expect((await app.request(MID_SQUARE, { headers: AUTH }, WITH_PETROLEUM)).status).toBe(200);
+    expect(petroleum.pipelineSquare.mock.calls[0]?.[2]).toEqual({
+      minDiameterMm: 168.3,
+      minLengthKm: 2,
+    });
+    expect((await app.request(FAR_SQUARE, { headers: AUTH }, WITH_PETROLEUM)).status).toBe(200);
+    expect(petroleum.pipelineSquare.mock.calls[1]?.[2]).toEqual({
+      minDiameterMm: 219.1,
+      minLengthKm: 5,
+    });
   });
 
   it('refuses another square without opening any database', async () => {
     for (const path of [
-      '/api/v1/petroleum/pipelines/9/89/163',
+      '/api/v1/petroleum/pipelines/7/22/40',
       '/api/v1/petroleum/pipelines/10/284/374',
       '/api/v1/petroleum/pipelines/10/x/327',
     ]) {
