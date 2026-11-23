@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  gridSquareOf,
+  legalLand,
   gridKey,
   gridLabel,
   gridSquares,
@@ -58,5 +60,24 @@ describe('the township grid (F-240)', () => {
     expect(gridKey('section', f)).toBe('section:5-19-63-6--');
     expect(gridKey('section', { ...f })).toBe(gridKey('section', f));
     expect(gridKey('section', { M: 5 })).toBeNull();
+  });
+
+  it('reads a clicked square and writes it as land is written in Alberta', () => {
+    const square = gridSquareOf({ M: 5, RGE: 19, TWP: 62, SEC: 33, QS: 'SW', LS: 4 });
+    expect(square).toEqual({
+      meridian: 5,
+      range: 19,
+      township: 62,
+      section: 33,
+      quarter: 'SW',
+      lsd: 4,
+    });
+    expect(square && legalLand(square)).toBe('04-33-062-19W5');
+    expect(
+      legalLand({ meridian: 4, range: 1, township: 1, section: 1, quarter: null, lsd: 16 }),
+    ).toBe('16-01-001-01W4');
+    expect(gridSquareOf({ M: 5, RGE: 19, TWP: 62, SEC: 33, QS: 'X', LS: 4 })?.quarter).toBeNull();
+    expect(gridSquareOf({ M: 5, RGE: 19, TWP: 62, SEC: 37, LS: 4 })).toBeNull();
+    expect(gridSquareOf({ M: 5, RGE: 19, TWP: 62, SEC: 33 })).toBeNull();
   });
 });

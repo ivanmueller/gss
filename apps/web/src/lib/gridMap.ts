@@ -4,37 +4,56 @@ import { FACILITY_LAYERS } from './facilitiesMap';
 import { SALE_LAYERS } from './landSalesMap';
 import { ST37_LAYERS } from './st37Map';
 
-// The township grid on the oil and gas map (F-240, F-271): the province's township, section,
-// quarter section and legal subdivision lines, each from its own zoom, with their numbers, and
-// the three meridians the land is counted from. Above the land and the sale parcels, so a parcel
-// reads against its squares, and under the wells and the sales' dots.
+// The township grid on the oil and gas map (F-240, F-271): every township's lines from a file
+// kept with the app, drawn at once; sections, quarter sections and legal subdivisions from the
+// province's service close in; the square a click identified, outlined. No numbers inside the
+// squares: the range and township numbers run along the map's edges (gridEdges.ts; the owner,
+// 2026-11-22). Above the land and the sale parcels, under the facilities, the sales' dots and
+// the wells.
 
 export interface GridView {
-  /** The grid's shapes, each with its `level`. */
+  /** Every township's lines, each edge once. */
+  townships: GeoJSON.FeatureCollection;
+  /** The finer levels' shapes close in, each with its `level`. */
   shapes: GeoJSON.FeatureCollection;
-  /** One point a shape, in its middle, with its `level` and `label`. */
-  labels: GeoJSON.FeatureCollection;
-  /** The meridians as lines, each with its `label`. */
-  meridians: GeoJSON.FeatureCollection;
+  /** The square a click identified; empty for none. */
+  picked: GeoJSON.FeatureCollection;
 }
 
+const TOWNSHIPS = 'ats-townships';
 const SOURCE = 'ats-grid';
-const LABELS = 'ats-grid-labels';
-const MERIDIANS = 'ats-grid-meridians';
+const PICKED = 'ats-grid-picked';
 
 export const GRID_LAYERS = {
   lsd: 'ats-grid-lsd',
   quarter: 'ats-grid-quarter',
   section: 'ats-grid-section',
   township: 'ats-grid-township',
-  meridian: 'ats-grid-meridian',
-  lsdLabels: 'ats-grid-lsd-labels',
-  quarterLabels: 'ats-grid-quarter-labels',
-  sectionLabels: 'ats-grid-section-labels',
-  townshipLabels: 'ats-grid-township-labels',
-  meridianLabels: 'ats-grid-meridian-labels',
+  picked: 'ats-grid-picked-line',
 } as const;
 const ORDER = Object.values(GRID_LAYERS);
+
+/**
+ * The townships come in on the second scroll after the distance bar reads 30 km (zoom 7.8 around
+ * the Duvernay, mapDetail.ts), and darken as the map is zoomed in to the strengths read from the
+ * owner's reference pictures (2026-11-22, on the warm grey land, 243 240 232): about 8% darker
+ * at first (223 220 213), 19% a little closer (197 194 184), 26% from the 10 km bar (179 177
+ * 169), each a 1-pixel line.
+ */
+export const GRID_FROM = 7.8;
+const TOWNSHIP_OPACITY: ExpressionSpecification = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  GRID_FROM,
+  0,
+  7.95,
+  0.08,
+  8.1,
+  0.19,
+  9,
+  0.26,
+];
 
 /** What each map's sources were last given, so unchanged data is not read again. */
 const drawn = new WeakMap<MapboxMap, GridView>();
@@ -80,31 +99,31 @@ export function syncGrid(
 ) {
   if (view === null) {
     for (const id of ORDER) if (map.getLayer(id)) map.removeLayer(id);
-    for (const id of [SOURCE, LABELS, MERIDIANS]) if (map.getSource(id)) map.removeSource(id);
+    for (const id of [TOWNSHIPS, SOURCE, PICKED]) if (map.getSource(id)) map.removeSource(id);
     drawn.delete(map);
     return;
   }
   const before = drawn.get(map);
-  if (!map.getSource(SOURCE) || before?.shapes !== view.shapes) setData(map, SOURCE, view.shapes);
-  if (!map.getSource(LABELS) || before?.labels !== view.labels) setData(map, LABELS, view.labels);
-  if (!map.getSource(MERIDIANS) || before?.meridians !== view.meridians) {
-    setData(map, MERIDIANS, view.meridians);
+  const sources: [string, GeoJSON.FeatureCollection, GeoJSON.FeatureCollection | undefined][] = [
+    [TOWNSHIPS, view.townships, before?.townships],
+    [SOURCE, view.shapes, before?.shapes],
+    [PICKED, view.picked, before?.picked],
+  ];
+  for (const [id, data, was] of sources) {
+    if (!map.getSource(id) || was !== data) setData(map, id, data);
   }
   drawn.set(map, view);
 
-  const ink = tone === 'light' ? '#44403c' : '#e7e5e4';
-  const halo = tone === 'light' ? 'rgba(250,250,249,0.9)' : 'rgba(28,25,23,0.85)';
   if (!map.getLayer(GRID_LAYERS.township)) {
     const anchor = anchorOf(map, beforeId);
-    // Finest first, so the coarser lines are drawn over them.
-    const lines: [string, string, number, number, number, number][] = [
-      // [layer, level, from zoom, width, opacity near, opacity at its first zoom]
-      [GRID_LAYERS.lsd, 'lsd', 14, 0.5, 0.22, 0.1],
-      [GRID_LAYERS.quarter, 'quarter', 13, 0.6, 0.3, 0.12],
-      [GRID_LAYERS.section, 'section', 11, 0.7, 0.4, 0.15],
-      [GRID_LAYERS.township, 'township', 7, 1.1, 0.6, 0.25],
+    // Finest first, so the coarser lines are drawn over them; each fainter than the township.
+    const finer: [string, string, number, number][] = [
+      // [layer, level, from zoom, opacity close in]
+      [GRID_LAYERS.lsd, 'lsd', 14, 0.1],
+      [GRID_LAYERS.quarter, 'quarter', 13, 0.13],
+      [GRID_LAYERS.section, 'section', 11, 0.17],
     ];
-    for (const [id, name, from, width, near, first] of lines) {
+    for (const [id, name, from, near] of finer) {
       map.addLayer(
         {
           id,
@@ -112,11 +131,9 @@ export function syncGrid(
           source: SOURCE,
           minzoom: from,
           filter: level(name),
-          layout: { 'line-join': 'round' },
           paint: {
-            'line-width': ['interpolate', ['linear'], ['zoom'], from, width, from + 4, width * 1.4],
-            // Faint as a level comes in, firmer as the map is zoomed in on it.
-            'line-opacity': ['interpolate', ['linear'], ['zoom'], from, first, from + 1.5, near],
+            'line-width': 1,
+            'line-opacity': ['interpolate', ['linear'], ['zoom'], from, 0, from + 0.6, near],
           },
         },
         anchor,
@@ -124,64 +141,34 @@ export function syncGrid(
     }
     map.addLayer(
       {
-        id: GRID_LAYERS.meridian,
+        id: GRID_LAYERS.township,
         type: 'line',
-        source: MERIDIANS,
-        paint: { 'line-width': 1.2, 'line-opacity': 0.55, 'line-dasharray': [6, 3] },
+        source: TOWNSHIPS,
+        minzoom: GRID_FROM,
+        paint: { 'line-width': 1, 'line-opacity': TOWNSHIP_OPACITY },
       },
       anchor,
     );
-    const labels: [string, string, number, number, number][] = [
-      // [layer, level, from zoom, to zoom, text size]
-      [GRID_LAYERS.lsdLabels, 'lsd', 14.5, 24, 10],
-      [GRID_LAYERS.quarterLabels, 'quarter', 13.5, 15.5, 10],
-      [GRID_LAYERS.sectionLabels, 'section', 12, 15, 11],
-      [GRID_LAYERS.townshipLabels, 'township', 8.5, 12, 11],
-    ];
-    for (const [id, name, from, to, size] of labels) {
-      map.addLayer(
-        {
-          id,
-          type: 'symbol',
-          source: LABELS,
-          minzoom: from,
-          maxzoom: to,
-          filter: level(name),
-          layout: {
-            'text-field': ['get', 'label'],
-            'text-size': size,
-            'text-padding': 4,
-          },
-          paint: { 'text-halo-width': 1.2, 'text-opacity': 0.75 },
-        },
-        anchor,
-      );
-    }
     map.addLayer(
       {
-        id: GRID_LAYERS.meridianLabels,
-        type: 'symbol',
-        source: MERIDIANS,
-        layout: {
-          'symbol-placement': 'line',
-          'symbol-spacing': 400,
-          'text-field': ['get', 'label'],
-          'text-size': 11,
-          'text-letter-spacing': 0.05,
-        },
-        paint: { 'text-halo-width': 1.4, 'text-opacity': 0.8 },
+        id: GRID_LAYERS.picked,
+        type: 'line',
+        source: PICKED,
+        layout: { 'line-join': 'round' },
+        paint: { 'line-width': 2.5, 'line-opacity': 0.9 },
       },
       anchor,
     );
   }
+  // Black lines on the light map, white on the dark one and the satellite.
+  const ink = tone === 'light' ? '#000000' : '#ffffff';
   for (const id of ORDER) {
-    const layer = map.getLayer(id);
-    if (!layer) continue;
-    if (layer.type === 'line') map.setPaintProperty(id, 'line-color', ink);
-    else {
-      map.setPaintProperty(id, 'text-color', ink);
-      map.setPaintProperty(id, 'text-halo-color', halo);
-    }
+    if (!map.getLayer(id)) continue;
+    map.setPaintProperty(
+      id,
+      'line-color',
+      id === GRID_LAYERS.picked ? (tone === 'light' ? '#1c1917' : '#fafaf9') : ink,
+    );
   }
   placeGrid(map, beforeId);
 }

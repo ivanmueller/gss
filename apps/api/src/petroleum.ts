@@ -42,7 +42,13 @@ import {
   st37Well3dAnswer,
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
-import { gridSquareAnswer, parseGridLevel, parseGridSquare } from './township-grid';
+import {
+  gridPointAnswer,
+  gridSquareAnswer,
+  parseGridLevel,
+  parseGridPoint,
+  parseGridSquare,
+} from './township-grid';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import type { MapLayerWrite } from './map-layers-db';
@@ -484,6 +490,24 @@ export function petroleumRoutes(
   // /petroleum/grid/:level/:z/:x/:y: one map square of the township grid (F-240, F-271), from the
   // province's service; membership first, as above. Nothing is stored, so the oil and gas
   // database is never opened.
+  // /petroleum/grid/at?lon=&lat=: the legal subdivision under a click on no land, well or
+  // facility (F-271), asked of the province; membership first, nothing stored.
+  routes.get('/grid/at', (c) => {
+    const point = parseGridPoint(c.req.query('lon'), c.req.query('lat'));
+    if (!point) {
+      c.header('Cache-Control', 'no-store');
+      return apiError(c, 400, 'VALIDATION_FAILED', 'lon and lat must be a point in Alberta.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) {
+        c.header('Cache-Control', 'no-store');
+        return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      }
+      return gridPointAnswer(c, point);
+    });
+  });
+
   routes.get('/grid/:level/:z/:x/:y', (c) => {
     const level = parseGridLevel(c.req.param('level'));
     const tile =

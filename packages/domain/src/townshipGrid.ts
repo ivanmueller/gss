@@ -176,12 +176,35 @@ export function gridKey(level: GridLevel, f: GridShapeFields): string | null {
   return gridLabel(level, f) === null ? null : `${level}:${parts.join('-')}`;
 }
 
+/** A square of the grid as a click identifies it (F-271): the legal subdivision and the rest. */
+export interface GridSquareAt {
+  meridian: number;
+  range: number;
+  township: number;
+  section: number;
+  /** NE, NW, SE or SW; null when the province gives none. */
+  quarter: string | null;
+  lsd: number;
+}
+
 /**
- * The Dominion Land Survey's meridians through Alberta, the 4th being its border with
- * Saskatchewan: every land description counts its ranges west from one of them.
+ * The square as land is written in Alberta: legal subdivision, section, township (three
+ * digits), range (two digits) and meridian, "10-12-010-16W4".
  */
-export const GRID_MERIDIANS = [
-  { meridian: 4, longitude: -110 },
-  { meridian: 5, longitude: -114 },
-  { meridian: 6, longitude: -118 },
-] as const;
+export function legalLand(square: GridSquareAt): string {
+  const pad = (n: number, width: number) => String(n).padStart(width, '0');
+  return `${pad(square.lsd, 2)}-${pad(square.section, 2)}-${pad(square.township, 3)}-${pad(square.range, 2)}W${String(square.meridian)}`;
+}
+
+/** The square from the fields the province sends for a legal subdivision; null when not one. */
+export function gridSquareOf(fields: GridShapeFields): GridSquareAt | null {
+  const meridian = whole(fields.M, 6);
+  const range = whole(fields.RGE, 34);
+  const township = whole(fields.TWP, 126);
+  const section = whole(fields.SEC, 36);
+  const lsd = whole(fields.LS, 16);
+  if (!meridian || !range || !township || !section || !lsd) return null;
+  const quarter =
+    typeof fields.QS === 'string' && /^(NE|NW|SE|SW)$/.test(fields.QS) ? fields.QS : null;
+  return { meridian, range, township, section, quarter, lsd };
+}

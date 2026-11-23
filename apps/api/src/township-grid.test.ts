@@ -5,7 +5,13 @@ import { createApp } from './index';
 import type { PetroleumFactory } from './petroleum-db';
 import { ENV, fakeDatabase, USER_ID, VALID_TOKEN } from './testing/helpers';
 import { fakePetroleum } from './testing/petroleum';
-import { gridSquareUrl, gridTag, parseGridSquare } from './township-grid';
+import {
+  gridPointUrl,
+  gridSquareUrl,
+  gridTag,
+  parseGridPoint,
+  parseGridSquare,
+} from './township-grid';
 
 // The township grid's squares (F-240, F-271): the province's service asked by the Worker only,
 // from fixed values and the square; the membership checked first; nothing stored.
@@ -109,6 +115,85 @@ describe('GET /api/v1/petroleum/grid/:level/:z/:x/:y', () => {
   });
 });
 
+describe('GET /api/v1/petroleum/grid/at', () => {
+  const AT = '/api/v1/petroleum/grid/at?lon=-116.8&lat=54.4';
+  const LSD = JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [-116.795088, 54.403176],
+              [-116.801102, 54.403175],
+              [-116.801102, 54.399561],
+              [-116.795088, 54.403176],
+            ],
+          ],
+        },
+        properties: { M: 5, RGE: 19, TWP: 62, SEC: 33, QS: 'SW', LS: 4 },
+      },
+    ],
+  });
+
+  it('names the legal subdivision under the point, with its outline', async () => {
+    grid = new Response(LSD, { headers: { 'Content-Type': 'application/geo+json' } });
+    const res = await app.request(AT, { headers: AUTH }, WITH_PETROLEUM);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(await res.json()).toEqual({
+      square: {
+        meridian: 5,
+        range: 19,
+        township: 62,
+        section: 33,
+        quarter: 'SW',
+        lsd: 4,
+        legal: '04-33-062-19W5',
+        shape: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [-116.795088, 54.403176],
+              [-116.801102, 54.403175],
+              [-116.801102, 54.399561],
+              [-116.795088, 54.403176],
+            ],
+          ],
+        },
+      },
+    });
+    const [url] = gridCalls()[0] ?? [];
+    expect(url).toBe(gridPointUrl({ lon: -116.8, lat: 54.4 }));
+    expect(openPetroleum).not.toHaveBeenCalled();
+  });
+
+  it('answers no square on a road allowance, and says when the province fails', async () => {
+    let res = await app.request(AT, { headers: AUTH }, WITH_PETROLEUM);
+    expect(await res.json()).toEqual({ square: null });
+    grid = new Response('{"error":{"code":400}}', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    res = await app.request(AT, { headers: AUTH }, WITH_PETROLEUM);
+    expect(res.status).toBe(502);
+  });
+
+  it('refuses a point outside Alberta or a person who is not a member, asking nothing', async () => {
+    for (const path of [
+      '/api/v1/petroleum/grid/at?lon=-100&lat=54',
+      '/api/v1/petroleum/grid/at?lon=-116.8',
+      '/api/v1/petroleum/grid/at?lon=1e2&lat=54',
+    ]) {
+      expect((await app.request(path, { headers: AUTH }, WITH_PETROLEUM)).status, path).toBe(400);
+    }
+    db.memberships.mockResolvedValueOnce([]);
+    expect((await app.request(AT, { headers: AUTH }, WITH_PETROLEUM)).status).toBe(403);
+    expect(gridCalls()).toHaveLength(0);
+  });
+});
+
 describe('the square asked of the province', () => {
   it('is built from fixed values: the level, its fields, the land without road allowances', () => {
     const url = new URL(gridSquareUrl('section', { z: 11, x: 359, y: 652 }));
@@ -129,5 +214,16 @@ describe('the square asked of the province', () => {
     expect(parseGridSquare('lsd', '12', '719', '1307')).toBeNull();
     expect(parseGridSquare('township', '9', '-1', '162')).toBeNull();
     expect(parseGridSquare('township', '9', '1e2', '162')).toBeNull();
+  });
+
+  it('asks for the legal subdivision at a point, the land without road allowances', () => {
+    const url = new URL(gridPointUrl({ lon: -116.8, lat: 54.4 }));
+    expect(url.pathname).toMatch(/\/MapServer\/20\/query$/);
+    expect(url.searchParams.get('geometryType')).toBe('esriGeometryPoint');
+    expect(url.searchParams.get('geometry')).toBe('-116.800000,54.400000');
+    expect(url.searchParams.get('where')).toBe("RA = ' '");
+    expect(parseGridPoint('-116.8', '54.4')).toEqual({ lon: -116.8, lat: 54.4 });
+    expect(parseGridPoint('-116.8', '61')).toBeNull();
+    expect(parseGridPoint(undefined, '54')).toBeNull();
   });
 });

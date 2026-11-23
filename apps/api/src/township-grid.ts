@@ -1,13 +1,17 @@
 import {
+  ALBERTA_BOX,
   ATS_SERVICE,
   GRID_LEVELS,
   GRID_SPECS,
+  gridSquareOf,
   gridSquareZooms,
+  legalLand,
   isTile,
   simplifyDegrees,
   squareInAlberta,
   tileBounds,
   type GridLevel,
+  type GridShapeFields,
   type Tile,
 } from '@grain/domain';
 
@@ -56,6 +60,93 @@ export function gridSquareUrl(level: GridLevel, tile: Tile): string {
     geometryPrecision: tile.z >= 12 ? '6' : '5',
   });
   return `${ATS_SERVICE}/${String(spec.layer)}/query?${params.toString()}`;
+}
+
+/** A point in Alberta from the query's text (plain decimals only); null otherwise. */
+export function parseGridPoint(
+  lon: string | undefined,
+  lat: string | undefined,
+): { lon: number; lat: number } | null {
+  const plain = /^-?\d{1,3}(\.\d{1,8})?$/;
+  if (!lon || !lat || !plain.test(lon) || !plain.test(lat)) return null;
+  const point = { lon: Number(lon), lat: Number(lat) };
+  return point.lon >= ALBERTA_BOX.west &&
+    point.lon <= ALBERTA_BOX.east &&
+    point.lat >= ALBERTA_BOX.south &&
+    point.lat <= ALBERTA_BOX.north
+    ? point
+    : null;
+}
+
+/** The province's address for the legal subdivision under a point, with its outline. */
+export function gridPointUrl(point: { lon: number; lat: number }): string {
+  const params = new URLSearchParams({
+    f: 'geojson',
+    where: "RA = ' '",
+    outFields: 'M,RGE,TWP,SEC,QS,LS',
+    returnGeometry: 'true',
+    geometry: `${point.lon.toFixed(6)},${point.lat.toFixed(6)}`,
+    geometryType: 'esriGeometryPoint',
+    inSR: '4326',
+    outSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    geometryPrecision: '6',
+  });
+  return `${ATS_SERVICE}/${String(GRID_SPECS.lsd.layer)}/query?${params.toString()}`;
+}
+
+/**
+ * The square under a click (F-271): the legal subdivision and its section, quarter, township,
+ * range and meridian, with its outline; `square: null` on a road allowance or outside the grid.
+ */
+export async function gridPointAnswer(c: ApiContext, point: { lon: number; lat: number }) {
+  c.header('Cache-Control', 'no-store');
+  let body: ArrayBuffer;
+  try {
+    ({ body } = await fetchService(
+      gridPointUrl(point),
+      /^(application|text)\/(json|plain|geo\+json)$/,
+      MAX_GRID_BYTES,
+    ));
+  } catch (error) {
+    if (!(error instanceof LayerServiceError)) throw error;
+    console.warn(`Township grid point not fetched: status=${String(error.status)}`);
+    return apiError(
+      c,
+      502,
+      'GRID_SERVICE_FAILED',
+      "The province's township grid service could not be reached or did not answer as expected.",
+    );
+  }
+  let answer: unknown;
+  try {
+    answer = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    answer = null;
+  }
+  const features =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { features?: unknown }).features
+      : undefined;
+  if (!Array.isArray(features)) {
+    console.warn('Township grid point not fetched: status=422');
+    return apiError(
+      c,
+      502,
+      'GRID_SERVICE_FAILED',
+      "The province's township grid service did not answer as expected.",
+    );
+  }
+  const first = features[0] as
+    | { properties?: GridShapeFields; geometry?: { type?: unknown; coordinates?: unknown } }
+    | undefined;
+  const square = first?.properties ? gridSquareOf(first.properties) : null;
+  const geometry = first?.geometry;
+  const shape =
+    geometry && (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon')
+      ? { type: geometry.type, coordinates: geometry.coordinates }
+      : null;
+  return c.json({ square: square && { ...square, legal: legalLand(square), shape } });
 }
 
 /** The tag of a square for this week: the same square within the week is "not modified". */

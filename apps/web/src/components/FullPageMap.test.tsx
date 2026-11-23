@@ -8,6 +8,7 @@ import { mockApi, ORG, SESSION } from '../test/api';
 import { choose } from '../test/select';
 import type { FacilityMapProps } from './FacilityMap';
 import { CANADA, FullPageMap, sideOrder } from './FullPageMap';
+import { TOWNSHIP_FILE } from './TownshipGrid';
 
 // Mapbox GL JS needs WebGL and Mapbox's servers; a stand-in reports what it was given.
 vi.mock('./FacilityMap', () => ({
@@ -211,9 +212,11 @@ describe('FullPageMap', () => {
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     expect(await screen.findByText(/Drawn: .*a1a01\/tiles/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Layers (1)' })).toBeInTheDocument();
-    // Every request names the organization (F-247-2-D1-04).
-    expect(calls.length).toBeGreaterThan(0);
-    for (const call of calls) expect(call.path).toContain(ORGANIZATION);
+    // Every request to the API names the organization (F-247-2-D1-04); the township grid's file
+    // is served with the app, not by the API (F-271).
+    const api = calls.filter((call) => call.path !== TOWNSHIP_FILE);
+    expect(api.length).toBeGreaterThan(0);
+    for (const call of api) expect(call.path).toContain(ORGANIZATION);
   });
 
   it('offers Settings to admins only', async () => {
@@ -308,7 +311,9 @@ describe('FullPageMap', () => {
     await userEvent.click(within(settings).getByRole('button', { name: 'Remove' }));
     await userEvent.click(within(settings).getByRole('button', { name: 'Remove for everyone' }));
     expect(await screen.findByText('Drawn: nothing')).toBeInTheDocument();
-    for (const call of calls) expect(call.path).toContain(ORGANIZATION);
+    for (const call of calls.filter((c) => c.path !== TOWNSHIP_FILE)) {
+      expect(call.path).toContain(ORGANIZATION);
+    }
     expect(calls.some((call) => call.path.startsWith('/map-layers'))).toBe(false);
   });
 
