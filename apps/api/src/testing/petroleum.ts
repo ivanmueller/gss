@@ -87,6 +87,7 @@ export function fakePetroleum() {
     facilities: vi.fn<PetroleumDatabase['facilities']>(() =>
       Promise.resolve({ load: null, rows: [] }),
     ),
+    prices: vi.fn<PetroleumDatabase['prices']>(() => Promise.resolve({ load: null, rows: [] })),
     pipelineSquare: vi.fn<PetroleumDatabase['pipelineSquare']>(() =>
       Promise.resolve({ load: null, rows: [] }),
     ),
