@@ -26,6 +26,7 @@ import {
   type LandShape,
   type LandView,
 } from '../lib/landMap';
+import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
 import {
   highlightSt37,
@@ -138,6 +139,8 @@ export interface FacilityMapProps {
   land?: LandView | null;
   /** The parcels of Crown land sales (F-242), drawn over the land held and under the wells. */
   landSales?: LandSalesView | null;
+  /** The township grid (F-240, F-271), over the land and under the wells. */
+  grid?: GridView | null;
   /**
    * The land clicked, by its keys, with where the click is in the map's box; null for a click
    * on none, or on a well (the well's card comes first).
@@ -643,6 +646,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         latest.current.landHover ?? null,
         st37Tone(latest.current.basemap, latest.current.theme),
       );
+      syncGrid(
+        instance,
+        latest.current.grid ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
@@ -936,6 +945,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the wells as they are then.
     if (instance && styleReady.current) {
       syncSt37(instance, st37 ?? null, st37Tone(basemap, theme), PINS);
+      placeGrid(instance, PINS);
     }
   }, [st37, basemap, theme]);
 
@@ -945,6 +955,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the parcels as they are then.
     if (instance && styleReady.current) {
       syncLandSales(instance, landSales ?? null, st37Tone(basemap, theme), PINS);
+      placeGrid(instance, PINS);
     }
   }, [landSales, basemap, theme]);
 
@@ -962,8 +973,18 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the land as it is then.
     if (instance && styleReady.current) {
       syncLand(instance, land ?? null, st37Tone(basemap, theme), PINS);
+      placeGrid(instance, PINS);
     }
   }, [land, basemap, theme]);
+
+  const { grid } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the grid as it is then.
+    if (instance && styleReady.current) {
+      syncGrid(instance, grid ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [grid, basemap, theme]);
 
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;

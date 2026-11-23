@@ -41,6 +41,7 @@ import {
   st37LoadZones,
   st37Well3dAnswer,
 } from './st37';
+import { gridSquareAnswer, parseGridLevel, parseGridSquare } from './township-grid';
 import { WELLS_SCHEMA_VERSION } from './wells';
 import { layerRoutes, type LayerBackend, type LayerDatabase } from './map-layers';
 import type { MapLayerWrite } from './map-layers-db';
@@ -478,6 +479,27 @@ export function petroleumRoutes(
   };
   routes.get('/aer/licences', aer('licences'));
   routes.get('/aer/rigs', aer('rigs'));
+
+  // /petroleum/grid/:level/:z/:x/:y: one map square of the township grid (F-240, F-271), from the
+  // province's service; membership first, as above. Nothing is stored, so the oil and gas
+  // database is never opened.
+  routes.get('/grid/:level/:z/:x/:y', (c) => {
+    const level = parseGridLevel(c.req.param('level'));
+    const tile =
+      level && parseGridSquare(level, c.req.param('z'), c.req.param('x'), c.req.param('y'));
+    if (!level || !tile) {
+      c.header('Cache-Control', 'no-store');
+      return apiError(c, 404, 'NOT_FOUND', 'No such square of the township grid.');
+    }
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) {
+        c.header('Cache-Control', 'no-store');
+        return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      }
+      return gridSquareAnswer(c, level, tile);
+    });
+  });
 
   // /petroleum/wells/status: the wells load and how many wells are current (F-243 part 3), for
   // the map to say "loading" or "stopped at the size limit". Membership first, as above.

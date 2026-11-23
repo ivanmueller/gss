@@ -30,6 +30,7 @@ import { saleDay, useLandSales } from './LandSales';
 import { SIDE_LABEL } from './MapSide';
 import { St37Panel, St37Tip } from './St37Panel';
 import { useSt37Wells } from './St37Wells';
+import { useTownshipGrid } from './TownshipGrid';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -88,6 +89,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [landPick, setLandPick] = useState<LandPick | null>(null);
   // Crown land sales, over the land held (F-242); a clicked parcel leads the same card.
   const sales = useLandSales(session.organization.id, session.token);
+  // The township grid (F-240, F-271): on by default, its switch in the legend.
+  const grid = useTownshipGrid(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {
     setLandPick(pick);
     land.setPicked(pick?.keys ?? []);
@@ -144,8 +147,6 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     name,
     node: name === 'sales' ? sales.legend() : name === 'land' ? land.legend() : wells.legend(tone),
   }));
-  const layersOn = layers.layers.some((layer) => layers.chosen.has(layer.id));
-  const anyLegend = legends.some((legend) => legend.node !== null) || layersOn;
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
 
@@ -170,6 +171,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           st37Locked={locked}
           land={land.view}
           landSales={sales.view}
+          grid={grid.view}
           onLandClick={pickLand}
           onLandHover={setLandHover}
           landHover={hoverShape}
@@ -186,6 +188,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             wells.onViewChange(bbox);
             land.onViewChange(bbox, zoom);
             sales.onViewChange(bbox, zoom);
+            grid.onViewChange(bbox, zoom);
           }}
           onOverlayClick={layers.setPicked}
           onLayersStale={layers.onStale}
@@ -340,6 +343,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {sales.about()}
                 {land.about()}
                 {wells.about()}
+                {grid.about()}
               </div>
             </details>
           </aside>
@@ -376,7 +380,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           shape's details, so it never covers their fields or their close button
           (F-247-2-R3-02), and with many layers on it scrolls within the space it has
           (F-247-2-R13-02). */}
-      {layers.picked === null && anyLegend && (
+      {/* Always there: the township grid's switch is in it (F-271). */}
+      {layers.picked === null && (
         <div
           role="group"
           aria-label="Legend"
@@ -406,6 +411,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 (legend) => legend.node !== null && <div key={legend.name}>{legend.node}</div>,
               )}
               <MapLayersLegend state={layers} />
+              <div>{grid.legend()}</div>
             </div>
           )}
         </div>
