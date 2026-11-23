@@ -57,7 +57,9 @@
       // 16:30 Ottawa time on business days: 22:15 UTC is after that all year (17:15 or 18:15
       // in Ottawa), and 14:15 UTC the next morning picks up a rate published late or a run
       // that failed. Locally: `wrangler dev --test-scheduled`, then /__scheduled.
-      "triggers": { "crons": ["15 14,22 * * *", "*/2 * * * *"] },
+      // Every hour at :45 (AER_CRON), the AER's daily lists, rig archives and rig licences alone
+      // (F-282), so new rigs are placed within the hour.
+      "triggers": { "crons": ["15 14,22 * * *", "*/2 * * * *", "45 * * * *"] },
       // Keeps Workers Logs on across deploys (the API logs secret-free failure reasons).
       "observability": {
         "logs": {
