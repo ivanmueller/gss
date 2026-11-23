@@ -43,3 +43,4 @@ export * from './townshipGrid';
 export * from './facilities';
 export * from './pipelines';
 export * from './prices';
+export * from './royalties';
