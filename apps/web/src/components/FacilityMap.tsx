@@ -32,6 +32,7 @@ import {
   syncFacilities,
   type FacilitiesView,
 } from '../lib/facilitiesMap';
+import { EDGE_LABELS_FROM, gridEdgeLabels, type GridTownship } from '../lib/gridEdges';
 import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
 import {
@@ -69,6 +70,10 @@ const LABELS = 'facilities-labels';
 const SELECTED_SOURCE = 'facilities-selected-source';
 const SELECTED = 'facilities-selected';
 const NAMES_FROM_ZOOM = 9;
+/** A range or township number at the map's edge, as on the owner's reference picture. */
+const EDGE_LABEL =
+  'absolute rounded-sm border border-foreground/15 bg-card/90 px-1.5 py-0.5 font-mono text-[0.6875rem] leading-none whitespace-nowrap text-foreground/80';
+
 const NOTHING = (): void => undefined;
 // A carrier's lanes (owner's request, 2026-11-01): the places it runs between, shaded.
 const AREAS = 'lane-areas';
@@ -152,6 +157,13 @@ export interface FacilityMapProps {
    * ("facility:ID") answer the pointer and the click as land does, before it.
    */
   facilities?: FacilitiesView | null;
+  /**
+   * Each township's numbers and box (F-271): the ranges along the map's top and the townships
+   * down its right side, from EDGE_LABELS_FROM in; null for none.
+   */
+  gridTownships?: readonly GridTownship[] | null;
+  /** A click on no well, land, facility or map layer's feature: where it was. */
+  onEmptyClick?: (lon: number, lat: number) => void;
   /**
    * The land clicked, by its keys, with where the click is in the map's box; null for a click
    * on none, or on a well (the well's card comes first).
@@ -516,6 +528,9 @@ export default function FacilityMap(props: FacilityMapProps) {
   const landTold = useRef<string | null>(null);
   // The box at the pointer, moved with it (F-265).
   const tip = useRef<HTMLDivElement>(null);
+  // The range and township numbers along the map's edges, written by the map at each move.
+  const edges = useRef<HTMLDivElement>(null);
+  const drawEdges = useRef<() => void>(NOTHING);
   // The box on the map: where the chosen pin is on screen, and the pin whose box was closed.
   const [anchor, setAnchor] = useState<PinAnchor | null>(null);
   const [closedId, setClosedId] = useState<string | null>(null);
@@ -804,6 +819,21 @@ export default function FacilityMap(props: FacilityMapProps) {
         }
       }
       onLand(keys.size > 0 ? { keys: [...keys], x: event.point.x, y: event.point.y } : null);
+      // Nothing at all under the click, not even a map layer's feature: the page may name the
+      // square of the township grid there (F-271).
+      if (!found && keys.size === 0 && latest.current.onEmptyClick) {
+        const overlays = drawnOverlayLayers(instance, latest.current.overlays ?? []);
+        const near: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+          [event.point.x - 4, event.point.y - 4],
+          [event.point.x + 4, event.point.y + 4],
+        ];
+        if (
+          overlays.length === 0 ||
+          instance.queryRenderedFeatures(near, { layers: overlays }).length === 0
+        ) {
+          latest.current.onEmptyClick(event.lngLat.lng, event.lngLat.lat);
+        }
+      }
     });
     instance.on('mouseout', () => {
       pointer = null;
@@ -820,6 +850,57 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Hovered.current = null;
         highlightSt37(instance, null);
       }
+    });
+    // The numbers along the edges: worked out from the townships in view, once a frame.
+    let edgeFrame: number | null = null;
+    drawEdges.current = () => {
+      const box = edges.current;
+      if (!box) return;
+      const townships = latest.current.gridTownships;
+      if (!townships || instance.getZoom() < EDGE_LABELS_FROM) {
+        box.replaceChildren();
+        return;
+      }
+      const b = instance.getBounds();
+      const within = instance.getContainer();
+      const size = { width: within.clientWidth, height: within.clientHeight };
+      const labels = gridEdgeLabels(
+        townships,
+        { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() },
+        (lon, lat) => instance.project([lon, lat]),
+        size,
+      );
+      const spans: HTMLSpanElement[] = [];
+      for (const label of labels) {
+        // Clear of the zoom buttons at the top right and the distance bar at the bottom right.
+        if (label.side === 'right' && (label.at < 96 || label.at > size.height - 72)) continue;
+        const span = document.createElement('span');
+        span.textContent = label.text;
+        span.className = EDGE_LABEL;
+        if (label.side === 'top') {
+          span.style.left = `${String(label.at)}px`;
+          span.style.top = '8px';
+          span.style.transform = 'translateX(-50%)';
+        } else {
+          span.style.right = '8px';
+          span.style.top = `${String(label.at)}px`;
+          span.style.transform = 'translateY(-50%)';
+        }
+        spans.push(span);
+      }
+      box.replaceChildren(...spans);
+    };
+    const edgesLater = () => {
+      edgeFrame ??= requestAnimationFrame(() => {
+        edgeFrame = null;
+        drawEdges.current();
+      });
+    };
+    instance.on('load', edgesLater);
+    instance.on('move', edgesLater);
+    instance.on('resize', edgesLater);
+    instance.on('remove', () => {
+      if (edgeFrame !== null) cancelAnimationFrame(edgeFrame);
     });
     instance.on('move', () => {
       handlers.current.place();
@@ -1001,6 +1082,11 @@ export default function FacilityMap(props: FacilityMapProps) {
     }
   }, [land, basemap, theme]);
 
+  const { gridTownships } = props;
+  useEffect(() => {
+    drawEdges.current();
+  }, [gridTownships]);
+
   const { facilities } = props;
   useEffect(() => {
     const instance = map.current;
@@ -1035,6 +1121,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     <div className="relative size-full">
       <div ref={container} className="size-full" />
       {/* Moved with the pointer by the map itself; empty when nothing is under it. */}
+      <div ref={edges} aria-hidden="true" className="pointer-events-none absolute inset-0 z-10" />
       <div ref={tip} className="pointer-events-none absolute top-0 left-0 z-30">
         {props.hoverBox}
       </div>

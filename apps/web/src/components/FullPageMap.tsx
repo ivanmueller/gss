@@ -32,7 +32,7 @@ import { saleDay, useLandSales } from './LandSales';
 import { SIDE_LABEL } from './MapSide';
 import { St37Panel, St37Tip } from './St37Panel';
 import { useSt37Wells } from './St37Wells';
-import { useTownshipGrid } from './TownshipGrid';
+import { GridPanel, useTownshipGrid } from './TownshipGrid';
 import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
 import { SegmentedControl } from './ui/segmented-control';
 
@@ -96,6 +96,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // The AER's facilities (F-278): their keys answer the pointer and the click as land does.
   const facilities = useFacilities(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {
+    if (pick) grid.clearPick();
     setLandPick(pick);
     land.setPicked(pick?.keys ?? []);
     sales.setPicked(pick?.keys ?? []);
@@ -184,11 +185,16 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           authToken={session.token}
           st37={wells.view}
           onSt37Hover={setHover}
-          onSt37Click={setClicked}
+          onSt37Click={(found) => {
+            if (found) grid.clearPick();
+            setClicked(found);
+          }}
           st37Locked={locked}
           land={land.view}
           landSales={sales.view}
           grid={grid.view}
+          gridTownships={grid.townships}
+          onEmptyClick={grid.identify}
           facilities={facilities.view}
           onLandClick={pickLand}
           onLandHover={setLandHover}
@@ -388,6 +394,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           pickLand(null);
         }}
       />
+      {/* A square of the grid a click on nothing else named (F-271). */}
+      {!kept && !landPick && <GridPanel pick={grid.pick} goTo={goTo} onClose={grid.clearPick} />}
       <FacilityPanel
         facility={kept ? null : facilityPicked}
         fileDate={facilities.fileDate}

@@ -1,29 +1,42 @@
 import {
-  GRID_LEVELS,
-  GRID_MERIDIANS,
   gridKey,
-  gridLabel,
   gridSquares,
   gridSquareZoom,
   type Bbox,
   type GridLevel,
-  type GridShapeFields,
+  type GridSquareAt,
   type Tile,
 } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
-import type { GridView } from '../lib/gridMap';
+import type { GridTownship } from '../lib/gridEdges';
+import { GRID_FROM, type GridView } from '../lib/gridMap';
+import type { MapBounds } from '../lib/mapbox';
+import { MapPanel, PanelSection, PanelTiles } from './MapPanel';
+import { Button } from './ui/button';
 
-// The township grid (F-240, F-271): the squares of the view asked of the Worker, which asks the
-// province's township grid service; kept in the page while it is open (and by the browser for a
-// week, asked again with its tag), drawn above the land and under the wells, on by default with
-// a switch in the legend.
+// The township grid (F-240, F-271; the owner, 2026-11-22: "much faster and be snappy and quickly
+// generated once"): every township's lines from one file kept with the app
+// (public/grid/alberta-townships.json, scripts/build-township-grid.js), fetched once and drawn at
+// once; sections, quarter sections and legal subdivisions close in, from the province's service
+// square by square through the Worker; the range and township numbers along the map's edges
+// (gridEdges.ts); and a click on no land, well or facility names the square under it.
+
+/** The township file's address, served with the app. */
+export const TOWNSHIP_FILE = '/grid/alberta-townships.json';
+
+interface TownshipFile {
+  lines: number[][];
+  townships: GridTownship[];
+}
 
 /** Squares kept in the page at most; the oldest go first. */
 const KEPT = 600;
 /** Requests at once: the province's servers are production servers. */
 const AT_ONCE = 4;
+/** The levels asked of the province: the townships come from the file. */
+const FINER: readonly GridLevel[] = ['section', 'quarter', 'lsd'];
 
 export interface Square {
   level: GridLevel;
@@ -32,10 +45,10 @@ export interface Square {
 const keyOf = ({ level, tile }: Square) =>
   `${level}/${String(tile.z)}/${String(tile.x)}/${String(tile.y)}`;
 
-/** The squares a view needs at its zoom, the coarsest level first. */
+/** The squares of the finer levels a view needs at its zoom, the coarsest first. */
 export function squaresFor(view: Bbox, zoom: number): Square[] {
   const out: Square[] = [];
-  for (const level of GRID_LEVELS) {
+  for (const level of FINER) {
     const z = gridSquareZoom(level, zoom);
     if (z === null) continue;
     for (const tile of gridSquares(view, z)) out.push({ level, tile });
@@ -45,81 +58,60 @@ export function squaresFor(view: Bbox, zoom: number): Square[] {
 
 type Shape = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
 
-/** The middle of a shape's box: grid squares are near enough to rectangles for a label. */
-function middleOf(shape: Shape): [number, number] | null {
-  let west = Infinity;
-  let south = Infinity;
-  let east = -Infinity;
-  let north = -Infinity;
-  const rings =
-    shape.geometry.type === 'Polygon'
-      ? [shape.geometry.coordinates[0]]
-      : shape.geometry.coordinates.map((polygon) => polygon[0]);
-  for (const ring of rings) {
-    for (const [x, y] of ring ?? []) {
-      if (x === undefined || y === undefined) continue;
-      west = Math.min(west, x);
-      east = Math.max(east, x);
-      south = Math.min(south, y);
-      north = Math.max(north, y);
-    }
-  }
-  return Number.isFinite(west) ? [(west + east) / 2, (south + north) / 2] : null;
-}
-
-/** A square's answer as the map takes it: each shape once, named, with its label point. */
+/** A square's answer as the map takes it: each shape once, by its place on the grid. */
 export function readSquare(
   level: GridLevel,
   answer: unknown,
-): { key: string; shape: GeoJSON.Feature; label: GeoJSON.Feature | null }[] {
+): { key: string; shape: GeoJSON.Feature }[] {
   const features: unknown =
     typeof answer === 'object' && answer !== null
       ? (answer as { features?: unknown }).features
       : null;
   if (!Array.isArray(features)) return [];
-  const out: { key: string; shape: GeoJSON.Feature; label: GeoJSON.Feature | null }[] = [];
+  const out: { key: string; shape: GeoJSON.Feature }[] = [];
   for (const raw of features as unknown[]) {
     const feature = raw as Partial<Shape> | null;
     const type = feature?.geometry?.type;
     if (!feature?.geometry || (type !== 'Polygon' && type !== 'MultiPolygon')) continue;
-    const fields = (feature.properties ?? {}) as GridShapeFields;
-    const key = gridKey(level, fields);
-    const label = gridLabel(level, fields);
-    if (key === null || label === null) continue;
-    const shape: Shape = {
-      type: 'Feature',
-      geometry: feature.geometry,
-      properties: { level },
-    };
-    const middle = middleOf(shape);
+    const key = gridKey(level, feature.properties ?? {});
+    if (key === null) continue;
     out.push({
       key,
-      shape,
-      label: middle && {
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: middle },
-        properties: { level, label },
-      },
+      shape: { type: 'Feature', geometry: feature.geometry, properties: { level } },
     });
   }
   return out;
 }
 
-/** The meridians from the border to 60°N, named as on the reference: "W5 · 114°W". */
-const MERIDIAN_LINES: GeoJSON.FeatureCollection = {
-  type: 'FeatureCollection',
-  features: GRID_MERIDIANS.map(({ meridian, longitude }) => ({
-    type: 'Feature',
-    geometry: {
-      type: 'LineString',
-      coordinates: [
-        [longitude, 49],
-        [longitude, 60],
-      ],
-    },
-    properties: { label: `W${String(meridian)} · ${String(-longitude)}°W` },
-  })),
-};
+/** Every township's lines as one shape: each line its points, longitude then latitude. */
+export function townshipLines(lines: readonly (readonly number[])[]): GeoJSON.FeatureCollection {
+  const coordinates: [number, number][][] = [];
+  for (const flat of lines) {
+    const line: [number, number][] = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) line.push([flat[i] ?? 0, flat[i + 1] ?? 0]);
+    if (line.length >= 2) coordinates.push(line);
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', geometry: { type: 'MultiLineString', coordinates }, properties: {} },
+    ],
+  };
+}
+
+/** The township file, asked for once for the page's whole life. */
+let townshipFile: Promise<TownshipFile> | null = null;
+function loadTownships(): Promise<TownshipFile> {
+  townshipFile ??= fetch(TOWNSHIP_FILE).then(async (res) => {
+    if (!res.ok) throw new Error(`The township grid file answered ${String(res.status)}.`);
+    return (await res.json()) as TownshipFile;
+  });
+  townshipFile.catch(() => {
+    // Asked again on the next visit to the map rather than kept as a failure.
+    townshipFile = null;
+  });
+  return townshipFile;
+}
 
 type SquareItems = ReturnType<typeof readSquare>;
 
@@ -197,35 +189,50 @@ export class GridLoader {
   }
 }
 
-/** What the map draws for the squares of the view: each shape once, whichever square held it. */
-export function gridView(
+const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+/** The finer levels' shapes for the squares of the view: each once, whichever square held it. */
+export function finerShapes(
   needed: readonly Square[],
   squares: ReadonlyMap<string, SquareItems>,
-): GridView {
+): GeoJSON.FeatureCollection {
   const seen = new Set<string>();
   const shapes: GeoJSON.Feature[] = [];
-  const labels: GeoJSON.Feature[] = [];
   for (const square of needed) {
     for (const item of squares.get(keyOf(square)) ?? []) {
       if (seen.has(item.key)) continue;
       seen.add(item.key);
       shapes.push(item.shape);
-      if (item.label) labels.push(item.label);
     }
   }
-  return {
-    shapes: { type: 'FeatureCollection', features: shapes },
-    labels: { type: 'FeatureCollection', features: labels },
-    meridians: MERIDIAN_LINES,
-  };
+  return { type: 'FeatureCollection', features: shapes };
 }
 
+/** The square a click named, as the Worker answers it (GET /petroleum/grid/at). */
+export interface GridSquareFound extends GridSquareAt {
+  legal: string;
+  shape: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
+}
+
+/** A click's square: being asked for, found, on no square (a road allowance), or not answered. */
+export type GridPick =
+  | { state: 'asking'; lon: number; lat: number }
+  | { state: 'found'; lon: number; lat: number; square: GridSquareFound }
+  | { state: 'none'; lon: number; lat: number }
+  | { state: 'failed'; lon: number; lat: number };
+
 export interface TownshipGrid {
-  /** What the map draws; null while switched off. */
+  /** What the map draws; null while switched off or before the file has come. */
   view: GridView | null;
+  /** Each township's numbers and box, for the numbers along the map's edges; null while off. */
+  townships: readonly GridTownship[] | null;
   on: boolean;
   setOn: (on: boolean) => void;
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
+  /** Names the square under a click on no land, well or facility. */
+  identify: (lon: number, lat: number) => void;
+  pick: GridPick | null;
+  clearPick: () => void;
   legend: () => React.ReactNode;
   about: () => React.ReactNode;
 }
@@ -233,9 +240,15 @@ export interface TownshipGrid {
 export function useTownshipGrid(organizationId: string, token: string): TownshipGrid {
   const [on, setOn] = useState(true);
   const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
+  const [file, setFile] = useState<{
+    lines: GeoJSON.FeatureCollection;
+    townships: GridTownship[];
+  } | null>(null);
+  const [fileFailed, setFileFailed] = useState(false);
   // The squares read, by key, oldest first.
   const [squares, setSquares] = useState<ReadonlyMap<string, SquareItems>>(new Map());
   const [failed, setFailed] = useState(false);
+  const [pick, setPick] = useState<GridPick | null>(null);
   const [loader] = useState(
     () =>
       new GridLoader(
@@ -266,14 +279,44 @@ export function useTownshipGrid(organizationId: string, token: string): Township
     };
   }, [loader]);
 
+  // The township file, once, and its lines made once.
+  const wantFile = on && file === null;
+  useEffect(() => {
+    if (!wantFile) return;
+    let live = true;
+    loadTownships()
+      .then((got) => {
+        if (!live) return;
+        setFile({ lines: townshipLines(got.lines), townships: got.townships });
+        setFileFailed(false);
+      })
+      .catch(() => {
+        if (live) setFileFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [wantFile]);
+
   const needed = useMemo(() => (on && at ? squaresFor(at.view, at.zoom) : []), [on, at]);
   useEffect(() => {
     loader.want(needed, squares);
   }, [loader, needed, squares]);
 
+  const shapes = useMemo(() => finerShapes(needed, squares), [needed, squares]);
+  const picked = useMemo(
+    (): GeoJSON.FeatureCollection =>
+      pick?.state === 'found' && pick.square.shape
+        ? {
+            type: 'FeatureCollection',
+            features: [{ type: 'Feature', geometry: pick.square.shape, properties: {} }],
+          }
+        : EMPTY,
+    [pick],
+  );
   const view = useMemo(
-    (): GridView | null => (on ? gridView(needed, squares) : null),
-    [on, needed, squares],
+    (): GridView | null => (on && file ? { townships: file.lines, shapes, picked } : null),
+    [on, file, shapes, picked],
   );
 
   const onViewChange = useCallback((bbox: Bbox | null, zoom: number) => {
@@ -285,6 +328,39 @@ export function useTownshipGrid(organizationId: string, token: string): Township
     });
   }, []);
 
+  // Only while the grid is drawn: farther out a click names nothing.
+  const shown = on && (at?.zoom ?? 0) >= GRID_FROM;
+  const identify = useCallback(
+    (lon: number, lat: number) => {
+      if (!shown) return;
+      setPick({ state: 'asking', lon, lat });
+      const query = new URLSearchParams({
+        lon: lon.toFixed(6),
+        lat: lat.toFixed(6),
+        organization_id: organizationId,
+      });
+      apiJson<{ square: GridSquareFound | null }>(`/petroleum/grid/at?${query.toString()}`, token)
+        .then(({ square }) => {
+          setPick((before) =>
+            before?.lon !== lon || before.lat !== lat
+              ? before
+              : square
+                ? { state: 'found', lon, lat, square }
+                : { state: 'none', lon, lat },
+          );
+        })
+        .catch(() => {
+          setPick((before) =>
+            before?.lon !== lon || before.lat !== lat ? before : { state: 'failed', lon, lat },
+          );
+        });
+    },
+    [shown, organizationId, token],
+  );
+  const clearPick = useCallback(() => {
+    setPick(null);
+  }, []);
+
   const zoom = at?.zoom ?? 0;
   const legend = () => (
     <label className="flex cursor-pointer items-center gap-2">
@@ -293,6 +369,7 @@ export function useTownshipGrid(organizationId: string, token: string): Township
         checked={on}
         onChange={(event) => {
           setOn(event.target.checked);
+          if (!event.target.checked) setPick(null);
         }}
         className="size-3.5 accent-foreground"
       />
@@ -300,9 +377,9 @@ export function useTownshipGrid(organizationId: string, token: string): Township
       <span className="text-muted-foreground">
         {!on
           ? ''
-          : failed
+          : fileFailed || failed
             ? 'not answering'
-            : zoom < 7
+            : zoom < GRID_FROM
               ? 'zoom in to see'
               : zoom < 11
                 ? 'townships'
@@ -319,15 +396,118 @@ export function useTownshipGrid(organizationId: string, token: string): Township
     <p>
       <strong className="font-medium text-foreground">Township grid.</strong> The Alberta Township
       System from the Government of Alberta’s township grid service (Open Government Licence –
-      Alberta), shown as the province publishes it, nothing stored: townships from a 30 km distance
-      bar, sections, quarter sections and legal subdivisions as the map is zoomed in, with the 4th,
-      5th and 6th meridians the ranges are counted from.
+      Alberta): its townships kept with the app, its sections, quarter sections and legal
+      subdivisions shown close in as the province publishes them. Click a square with nothing on it
+      to name it.
     </p>
   );
 
-  return { view, on, setOn, onViewChange, legend, about };
+  return {
+    view,
+    townships: on && file ? file.townships : null,
+    on,
+    setOn,
+    onViewChange,
+    identify,
+    pick,
+    clearPick,
+    legend,
+    about,
+  };
 }
 
 function sameBox(a: Bbox, b: Bbox) {
   return a.west === b.west && a.south === b.south && a.east === b.east && a.north === b.north;
+}
+
+/** The box around a shape, for Zoom to square. */
+function boundsOf(shape: GeoJSON.Polygon | GeoJSON.MultiPolygon): MapBounds | null {
+  const rings = shape.type === 'Polygon' ? shape.coordinates : shape.coordinates.flat();
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const ring of rings) {
+    for (const [x, y] of ring) {
+      if (x === undefined || y === undefined) continue;
+      west = Math.min(west, x);
+      east = Math.max(east, x);
+      south = Math.min(south, y);
+      north = Math.max(north, y);
+    }
+  }
+  return Number.isFinite(west) ? [west, south, east, north] : null;
+}
+
+/** The panel on the right for a square a click named (F-271). */
+export function GridPanel({
+  pick,
+  goTo,
+  onClose,
+}: {
+  pick: GridPick | null;
+  goTo: (bounds: MapBounds) => void;
+  onClose: () => void;
+}) {
+  if (!pick) return null;
+  if (pick.state !== 'found') {
+    const text =
+      pick.state === 'asking'
+        ? 'Asking the province which square this is…'
+        : pick.state === 'none'
+          ? 'No legal subdivision here: a road allowance, or outside the grid.'
+          : 'The province’s township grid did not answer. Try again in a moment.';
+    return (
+      <MapPanel label="Land location" eyebrow="Land location" title="—" onClose={onClose}>
+        <p className="mt-2 text-muted-foreground">{text}</p>
+      </MapPanel>
+    );
+  }
+  const s = pick.square;
+  const bounds = s.shape ? boundsOf(s.shape) : null;
+  return (
+    <MapPanel
+      label={`Land location ${s.legal}`}
+      eyebrow="Land location · LSD-Sec-Twp-Rge-Mer"
+      title={s.legal}
+      onClose={onClose}
+    >
+      <PanelTiles
+        tiles={[
+          { label: 'LSD', value: String(s.lsd) },
+          { label: 'Section', value: String(s.section) },
+          { label: 'Quarter', value: s.quarter ?? '—' },
+        ]}
+      />
+      {bounds && (
+        <div className="mt-3">
+          <Button
+            size="sm"
+            onClick={() => {
+              goTo(bounds);
+            }}
+          >
+            Zoom to square
+          </Button>
+        </div>
+      )}
+      <PanelSection title="Township">
+        <p className="font-mono">
+          T{s.township} R{s.range} W{s.meridian}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Township {s.township}, range {s.range}, west of the {ordinal(s.meridian)} meridian;
+          section {s.section}
+          {s.quarter ? `, its ${s.quarter} quarter` : ''}; legal subdivision {s.lsd}.
+        </p>
+      </PanelSection>
+      <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+        The Government of Alberta’s township grid (Open Government Licence – Alberta).
+      </p>
+    </MapPanel>
+  );
+}
+
+function ordinal(n: number): string {
+  return n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${String(n)}th`;
 }

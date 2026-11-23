@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GridLoader, gridView, readSquare, squaresFor, type Square } from './TownshipGrid';
+import {
+  finerShapes,
+  GridLoader,
+  readSquare,
+  squaresFor,
+  townshipLines,
+  type Square,
+} from './TownshipGrid';
 
 // The township grid in the browser (F-240, F-271): which squares a view asks for, how a square's
-// answer is read, the queue that asks for them, and each shape drawn once.
+// answer is read, the township file's lines, the queue that asks for squares, and each shape
+// drawn once.
 
 const section = (sec: number, west: number) => ({
   type: 'Feature',
@@ -25,13 +33,12 @@ const section = (sec: number, west: number) => ({
 const FOX_CREEK = { west: -117.0, south: 54.3, east: -116.6, north: 54.5 };
 
 describe('squaresFor', () => {
-  it('asks for townships far out, and each finer level as the map is zoomed in', () => {
-    expect(squaresFor(FOX_CREEK, 6)).toEqual([]);
+  it('asks the province only for the finer levels, each from its zoom: the townships are kept with the app', () => {
+    expect(squaresFor(FOX_CREEK, 8)).toEqual([]);
     const levels = (zoom: number) => [...new Set(squaresFor(FOX_CREEK, zoom).map((s) => s.level))];
-    expect(levels(8)).toEqual(['township']);
-    expect(levels(11.5)).toEqual(['township', 'section']);
-    expect(levels(13.2)).toEqual(['township', 'section', 'quarter']);
-    expect(levels(14)).toEqual(['township', 'section', 'quarter', 'lsd']);
+    expect(levels(11.5)).toEqual(['section']);
+    expect(levels(13.2)).toEqual(['section', 'quarter']);
+    expect(levels(14)).toEqual(['section', 'quarter', 'lsd']);
   });
 
   it('asks for nothing outside Alberta', () => {
@@ -40,15 +47,11 @@ describe('squaresFor', () => {
 });
 
 describe('readSquare', () => {
-  it('names each shape, with a point in its middle for the label', () => {
+  it('keys each shape by its place on the grid', () => {
     const items = readSquare('section', { features: [section(6, -116.8)] });
     expect(items).toHaveLength(1);
     expect(items[0]?.key).toBe('section:5-19-63-6--');
     expect(items[0]?.shape.properties).toEqual({ level: 'section' });
-    expect(items[0]?.label?.properties).toEqual({ level: 'section', label: '6' });
-    const [x, y] = (items[0]?.label?.geometry as GeoJSON.Point).coordinates;
-    expect(x).toBeCloseTo(-116.79, 5);
-    expect(y).toBeCloseTo(54.005, 5);
   });
 
   it('leaves out what is not a named area, and an answer that is not a list', () => {
@@ -65,8 +68,8 @@ describe('readSquare', () => {
   });
 });
 
-describe('gridView', () => {
-  it('draws a shape that came in two squares once', () => {
+describe('finerShapes', () => {
+  it('draws a shape that came in two squares once, and none of squares no longer needed', () => {
     const a: Square = { level: 'section', tile: { z: 11, x: 359, y: 652 } };
     const b: Square = { level: 'section', tile: { z: 11, x: 360, y: 652 } };
     const kept = new Map([
@@ -76,16 +79,28 @@ describe('gridView', () => {
         readSquare('section', { features: [section(6, -116.8), section(5, -116.78)] }),
       ],
     ]);
-    const view = gridView([a, b], kept);
-    expect(view.shapes.features).toHaveLength(2);
-    expect(view.labels.features.map((f) => f.properties?.label as unknown)).toEqual(['6', '5']);
-    expect(view.meridians.features.map((f) => f.properties?.label as unknown)).toEqual([
-      'W4 · 110°W',
-      'W5 · 114°W',
-      'W6 · 118°W',
+    expect(finerShapes([a, b], kept).features).toHaveLength(2);
+    expect(finerShapes([a], kept).features).toHaveLength(1);
+  });
+});
+
+describe('townshipLines', () => {
+  it('turns the flat lines of the file into one shape of lines', () => {
+    const lines = townshipLines([
+      [-116, 54, -116, 54.1, -116.1, 54.1],
+      [-115, 53],
     ]);
-    // Squares the view no longer needs are not drawn.
-    expect(gridView([a], kept).shapes.features).toHaveLength(1);
+    expect(lines.features).toHaveLength(1);
+    expect(lines.features[0]?.geometry).toEqual({
+      type: 'MultiLineString',
+      coordinates: [
+        [
+          [-116, 54],
+          [-116, 54.1],
+          [-116.1, 54.1],
+        ],
+      ],
+    });
   });
 });
 

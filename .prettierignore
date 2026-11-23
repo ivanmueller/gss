@@ -2,3 +2,5 @@
 *.md
 pnpm-lock.yaml
 apps/web/src/data/lane-regions.json
+# Built by scripts/build-township-grid.js, one line on purpose: reformatted it would be far larger.
+apps/web/public/grid/alberta-townships.json
