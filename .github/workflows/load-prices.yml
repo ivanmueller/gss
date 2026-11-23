@@ -1,0 +1,72 @@
+name: Load prices
+
+# Alberta's royalty prices (F-285, docs/FEATURES_OIL_GAS.md): the gas reference price of every month
+# since 1994 (https://www.alberta.ca/alberta-natural-gas-reference-price), the liquids' and
+# sulphur's prices from the monthly reference price calculations on https://open.alberta.ca, and
+# the oil par prices since 2012 (https://www.alberta.ca/oil-par-prices). Every price is read again
+# and the whole copy replaced in one transaction in the oil and gas database (petroleum-staging).
+#
+# Run by hand from the Actions tab (Actions → Load prices → Run workflow), and by itself on the 1st
+# and the 16th of each month, as the province publishes a month's sheet and letter. Public data of
+# the Government of Alberta; the files stay on the runner, never in the repository or the logs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 15 1,16 * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-prices
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install pdftotext
+        run: sudo apt-get install -y -q poppler-utils > /dev/null
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 19 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 19)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB."
+      - name: Read the province's prices
+        run: node --experimental-strip-types scripts/load-prices.js fetch "$RUNNER_TEMP/prices"
+      - name: Load the prices
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          dir="$RUNNER_TEMP/prices"
+          node --experimental-strip-types scripts/load-prices.js sql "$dir/prices.json" "$GRAIN_BYTES" > "$dir/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$dir/load.sql"
+      - name: Remove the files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/prices"
