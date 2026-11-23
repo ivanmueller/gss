@@ -2,7 +2,14 @@ import { PIPELINE_LEVELS, type St37Zone } from '@grain/domain';
 import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
-import { LICENCE_DAYS, licencesAnswer, periodStart, RIG_DAYS, rigsAnswer } from './aer-lists';
+import {
+  LICENCE_DAYS,
+  licencesAnswer,
+  periodStart,
+  RIG_DAYS,
+  RIGS_SCHEMA_VERSION,
+  rigsAnswer,
+} from './aer-lists';
 import type { Membership } from './db';
 import {
   LAND_SCHEMA_VERSION,
@@ -488,8 +495,17 @@ export function petroleumRoutes(
           const { rows, dates } = await petroleum.aerLicences(who, since);
           return c.json(licencesAnswer(rows, dates, days));
         }
-        const { rows, dates } = await petroleum.aerRigs(who, since);
-        return c.json(rigsAnswer(rows, dates, days));
+        // The rigs' places need the licences' locations (F-282).
+        if ((await petroleum.schemaVersion()) < RIGS_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { rows, dates, listDates } = await petroleum.aerRigs(who, since);
+        return c.json(rigsAnswer(rows, dates, days, listDates));
       });
     });
   };

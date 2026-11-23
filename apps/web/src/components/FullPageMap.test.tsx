@@ -30,6 +30,7 @@ vi.mock('./FacilityMap', () => ({
       </button>
       <p>{`Asked again: ${String(props.layersRetry ?? 0)}`}</p>
       <p>{`Outlines: ${[...new Set((props.formations?.outlines.features ?? []).map((f) => String(f.properties?.key)))].join(' ') || 'none'}`}</p>
+      <p>{`Rigs drawn: ${String(props.rigs?.points.features.length ?? 'off')}`}</p>
       <button type="button" onClick={() => props.onLayersStale?.('missing')}>
         A picture is refused
       </button>
@@ -187,7 +188,7 @@ describe('the side card (F-267)', () => {
   });
 
   it('leads the legend with the open section', () => {
-    const all = ['sales', 'land', 'facilities', 'pipelines', 'wells', 'formations'];
+    const all = ['sales', 'land', 'facilities', 'pipelines', 'rigs', 'wells', 'formations'];
     expect(sideOrder('sales')).toEqual(all);
     expect(sideOrder('wells')).toEqual([
       'wells',
@@ -195,10 +196,61 @@ describe('the side card (F-267)', () => {
       'land',
       'facilities',
       'pipelines',
+      'rigs',
       'formations',
     ]);
-    expect(sideOrder('formations')).toEqual(['formations', ...all.slice(0, 5)]);
+    expect(sideOrder('formations')).toEqual(['formations', ...all.slice(0, 6)]);
     expect(sideOrder(null)).toEqual(all);
+  });
+
+  it('shows the rigs on a well now, then every move in 90 days, all of Alberta (F-282)', async () => {
+    const day = (ago: number) => new Date(Date.now() - ago * 86_400_000).toISOString();
+    const rig = (ago: number, rigNumber: string, wellName: string) => ({
+      geometry: { coordinates: [-116, 54] },
+      properties: {
+        wellId: '00/01-02-055-05W5/0',
+        wellName,
+        licenceNumber: '0500001',
+        licenseeBaId: 'A1XX',
+        licenseeName: 'Synthetic Energy Ltd.',
+        contractorBaId: 'C1XX',
+        contractorName: 'Synthetic Drilling Inc.',
+        rigNumber,
+        activityType: 'Drill To LD',
+        activityAt: day(ago),
+        listDate: day(ago).slice(0, 10),
+        surfaceLocation: '01-02-055-05W5',
+        place: 'well',
+      },
+    });
+    const calls = mockApi({
+      [LIST]: listOf(),
+      ...noLegend,
+      [`GET /petroleum/aer/rigs?${ORGANIZATION}&days=90`]: () =>
+        Response.json({
+          source: { latestListDate: day(0).slice(0, 10), lastSeenAt: null, preliminary: true },
+          days: 90,
+          listDates: [],
+          located: {
+            type: 'FeatureCollection',
+            features: [rig(2, '7', 'NOW A'), rig(20, '7', 'BEFORE A'), rig(5, '9', 'NOW B')],
+          },
+          unlocated: [],
+          truncated: false,
+        }),
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    expect(within(card).getByRole('switch', { name: 'Rigs' })).toBeChecked();
+    expect(await screen.findByText('Rigs drawn: 2')).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: 'Rigs' }));
+    expect(within(card).getByText(/on a well now/)).toHaveTextContent('2 rigs on a well now');
+    await userEvent.click(within(card).getByRole('button', { name: '90 days' }));
+    expect(await screen.findByText('Rigs drawn: 3')).toBeInTheDocument();
+    expect(within(card).getByText(/on a well now/)).toHaveTextContent('3 moves in 90 days');
+    // The days with no rig list are named.
+    expect(within(card).getByText(/No rig list held for/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.path.startsWith('/petroleum/aer/rigs'))).toHaveLength(1);
   });
 
   it('switches each formation by itself, the Duvernay on at first, the wells untouched (F-280, F-281)', async () => {

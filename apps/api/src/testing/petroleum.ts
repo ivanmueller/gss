@@ -39,7 +39,18 @@ export function fakePetroleum() {
       Promise.resolve({ rows: [], dates: { latestListDate: null, lastSeenAt: null } }),
     ),
     aerRigs: vi.fn<PetroleumDatabase['aerRigs']>(() =>
-      Promise.resolve({ rows: [], dates: { latestListDate: null, lastSeenAt: null } }),
+      Promise.resolve({
+        rows: [],
+        dates: { latestListDate: null, lastSeenAt: null },
+        listDates: [],
+      }),
+    ),
+    aerArchiveMonthsKept: vi.fn<PetroleumDatabase['aerArchiveMonthsKept']>(() =>
+      Promise.resolve([]),
+    ),
+    aerLicencesToLocate: vi.fn<PetroleumDatabase['aerLicencesToLocate']>(() => Promise.resolve([])),
+    aerStoreLicenceLocations: vi.fn<PetroleumDatabase['aerStoreLicenceLocations']>(() =>
+      Promise.resolve(),
     ),
     databaseSize: vi.fn<PetroleumDatabase['databaseSize']>(() => Promise.resolve(20_000_000)),
     latestWellLoad: vi.fn<PetroleumDatabase['latestWellLoad']>(() => Promise.resolve(null)),

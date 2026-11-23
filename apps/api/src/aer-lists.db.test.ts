@@ -325,6 +325,90 @@ describe('the AER lists as petro_api', () => {
       expect(row).toMatchObject({ longitude: null, latitude: null });
     }));
 
+  it('places a rig at its well’s own point from the list of every licence, asked for once (F-282)', () =>
+    using(async (db) => {
+      const n = ownLicence();
+      const listDate = ownDate();
+      const place = ownPlace();
+      await storedRead(db, 'st49', ST49_URL, {
+        status: 'read',
+        listDate,
+        skipped: 0,
+        licences: [],
+        rigs: [rig(n, 2, ownWell())],
+      });
+      expect(await db.aerLicencesToLocate(listDate, 100_000)).toContain(n);
+      await db.aerStoreLicenceLocations(
+        [
+          {
+            licenceNumber: n,
+            licensee: 'Example Energy Ltd.(A7XX)',
+            latitude: 54.123456,
+            longitude: -116.654321,
+            surfaceLocation: placeText(place),
+            status: 'Issued',
+          },
+        ],
+        [],
+      );
+      expect(await db.aerLicencesToLocate(listDate, 100_000)).not.toContain(n);
+      const answer = await db.aerRigs(member(), listDate);
+      expect(answer.rows.filter((row) => row.licenceNumber === n)).toEqual([
+        expect.objectContaining({
+          place: 'well',
+          surfaceLocation: placeText(place),
+          longitude: -116.654321,
+          latitude: 54.123456,
+          contractorBaId: 'A1XX',
+          licenseeBaId: 'A7XX',
+        }),
+      ]);
+      expect(answer.listDates).toContain(listDate);
+    }));
+
+  it('keeps a licence not in the list until a week has passed (F-282)', () =>
+    using(async (db) => {
+      const n = ownLicence();
+      const listDate = ownDate();
+      await storedRead(db, 'st49', ST49_URL, {
+        status: 'read',
+        listDate,
+        skipped: 0,
+        licences: [],
+        rigs: [rig(n, 3, ownWell())],
+      });
+      await db.aerStoreLicenceLocations([], [n]);
+      expect(await db.aerLicencesToLocate(listDate, 100_000)).not.toContain(n);
+      // Found within the week: the stored answer stays.
+      await db.aerStoreLicenceLocations(
+        [
+          {
+            licenceNumber: n,
+            licensee: 'Example',
+            latitude: 54,
+            longitude: -116,
+            surfaceLocation: '01-01-001-01W5',
+            status: 'Issued',
+          },
+        ],
+        [],
+      );
+      const row = (await db.aerRigs(member(), listDate)).rows.find((r) => r.licenceNumber === n);
+      expect(row).toMatchObject({ place: null, longitude: null });
+    }));
+
+  it('knows the months of the rig archives kept (F-282)', () =>
+    using(async (db) => {
+      const month = `${String(random(2070, 2099))}-${String(random(1, 12)).padStart(2, '0')}`;
+      await capture(
+        db,
+        'st49',
+        `https://static.aer.ca/prd/data/wells/spud${month}.zip#SPUD${month.slice(5)}01.txt`,
+        unique(),
+      );
+      expect(await db.aerArchiveMonthsKept()).toContain(month);
+    }));
+
   it('shows nothing to a person the Worker did not name', () =>
     using(async (db) => {
       const nobody = { ...member(), role: 'not-a-role' };
