@@ -134,7 +134,7 @@ export async function fetchRigArchive(
   const fetchedAt = new Date();
   try {
     res = await fetchImpl(url, {
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
   } catch {
@@ -184,7 +184,7 @@ export async function readLicenceList(
   let res: Response;
   try {
     res = await fetchImpl(AER_LICENCE_LIST_URL, {
-      redirect: 'error',
+      redirect: 'manual',
       headers: { Accept: 'text/csv' },
       signal: AbortSignal.timeout(LICENCE_LIST_TIMEOUT_MS),
     });
@@ -284,7 +284,7 @@ export async function fetchAerList(url: string, fetchImpl: typeof fetch): Promis
   const fetchedAt = new Date();
   try {
     res = await fetchImpl(url, {
-      redirect: 'error',
+      redirect: 'manual',
       headers: { Accept: 'text/plain' },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
@@ -545,7 +545,7 @@ async function locateBatch(batch: AtsLsd[], fetchImpl: typeof fetch): Promise<Ae
     const res = await fetchImpl(ATS_LSD_QUERY, {
       method: 'POST',
       body: params,
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;

@@ -59,7 +59,7 @@ export async function fetchWellPage(
     const res = await fetchImpl(WELLS_SERVICE, {
       method: 'POST',
       body: params,
-      redirect: 'error',
+      redirect: 'manual',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
