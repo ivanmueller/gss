@@ -201,19 +201,24 @@ describe('the side card (F-267)', () => {
     expect(sideOrder(null)).toEqual(all);
   });
 
-  it('switches each formation by itself, the Duvernay on at first, the wells untouched (F-280)', async () => {
+  it('switches each formation by itself, the Duvernay on at first, the wells untouched (F-280, F-281)', async () => {
     const calls = mockApi({
       [LIST]: listOf(),
       ...noLegend,
       'GET /outlines/duvernay.geojson': OUTLINE_FILE,
       'GET /outlines/montney.geojson': OUTLINE_FILE,
+      'GET /outlines/nisku.geojson': OUTLINE_FILE,
     });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const card = await screen.findByRole('complementary', { name: 'Map menu' });
     expect(within(card).getByRole('switch', { name: 'Formations' })).toBeChecked();
     expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
     await userEvent.click(within(card).getByRole('button', { name: 'Formations' }));
-    const list = within(card).getByRole('group', { name: 'Formations shown' });
+    const list = within(card).getByRole('group', { name: 'Shale plays' });
+    const others = within(card).getByRole('group', { name: 'Other formations' });
+    for (const name of ['Cardium', 'Mannville (undivided)', 'Winterburn (Nisku)', 'Leduc']) {
+      expect(within(others).getByRole('switch', { name })).not.toBeChecked();
+    }
     for (const name of ['Wilrich', 'North Nordegg', 'Basal Banff / Exshaw', 'Muskwa']) {
       expect(within(list).getByRole('switch', { name })).not.toBeChecked();
     }
@@ -221,8 +226,11 @@ describe('the side card (F-267)', () => {
     // A formation switched on is fetched once and drawn beside the others.
     await userEvent.click(within(list).getByRole('switch', { name: 'Montney' }));
     expect(await screen.findByText('Outlines: montney duvernay')).toBeInTheDocument();
+    // One of the 3D model's, drawn after the shale plays.
+    await userEvent.click(within(others).getByRole('switch', { name: 'Winterburn (Nisku)' }));
+    expect(await screen.findByText('Outlines: montney duvernay nisku')).toBeInTheDocument();
     await userEvent.click(within(list).getByRole('switch', { name: 'Duvernay' }));
-    expect(await screen.findByText('Outlines: montney')).toBeInTheDocument();
+    expect(await screen.findByText('Outlines: montney nisku')).toBeInTheDocument();
     // The section's own switch takes every outline off; the wells' section stays as it was.
     await userEvent.click(within(card).getByRole('switch', { name: 'Formations' }));
     expect(await screen.findByText('Outlines: none')).toBeInTheDocument();
