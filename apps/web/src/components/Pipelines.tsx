@@ -301,16 +301,19 @@ export interface Pipelines {
   about: () => React.ReactNode;
 }
 
-const ALL_STATUSES: ReadonlySet<string> = new Set([...PIPELINE_STATUSES, '']);
 const ALL_GROUPS: ReadonlySet<PipelineSubstance> = new Set(PIPELINE_SUBSTANCES.map((s) => s.key));
+/** When the section is first switched on (F-284): operating lines only, and no substance yet. */
+export const PIPELINE_STATUSES_AT_START: ReadonlySet<string> = new Set(['Operating']);
+export const PIPELINE_GROUPS_AT_START: ReadonlySet<PipelineSubstance> = new Set();
 
 export function usePipelines(organizationId: string, token: string): Pipelines {
-  const [on, setOn] = useState(true);
+  // Off when the map opens (F-284).
+  const [on, setOn] = useState(false);
   const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
   const [squares, setSquares] = useState<ReadonlyMap<string, SquareRead>>(new Map());
   const [problem, setProblem] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<ReadonlySet<string>>(ALL_STATUSES);
-  const [groups, setGroups] = useState<ReadonlySet<PipelineSubstance>>(ALL_GROUPS);
+  const [statuses, setStatuses] = useState<ReadonlySet<string>>(PIPELINE_STATUSES_AT_START);
+  const [groups, setGroups] = useState<ReadonlySet<PipelineSubstance>>(PIPELINE_GROUPS_AT_START);
   const [licensee, setLicensee] = useState('');
   const [minMm, setMinMm] = useState(0);
   const [picked, setPickedKeys] = useState<readonly string[]>([]);
@@ -382,11 +385,13 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
     [on, lines, picked],
   );
 
+  // Each substance's segments here, chosen or not, so a chip shows what it would add.
   const counts = useMemo(() => {
     const out = new Map<PipelineSubstance, number>();
-    for (const p of shown) out.set(p.group, (out.get(p.group) ?? 0) + 1);
+    const each = pipelinesShown(entries, { statuses, groups: ALL_GROUPS, licensee, minMm });
+    for (const p of each) out.set(p.group, (out.get(p.group) ?? 0) + 1);
     return out;
-  }, [shown]);
+  }, [entries, statuses, licensee, minMm]);
 
   const onViewChange = useCallback((bbox: Bbox | null, zoom: number) => {
     setAt(bbox ? { view: bbox, zoom } : null);
@@ -495,6 +500,9 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
           ))}
         </select>
       </label>
+      {groups.size === 0 && (
+        <p className="text-xs text-muted-foreground">Pick what they carry to see pipelines.</p>
+      )}
       <p className="text-xs text-muted-foreground">
         {`${shown.length.toLocaleString('en-CA')} segments shown here${pipelineLevelNote(level)}.`}
         {truncated && ' Some squares hold more lines than are drawn: zoom in to see them all.'}{' '}
@@ -507,19 +515,21 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
     !view || shown.length === 0 ? null : (
       <div className="flex flex-col gap-1.5">
         <LegendTitle>Pipelines here</LegendTitle>
-        {PIPELINE_SUBSTANCES.filter((s) => (counts.get(s.key) ?? 0) > 0).map((s) => (
-          <p key={s.key} className="flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="h-0.5 w-3 shrink-0"
-              style={{ backgroundColor: PIPELINE_COLOURS[s.key] }}
-            />
-            <span className="grow">{s.name}</span>
-            <span className="font-mono text-muted-foreground">
-              {(counts.get(s.key) ?? 0).toLocaleString('en-CA')}
-            </span>
-          </p>
-        ))}
+        {PIPELINE_SUBSTANCES.filter((s) => groups.has(s.key) && (counts.get(s.key) ?? 0) > 0).map(
+          (s) => (
+            <p key={s.key} className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className="h-0.5 w-3 shrink-0"
+                style={{ backgroundColor: PIPELINE_COLOURS[s.key] }}
+              />
+              <span className="grow">{s.name}</span>
+              <span className="font-mono text-muted-foreground">
+                {(counts.get(s.key) ?? 0).toLocaleString('en-CA')}
+              </span>
+            </p>
+          ),
+        )}
       </div>
     );
 

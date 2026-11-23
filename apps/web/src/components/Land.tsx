@@ -345,7 +345,8 @@ function useLandAnswer(
 }
 
 export function useLand(organizationId: string, token: string): LandState {
-  const [all, setAll] = useState(true);
+  // Off when the map opens (F-284): switched on from its section.
+  const [all, setAll] = useState(false);
   const [kinds, setKinds] = useState<Record<LandKind, boolean>>({
     agreements: true,
     offsets: true,

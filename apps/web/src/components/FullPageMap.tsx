@@ -152,7 +152,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
 
   // The side card (F-267): its sections open one at a time, and the legend leads with the one
   // open. On a narrow screen the card starts folded, so the map is seen first.
-  const [section, setSection] = useState<SideSection | null>('sales');
+  const [section, setSection] = useState<SideSection | null>('wells');
   const [folded, setFolded] = useState(startsFolded);
   const [legendOpen, setLegendOpen] = useState(true);
   const openOnly = (name: SideSection) => () => {
