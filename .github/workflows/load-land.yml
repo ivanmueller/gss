@@ -2,10 +2,12 @@ name: Load land
 
 # Run by hand from the Actions tab (Actions → Load land → Run workflow), after "Load ST37 wells".
 # Reads land held today from the Government of Alberta's public map services, for the area of
-# one play's wells (the Duvernay first; the owner, 2026-11-21): Crown petroleum and natural gas
-# and oil sands agreements, active offset notices, and land whose petroleum and natural gas is
-# not the Crown's. Loads them into the oil and gas database (petroleum-staging), replacing the
-# whole copy in one transaction (F-241, docs/FEATURES_OIL_GAS.md).
+# one play (the Duvernay first; the owner, 2026-11-21): Crown petroleum and natural gas and oil
+# sands agreements, active offset notices, and land whose petroleum and natural gas is not the
+# Crown's. Loads them into the oil and gas database (petroleum-staging), replacing the whole
+# copy in one transaction (F-241, docs/FEATURES_OIL_GAS.md). The area is the box that holds the
+# play's wells and its outline, the same as "Load land sales" reads the sales for, so a parcel
+# sold anywhere in it finds the agreement issued from it (F-276; the owner, 2026-11-22).
 #
 # Agreements and non-Crown minerals are Alberta Energy and Minerals' data under the Open
 # Government Licence - Alberta (docs/DECISIONS.md, 2026-11-21). The data stays on the runner and
@@ -71,6 +73,13 @@ jobs:
             exit 1
           fi
           read -r west south east north <<< "$box"
+          # Widened to hold the play's outline, where the map draws one, as the sales are
+          # (F-264, F-276).
+          outline="apps/web/public/outlines/$FORMATION.geojson"
+          if [ -f "$outline" ]; then
+            wide=$(node --experimental-strip-types scripts/load-land-sales.js area "$west" "$south" "$east" "$north" "$outline")
+            read -r west south east north <<< "$wide"
+          fi
           {
             echo "WEST=$west"
             echo "SOUTH=$south"

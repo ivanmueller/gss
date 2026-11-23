@@ -611,7 +611,7 @@ export function useLand(organizationId: string, token: string): LandState {
       </p>
       <p>
         {loadedAt
-          ? `${answer?.source.name ?? ''}, public map services; loaded ${formatAlberta(loadedAt, { weekday: false })}, for the area of the Duvernay's wells only so far. Not an official record.`
+          ? `${answer?.source.name ?? ''}, public map services; loaded ${formatAlberta(loadedAt, { weekday: false })}, for the Duvernay's area only so far. Not an official record.`
           : answer
             ? 'No land loaded yet.'
             : 'Alberta Energy and Minerals, Government of Alberta, public map services.'}
