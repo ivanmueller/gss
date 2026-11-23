@@ -135,13 +135,16 @@ describe('load-land-sales.js', () => {
     // The sold parcel: its money as published, its buyer's quotes doubled so it stays one value.
     assert.ok(
       sql.includes(
-        '"2026-11-04","A0001","LEASE","PLAINS","256","PETROLEUM AND NATURAL GAS IN THE EXAMPLE FM","51806024","f","ACCEPTED","56888.32","222.22","EXAMPLE ""LAND"" LTD.\'); drop table x; -- 100%","SHA010301 SHA010401","D00004","(-115.975,54.0145),(-116,54)"',
+        '"2026-11-04","A0001","LEASE","PLAINS","256","PETROLEUM AND NATURAL GAS IN THE EXAMPLE FM","51806024","f","ACCEPTED","56888.32","222.22","EXAMPLE ""LAND"" LTD.\'); drop table x; -- 100%","SHA010301 SHA010401","D00004","[""PETROLEUM AND NATURAL GAS IN THE EXAMPLE FM""]","(-115.975,54.0145),(-116,54)"',
       ),
       sql,
     );
     // Part of its land outside the area, and a portion: kept, marked inexact, with no offers.
-    // It has no codes: none are written.
-    assert.match(sql, /"2026-11-04","A0002",[^\n]*"51806024SW 41203424","t","NO OFFERS",,,,,,"\(/);
+    // It has no codes: none are written. Its rights tract by tract are, as a list (F-276).
+    assert.match(
+      sql,
+      /"2026-11-04","A0002",[^\n]*"51806024SW 41203424","t","NO OFFERS",,,,,,"\[""PETROLEUM AND NATURAL GAS IN THE [^"]+""\]","\(/,
+    );
     // A parcel wholly outside the area is left out; one of a sale not held yet has no result.
     assert.doesNotMatch(sql, /"A0003"/);
     assert.match(sql, /"2026-12-02","A0001",[^\n]*"5180602401","f",,,,,/);
