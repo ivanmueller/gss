@@ -12,6 +12,7 @@ import {
   saleDollars,
   saleLands,
   saleResult,
+  saleWholeDollars,
 } from './LandPanel';
 
 // The box at the pointer and the panel on the right for land on the oil and gas map (F-265).
@@ -41,6 +42,9 @@ const parcel = (id: string, extra: Partial<LandSaleParcel> = {}): LandSaleParcel
   bonus: '67150.00',
   dollarsPerHectare: '36.18',
   buyers: 'EXAMPLE LAND (222) LTD. 100%',
+  // The agreement issued from the sale, as the database found it (F-276).
+  heldAgreement: '5326080102',
+  heldBy: 'SAMPLE RESOURCES INC.',
   shape: SHAPE,
   ...extra,
 });
@@ -62,12 +66,6 @@ const agreement = (id: string, extra: Partial<LandMapAgreement> = {}): LandMapAg
   expiryText: 'INDEFINITE',
   shape: SHAPE,
   ...extra,
-});
-const issued = agreement('7', {
-  agreementType: '053',
-  agreementNumber: '5326080102',
-  group: 'LICENSE',
-  holder: 'SAMPLE RESOURCES INC.',
 });
 const land = {
   agreements: new Map([['1', agreement('1')]]),
@@ -99,8 +97,6 @@ const land = {
       },
     ],
   ]),
-  issuedFrom: (saleDate: string, contractNo: string) =>
-    saleDate === '2026-08-19' && contractNo === 'B0102' ? issued : null,
 };
 const sales = {
   parcels: new Map([
@@ -204,6 +200,12 @@ describe('reading a parcel', () => {
     expect(landDay('soon')).toBe('soon');
     expect(saleDollars('67150.00')).toBe('$67,150');
     expect(saleDollars('2296.32')).toBe('$2,296.32');
+    // To the nearest dollar, on the digits (F-276).
+    expect(saleWholeDollars('313712.64')).toBe('$313,713');
+    expect(saleWholeDollars('313712.49')).toBe('$313,712');
+    expect(saleWholeDollars('67150.00')).toBe('$67,150');
+    expect(saleWholeDollars('999999999999.50')).toBe('$1,000,000,000,000');
+    expect(saleWholeDollars('12')).toBe('$12');
     expect(saleLands(parcel('1'))).toEqual(['6-38-1-W5', 'NE-18-37-1-W5', 'LSD 4-2-38-1-W5']);
     // A key not in the notices' usual form is shown as published.
     expect(saleLands({ land: 'ODD-KEY' })).toEqual(['ODD-KEY']);
@@ -335,7 +337,8 @@ describe('LandPanel', () => {
       'NE-18-37-1-W5',
       'LSD 4-2-38-1-W5',
     ]);
-    expect(screen.getByText('MRT 5-01-038 · Sale Aug 19, 2026')).toBeInTheDocument();
+    // The lowest township among its lands, as the province files it (F-276).
+    expect(screen.getByText('MRT 5-01-037 · Sale Aug 19, 2026')).toBeInTheDocument();
     expect(
       screen.getByText(/Alberta Energy and Minerals, Government of Alberta/),
     ).toBeInTheDocument();
@@ -344,6 +347,69 @@ describe('LandPanel', () => {
     expect(goTo).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('lays the rights out tract by tract, the bonus to the dollar, and finds the holder itself (F-276)', () => {
+    const tracts = [
+      'PETROLEUM AND NATURAL GAS FROM SURFACE; TO THE TOP OF THE EXAMPLE FM; PETROLEUM AND NATURAL GAS BELOW THE BASE OF THE EXAMPLE GRP; TO BASEMENT',
+      'PETROLEUM AND NATURAL GAS BELOW THE BASE OF THE EXAMPLE GRP; TO BASEMENT',
+    ];
+    render(
+      <LandPanel
+        pick={{ keys: ['sale:20'], x: 1, y: 1 }}
+        // No land held is loaded: Land today can be switched off.
+        land={{ agreements: new Map(), offsets: new Map(), freehold: new Map() }}
+        sales={{
+          parcels: new Map([
+            [
+              '20',
+              parcel('20', {
+                bonus: '313712.64',
+                tractRights: tracts,
+                restrictions: 'IRZ003501 SHA006701',
+                land: '50904420 50704507 50804501 50704606',
+              }),
+            ],
+          ]),
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+    // The bonus to the nearest dollar, the figure to the cent on pointing at it.
+    expect(screen.getByText('$313,713')).toHaveAttribute('title', '$313,712.64');
+    const held = screen.getByRole('region', { name: 'Held today' });
+    expect(held).toHaveTextContent('Sample Resources Inc.');
+    expect(held).toHaveTextContent('agreement 5326080102');
+    // An entry a tract, as the notice writes it, in place of a clause a line.
+    const rights = screen.getByRole('region', { name: 'Rights' });
+    expect([...rights.querySelectorAll('li')].map((li) => li.textContent)).toEqual(tracts);
+    // The lands in the notice's order (read down the columns), and the township filed under.
+    const lands = screen.getByRole('list', { name: 'Lands' });
+    expect(lands).toHaveClass('columns-2');
+    expect([...lands.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      '20-44-9-W5',
+      '7-45-7-W5',
+      '1-45-8-W5',
+      '6-46-7-W5',
+    ]);
+    expect(screen.getByText('MRT 5-07-045 · Sale Aug 19, 2026')).toBeInTheDocument();
+    // The codes alone under their heading.
+    expect(screen.getByRole('region', { name: 'Restriction codes' })).toHaveTextContent(
+      /^Restriction codesIRZ003501SHA006701$/,
+    );
+  });
+
+  it('shows no holder for a sold parcel whose agreement is not among the land loaded', () => {
+    render(
+      <LandPanel
+        pick={{ keys: ['sale:21'], x: 1, y: 1 }}
+        land={land}
+        sales={{ parcels: new Map([['21', parcel('21', { heldAgreement: null, heldBy: null })]]) }}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Sold/)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Held today' })).not.toBeInTheDocument();
   });
 
   it('shows no buyer, bonus or holder for a parcel not sold', () => {

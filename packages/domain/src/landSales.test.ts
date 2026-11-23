@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   landKeyPart,
+  landKeysTownship,
   landKeyText,
   landKeyTownship,
   parseSaleNotice,
   parseSaleResults,
   placeParcel,
-  saleAgreementTail,
   saleDocumentLinks,
   saleDocumentPath,
   sectionCorners,
@@ -158,6 +158,49 @@ describe('parseSaleNotice', () => {
     );
   });
 
+  it('keeps the rights tract by tract as written, a wording once (F-276)', () => {
+    const line = (substance: string | null, qualifier: string, zone: string, excepting = false) =>
+      `<Line>${excepting ? '<Excepting>EXCEPTING</Excepting>' : ''}${substance ? `<Substance>${substance}</Substance>` : ''}<Qualifier>${qualifier}</Qualifier><ZoneName>${zone}</ZoneName></Line>`;
+    const png = 'PETROLEUM AND NATURAL GAS';
+    const tract = (lines: string) =>
+      `<Tract><LandDescription><Land><LandKey>41203424</LandKey></Land></LandDescription><ZoneDescription>${lines}</ZoneDescription></Tract>`;
+    const deep = line(png, 'BELOW THE BASE OF THE', 'EXAMPLE GRP') + line(null, 'TO', 'BASEMENT');
+    const xml = NOTICE.replace(
+      /<Contract>[\s\S]*?<\/Contract>/,
+      `<Contract><ContractNo>A0001</ContractNo><Hectares>64</Hectares>${tract(
+        // Two intervals in one tract: one entry, a line of the notice a part of it.
+        line(png, 'FROM', 'SURFACE') + line(null, 'TO THE TOP OF THE', 'SAMPLE FM') + deep,
+      )}${tract(deep)}${tract(
+        // The notice leaves an empty line between two substances: not a part.
+        line('NATURAL GAS', 'IN THE', 'SAMPLE FM') + line(null, ' ', ' ') + deep,
+      )}${tract(deep)}${tract(deep + line(png, 'IN THE', 'OTHER FM', true))}</Contract>`,
+    );
+    expect(parseSaleNotice(xml)?.parcels[0]?.tractRights).toEqual([
+      `${png} FROM SURFACE; TO THE TOP OF THE SAMPLE FM; ${png} BELOW THE BASE OF THE EXAMPLE GRP; TO BASEMENT`,
+      `${png} BELOW THE BASE OF THE EXAMPLE GRP; TO BASEMENT`,
+      `NATURAL GAS IN THE SAMPLE FM; ${png} BELOW THE BASE OF THE EXAMPLE GRP; TO BASEMENT`,
+      // What a tract excepts keeps its word.
+      `${png} BELOW THE BASE OF THE EXAMPLE GRP; TO BASEMENT; EXCEPTING ${png} IN THE OTHER FM`,
+    ]);
+  });
+
+  it('keeps as many whole tract wordings as fit (F-276)', () => {
+    const tract = (n: number) =>
+      `<Tract><LandDescription><Land><LandKey>41203424</LandKey></Land></LandDescription><ZoneDescription><Line><Substance>PETROLEUM AND NATURAL GAS</Substance><Qualifier>IN THE</Qualifier><ZoneName>${'EXAMPLE '.repeat(20)}${String(n)} FM</ZoneName></Line></ZoneDescription></Tract>`;
+    const xml = NOTICE.replace(
+      /<Contract>[\s\S]*?<\/Contract>/,
+      `<Contract><ContractNo>A0001</ContractNo><Hectares>64</Hectares>${Array.from(
+        { length: 60 },
+        (_, n) => tract(n),
+      ).join('')}</Contract>`,
+    );
+    const kept = parseSaleNotice(xml)?.parcels[0]?.tractRights ?? [];
+    expect(kept.length).toBeGreaterThan(10);
+    expect(kept.length).toBeLessThan(40);
+    expect(kept.join('').length).toBeLessThanOrEqual(4000);
+    expect(kept.every((wording) => wording.endsWith(' FM'))).toBe(true);
+  });
+
   it('keeps a clause that takes rights away as one, with its codes (F-265)', () => {
     const png = 'PETROLEUM AND NATURAL GAS';
     const xml = NOTICE.replace(
@@ -234,6 +277,7 @@ describe('parseSaleNotice', () => {
           portion: true,
           restrictions: ['SHA009801'],
           reversionZones: ['D00013'],
+          tractRights: ['PETROLEUM AND NATURAL GAS BELOW THE BASE OF THE EXAMPLE FM; TO BASEMENT'],
         },
         {
           contractNo: 'B0018',
@@ -245,6 +289,7 @@ describe('parseSaleNotice', () => {
           portion: false,
           restrictions: [],
           reversionZones: [],
+          tractRights: ['PETROLEUM AND NATURAL GAS IN THE EXAMPLE & SAMPLE FM'],
         },
       ],
     });
@@ -327,10 +372,11 @@ describe('land keys for reading (F-265)', () => {
     expect(landKeyTownship('')).toBeNull();
   });
 
-  it('gives the end of the number of the agreement issued from a sold parcel', () => {
-    expect(saleAgreementTail('2026-08-19', 'B0102')).toBe('26080102');
-    expect(saleAgreementTail('2004-01-07', 'A0010')).toBe('04010010');
-    expect(saleAgreementTail('2026/08/19', 'B0102')).toBeNull();
-    expect(saleAgreementTail('2026-08-19', '0102')).toBeNull();
+  it('names the township a parcel is filed under: the lowest among its lands (F-276)', () => {
+    // Range before township, as the department's results write it: (5-07-045).
+    expect(landKeysTownship(['50904420', '50704507', '50804501', '50704606'])).toBe('5-07-045');
+    expect(landKeysTownship(['50103718NE', 'not a key', '41203424'])).toBe('4-12-034');
+    expect(landKeysTownship(['not a key'])).toBeNull();
+    expect(landKeysTownship([])).toBeNull();
   });
 });

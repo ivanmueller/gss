@@ -1,4 +1,4 @@
-import { landKeyText, landKeyTownship, rightsLines } from '@grain/domain';
+import { landKeysTownship, landKeyText, rightsLines } from '@grain/domain';
 import { useState } from 'react';
 
 import {
@@ -37,7 +37,7 @@ import { Button } from './ui/button';
  * panel; every figure is the province's own.
  */
 
-type Land = Pick<LandState, 'agreements' | 'offsets' | 'freehold' | 'issuedFrom'>;
+type Land = Pick<LandState, 'agreements' | 'offsets' | 'freehold'>;
 type Sales = Pick<LandSalesState, 'parcels'> & Partial<Pick<LandSalesState, 'documents'>>;
 
 /** One piece of land under the pointer or a click. */
@@ -83,6 +83,17 @@ export function landDay(date: string): string {
 /** `67150.00` as `$67,150`, `2296.32` as `$2,296.32`: to the cent only when there are cents. */
 export function saleDollars(text: string): string {
   return saleExact(text.replace(/\.0+$/, ''));
+}
+
+/**
+ * `313712.64` as `$313,713`: to the nearest dollar, as the panel's tile gives a bonus (F-276;
+ * the figure to the cent is its title). Worked out on the digits, never as a float.
+ */
+export function saleWholeDollars(text: string): string {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!m) return saleDollars(text);
+  const up = (m[2] ?? '').charAt(0) >= '5';
+  return `$${(BigInt(m[1] ?? '0') + BigInt(up ? 1 : 0)).toLocaleString('en-CA')}`;
 }
 
 const hectares = (n: number) => `${n.toLocaleString('en-CA', { maximumFractionDigits: 1 })} ha`;
@@ -311,11 +322,21 @@ function entryLines(entry: LandEntry, today: string): { title: string; note: str
   return { title: freeholdTitle(entry.freehold), note: entry.freehold.substances ?? '' };
 }
 
-/** A zone as the province writes it, a clause a line. */
-function Rights({ zone }: { zone: string }) {
+/**
+ * The rights, an entry a line: tract by tract as the sale's notice writes them when the load
+ * kept them (F-276), otherwise the zone as the province writes it, a clause a line.
+ */
+function Rights({
+  zone,
+  tracts,
+}: {
+  zone: string | null;
+  tracts?: readonly string[] | null | undefined;
+}) {
+  const lines = tracts && tracts.length > 0 ? tracts : rightsLines(zone ?? '');
   return (
     <ul className="flex flex-col gap-1.5 text-[0.8125rem] leading-snug">
-      {rightsLines(zone).map((line) => (
+      {lines.map((line) => (
         <li key={line}>{line}</li>
       ))}
     </ul>
@@ -440,8 +461,15 @@ export function LandPanel({
     const kind = saleKind(p);
     const lands = saleLands(p);
     const buyers = saleBuyers(p.buyers);
-    const issued = state === 'sold' ? land.issuedFrom(p.saleDate, p.contractNo) : null;
-    const township = landKeyTownship(p.land.split(/\s+/)[0] ?? '');
+    // The agreement issued from the sale, found by the database: shown whatever land the page
+    // has switched on (F-276).
+    const issued =
+      state === 'sold' && p.heldAgreement
+        ? { agreementNumber: p.heldAgreement, holder: p.heldBy ?? null }
+        : null;
+    // The township the province files the parcel under: the lowest among its lands.
+    const township = landKeysTownship(p.land.split(/\s+/));
+    const hasRights = Boolean(p.zone) || (p.tractRights?.length ?? 0) > 0;
     const documents = sales.documents?.[p.saleDate];
     // The results exist once the sale is held.
     const links = [
@@ -469,7 +497,11 @@ export function LandPanel({
         </PanelBadge>
         <PanelTiles
           tiles={[
-            { label: 'Bonus', value: p.bonus ? saleDollars(p.bonus) : '—' },
+            {
+              label: 'Bonus',
+              value: p.bonus ? saleWholeDollars(p.bonus) : '—',
+              title: p.bonus ? saleDollars(p.bonus) : undefined,
+            },
             {
               label: 'Per hectare',
               value: p.dollarsPerHectare ? `${saleExact(p.dollarsPerHectare)}/ha` : '—',
@@ -505,13 +537,17 @@ export function LandPanel({
             </p>
           </PanelSection>
         )}
-        {p.zone && (
+        {hasRights && (
           <PanelSection title="Rights">
-            <Rights zone={p.zone} />
+            <Rights zone={p.zone} tracts={p.tractRights} />
           </PanelSection>
         )}
         <PanelSection title="Lands" count={lands.length}>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs" aria-label="Lands">
+          {/* Read down the first column, then the second, in the notice's order. */}
+          <ul
+            className="columns-2 gap-x-4 font-mono text-xs [&>li]:mb-1 [&>li]:break-inside-avoid"
+            aria-label="Lands"
+          >
             {lands.map((text, i) => (
               // The same land can be listed twice (two tracts with different rights).
               <li key={`${text}|${String(i)}`}>{text}</li>
@@ -527,9 +563,6 @@ export function LandPanel({
         {restrictions.length > 0 && (
           <PanelSection title="Restriction codes">
             <Codes codes={restrictions} />
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              What each restriction says is in the sale’s notice.
-            </p>
           </PanelSection>
         )}
         {reversionZones.length > 0 && (

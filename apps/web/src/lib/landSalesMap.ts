@@ -54,6 +54,17 @@ export interface LandSaleParcel {
   restrictions?: string | null;
   /** Its deeper rights reversion zone codes, the same way. */
   reversionZones?: string | null;
+  /**
+   * Its rights tract by tract, as the notice writes them, each tract's lines joined by `; `
+   * (F-276); none until loaded.
+   */
+  tractRights?: string[] | null;
+  /**
+   * The agreement the province issued from it and who holds it today (F-276), found by the
+   * database among the land held that is loaded; none when it was not sold or none is loaded.
+   */
+  heldAgreement?: string | null;
+  heldBy?: string | null;
   shape: LandShape;
 }
 

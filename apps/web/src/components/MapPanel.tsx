@@ -102,8 +102,15 @@ export function PanelSection({
   );
 }
 
-/** The figures under the heading, side by side: a small label over each value. */
-export function PanelTiles({ tiles }: { tiles: readonly { label: string; value: string }[] }) {
+/**
+ * The figures under the heading, side by side: a small label over each value. A tile can
+ * carry the figure in full (`title`), shown on pointing at it.
+ */
+export function PanelTiles({
+  tiles,
+}: {
+  tiles: readonly { label: string; value: string; title?: string | undefined }[];
+}) {
   return (
     <dl className="mt-3 grid grid-cols-3 gap-2">
       {tiles.map((tile) => (
@@ -111,7 +118,9 @@ export function PanelTiles({ tiles }: { tiles: readonly { label: string; value: 
           <dt className="truncate text-[0.625rem] font-medium tracking-wider text-muted-foreground uppercase">
             {tile.label}
           </dt>
-          <dd className="mt-0.5 font-mono text-sm font-semibold tabular-nums">{tile.value}</dd>
+          <dd className="mt-0.5 font-mono text-sm font-semibold tabular-nums" title={tile.title}>
+            {tile.value}
+          </dd>
         </div>
       ))}
     </dl>
