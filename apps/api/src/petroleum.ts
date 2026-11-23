@@ -49,6 +49,7 @@ import {
   st37Well3dAnswer,
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
+import { PRICES_SCHEMA_VERSION, pricesAnswer } from './petro-prices';
 import {
   parsePipelineId,
   parsePipelineSquare,
@@ -761,6 +762,35 @@ export function petroleumRoutes(
           requestId: ctx.requestId,
         });
         return keptJson(c, facilitiesAnswer(load, rows));
+      });
+    });
+  });
+
+  // /petroleum/prices: every royalty price of the latest "Load prices" (F-285), the province's
+  // gas, liquids, sulphur and oil par prices by month, in one answer the browser keeps until a
+  // load changes it. Membership first. Public data of the Government of Alberta on its
+  // non-commercial terms (docs/DECISIONS.md, 2026-11-23).
+  routes.get('/prices', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < PRICES_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { load, rows } = await petroleum.prices({
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        });
+        return keptJson(c, pricesAnswer(load, rows));
       });
     });
   });

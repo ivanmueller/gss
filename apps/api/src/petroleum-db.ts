@@ -7,6 +7,7 @@ import { formationQueries, type FormationDatabase } from './formation-db';
 import { landQueries, type LandDatabase } from './land-db';
 import { landSalesQueries, type LandSalesDatabase } from './land-sales-db';
 import { facilityQueries, type FacilitiesDatabase } from './petro-facilities-db';
+import { priceQueries, type PricesDatabase } from './petro-prices-db';
 import { pipelineQueries, type PipelinesDatabase } from './petro-pipelines-db';
 import { productionQueries, type ProductionDatabase } from './production-db';
 import { st37Queries, type St37Database } from './st37-db';
@@ -46,7 +47,8 @@ export interface PetroleumDatabase
     FormationDatabase,
     LandSalesDatabase,
     FacilitiesDatabase,
-    PipelinesDatabase {
+    PipelinesDatabase,
+    PricesDatabase {
   /** The database's schema version (petro.schema_version()). Reads no data. */
   schemaVersion(): Promise<number>;
   /** The organization the database sees for this person: the health check. */
@@ -200,6 +202,7 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
     ...landSalesQueries(sql),
     ...facilityQueries(sql),
     ...pipelineQueries(sql),
+    ...priceQueries(sql),
     async schemaVersion() {
       const [row] = await sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;

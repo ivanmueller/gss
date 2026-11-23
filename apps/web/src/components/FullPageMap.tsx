@@ -25,6 +25,7 @@ import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { useFacilities } from './Facilities';
+import { usePrices } from './Prices';
 import { FacilityPanel, FacilityTip } from './FacilityPanel';
 import { useFormations } from './Formations';
 import { PipelinePanel, PipelineTip } from './PipelinePanel';
@@ -100,6 +101,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const grid = useTownshipGrid(session.organization.id, session.token);
   // The AER's facilities (F-278): their keys answer the pointer and the click as land does.
   const facilities = useFacilities(session.organization.id, session.token);
+  // Alberta's royalty prices (F-285): a section of charts, nothing on the map.
+  const prices = usePrices(session.organization.id, session.token);
   // The AER's pipelines (F-249), square by square: their keys answer after the facilities'.
   const pipelines = usePipelines(session.organization.id, session.token);
   // The segment a click opened, kept as it was: the map may move on past its square.
@@ -418,6 +421,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               onToggle: openOnly('formations'),
               tone,
             })}
+            {prices.section({ open: section === 'prices', onToggle: openOnly('prices') })}
             {/* What the card shows and where it comes from, out of the way until asked for.
                 The sources stay here: their terms ask that they be named. */}
             <details className="mt-auto border-t px-4 py-3 text-xs text-muted-foreground">
@@ -434,6 +438,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {rigs.about()}
                 {formations.about()}
                 {grid.about()}
+                {prices.about()}
               </div>
             </details>
           </aside>
@@ -538,10 +543,12 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   );
 }
 
-type SideSection = 'sales' | 'land' | 'facilities' | 'pipelines' | 'rigs' | 'wells' | 'formations';
+type SideSection =
+  'sales' | 'land' | 'facilities' | 'pipelines' | 'rigs' | 'wells' | 'formations' | 'prices';
 
 /** The sections' legends in order: the open one first, the rest as the card lists them. */
 export function sideOrder(open: SideSection | null): SideSection[] {
+  // Prices draws nothing on the map, so it has no legend: never among them.
   const all: SideSection[] = [
     'sales',
     'land',
@@ -551,7 +558,9 @@ export function sideOrder(open: SideSection | null): SideSection[] {
     'wells',
     'formations',
   ];
-  return open === null ? all : [open, ...all.filter((name) => name !== open)];
+  return open === null || !all.includes(open)
+    ? all
+    : [open, ...all.filter((name) => name !== open)];
 }
 
 /** Whether the card starts folded: on a screen too narrow to show it beside the map. */
