@@ -24,6 +24,8 @@ import {
 import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
+import { useFacilities } from './Facilities';
+import { FacilityPanel, FacilityTip } from './FacilityPanel';
 import { useLand, type LandPick } from './Land';
 import { LandPanel, LandTip } from './LandPanel';
 import { saleDay, useLandSales } from './LandSales';
@@ -91,11 +93,19 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const sales = useLandSales(session.organization.id, session.token);
   // The township grid (F-240, F-271): on by default, its switch in the legend.
   const grid = useTownshipGrid(session.organization.id, session.token);
+  // The AER's facilities (F-278): their keys answer the pointer and the click as land does.
+  const facilities = useFacilities(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {
     setLandPick(pick);
     land.setPicked(pick?.keys ?? []);
     sales.setPicked(pick?.keys ?? []);
+    facilities.setPicked(pick?.keys.slice(0, 1) ?? []);
   };
+  // A click whose topmost shape is a facility opens the facility's panel; else the land's.
+  const facilityPicked =
+    landPick?.keys[0]?.startsWith('facility:') === true
+      ? (facilities.byKey.get(landPick.keys[0]) ?? null)
+      : null;
   // The land under the pointer, where no well is: a box at the pointer, and its outline.
   const [landHover, setLandHover] = useState<string | null>(null);
   const hoverShape = useMemo(() => {
@@ -125,7 +135,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     setSection((before) => (before === name ? null : name));
   };
   const updated =
-    [wells.updated, land.updated, sales.updated]
+    [wells.updated, land.updated, sales.updated, facilities.updated]
       .filter((at): at is string => at !== null)
       .sort()
       .at(-1) ?? null;
@@ -145,7 +155,14 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
 
   const legends = sideOrder(section).map((name) => ({
     name,
-    node: name === 'sales' ? sales.legend() : name === 'land' ? land.legend() : wells.legend(tone),
+    node:
+      name === 'sales'
+        ? sales.legend()
+        : name === 'land'
+          ? land.legend()
+          : name === 'facilities'
+            ? facilities.legend()
+            : wells.legend(tone),
   }));
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
@@ -172,12 +189,15 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           land={land.view}
           landSales={sales.view}
           grid={grid.view}
+          facilities={facilities.view}
           onLandClick={pickLand}
           onLandHover={setLandHover}
           landHover={hoverShape}
           hoverBox={
             hover ? (
               <St37Tip hover={hover} byUwi={wells.byUwi} legsOf={wells.legsOf} />
+            ) : landHover?.startsWith('facility:') ? (
+              <FacilityTip facility={facilities.byKey.get(landHover) ?? null} />
             ) : (
               <LandTip landKey={landHover} land={land} sales={sales} />
             )
@@ -189,6 +209,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             land.onViewChange(bbox, zoom);
             sales.onViewChange(bbox, zoom);
             grid.onViewChange(bbox, zoom);
+            facilities.onViewChange(bbox, zoom);
           }}
           onOverlayClick={layers.setPicked}
           onLayersStale={layers.onStale}
@@ -326,6 +347,10 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             </div>
             {sales.section({ open: section === 'sales', onToggle: openOnly('sales'), goTo })}
             {land.section({ open: section === 'land', onToggle: openOnly('land') })}
+            {facilities.section({
+              open: section === 'facilities',
+              onToggle: openOnly('facilities'),
+            })}
             {wells.section({
               open: section === 'wells',
               onToggle: openOnly('wells'),
@@ -343,6 +368,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {sales.about()}
                 {land.about()}
                 {wells.about()}
+                {facilities.about()}
                 {grid.about()}
               </div>
             </details>
@@ -354,9 +380,17 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       <LandPanel
         // A panel of its own for each click: it starts on the first piece of land under it.
         key={landPick ? `land:${landPick.keys.join(',')}` : 'land'}
-        pick={kept ? null : landPick}
+        pick={kept || facilityPicked ? null : landPick}
         land={land}
         sales={sales}
+        goTo={goTo}
+        onClose={() => {
+          pickLand(null);
+        }}
+      />
+      <FacilityPanel
+        facility={kept ? null : facilityPicked}
+        fileDate={facilities.fileDate}
         goTo={goTo}
         onClose={() => {
           pickLand(null);
@@ -420,11 +454,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   );
 }
 
-type SideSection = 'sales' | 'land' | 'wells';
+type SideSection = 'sales' | 'land' | 'facilities' | 'wells';
 
 /** The sections' legends in order: the open one first, the rest as the card lists them. */
 export function sideOrder(open: SideSection | null): SideSection[] {
-  const all: SideSection[] = ['sales', 'land', 'wells'];
+  const all: SideSection[] = ['sales', 'land', 'facilities', 'wells'];
   return open === null ? all : [open, ...all.filter((name) => name !== open)];
 }
 

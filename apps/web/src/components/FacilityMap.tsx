@@ -26,6 +26,12 @@ import {
   type LandShape,
   type LandView,
 } from '../lib/landMap';
+import {
+  FACILITY_PICKABLE,
+  placeFacilities,
+  syncFacilities,
+  type FacilitiesView,
+} from '../lib/facilitiesMap';
 import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
 import {
@@ -141,6 +147,11 @@ export interface FacilityMapProps {
   landSales?: LandSalesView | null;
   /** The township grid (F-240, F-271), over the land and under the wells. */
   grid?: GridView | null;
+  /**
+   * The AER's facilities (F-278), over the land and the grid, under the wells. Their keys
+   * ("facility:ID") answer the pointer and the click as land does, before it.
+   */
+  facilities?: FacilitiesView | null;
   /**
    * The land clicked, by its keys, with where the click is in the map's box; null for a click
    * on none, or on a well (the well's card comes first).
@@ -646,6 +657,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         latest.current.landHover ?? null,
         st37Tone(latest.current.basemap, latest.current.theme),
       );
+      syncFacilities(
+        instance,
+        latest.current.facilities ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       syncGrid(
         instance,
         latest.current.grid ?? null,
@@ -688,7 +705,9 @@ export default function FacilityMap(props: FacilityMapProps) {
     };
     // The land under the pointer, when no well is: the topmost shape, a sale parcel first.
     const landAt = (point: mapboxgl.Point): string | null => {
-      const layers = [...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) => instance.getLayer(id));
+      const layers = [...FACILITY_PICKABLE, ...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) =>
+        instance.getLayer(id),
+      );
       if (layers.length === 0) return null;
       for (const feature of instance.queryRenderedFeatures(point, { layers })) {
         const key: unknown = feature.properties?.key;
@@ -773,8 +792,10 @@ export default function FacilityMap(props: FacilityMapProps) {
       // Land under the click, when no well is: every shape there, agreements first (F-241).
       const onLand = latest.current.onLandClick;
       if (!onLand) return;
-      // Sale parcels first: they are drawn over the land held.
-      const layers = [...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) => instance.getLayer(id));
+      // Facilities first, then sale parcels: each is drawn over what follows it.
+      const layers = [...FACILITY_PICKABLE, ...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) =>
+        instance.getLayer(id),
+      );
       const keys = new Set<string>();
       if (!found && layers.length > 0) {
         for (const feature of instance.queryRenderedFeatures(event.point, { layers })) {
@@ -945,6 +966,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the wells as they are then.
     if (instance && styleReady.current) {
       syncSt37(instance, st37 ?? null, st37Tone(basemap, theme), PINS);
+      placeFacilities(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [st37, basemap, theme]);
@@ -955,6 +977,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the parcels as they are then.
     if (instance && styleReady.current) {
       syncLandSales(instance, landSales ?? null, st37Tone(basemap, theme), PINS);
+      placeFacilities(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [landSales, basemap, theme]);
@@ -973,9 +996,20 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the land as it is then.
     if (instance && styleReady.current) {
       syncLand(instance, land ?? null, st37Tone(basemap, theme), PINS);
+      placeFacilities(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [land, basemap, theme]);
+
+  const { facilities } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the facilities as they are then.
+    if (instance && styleReady.current) {
+      syncFacilities(instance, facilities ?? null, st37Tone(basemap, theme), PINS);
+      placeGrid(instance, PINS);
+    }
+  }, [facilities, basemap, theme]);
 
   const { grid } = props;
   useEffect(() => {

@@ -38,3 +38,4 @@ export * from './land';
 export * from './landSales';
 export * from './landRights';
 export * from './townshipGrid';
+export * from './facilities';
