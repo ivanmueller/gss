@@ -52,6 +52,8 @@ export function fakePetroleum() {
     aerStoreLicenceLocations: vi.fn<PetroleumDatabase['aerStoreLicenceLocations']>(() =>
       Promise.resolve(),
     ),
+    aerTargetsToFind: vi.fn<PetroleumDatabase['aerTargetsToFind']>(() => Promise.resolve([])),
+    aerStoreTargets: vi.fn<PetroleumDatabase['aerStoreTargets']>(() => Promise.resolve()),
     databaseSize: vi.fn<PetroleumDatabase['databaseSize']>(() => Promise.resolve(20_000_000)),
     latestWellLoad: vi.fn<PetroleumDatabase['latestWellLoad']>(() => Promise.resolve(null)),
     lastDoneWellLoad: vi.fn<PetroleumDatabase['lastDoneWellLoad']>(() => Promise.resolve(null)),

@@ -3,7 +3,7 @@ import { albertaDay } from '@grain/domain';
 import type { MapBounds } from '../lib/mapbox';
 import { RIG_COLOUR } from '../lib/rigsMap';
 import { MapPanel, MapTip, PanelBadge, PanelSection, PanelTiles, TipHead } from './MapPanel';
-import { daysAgo, rigStarted, type RigMove } from './Rigs';
+import { daysAgo, rigStarted, targetName, type RigMove } from './Rigs';
 import { Button } from './ui/button';
 
 // A rig on the oil and gas map (F-282): the box at the pointer, and the panel on the right when it
@@ -25,6 +25,9 @@ export function RigTip({ move, now = new Date() }: { move: RigMove | null; now?:
     <MapTip>
       <TipHead title={rigName(move)} aside={move.now ? 'now' : since(move, now)} />
       <p className="mt-0.5 truncate font-medium">{move.wellName}</p>
+      <p className="truncate text-xs">
+        Drilling for {targetName(move.targetZone) ?? 'a zone not known yet'}
+      </p>
       <p className="truncate text-xs text-muted-foreground">
         {move.activityType} · {since(move, now)}
       </p>
@@ -83,6 +86,14 @@ export function RigPanel({
           </Button>
         </div>
       )}
+      <PanelSection title="Drilling for">
+        <p className="font-medium">{targetName(m.targetZone) ?? 'Not known yet'}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {m.targetZone
+            ? `The zone its well licence targets (the AER’s terminating zone, “${m.targetZone}”).`
+            : 'The zone its well licence targets is looked up in the AER’s licence lists twice a day.'}
+        </p>
+      </PanelSection>
       <PanelSection title="Well">
         <p className="font-medium">{m.wellName}</p>
         <p className="mt-0.5 font-mono text-xs text-muted-foreground">{m.wellId}</p>

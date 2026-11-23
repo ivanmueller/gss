@@ -7,7 +7,7 @@ import {
   licencesAnswer,
   periodStart,
   RIG_DAYS,
-  RIGS_SCHEMA_VERSION,
+  RIG_TARGETS_SCHEMA_VERSION,
   rigsAnswer,
 } from './aer-lists';
 import type { Membership } from './db';
@@ -495,8 +495,8 @@ export function petroleumRoutes(
           const { rows, dates } = await petroleum.aerLicences(who, since);
           return c.json(licencesAnswer(rows, dates, days));
         }
-        // The rigs' places need the licences' locations (F-282).
-        if ((await petroleum.schemaVersion()) < RIGS_SCHEMA_VERSION) {
+        // The rigs need the licences' locations (F-282) and targets (F-283).
+        if ((await petroleum.schemaVersion()) < RIG_TARGETS_SCHEMA_VERSION) {
           return apiError(
             c,
             503,

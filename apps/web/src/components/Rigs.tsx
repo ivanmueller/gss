@@ -27,6 +27,8 @@ interface Served {
   listDate: string;
   surfaceLocation: string | null;
   place: 'well' | 'lsd' | null;
+  /** The licence's terminating zone as ST1 writes it ('SPIRIT RIVER FM'); null when unknown. */
+  targetZone: string | null;
 }
 interface Answer {
   source: { latestListDate: string | null; lastSeenAt: string | null };
@@ -468,6 +470,39 @@ export function useRigs(organizationId: string, token: string): Rigs {
     legend,
     about,
   };
+}
+
+/** The AER's short words in a zone's name, written out. */
+const ZONE_WORDS: Record<string, string> = {
+  FM: 'Formation',
+  MBR: 'Member',
+  GRP: 'Group',
+  SS: 'Sandstone',
+  SD: 'Sand',
+  LS: 'Limestone',
+  ZN: 'Zone',
+};
+
+/**
+ * What a rig is drilling for, readable (F-283): 'SPIRIT RIVER FM' → 'Spirit River Formation',
+ * 'MCMURRAY FM' → 'McMurray Formation'; null when the zone is not known.
+ */
+export function targetName(zone: string | null): string | null {
+  if (zone === null || zone.trim() === '') return null;
+  return zone
+    .trim()
+    .split(/\s+/)
+    .map((word) => {
+      const upper = word.toUpperCase();
+      const full = ZONE_WORDS[upper];
+      if (full) return full;
+      const lower = word.toLowerCase();
+      if (lower.startsWith('mc') && lower.length > 2) {
+        return `Mc${lower.charAt(2).toUpperCase()}${lower.slice(3)}`;
+      }
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(' ');
 }
 
 /** A move's start, in Alberta time. */
