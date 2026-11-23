@@ -523,7 +523,7 @@ async function readLimited(res: Response, maxBytes: number): Promise<ArrayBuffer
  * Redirects are refused, never followed: only the stored, checked address is ever fetched
  * (Codex's review of 11c467e). A failure while the body arrives is the service's failure too.
  */
-async function fetchService(
+export async function fetchService(
   url: string,
   accept: RegExp,
   maxBytes: number,
