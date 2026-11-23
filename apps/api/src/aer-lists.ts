@@ -47,7 +47,7 @@ const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
  * The hourly trigger (apps/api/wrangler.jsonc): the AER's lists alone, so rigs are placed within
  * the hour (F-282). The twice-daily trigger runs them too, beside the Bank of Canada rate.
  */
-export const AER_CRON = '45 * * * *';
+export const AER_CRON = '30 * * * *';
 
 /** The 14 fixed addresses (final ones: www.aer.ca/data/… answers with a page that points here). */
 export const AER_SOURCES: readonly { report: AerReport; url: string }[] = [

@@ -51,7 +51,7 @@ describe('the hourly trigger (F-282)', () => {
     }
     const waits: Promise<unknown>[] = [];
     worker.scheduled(
-      { cron: '45 * * * *', scheduledTime: Date.now(), noRetry: () => undefined },
+      { cron: '30 * * * *', scheduledTime: Date.now(), noRetry: () => undefined },
       ENV,
       {
         waitUntil: (p: Promise<unknown>) => waits.push(p),
