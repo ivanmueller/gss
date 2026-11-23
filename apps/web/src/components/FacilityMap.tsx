@@ -34,6 +34,12 @@ import {
 } from '../lib/facilitiesMap';
 import { EDGE_LABELS_FROM, gridEdgeLabels, type GridTownship } from '../lib/gridEdges';
 import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
+import {
+  PIPELINE_PICKABLE,
+  placePipelines,
+  syncPipelines,
+  type PipelinesView,
+} from '../lib/pipelinesMap';
 import { SALE_PICKABLE, syncLandSales, type LandSalesView } from '../lib/landSalesMap';
 import {
   highlightSt37,
@@ -157,6 +163,11 @@ export interface FacilityMapProps {
    * ("facility:ID") answer the pointer and the click as land does, before it.
    */
   facilities?: FacilitiesView | null;
+  /**
+   * The AER's pipelines (F-249), over the grid, under the facilities. Their keys
+   * ("pipeline:ID") answer the pointer and the click after the facilities', before the land's.
+   */
+  pipelines?: PipelinesView | null;
   /**
    * Each township's numbers and box (F-271): the ranges along the map's top and the townships
    * down its right side, from EDGE_LABELS_FROM in; null for none.
@@ -678,6 +689,7 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncPipelines(instance, latest.current.pipelines ?? null, PINS);
       syncGrid(
         instance,
         latest.current.grid ?? null,
@@ -718,11 +730,15 @@ export default function FacilityMap(props: FacilityMapProps) {
       }
       return { uwis: [...uwis], licence, leg };
     };
-    // The land under the pointer, when no well is: the topmost shape, a sale parcel first.
+    // The land under the pointer, when no well is: the topmost shape, a facility first, then a
+    // pipeline, then a sale parcel.
     const landAt = (point: mapboxgl.Point): string | null => {
-      const layers = [...FACILITY_PICKABLE, ...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) =>
-        instance.getLayer(id),
-      );
+      const layers = [
+        ...FACILITY_PICKABLE,
+        ...PIPELINE_PICKABLE,
+        ...SALE_PICKABLE,
+        ...LAND_PICKABLE,
+      ].filter((id) => instance.getLayer(id));
       if (layers.length === 0) return null;
       for (const feature of instance.queryRenderedFeatures(point, { layers })) {
         const key: unknown = feature.properties?.key;
@@ -807,10 +823,13 @@ export default function FacilityMap(props: FacilityMapProps) {
       // Land under the click, when no well is: every shape there, agreements first (F-241).
       const onLand = latest.current.onLandClick;
       if (!onLand) return;
-      // Facilities first, then sale parcels: each is drawn over what follows it.
-      const layers = [...FACILITY_PICKABLE, ...SALE_PICKABLE, ...LAND_PICKABLE].filter((id) =>
-        instance.getLayer(id),
-      );
+      // Facilities first, then pipelines, then sale parcels: each is drawn over what follows it.
+      const layers = [
+        ...FACILITY_PICKABLE,
+        ...PIPELINE_PICKABLE,
+        ...SALE_PICKABLE,
+        ...LAND_PICKABLE,
+      ].filter((id) => instance.getLayer(id));
       const keys = new Set<string>();
       if (!found && layers.length > 0) {
         for (const feature of instance.queryRenderedFeatures(event.point, { layers })) {
@@ -1048,6 +1067,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && styleReady.current) {
       syncSt37(instance, st37 ?? null, st37Tone(basemap, theme), PINS);
       placeFacilities(instance, PINS);
+      placePipelines(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [st37, basemap, theme]);
@@ -1059,6 +1079,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && styleReady.current) {
       syncLandSales(instance, landSales ?? null, st37Tone(basemap, theme), PINS);
       placeFacilities(instance, PINS);
+      placePipelines(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [landSales, basemap, theme]);
@@ -1078,6 +1099,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     if (instance && styleReady.current) {
       syncLand(instance, land ?? null, st37Tone(basemap, theme), PINS);
       placeFacilities(instance, PINS);
+      placePipelines(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [land, basemap, theme]);
@@ -1093,9 +1115,20 @@ export default function FacilityMap(props: FacilityMapProps) {
     // Before the style is ready, its 'style.load' draws the facilities as they are then.
     if (instance && styleReady.current) {
       syncFacilities(instance, facilities ?? null, st37Tone(basemap, theme), PINS);
+      placePipelines(instance, PINS);
       placeGrid(instance, PINS);
     }
   }, [facilities, basemap, theme]);
+
+  const { pipelines } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the pipelines as they are then.
+    if (instance && styleReady.current) {
+      syncPipelines(instance, pipelines ?? null, PINS);
+      placeGrid(instance, PINS);
+    }
+  }, [pipelines]);
 
   const { grid } = props;
   useEffect(() => {
