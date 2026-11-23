@@ -67,13 +67,14 @@ export interface PipelineLoad {
 
 export interface PipelinesDatabase {
   /**
-   * Members: the latest load and, of its segments whose box touches `box` and whose outside
-   * diameter is `minDiameterMm` or more (any, when 0), at most `limit`, the largest first.
+   * Members: the latest load and, of its segments whose box touches `box`, those whose outside
+   * diameter is `minDiameterMm` or more or whose length is `minLengthKm` or more (each test
+   * left out when 0; every segment when both are), at most `limit`, the largest first.
    */
   pipelineSquare(
     ctx: PetroleumContext,
     box: Bbox,
-    minDiameterMm: number,
+    sizes: { minDiameterMm: number; minLengthKm: number },
     limit: number,
   ): Promise<{ load: PipelineLoad | null; rows: PipelineLineRow[] }>;
   /** Members: one segment by its row id, every column; null when there is none. */
@@ -90,7 +91,7 @@ async function readAs(tx: postgres.TransactionSql, ctx: PetroleumContext) {
 
 export function pipelineQueries(sql: postgres.Sql): PipelinesDatabase {
   return {
-    pipelineSquare(ctx, box, minDiameterMm, limit) {
+    pipelineSquare(ctx, box, { minDiameterMm, minLengthKm }, limit) {
       return sql.begin(async (tx) => {
         await readAs(tx, ctx);
         const [load] = await tx<
@@ -113,7 +114,9 @@ export function pipelineQueries(sql: postgres.Sql): PipelinesDatabase {
                  to_jsonb(path) as path, to_jsonb(breaks) as breaks
           from petro.pipelines
           where bounds && box(point(${box.west}, ${box.south}), point(${box.east}, ${box.north}))
-            and (${minDiameterMm}::numeric = 0 or diameter_mm >= ${minDiameterMm}::numeric)
+            and ((${minDiameterMm}::numeric = 0 and ${minLengthKm}::numeric = 0)
+                 or (${minDiameterMm}::numeric > 0 and diameter_mm >= ${minDiameterMm}::numeric)
+                 or (${minLengthKm}::numeric > 0 and length_km >= ${minLengthKm}::numeric))
           order by diameter_mm desc nulls last, id
           limit ${limit}`;
         return {

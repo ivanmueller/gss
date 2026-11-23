@@ -57,7 +57,8 @@ describe('pipelines as petro_api', () => {
         returning id::text as id`;
       load = row?.id;
 
-      const all = await db.pipelineSquare(member(), CORNER, 0, 100);
+      const every = { minDiameterMm: 0, minLengthKm: 0 };
+      const all = await db.pipelineSquare(member(), CORNER, every, 100);
       expect(all.load).toMatchObject({
         fileDate: '2026-11-22',
         area: { west: -120, south: 59.4, east: -119.3, north: 60 },
@@ -81,12 +82,18 @@ describe('pipelines as petro_api', () => {
         expect.objectContaining({ licence_number: 'ZZ2', substance: 'Salt Water', breaks: [2] }),
       ]);
 
-      const large = await db.pipelineSquare(member(), CORNER, 219.1, 100);
-      expect(
-        large.rows.filter((r) => r.licence_number.startsWith('ZZ')).map((r) => r.licence_number),
-      ).toEqual(['ZZ1']);
+      const ourLines = async (sizes: { minDiameterMm: number; minLengthKm: number }) =>
+        (await db.pipelineSquare(member(), CORNER, sizes, 100)).rows
+          .filter((r) => r.licence_number.startsWith('ZZ'))
+          .map((r) => r.licence_number);
+      // Large enough, long enough, or either: a size of 0 asks nothing of that measure.
+      expect(await ourLines({ minDiameterMm: 219.1, minLengthKm: 0 })).toEqual(['ZZ1']);
+      expect(await ourLines({ minDiameterMm: 0, minLengthKm: 5 })).toEqual(['ZZ1']);
+      expect(await ourLines({ minDiameterMm: 600, minLengthKm: 5 })).toEqual(['ZZ1']);
+      expect(await ourLines({ minDiameterMm: 80, minLengthKm: 50 })).toEqual(['ZZ1', 'ZZ2']);
+      expect(await ourLines({ minDiameterMm: 600, minLengthKm: 50 })).toEqual([]);
 
-      const one = await db.pipelineSquare(member(), CORNER, 0, 1);
+      const one = await db.pipelineSquare(member(), CORNER, every, 1);
       expect(one.rows).toHaveLength(1);
 
       const segment = await db.pipelineSegment(member(), ours[0]?.id ?? '0');

@@ -72,7 +72,7 @@ export function pipelineSquareBox(tile: Tile) {
 
 /**
  * Builds a square's answer: each status, substance and company written once and pointed to; at
- * the large lines' level each line thinned further, as the map draws them from farther out.
+ * the levels drawn from farther out each line thinned further (PIPELINE_LEVELS).
  */
 export function pipelineSquareAnswer(
   level: PipelineLevel,

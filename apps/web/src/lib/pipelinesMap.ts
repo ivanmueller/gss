@@ -54,39 +54,48 @@ export const PIPELINE_LAYERS = {
 /** The layer a pointer finds a segment on: wider than the line, unseen. */
 export const PIPELINE_PICKABLE = [PIPELINE_LAYERS.hit];
 
-/** The zoom the large lines are drawn from: the second scroll after the bar reads 30 km. */
-export const PIPELINES_FROM = 7.8;
-
 const diameter: ExpressionSpecification = ['get', 'diameter'];
-/** Wider for a larger pipe, and wider close in. */
-const WIDTH: ExpressionSpecification = [
-  'interpolate',
-  ['linear'],
-  ['zoom'],
-  PIPELINES_FROM,
-  ['case', ['>=', diameter, 508], 2, ['>=', diameter, 219.1], 1.2, 0.6],
-  12,
-  [
-    'case',
-    ['>=', diameter, 508],
-    3.5,
-    ['>=', diameter, 219.1],
-    2.2,
-    ['>=', diameter, 114.3],
-    1.4,
-    1,
-  ],
-  16,
-  ['case', ['>=', diameter, 508], 6, ['>=', diameter, 219.1], 4, ['>=', diameter, 114.3], 2.6, 1.8],
+
+/**
+ * A line's width in pixels at each zoom, by its pipe: 20-inch and up, 8-inch and up, 4-inch and
+ * up, smaller or not given. Thin hairlines far out, growing steadily as the map comes closer
+ * (the owner, 2026-11-22: "dynamic in their sizing to accommodate for the zoom levels").
+ */
+export const PIPELINE_WIDTHS: readonly [zoom: number, widths: readonly number[]][] = [
+  [4, [1, 0.7, 0.5, 0.4]],
+  [8, [2.2, 1.5, 1, 0.7]],
+  [11, [3.2, 2.3, 1.6, 1.1]],
+  [14, [5, 3.6, 2.6, 1.9]],
+  [18, [10, 7, 5, 3.5]],
 ];
-/** Fades in over a scroll, then each line at its status's strength. */
+
+/** The width expression, `extra` pixels wider than the line (the picked line is drawn bolder). */
+function widthBy(extra = 0): ExpressionSpecification {
+  const stops = PIPELINE_WIDTHS.flatMap(([zoom, [huge = 1, large = 1, middle = 1, small = 1]]) => [
+    zoom,
+    [
+      'case',
+      ['>=', diameter, 508],
+      huge + extra,
+      ['>=', diameter, 219.1],
+      large + extra,
+      ['>=', diameter, 114.3],
+      middle + extra,
+      small + extra,
+    ] as ExpressionSpecification,
+  ]);
+  return ['interpolate', ['exponential', 1.3], ['zoom'], ...stops];
+}
+const WIDTH = widthBy();
+
+/** Each line at its status's strength; a little lighter far out, where lines crowd. */
 const OPACITY: ExpressionSpecification = [
   'interpolate',
   ['linear'],
   ['zoom'],
-  PIPELINES_FROM,
-  0,
-  PIPELINES_FROM + 0.3,
+  5,
+  ['*', 0.7, ['get', 'strength']],
+  10,
   ['*', 0.85, ['get', 'strength']],
 ];
 
@@ -131,9 +140,9 @@ export function syncPipelines(map: MapboxMap, view: PipelinesView | null, before
 
   if (!map.getLayer(PIPELINE_LAYERS.lines)) {
     const anchor = anchorOf(map, beforeId);
+    // No lowest zoom: some lines are drawn at every zoom (PIPELINE_LEVELS).
     const common = {
       source: SOURCE,
-      minzoom: PIPELINES_FROM,
       layout: { 'line-join': 'round', 'line-cap': 'round' },
     } as const;
     map.addLayer(
@@ -180,7 +189,7 @@ export function syncPipelines(map: MapboxMap, view: PipelinesView | null, before
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': ['get', 'colour'],
-          'line-width': ['+', 3, ['/', diameter, 150]],
+          'line-width': widthBy(2.5),
           'line-opacity': 1,
         },
       },

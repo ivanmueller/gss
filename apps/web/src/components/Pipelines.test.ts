@@ -5,6 +5,7 @@ import {
   PipelineLoader,
   pipelineEntries,
   pipelineFeatures,
+  pipelineLevelNote,
   pipelineSquaresFor,
   pipelinesInSquares,
   pipelinesShown,
@@ -90,16 +91,27 @@ describe('pipelinesShown', () => {
 describe('pipelineSquaresFor', () => {
   const FOX_CREEK = { west: -117.2, south: 54.3, east: -116.6, north: 54.5 };
 
-  it('asks for nothing far out, the large lines farther out and every line close in', () => {
-    expect(pipelineSquaresFor(FOX_CREEK, 7, null)).toEqual([]);
-    // The view straddles the edge between two large squares, at 116.72° west.
-    expect(pipelineSquaresFor(FOX_CREEK, 8, null)).toEqual([
-      { level: 'main', tile: { z: 8, x: 44, y: 81 } },
-      { level: 'main', tile: { z: 8, x: 45, y: 81 } },
+  it('asks for some lines at every zoom, in smaller squares closer in', () => {
+    expect(pipelineSquaresFor(FOX_CREEK, 3, null)).toEqual([
+      { level: 'far', tile: { z: 6, x: 11, y: 20 } },
     ]);
-    const close = pipelineSquaresFor(FOX_CREEK, 10.5, null);
+    // The view straddles the edge between two squares, at 116.72° west.
+    expect(pipelineSquaresFor(FOX_CREEK, 8, null)).toEqual([
+      { level: 'mid', tile: { z: 8, x: 44, y: 81 } },
+      { level: 'mid', tile: { z: 8, x: 45, y: 81 } },
+    ]);
+    const near = pipelineSquaresFor(FOX_CREEK, 10, null);
+    expect(near.every((s) => s.level === 'near' && s.tile.z === 9)).toBe(true);
+    const close = pipelineSquaresFor(FOX_CREEK, 11.5, null);
     expect(close.every((s) => s.level === 'all' && s.tile.z === 10)).toBe(true);
     expect(close.length).toBeGreaterThan(1);
+  });
+
+  it('says what a level leaves out', () => {
+    expect(pipelineLevelNote('far')).toContain('8-inch pipe and up or 5 km and longer');
+    expect(pipelineLevelNote('mid')).toContain('6-inch pipe and up or 2 km and longer');
+    expect(pipelineLevelNote('near')).toBe('');
+    expect(pipelineLevelNote('all')).toBe('');
   });
 
   it('asks only within the area loaded, once it is known', () => {
@@ -110,6 +122,24 @@ describe('pipelineSquaresFor', () => {
     expect(pipelineSquaresFor(FOX_CREEK, 10.5, area)).toEqual(
       pipelineSquaresFor(FOX_CREEK, 10.5, null),
     );
+  });
+});
+
+describe('pipelinesInSquares while squares come', () => {
+  it('draws the lines of a farther level over the same ground until the closer squares come', () => {
+    const entries = pipelineEntries(ANSWER);
+    const far = { load: ANSWER.load, truncated: false, entries: entries.slice(0, 1) };
+    const close = { load: ANSWER.load, truncated: false, entries: entries.slice(1) };
+    // The far square of Fox Creek holds the close square 10/178/327; 10/200/327 lies elsewhere.
+    const squares = new Map([['6/11/20', far]]);
+    const needed = [{ level: 'all' as const, tile: { z: 10, x: 178, y: 327 } }];
+    expect(pipelinesInSquares(needed, squares).map((p) => p.id)).toEqual([1]);
+    // Once it has come, only its own lines.
+    squares.set('10/178/327', close);
+    expect(pipelinesInSquares(needed, squares).map((p) => p.id)).toEqual([2, 3]);
+    // A kept square elsewhere stands in for nothing.
+    const elsewhere = new Map([['6/14/20', far]]);
+    expect(pipelinesInSquares(needed, elsewhere)).toEqual([]);
   });
 });
 

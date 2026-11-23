@@ -327,14 +327,19 @@ describe('shapefileLines and dbaseTable', () => {
 });
 
 describe('pipeline levels', () => {
-  it('asks for the large lines from about the 10 km bar and every line from about 2 km', () => {
-    expect(pipelineLevelAt(7)).toBeNull();
-    expect(pipelineLevelAt(7.8)).toBe('main');
-    expect(pipelineLevelAt(9.9)).toBe('main');
-    expect(pipelineLevelAt(10)).toBe('all');
-    expect(pipelineLevelAt(15)).toBe('all');
-    expect(pipelineLevelOfSquare({ z: 8, x: 44, y: 81 })).toBe('main');
+  it('asks for some lines at every zoom, more of them closer in', () => {
+    expect(pipelineLevelAt(0)).toBe('far');
+    expect(pipelineLevelAt(7.7)).toBe('far');
+    expect(pipelineLevelAt(7.8)).toBe('mid');
+    expect(pipelineLevelAt(9.4)).toBe('mid');
+    expect(pipelineLevelAt(9.5)).toBe('near');
+    expect(pipelineLevelAt(10.9)).toBe('near');
+    expect(pipelineLevelAt(11)).toBe('all');
+    expect(pipelineLevelAt(18)).toBe('all');
+    expect(pipelineLevelOfSquare({ z: 6, x: 11, y: 20 })).toBe('far');
+    expect(pipelineLevelOfSquare({ z: 8, x: 44, y: 81 })).toBe('mid');
+    expect(pipelineLevelOfSquare({ z: 9, x: 89, y: 163 })).toBe('near');
     expect(pipelineLevelOfSquare({ z: 10, x: 178, y: 327 })).toBe('all');
-    expect(pipelineLevelOfSquare({ z: 9, x: 89, y: 163 })).toBeNull();
+    expect(pipelineLevelOfSquare({ z: 7, x: 22, y: 40 })).toBeNull();
   });
 });
