@@ -92,10 +92,18 @@ jobs:
       - name: Read the province's map services
         run: |
           mkdir -p "$RUNNER_TEMP/land"
-          for layer in png_agreements oil_sands_agreements offset_notices freehold; do
+          for layer in png_agreements oil_sands_agreements freehold; do
             node --experimental-strip-types scripts/load-land.js fetch "$layer" \
               "$WEST" "$SOUTH" "$EAST" "$NORTH" "$RUNNER_TEMP/land/$layer.ndjson"
           done
+          # Offset notices are on a server of the province's that can be down while the others
+          # answer (2026-11-22). Without them the stored offset notices are kept as they are and
+          # the rest is loaded; the loader keeps them when their file is missing.
+          if ! node --experimental-strip-types scripts/load-land.js fetch offset_notices \
+            "$WEST" "$SOUTH" "$EAST" "$NORTH" "$RUNNER_TEMP/land/offset_notices.ndjson"; then
+            rm -f "$RUNNER_TEMP/land/offset_notices.ndjson"
+            echo "::warning::The province's offset notices service did not answer: the offset notices already stored are kept as they are (with their own load's date); the other layers are loaded. Run Load land again once it answers."
+          fi
       - name: Load the land
         env:
           PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
