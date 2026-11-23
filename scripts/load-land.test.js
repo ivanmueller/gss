@@ -107,6 +107,34 @@ describe('load-land.js', () => {
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
   });
 
+  test('sql: without the offset notices file, the stored ones are kept and the rest loads', () => {
+    const noOffsets = mkdtempSync(join(dir, 'no-offsets-'));
+    files(noOffsets, {});
+    rmSync(join(noOffsets, 'offset_notices.ndjson'));
+    const out = run('sql', noOffsets, '-117', '53', '-115', '55', '1000');
+    assert.equal(out.status, 0, out.stderr);
+    const sql = out.stdout;
+    assert.match(sql, /truncate petro\.land_agreements;/);
+    assert.match(sql, /truncate petro\.land_freehold;/);
+    // Neither emptied nor refilled; the closing summary still counts them.
+    assert.doesNotMatch(sql, /(truncate|copy) petro\.land_offsets/);
+    assert.doesNotMatch(sql, /'offset_notices'/);
+    assert.match(sql, /values \('freehold', /);
+    assert.match(sql, /Size guard/);
+    assert.match(out.stderr, /offset_notices: not read this time; the stored copy is kept/);
+  });
+
+  test('sql: any other missing file loads nothing', () => {
+    for (const name of ['png_agreements', 'oil_sands_agreements', 'freehold']) {
+      const missing = mkdtempSync(join(dir, `no-${name}-`));
+      files(missing, {});
+      rmSync(join(missing, `${name}.ndjson`));
+      const out = run('sql', missing, '-117', '53', '-115', '55', '0');
+      assert.equal(out.status, 2, name);
+      assert.equal(out.stdout, '');
+    }
+  });
+
   test('sql: a row in another form loads nothing', () => {
     const bad = mkdtempSync(join(dir, 'bad-'));
     files(bad, { freehold: [{ ...freehold, bounds: [-116.1, 54, -116, '54.1); drop table x'] }] });

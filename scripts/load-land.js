@@ -18,9 +18,14 @@
 // database: the load is refused, and nothing changes, if both databases together would pass
 // 400 MB (the free plan's limit is shared, docs/DECISIONS.md, 2026-11-19).
 //
+// Offset notices come from a server of the province's that can be down while the others answer
+// (2026-11-22: it listed its layer groups with none of their layers). When their file is missing,
+// the stored offset notices are kept as they are, with their own load's date and box, and the
+// other layers are loaded; every other layer's file is required.
+//
 // The province's data is never written to the repository: the files live only on the runner.
 
-import { readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { URLSearchParams } from 'node:url';
@@ -233,6 +238,8 @@ const TABLE_OF = {
   offset_notices: 'offsets',
   freehold: 'freehold',
 };
+/** Layers whose stored copy is kept when the run has no file for them (see the top). */
+const OPTIONAL = new Set(['offset_notices']);
 
 function mainSql(argv) {
   const [dir, west, south, east, north, grainBytes] = argv;
@@ -242,9 +249,17 @@ function mainSql(argv) {
 
   const lines = { agreements: [], offsets: [], freehold: [] };
   const counts = {};
+  const kept = new Set();
   for (const key of LAND_LAYER_KEYS) {
     const kind = TABLE_OF[key];
-    const text = readFileSync(join(dir, `${key}.ndjson`), 'utf8');
+    const file = join(dir, `${key}.ndjson`);
+    if (!existsSync(file)) {
+      if (!OPTIONAL.has(key)) fail(`${key}: no file was read; nothing was loaded.`, 2);
+      kept.add(key);
+      console.error(`${key}: not read this time; the stored copy is kept as it is.`);
+      continue;
+    }
+    const text = readFileSync(file, 'utf8');
     counts[key] = 0;
     for (const line of text.split('\n')) {
       if (line === '') continue;
@@ -276,6 +291,8 @@ function mainSql(argv) {
     "select set_config('statement_timeout', '15min', true);",
   );
   for (const kind of ['agreements', 'offsets', 'freehold']) {
+    const layers = LAND_LAYER_KEYS.filter((key) => TABLE_OF[key] === kind);
+    if (layers.every((key) => kept.has(key))) continue;
     const { table, columns } = TABLES[kind];
     // Emptied at once (and put back if the load fails): a delete would leave the old rows as
     // dead weight that the size guard counts.
@@ -289,6 +306,7 @@ function mainSql(argv) {
   }
   const box = `${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}`;
   for (const key of LAND_LAYER_KEYS) {
+    if (kept.has(key)) continue;
     out.push(
       `insert into petro.land_loads (layer, source_url, west, south, east, north, shapes) values ('${key}', '${LAND_LAYERS[key].url}', ${box}, ${String(counts[key])});`,
     );
