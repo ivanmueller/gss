@@ -292,3 +292,83 @@ describe('GET /api/v1/petroleum/geology/well', () => {
     expect(petroleum.geologyOfWell).not.toHaveBeenCalled();
   });
 });
+
+describe('GET /api/v1/petroleum/geology/samples (F-287 part 4)', () => {
+  const SAMPLES = '/api/v1/petroleum/geology/samples?play=duvernay';
+  const sample = (id: number, tmax: string | null, s2: string | null) => ({
+    sampleId: id,
+    run: 1,
+    uwi: '00/01-01-060-20W5/0',
+    site: 'well' as const,
+    longitude: -116.8,
+    latitude: 54.4,
+    topDepthM: '3050.2',
+    unit: 'Duvernay',
+    lithology: 'shale',
+    collectedOn: null,
+    tmaxC: tmax,
+    s2,
+    tocPct: '3.10',
+    hydrogenIndex: '120',
+  });
+
+  it('sends a member the play’s samples, each with its window', async () => {
+    petroleum.playSamples.mockResolvedValueOnce({
+      samples: [sample(1, '450', '2.5'), sample(2, '450', '0.1'), sample(3, null, null)],
+      load: { loadedAt: '2031-01-01T07:05:17.000Z', sourceDate: '2024-11-30' },
+    });
+    const res = await app.request(SAMPLES, { headers: AUTH }, WITH_PETROLEUM);
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      play: { key: string; name: string };
+      source: { name: string; sourceDate: string | null };
+      samples: {
+        sampleId: number;
+        ro: number | null;
+        window: string | null;
+        note: string | null;
+        depthM: string | null;
+      }[];
+    }>();
+    expect(body.play).toEqual({ key: 'duvernay', name: 'Duvernay / Muskwa' });
+    expect(body.source.name).toMatch(/Digital Dataset 2013-0003/);
+    expect(body.source.sourceDate).toBe('2024-11-30');
+    // Ro = 0.018 × 450 − 7.16 = 0.94%: the oil window.
+    expect(body.samples.map((s) => [s.sampleId, s.ro, s.window, s.note])).toEqual([
+      [1, 0.94, 'oil', null],
+      [2, 0.94, null, 'small-s2'],
+      [3, null, null, 'no-tmax'],
+    ]);
+    expect(body.samples[0]?.depthM).toBe('3050.2');
+    expect(petroleum.playSamples).toHaveBeenCalledWith(
+      {
+        userId: USER_ID,
+        organizationId: 'org-a',
+        role: 'trader',
+        requestId: expect.any(String) as string,
+      },
+      ['Duvernay', 'Muskwa'],
+    );
+  });
+
+  it('refuses an unknown play, and a person who is not a member', async () => {
+    for (const path of [
+      '/api/v1/petroleum/geology/samples',
+      '/api/v1/petroleum/geology/samples?play=montney',
+      '/api/v1/petroleum/geology/samples?play=__proto__',
+    ]) {
+      expect((await app.request(path, { headers: AUTH }, WITH_PETROLEUM)).status).toBe(400);
+    }
+    db.memberships.mockResolvedValueOnce([]);
+    expect((await app.request(SAMPLES, { headers: AUTH }, WITH_PETROLEUM)).status).toBe(403);
+    expect(openPetroleum).not.toHaveBeenCalled();
+    expect((await app.request(SAMPLES, {}, WITH_PETROLEUM)).status).toBe(401);
+  });
+
+  it('waits for the migration it needs', async () => {
+    petroleum.schemaVersion.mockResolvedValue(21);
+    const res = await app.request(SAMPLES, { headers: AUTH }, WITH_PETROLEUM);
+    expect(res.status).toBe(503);
+    expect(petroleum.playSamples).not.toHaveBeenCalled();
+  });
+});

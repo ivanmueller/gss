@@ -12,15 +12,19 @@ import { ST37_LAYERS } from './st37Map';
 
 // A formation's depth or thickness on the oil and gas map (F-287 part 3): the Survey's grid
 // shaded by value, a picture laid on the map, with its contour lines and their values. Under
-// everything else drawn from the oil and gas data and the map layers, over the base map.
+// everything else drawn from the oil and gas data and the map layers, over the base map. Or
+// (part 4) the play's Rock-Eval samples as dots coloured by maturity window, over the rest.
 
 export const GEOLOGY_LAYERS = {
   shade: 'geology-shade',
   lines: 'geology-lines',
   labels: 'geology-labels',
 } as const;
+/** The samples' dots: each feature has a `colour` and the `tip` its box shows. */
+export const GEOLOGY_SAMPLE_LAYER = 'geology-samples';
 const IMAGE = 'geology-image';
 const LINES = 'geology-contours';
+const SAMPLES = 'geology-sample-points';
 
 /** Each measure's colours, the least first: depth pale to deep blue, thickness pale to brown. */
 export const GEOLOGY_RAMPS: Record<GeologyMeasure, readonly string[]> = {
@@ -29,6 +33,13 @@ export const GEOLOGY_RAMPS: Record<GeologyMeasure, readonly string[]> = {
 };
 
 export interface GeologyView {
+  /** Depth or thickness shaded; null while the samples are shown. */
+  shading: GeologyShading | null;
+  /** The samples' dots; null while a measure is shaded. */
+  samples: GeoJSON.FeatureCollection | null;
+}
+
+export interface GeologyShading {
   measure: GeologyMeasure;
   /** The shading, a picture of the grid (a data URL), and where its corners lie. */
   image: string;
@@ -112,11 +123,61 @@ export function placeGeology(map: MapboxMap, beforeId?: string) {
 }
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-const drawn = new WeakMap<MapboxMap, GeologyView>();
+const drawn = new WeakMap<MapboxMap, GeologyShading>();
+const drawnSamples = new WeakMap<MapboxMap, GeoJSON.FeatureCollection>();
 
 export function syncGeology(
   map: MapboxMap,
   view: GeologyView | null,
+  tone: 'light' | 'dark',
+  beforeId?: string,
+) {
+  syncShading(map, view?.shading ?? null, tone, beforeId);
+  syncSamples(map, view?.samples ?? null, tone, beforeId);
+}
+
+/** The samples' dots, over everything else of ours, under the pins. */
+function syncSamples(
+  map: MapboxMap,
+  samples: GeoJSON.FeatureCollection | null,
+  tone: 'light' | 'dark',
+  beforeId?: string,
+) {
+  if (samples === null) {
+    if (map.getLayer(GEOLOGY_SAMPLE_LAYER)) map.removeLayer(GEOLOGY_SAMPLE_LAYER);
+    if (map.getSource(SAMPLES)) map.removeSource(SAMPLES);
+    drawnSamples.delete(map);
+    return;
+  }
+  const source = map.getSource<GeoJSONSource>(SAMPLES);
+  if (!source) map.addSource(SAMPLES, { type: 'geojson', data: samples });
+  else if (drawnSamples.get(map) !== samples) source.setData(samples);
+  drawnSamples.set(map, samples);
+  if (!map.getLayer(GEOLOGY_SAMPLE_LAYER)) {
+    map.addLayer(
+      {
+        id: GEOLOGY_SAMPLE_LAYER,
+        type: 'circle',
+        source: SAMPLES,
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 10, 6],
+          'circle-color': ['get', 'colour'],
+          'circle-stroke-width': 1.2,
+        },
+      },
+      beforeId && map.getLayer(beforeId) ? beforeId : undefined,
+    );
+  }
+  map.setPaintProperty(
+    GEOLOGY_SAMPLE_LAYER,
+    'circle-stroke-color',
+    tone === 'light' ? '#ffffff' : '#1c1917',
+  );
+}
+
+function syncShading(
+  map: MapboxMap,
+  view: GeologyShading | null,
   tone: 'light' | 'dark',
   beforeId?: string,
 ) {

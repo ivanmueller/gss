@@ -18,7 +18,7 @@ const LEG = '00/16-36-099-27W6/2';
 const NEAR = '00/15-36-099-27W6/0';
 const FAR = '00/01-01-100-20W6/0';
 const NAME_IDS = [32001, 32002];
-const SAMPLE_IDS = [999_001, 999_002];
+const SAMPLE_IDS = [999_001, 999_002, 999_003];
 const X = Math.round(-119.9 / 0.016);
 const Y = Math.round(59.95 / 0.009);
 
@@ -112,6 +112,22 @@ describe('geology as petro_api', () => {
       expect(got.loads.samples).toMatchObject({ sourceDate: null });
 
       expect((await db.geologyOfWell(member(), '00/01-01-001-01W4/0')).well).toBeNull();
+
+      // The Maturity map (F-287 part 4): a play's samples by unit, any case; another unit left out.
+      await admin`
+        insert into petro.maturity_samples (sample_id, run, uwi, site, longitude, latitude,
+          top_depth_m, unit, sample_type, tmax_c, s2, toc_pct)
+        values (999003, 1, null, 'outcrop', -119.6, 59.95, null, 'Montney', 'outcrop', 470, 1, 1)`;
+      const play = await db.playSamples(member(), ['Duvernay', 'Muskwa']);
+      const ours = play.samples.filter((x) => SAMPLE_IDS.includes(x.sampleId));
+      expect(ours.map((x) => [x.sampleId, x.unit, x.longitude, x.tmaxC])).toEqual([
+        [999001, 'Duvernay', -119.9, '460'],
+        [999002, 'Duvernay', -119.7, '440'],
+      ]);
+      expect(play.load).toMatchObject({ sourceDate: null });
+      expect(
+        (await db.playSamples(member(), ['montney'])).samples.some((x) => x.sampleId === 999003),
+      ).toBe(true);
     } finally {
       await clean();
       await admin.end();

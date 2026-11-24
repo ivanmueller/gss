@@ -102,6 +102,9 @@ export function fakePetroleum() {
         loads: { picks: null, samples: null, model: null },
       }),
     ),
+    playSamples: vi.fn<PetroleumDatabase['playSamples']>(() =>
+      Promise.resolve({ samples: [], load: null }),
+    ),
     pipelineSquare: vi.fn<PetroleumDatabase['pipelineSquare']>(() =>
       Promise.resolve({ load: null, rows: [] }),
     ),
