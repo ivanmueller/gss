@@ -1,4 +1,4 @@
-import { FACILITY_GROUPS, type Bbox, type FacilityGroup } from '@grain/domain';
+import { FACILITY_GROUPS, type Bbox, type FacilityGroup, type MapSettings } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
@@ -116,10 +116,18 @@ export interface Facilities {
   /** When the facilities were loaded; null before. */
   updated: string | null;
   fileDate: string | null;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: FacilitiesSnapshot;
+  apply: (settings: FacilitiesSnapshot) => void;
   section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   legend: () => React.ReactNode;
   about: () => React.ReactNode;
 }
+
+/** The section's settings, with the exact statuses on, so Undo brings them back. */
+export type FacilitiesSnapshot = NonNullable<MapSettings['facilities']> & {
+  statuses?: readonly string[];
+};
 
 const ALL_GROUPS: ReadonlySet<FacilityGroup> = new Set(FACILITY_GROUPS.map((g) => g.key));
 /** When the section is first switched on (F-284): active facilities only, and no kind yet. */
@@ -196,6 +204,23 @@ export function useFacilities(organizationId: string, token: string): Facilities
     for (const f of entries) counts.set(f.status ?? '', (counts.get(f.status ?? '') ?? 0) + 1);
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([status]) => status);
   }, [entries]);
+
+  const settings: FacilitiesSnapshot = {
+    on,
+    kinds: FACILITY_GROUPS.map((g) => g.key).filter((key) => groups.has(key)),
+    activeOnly: statusesOn.size === 1 && statusesOn.has('Active'),
+    statuses: [...statusesOn],
+    operator,
+  };
+  const apply = (next: FacilitiesSnapshot) => {
+    if (next.on !== undefined) setOn(next.on);
+    if (next.kinds) setGroups(new Set(next.kinds));
+    if (next.statuses) setStatusesOn(new Set(next.statuses));
+    else if (next.activeOnly === true) setStatusesOn(FACILITY_STATUSES_AT_START);
+    // Every status the list holds; before the list has come, the statuses stay as they are.
+    else if (next.activeOnly === false && statuses.length > 0) setStatusesOn(new Set(statuses));
+    if (next.operator !== undefined) setOperator(next.operator);
+  };
 
   // Counted in the view only close enough in for the facilities to be drawn.
   const close = at !== null && at.zoom >= FACILITIES_FROM;
@@ -367,6 +392,8 @@ export function useFacilities(organizationId: string, token: string): Facilities
     onViewChange,
     updated: answer?.load?.loadedAt ?? null,
     fileDate: answer?.load?.fileDate ?? null,
+    settings,
+    apply,
     section,
     legend,
     about,

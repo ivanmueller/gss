@@ -1,6 +1,7 @@
 // Alberta's royalty prices on the oil and gas map's side card (F-285 part 2): every price the
 // "Load prices" workflow stored, one small chart a series, a product at a time. Nothing is drawn
 // on the map. Prices are shown as the province wrote them; the charts draw them as numbers only.
+import type { MapSettings } from '@grain/domain';
 import { useEffect, useMemo, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
@@ -218,7 +219,12 @@ function PriceChart({
 export interface Prices {
   section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   about: () => React.ReactNode;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: PricesSettings;
+  apply: (settings: PricesSettings) => void;
 }
+
+export type PricesSettings = NonNullable<MapSettings['prices']>;
 
 export function usePrices(organizationId: string, token: string): Prices {
   // Off when the map opens (F-284): asked for once it is switched on.
@@ -421,5 +427,12 @@ export function usePrices(organizationId: string, token: string): Prices {
     </p>
   );
 
-  return { section, about };
+  const settings: PricesSettings = { on, product: group, period };
+  const apply = (next: PricesSettings) => {
+    if (next.on !== undefined) setOn(next.on);
+    if (next.product) setGroup(next.product);
+    if (next.period) setPeriod(next.period);
+  };
+
+  return { section, about, settings, apply };
 }

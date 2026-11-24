@@ -1,4 +1,4 @@
-import { formatAlberta, LAND_RIGHTS, type Bbox } from '@grain/domain';
+import { formatAlberta, LAND_RIGHTS, type Bbox, type MapSettings } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -216,6 +216,12 @@ export interface LandSalesState {
   showPastYear: (rights: string) => void;
   /** When the sales were last loaded; null before an answer. */
   updated: string | null;
+  /**
+   * Every setting of the section as it is now, and a way to set some of them (F-254). One sale
+   * alone is kept as its date, so Undo brings that sale back.
+   */
+  settings: LandSalesSnapshot;
+  apply: (settings: LandSalesSnapshot, goTo: (bounds: MapBounds) => void) => void;
   section: (props: {
     open: boolean;
     onToggle: () => void;
@@ -226,6 +232,9 @@ export interface LandSalesState {
   /** What the section shows and where it comes from, for Sources & licence. */
   about: () => React.ReactNode;
 }
+
+/** The section's settings, with one sale alone named by its date as well as next or last. */
+export type LandSalesSnapshot = NonNullable<MapSettings['sales']> & { saleDate?: string };
 
 export function useLandSales(organizationId: string, token: string): LandSalesState {
   // Off when the map opens (F-284); Jump to and its section's switch turn it on.
@@ -442,6 +451,25 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     setOn(true);
     setRights(play);
     setWhen('1');
+  };
+
+  const settings: LandSalesSnapshot = {
+    on,
+    rights: rights === null || Object.hasOwn(LAND_RIGHTS, rights) ? rights : null,
+    ...(typeof when === 'object' ? { saleDate: when.sale } : { period: when }),
+    buyer,
+    states: ALL_STATES.filter((state) => states.has(state)),
+  };
+  const apply = (next: LandSalesSnapshot, goTo: (bounds: MapBounds) => void) => {
+    if (next.on !== undefined) setOn(next.on);
+    if (next.rights !== undefined) setRights(next.rights);
+    if (next.period !== undefined) setWhen(next.period);
+    if (next.buyer !== undefined) setBuyer(next.buyer);
+    if (next.states) setStates(new Set(next.states));
+    const date =
+      next.saleDate ??
+      (next.sale === 'next' ? nextSale?.date : next.sale === 'last' ? lastSale?.date : undefined);
+    if (date) showSale(date, goTo);
   };
 
   const section = ({
@@ -732,6 +760,8 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     showSale,
     showPastYear,
     updated: answer?.source.loadedAt ?? null,
+    settings,
+    apply,
     section,
     legend,
     about,

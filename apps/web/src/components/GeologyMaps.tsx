@@ -12,6 +12,7 @@ import {
   geologyValues,
   type GeologyGrid,
   type GeologyMeasure,
+  type MapSettings,
   type MaturityWindow,
 } from '@grain/domain';
 import { useEffect, useMemo, useState } from 'react';
@@ -160,7 +161,12 @@ export interface GeologyMaps {
   section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   legend: () => React.ReactNode;
   about: () => React.ReactNode;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: GeologySettings;
+  apply: (settings: GeologySettings) => void;
 }
+
+export type GeologySettings = NonNullable<MapSettings['geology']>;
 
 export function useGeologyMaps(organizationId: string, token: string): GeologyMaps {
   const [on, setOn] = useState(false);
@@ -414,5 +420,11 @@ export function useGeologyMaps(organizationId: string, token: string): GeologyMa
     </p>
   );
 
-  return { view, tipAt, section, legend, about };
+  const settings: GeologySettings = { on, shown };
+  const apply = (next: GeologySettings) => {
+    if (next.on !== undefined) setOn(next.on);
+    if (next.shown) setShown(next.shown);
+  };
+
+  return { view, tipAt, section, legend, about, settings, apply };
 }

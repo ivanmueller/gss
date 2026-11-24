@@ -1,4 +1,4 @@
-import { formatAlberta, LAND_RIGHTS, type Bbox } from '@grain/domain';
+import { formatAlberta, LAND_RIGHTS, type Bbox, type MapSettings } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -259,12 +259,17 @@ export interface LandState {
   setRights: (rights: string | null) => void;
   /** When the land was last loaded; null before an answer. */
   updated: string | null;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: LandSettings;
+  apply: (settings: LandSettings) => void;
   section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   /** The holders in view and what each mark means; null when no land is on. */
   legend: () => React.ReactNode;
   /** What the section shows and where it comes from, for Sources & licence. */
   about: () => React.ReactNode;
 }
+
+export type LandSettings = NonNullable<MapSettings['land']>;
 
 const NONE: readonly string[] = [];
 const LABEL = SIDE_LABEL;
@@ -687,6 +692,30 @@ export function useLand(organizationId: string, token: string): LandState {
       </div>
     );
 
+  const settings: LandSettings = {
+    on: all,
+    kinds: LAND_KINDS.filter((kind) => kinds[kind]),
+    rights: rights === null || Object.hasOwn(LAND_RIGHTS, rights) ? rights : null,
+    holder,
+    terms: LAND_TERMS.filter((term) => terms.has(term)),
+    colourByHolder: byHolder,
+  };
+  const apply = (next: LandSettings) => {
+    if (next.on !== undefined) setAll(next.on);
+    if (next.kinds) {
+      const kept = new Set(next.kinds);
+      setKinds({
+        agreements: kept.has('agreements'),
+        offsets: kept.has('offsets'),
+        freehold: kept.has('freehold'),
+      });
+    }
+    if (next.rights !== undefined) setRights(next.rights);
+    if (next.holder !== undefined) setHolder(next.holder);
+    if (next.terms) setTerms(new Set(next.terms));
+    if (next.colourByHolder !== undefined) setByHolder(next.colourByHolder);
+  };
+
   return {
     view,
     agreements,
@@ -696,6 +725,8 @@ export function useLand(organizationId: string, token: string): LandState {
     onViewChange,
     setPicked,
     setRights,
+    settings,
+    apply,
     updated: loadedAt,
     section,
     legend,
