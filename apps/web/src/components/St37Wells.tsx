@@ -7,6 +7,7 @@ import {
   type St37StatusClass,
   operatorMatches,
 } from '@grain/domain';
+import { countOperators, type OperatorCount } from '../lib/operatorColours';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -109,6 +110,8 @@ const round = (n: number) => Math.round(n * 1e4) / 1e4;
 export interface St37State {
   on: boolean;
   view: St37View | null;
+  /** The operators of what is drawn in view, counted (F-302 part 2); null while off. */
+  operatorsInView: readonly OperatorCount[] | null;
   byUwi: ReadonlyMap<string, St37MapWell>;
   /** Each well's legs by licence number, the main leg first (F-257). */
   legsOf: ReadonlyMap<string, St37MapWell[]>;
@@ -219,6 +222,23 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     () => (on ? { wells: features, shown, parts: ST37_ALL_PARTS, zones } : null),
     [on, features, shown, zones],
   );
+  // The wells of the statuses shown whose surface hole is in view (F-302 part 2).
+  const operatorsInView = useMemo(() => {
+    if (!on || view === null) return null;
+    const statuses = new Set(shown);
+    return countOperators(
+      listed
+        .filter(
+          (w) =>
+            statuses.has(w.statusClass) &&
+            w.surface[0] >= view.west &&
+            w.surface[0] <= view.east &&
+            w.surface[1] >= view.south &&
+            w.surface[1] <= view.north,
+        )
+        .map((w) => w.licensee),
+    );
+  }, [on, view, listed, shown]);
   const counts = useMemo(() => {
     const out = new Map<St37StatusClass, number>();
     for (const w of listed) out.set(w.statusClass, (out.get(w.statusClass) ?? 0) + 1);
@@ -499,6 +519,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   return {
     on,
     view: mapView,
+    operatorsInView,
     byUwi,
     legsOf,
     onViewChange,

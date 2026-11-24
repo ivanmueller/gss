@@ -3,6 +3,7 @@ import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'm
 
 import { FACILITY_LAYERS } from './facilitiesMap';
 import { SALE_LAYERS } from './landSalesMap';
+import { operatorColourExpression, type OperatorColour } from './operatorColours';
 import { ST37_LAYERS } from './st37Map';
 
 // Pipelines on the oil and gas map (F-249): the AER's licensed lines, each coloured by what it
@@ -42,6 +43,8 @@ export interface PipelinesView {
   lines: GeoJSON.FeatureCollection;
   /** The keys of the segment whose panel is open, drawn bolder. */
   picked: readonly string[];
+  /** Coloured by operator (each line's `op`): the ten and their colours (F-302); else by substance. */
+  byOperator?: readonly OperatorColour[] | null;
 }
 
 const SOURCE = 'pipelines';
@@ -195,6 +198,11 @@ export function syncPipelines(map: MapboxMap, view: PipelinesView | null, before
       },
       anchor,
     );
+  }
+  const own: ExpressionSpecification = ['get', 'colour'];
+  const colour = view.byOperator ? operatorColourExpression(view.byOperator) : own;
+  for (const id of [PIPELINE_LAYERS.lines, PIPELINE_LAYERS.permitted, PIPELINE_LAYERS.picked]) {
+    map.setPaintProperty(id, 'line-color', colour);
   }
   map.setFilter(PIPELINE_LAYERS.picked, ['in', ['get', 'key'], ['literal', [...view.picked]]]);
   placePipelines(map, beforeId);

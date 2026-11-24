@@ -252,6 +252,23 @@ describe('the side card (F-267)', () => {
     expect(within(card).getByPlaceholderText('Any licensee')).toHaveValue('');
   });
 
+  // F-302 part 2: colour by operator, the ten in view in the legend in place of the statuses.
+  it('colours by operator on request, with the operators in the legend', async () => {
+    mockApi({ [LIST]: listOf(), ...noLegend });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    const legend = screen.getByRole('group', { name: 'Legend' });
+    expect(within(legend).queryByRole('group', { name: 'Operators in view' })).toBeNull();
+    const colourBy = within(card).getByRole('group', { name: 'Colour by' });
+    await userEvent.click(within(colourBy).getByRole('button', { name: 'Operator' }));
+    const operators = within(legend).getByRole('group', { name: 'Operators in view' });
+    // Nothing drawn in view in this test: the legend says what to do.
+    expect(within(operators).getByText(/None yet/)).toBeInTheDocument();
+    expect(within(legend).queryByRole('group', { name: 'Wells legend' })).toBeNull();
+    await userEvent.click(within(colourBy).getByRole('button', { name: 'Status' }));
+    expect(within(legend).queryByRole('group', { name: 'Operators in view' })).toBeNull();
+  });
+
   it('leads the legend with the open section', () => {
     const all = [
       'sales',

@@ -1,4 +1,4 @@
-import { ST37_STATUS_CLASSES, type St37StatusClass } from '@grain/domain';
+import { operatorKey, ST37_STATUS_CLASSES, type St37StatusClass } from '@grain/domain';
 import type {
   ExpressionSpecification,
   FilterSpecification,
@@ -6,6 +6,7 @@ import type {
   Map as MapboxMap,
 } from 'mapbox-gl';
 import { DETAIL_FULL, DETAIL_GONE, fadeIn } from './mapDetail';
+import { operatorColourExpression, type OperatorColour } from './operatorColours';
 
 /**
  * The AER's ST37 wells on the oil and gas map (F-243 part 4): how they are drawn at each zoom.
@@ -72,6 +73,8 @@ export interface St37View {
   parts?: St37Parts;
   /** The zones where the formation's drilled wells cluster (F-255), or null. */
   zones: GeoJSON.FeatureCollection | null;
+  /** Coloured by operator (each feature's `op`): the ten and their colours (F-302); else by status. */
+  byOperator?: readonly OperatorColour[] | null;
 }
 
 /** A zone as the API sends it: how many drilled wells it holds, and its closed ring. */
@@ -268,6 +271,7 @@ export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureColl
         uwi: first.uwi,
         licence: first.licenceNumber,
         status: first.statusClass,
+        op: operatorKey(first.licensee),
         pad: pads.get(licence) ?? licence,
         leg: 'main',
         part: 'well',
@@ -280,6 +284,7 @@ export function st37Features(wells: readonly St37MapWell[]): GeoJSON.FeatureColl
       uwi: w.uwi,
       licence: w.licenceNumber,
       status: w.statusClass,
+      op: operatorKey(w.licensee),
       pad: pads.get(w.licenceNumber) ?? w.licenceNumber,
       leg: main.has(w.uwi) ? 'main' : 'other',
     };
@@ -684,7 +689,9 @@ export function syncSt37(
   const parts = view.parts ?? ST37_ALL_PARTS;
   const none: readonly St37StatusClass[] = [];
 
-  const colour = colourBy(tone);
+  const colour = view.byOperator
+    ? (operatorColourExpression(view.byOperator) as ExpressionSpecification)
+    : colourBy(tone);
   // Wells are dense where they count: zoomed out, a grey shading of how many there are. On the
   // light map, as on the picture the owner gave to match (2026-11-21): warm dark patches where
   // wells are dense, about #a7a39c at their darkest over a zone's fill, soft at the edges, the

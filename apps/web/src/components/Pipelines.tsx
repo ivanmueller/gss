@@ -13,8 +13,10 @@ import {
   type PipelineParts,
   type PipelineSubstance,
   type Tile,
+  operatorKey,
   operatorMatches,
 } from '@grain/domain';
+import { countOperators, type OperatorCount } from '../lib/operatorColours';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
@@ -283,6 +285,7 @@ export function pipelineFeatures(entries: readonly PipelineEntry[]): GeoJSON.Fea
       properties: {
         key: p.key,
         colour: PIPELINE_COLOURS[p.group],
+        op: operatorKey(p.licensee?.name),
         strength: pipelineStrength(p.status),
         diameter: p.diameterMm ?? 0,
         permitted: p.status === 'Permitted',
@@ -293,6 +296,8 @@ export function pipelineFeatures(entries: readonly PipelineEntry[]): GeoJSON.Fea
 
 export interface Pipelines {
   view: PipelinesView | null;
+  /** The operators of what is drawn in view, counted (F-302 part 2); null while off. */
+  operatorsInView: readonly OperatorCount[] | null;
   byKey: ReadonlyMap<string, PipelineEntry>;
   setPicked: (keys: readonly string[]) => void;
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
@@ -387,6 +392,11 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
     [entries, statuses, groups, licensee, minMm],
   );
   const lines = useMemo(() => pipelineFeatures(shown), [shown]);
+  // The segments of the squares in view (F-302 part 2).
+  const operatorsInView = useMemo(
+    () => (on ? countOperators(shown.map((p) => p.licensee?.name)) : null),
+    [on, shown],
+  );
   const view = useMemo(
     (): PipelinesView | null => (on ? { lines, picked } : null),
     [on, lines, picked],
@@ -553,6 +563,7 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
 
   return {
     view,
+    operatorsInView,
     byKey,
     setPicked,
     onViewChange,

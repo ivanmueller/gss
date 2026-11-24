@@ -18,6 +18,7 @@ import {
   type MapboxToken,
 } from '../lib/mapbox';
 import { useTheme } from '../lib/theme';
+import { OPERATOR_OTHER, topOperators } from '../lib/operatorColours';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { AskMapBar } from './AskMapBar';
@@ -199,6 +200,32 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // One Operator box for the whole map (F-302): what is typed or picked fills the operator box
   // of Wells & licences, Facilities and Pipelines at once.
   const [operator, setOperator] = useState('');
+  // Colour by operator (F-302 part 2, the owner, 2026-11-24): the ten operators with the most
+  // wells, facilities and pipeline segments in view, a colour each on every layer, the rest grey.
+  const [colourBy, setColourBy] = useState<'status' | 'operator'>('status');
+  const byOperator = useMemo(
+    () =>
+      colourBy === 'operator'
+        ? topOperators([
+            wells.operatorsInView,
+            facilities.operatorsInView,
+            pipelines.operatorsInView,
+          ])
+        : null,
+    [colourBy, wells.operatorsInView, facilities.operatorsInView, pipelines.operatorsInView],
+  );
+  const wellsView = useMemo(
+    () => (wells.view && byOperator ? { ...wells.view, byOperator } : wells.view),
+    [wells.view, byOperator],
+  );
+  const facilitiesView = useMemo(
+    () => (facilities.view && byOperator ? { ...facilities.view, byOperator } : facilities.view),
+    [facilities.view, byOperator],
+  );
+  const pipelinesView = useMemo(
+    () => (pipelines.view && byOperator ? { ...pipelines.view, byOperator } : pipelines.view),
+    [pipelines.view, byOperator],
+  );
   const pickOperator = (text: string) => {
     setOperator(text);
     wells.apply({ operator: text });
@@ -261,25 +288,31 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     );
   }
 
-  const legends = sideOrder(section).map((name) => ({
-    name,
-    node:
-      name === 'sales'
-        ? sales.legend()
-        : name === 'land'
-          ? land.legend()
-          : name === 'facilities'
-            ? facilities.legend()
-            : name === 'pipelines'
-              ? pipelines.legend()
-              : name === 'rigs'
-                ? rigs.legend()
-                : name === 'formations'
-                  ? formations.legend(tone)
-                  : name === 'geology'
-                    ? geology.legend()
-                    : wells.legend(tone),
-  }));
+  // Coloured by operator, the wells', facilities' and pipelines' own colours mean nothing on
+  // the map: their legends make way for the operators'.
+  const ownColours = (name: SideSection) =>
+    byOperator === null || !['wells', 'facilities', 'pipelines'].includes(name);
+  const legends = sideOrder(section)
+    .filter(ownColours)
+    .map((name) => ({
+      name,
+      node:
+        name === 'sales'
+          ? sales.legend()
+          : name === 'land'
+            ? land.legend()
+            : name === 'facilities'
+              ? facilities.legend()
+              : name === 'pipelines'
+                ? pipelines.legend()
+                : name === 'rigs'
+                  ? rigs.legend()
+                  : name === 'formations'
+                    ? formations.legend(tone)
+                    : name === 'geology'
+                      ? geology.legend()
+                      : wells.legend(tone),
+    }));
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
   // A clicked feature's panel open on the right (St37Panel, LandPanel, GridPanel and the rest).
@@ -308,7 +341,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           onSelect={() => undefined}
           overlays={layers.overlays}
           authToken={session.token}
-          st37={wells.view}
+          st37={wellsView}
           onSt37Hover={setHover}
           onSt37Click={(found) => {
             if (found) grid.clearPick();
@@ -320,8 +353,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           grid={grid.view}
           gridTownships={grid.townships}
           onEmptyClick={grid.identify}
-          facilities={facilities.view}
-          pipelines={pipelines.view}
+          facilities={facilitiesView}
+          pipelines={pipelinesView}
           rigs={rigs.view}
           formations={formations.view}
           geology={geology.view}
@@ -426,6 +459,18 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 value={operator}
                 onChange={pickOperator}
               />
+              <div className="flex items-center gap-2">
+                <span className={`${SIDE_LABEL} grow`}>Colour by</span>
+                <SegmentedControl
+                  label="Colour by"
+                  options={[
+                    { value: 'status', label: 'Status' },
+                    { value: 'operator', label: 'Operator' },
+                  ]}
+                  value={colourBy}
+                  onChange={setColourBy}
+                />
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <MapLayersButton state={layers} />
                 <SegmentedControl
@@ -657,6 +702,34 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         </button>
         {legendOpen && (
           <div className="flex flex-col divide-y [&>*]:px-3 [&>*]:py-2.5">
+            {byOperator !== null && (
+              <div role="group" aria-label="Operators in view">
+                <p className="font-medium text-foreground">Operators in view</p>
+                {byOperator.length === 0 ? (
+                  <p className="mt-1.5 text-muted-foreground">
+                    None yet: switch on wells, facilities or pipelines, and zoom in.
+                  </p>
+                ) : (
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {[...byOperator, null].map((o) => (
+                      <li key={o?.key ?? 'other'} className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="size-2.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: o?.colour ?? OPERATOR_OTHER }}
+                        />
+                        <span className="grow truncate">{o?.name ?? 'Every other operator'}</span>
+                        {o && (
+                          <span className="text-muted-foreground tabular-nums">
+                            {o.count.toLocaleString('en-CA')}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             {legends.map(
               (legend) => legend.node !== null && <div key={legend.name}>{legend.node}</div>,
             )}

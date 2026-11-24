@@ -1,7 +1,8 @@
 import type { FacilityGroup } from '@grain/domain';
-import type { GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
+import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
 import { SALE_LAYERS } from './landSalesMap';
+import { operatorColourExpression, type OperatorColour } from './operatorColours';
 import { ST37_LAYERS } from './st37Map';
 
 // Facilities on the oil and gas map (F-278): the AER's batteries, plants, compressor stations
@@ -32,6 +33,8 @@ export interface FacilitiesView {
   points: GeoJSON.FeatureCollection;
   /** The keys of the facility whose panel is open, drawn larger with an edge. */
   picked: readonly string[];
+  /** Coloured by operator (each point's `op`): the ten and their colours (F-302); else by kind. */
+  byOperator?: readonly OperatorColour[] | null;
 }
 
 const SOURCE = 'facilities';
@@ -157,6 +160,10 @@ export function syncFacilities(
       anchor,
     );
   }
+  const own: ExpressionSpecification = ['get', 'colour'];
+  const colour = view.byOperator ? operatorColourExpression(view.byOperator) : own;
+  map.setPaintProperty(FACILITY_LAYERS.squares, 'icon-color', colour);
+  map.setPaintProperty(FACILITY_LAYERS.picked, 'icon-color', colour);
   const halo = tone === 'light' ? '#fafaf9' : '#1c1917';
   map.setPaintProperty(FACILITY_LAYERS.squares, 'icon-halo-color', halo);
   map.setPaintProperty(

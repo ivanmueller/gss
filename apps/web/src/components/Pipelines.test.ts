@@ -179,9 +179,31 @@ describe('pipelinesInSquares and pipelineFeatures', () => {
       'LineString',
     ]);
     expect(features.map((f) => f.properties)).toEqual([
-      { key: 'pipeline:1', colour: '#e8590c', strength: 1, diameter: 323.9, permitted: false },
-      { key: 'pipeline:2', colour: '#1c7ed6', strength: 0.25, diameter: 88.9, permitted: false },
-      { key: 'pipeline:3', colour: '#5c3d2e', strength: 1, diameter: 0, permitted: true },
+      // `op`: the licensee's key, for colour by operator (F-302 part 2); '' for none.
+      {
+        key: 'pipeline:1',
+        colour: '#e8590c',
+        op: 'EXAMPLE PIPELINES LTD',
+        strength: 1,
+        diameter: 323.9,
+        permitted: false,
+      },
+      {
+        key: 'pipeline:2',
+        colour: '#1c7ed6',
+        op: '',
+        strength: 0.25,
+        diameter: 88.9,
+        permitted: false,
+      },
+      {
+        key: 'pipeline:3',
+        colour: '#5c3d2e',
+        op: 'EXAMPLE PIPELINES LTD',
+        strength: 1,
+        diameter: 0,
+        permitted: true,
+      },
     ]);
   });
 });
