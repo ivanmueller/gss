@@ -272,9 +272,19 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   }));
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
+  // A clicked feature's panel open on the right (St37Panel, LandPanel, GridPanel and the rest).
+  const rightPanel = [kept, landPick, grid.pick, facilityPicked, pipelineOpen, rigPicked].some(
+    (open) => open !== null,
+  );
 
   return (
-    <div className="relative h-full overflow-hidden bg-muted">
+    <div
+      className={cn(
+        'relative h-full overflow-hidden bg-muted',
+        // The map's bottom-left corner (the attribution "i") clear of the open card (F-301).
+        !folded && 'md:[--map-left-inset:24rem]',
+      )}
+    >
       <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Loading map…</p>}>
         <FacilityMap
           token={mapbox.token}
@@ -541,8 +551,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           setBefore(null);
         }}
       />
-      {/* Below the zoom buttons, top right (F-139). */}
-      <MapLayersPanel state={layers} side="right" />
+      {/* Below the zoom buttons and the distance bar, top right (F-139, F-301). */}
+      <MapLayersPanel state={layers} side="right" className="md:top-28" />
       <LandPanel
         // A panel of its own for each click: it starts on the first piece of land under it.
         key={landPick ? `land:${landPick.keys.join(',')}` : 'land'}
@@ -595,47 +605,50 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         goTo={goTo}
       />
       <PickedFeatureCard state={layers} token={session.token} className={beside} />
-      {/* One legend, bottom left beside the card: what the open section's colours mean first,
-          then the other sections', then the map layers that are on. It makes way for a clicked
-          shape's details, so it never covers their fields or their close button
-          (F-247-2-R3-02), and with many layers on it scrolls within the space it has
-          (F-247-2-R13-02). */}
-      {/* Always there: the township grid's switch is in it (F-271). */}
-      {layers.picked === null && (
-        <div
-          role="group"
-          aria-label="Legend"
+      {/* One legend, bottom right, its foot level with the card's (the owner, 2026-11-24,
+          F-301): what the open section's colours mean first, then the other sections', then the
+          map layers that are on. It moves left of the Layers panel or a clicked feature's panel
+          rather than sit under them, and with many layers on it scrolls within the space it has
+          (F-247-2-R13-02). Always there: the township grid's switch is in it (F-271). */}
+      <div
+        role="group"
+        aria-label="Legend"
+        className={cn(
+          'absolute bottom-3 z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
+          rightPanel
+            ? 'right-3 md:right-[27.75rem]'
+            : layers.panelOpen
+              ? 'right-3 md:right-[19.5rem]'
+              : 'right-3',
+          !folded && 'hidden md:flex',
+          // On a phone a clicked shape's details take the bottom of the map (F-247-2-R3-02).
+          layers.picked !== null && 'max-md:hidden',
+        )}
+      >
+        <button
+          type="button"
+          aria-expanded={legendOpen}
+          aria-label={legendOpen ? 'Hide the legend' : 'Show the legend'}
+          onClick={() => {
+            setLegendOpen((before) => !before);
+          }}
           className={cn(
-            'absolute bottom-8 z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
-            beside,
-            !folded && 'hidden md:flex',
+            'z-10 rounded-sm px-1.5 leading-none text-muted-foreground hover:bg-muted hover:text-foreground',
+            legendOpen ? 'absolute top-2.5 right-2' : 'flex items-center gap-2 p-2.5',
           )}
         >
-          <button
-            type="button"
-            aria-expanded={legendOpen}
-            aria-label={legendOpen ? 'Hide the legend' : 'Show the legend'}
-            onClick={() => {
-              setLegendOpen((before) => !before);
-            }}
-            className={cn(
-              'z-10 rounded-sm px-1.5 leading-none text-muted-foreground hover:bg-muted hover:text-foreground',
-              legendOpen ? 'absolute top-2.5 right-2' : 'flex items-center gap-2 p-2.5',
+          {legendOpen ? '−' : 'Legend +'}
+        </button>
+        {legendOpen && (
+          <div className="flex flex-col divide-y [&>*]:px-3 [&>*]:py-2.5">
+            {legends.map(
+              (legend) => legend.node !== null && <div key={legend.name}>{legend.node}</div>,
             )}
-          >
-            {legendOpen ? '−' : 'Legend +'}
-          </button>
-          {legendOpen && (
-            <div className="flex flex-col divide-y [&>*]:px-3 [&>*]:py-2.5">
-              {legends.map(
-                (legend) => legend.node !== null && <div key={legend.name}>{legend.node}</div>,
-              )}
-              <MapLayersLegend state={layers} />
-              <div>{grid.legend()}</div>
-            </div>
-          )}
-        </div>
-      )}
+            <MapLayersLegend state={layers} />
+            <div>{grid.legend()}</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

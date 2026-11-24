@@ -115,7 +115,10 @@ export interface FacilityMapProps {
   selectedId: string | null;
   /** Where the zoom buttons go; the workspace keeps the right side for its order book. */
   controls?: 'top-left' | 'top-right';
-  /** A distance bar (kilometres) in the bottom right corner, which follows the zoom. */
+  /**
+   * A distance bar (kilometres) under the zoom buttons, which follows the zoom; the attribution
+   * then goes bottom left, where `--map-left-inset` keeps it clear of a side card (F-301).
+   */
   scale?: boolean;
   /** The warm off-white base map in the light theme (the oil and gas map). */
   paper?: boolean;
@@ -647,18 +650,16 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     const side = latest.current.controls ?? 'top-right';
     instance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), side);
+    const scale = latest.current.scale ?? false;
+    if (scale) {
+      // Added after the zoom buttons, so it sits just below them (F-301).
+      instance.addControl(new mapboxgl.ScaleControl({ unit: 'metric', maxWidth: 120 }), side);
+    }
     // Mapbox's terms require its attribution to stay visible.
     instance.addControl(
       new mapboxgl.AttributionControl({ compact: true }),
-      side === 'top-left' ? 'bottom-left' : 'bottom-right',
+      scale || side === 'top-left' ? 'bottom-left' : 'bottom-right',
     );
-    if (latest.current.scale) {
-      // Added after the attribution, so it sits above it in the same corner.
-      instance.addControl(
-        new mapboxgl.ScaleControl({ unit: 'metric', maxWidth: 120 }),
-        'bottom-right',
-      );
-    }
     const report = () => {
       const bounds = instance.getBounds();
       latest.current.onViewChange?.(

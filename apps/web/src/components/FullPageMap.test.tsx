@@ -185,9 +185,20 @@ describe('the side card (F-267)', () => {
     expect(wells).toHaveAttribute('aria-expanded', 'false');
     expect(sales).toHaveAttribute('aria-expanded', 'true');
     await userEvent.click(wells);
-    // A section switched off shows nothing under its title.
+    // A section switched off stays open with its filters, to set before switching it on
+    // (F-304): a status chosen while off is kept when it comes back on.
     await userEvent.click(within(card).getByRole('switch', { name: 'Wells & licences' }));
-    expect(within(card).queryByRole('group', { name: 'Statuses shown' })).not.toBeInTheDocument();
+    expect(wells).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      within(card).getByText(/Off: choose the filters, then switch it on/),
+    ).toBeInTheDocument();
+    await userEvent.click(within(card).getByRole('button', { name: 'Producing' }));
+    await userEvent.click(within(card).getByRole('switch', { name: 'Wells & licences' }));
+    expect(within(card).queryByText(/Off: choose the filters/)).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Producing' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
     // Folded, the card leaves the map; a button brings it back.
     await userEvent.click(within(card).getByRole('button', { name: 'Hide the menu' }));
     expect(screen.queryByRole('complementary', { name: 'Map menu' })).not.toBeInTheDocument();
@@ -755,8 +766,9 @@ describe('FullPageMap', () => {
     });
   });
 
-  // F-247-2-R3-02: both sit at the bottom left over the map; the legend makes way.
-  it('hides the legend while a clicked shape’s details are open', async () => {
+  // F-301: the legend is bottom right, the clicked shape's details bottom left; on a wide
+  // screen both stay (on a phone the legend still makes way, F-247-2-R3-02).
+  it('keeps the legend, bottom right, while a clicked shape’s details are open', async () => {
     const lines: MapLayerView = {
       ...pictures,
       id: LINES,
@@ -770,10 +782,10 @@ describe('FullPageMap', () => {
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     expect(await screen.findByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Click a shape' }));
-    const close = await screen.findByRole('button', { name: 'Close details' });
-    expect(screen.queryByRole('list', { name: 'Map layers shown' })).not.toBeInTheDocument();
-    await userEvent.click(close);
-    expect(await screen.findByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Close details' });
+    expect(screen.getByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
+    const legend = screen.getByRole('group', { name: 'Legend' });
+    expect(legend).toHaveClass('bottom-3', 'right-3', 'max-md:hidden');
   });
 
   // F-247-2-R9-02: an admin removes a picture layer while a teammate has the map open. The
