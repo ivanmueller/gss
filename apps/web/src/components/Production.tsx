@@ -266,7 +266,7 @@ const cache = new Map<string, ProductionAnswer>();
  * Reads production answers (one address each) after a short wait, so passing over wells asks for
  * none of them. All of them, or none: a well's total is never shown with a leg missing.
  */
-function useProductions(paths: readonly string[], token: string, waitMs: number) {
+export function useProductions(paths: readonly string[], token: string, waitMs: number) {
   const key = paths.join('\n');
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   useEffect(() => {
@@ -351,6 +351,11 @@ export function productionTotal(answers: readonly ProductionAnswer[]): {
   };
 }
 
+/** A leg's production address; the same address is read once in a visit. */
+export function wellProductionPath(organizationId: string, uwi: string): string {
+  return `/petroleum/production/well?${new URLSearchParams({ organization_id: organizationId, uwi }).toString()}`;
+}
+
 /** For tests: forget the answers read. */
 export function clearProductionCache() {
   cache.clear();
@@ -374,10 +379,7 @@ export function WellProduction({
   interactive?: boolean;
 }) {
   const { answers, state } = useProductions(
-    uwis.map(
-      (uwi) =>
-        `/petroleum/production/well?${new URLSearchParams({ organization_id: organizationId, uwi }).toString()}`,
-    ),
+    uwis.map((uwi) => wellProductionPath(organizationId, uwi)),
     token,
     250,
   );

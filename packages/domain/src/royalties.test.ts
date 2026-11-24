@@ -10,9 +10,11 @@ import {
   cStar,
   equivalentProppant,
   estimateWellRoyalties,
+  gasEnergyGJ,
   mrfEquivalentVolume,
   mrfPostCStarRate,
   royaltyFramework,
+  royaltyTotals,
   type WellMonthInput,
 } from './royalties';
 
@@ -336,5 +338,38 @@ describe('a well, month by month', () => {
       framework: 'mrf_post_c_star',
       effectivePct: '13.85161',
     });
+  });
+});
+
+describe('gas energy and totals', () => {
+  it("values gas at the Canada Energy Regulator's 37.3 GJ per e3m3", () => {
+    expect(gasEnergyGJ('100')).toBe('3730');
+    expect(gasEnergyGJ('0.5')).toBe('18.65');
+  });
+
+  it('adds only the estimated months', () => {
+    expect(
+      royaltyTotals([
+        {
+          month: '2026-01',
+          status: 'estimated',
+          framework: 'arf',
+          products: [],
+          valueCad: '1000',
+          royaltyCad: '150.5',
+          effectivePct: '15.05',
+        },
+        { month: '2026-02', status: 'blocked', blockedBy: ['oil_par_price'] },
+        {
+          month: '2026-03',
+          status: 'estimated',
+          framework: 'arf',
+          products: [],
+          valueCad: '3000',
+          royaltyCad: '249.5',
+          effectivePct: '8.31667',
+        },
+      ]),
+    ).toEqual({ months: 2, valueCad: '4000', royaltyCad: '400', effectivePct: '10' });
   });
 });

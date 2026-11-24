@@ -9,6 +9,7 @@ import { WellProduction } from './Production';
 import { st37Place, st37Plan } from './St37Wells';
 import { Button } from './ui/button';
 import { Well3d } from './Well3d';
+import { WellRoyalty } from './WellRoyalty';
 
 /**
  * A well on the oil and gas map, shown two ways (F-265; the owner, 2026-11-22): a box at the
@@ -290,6 +291,16 @@ export function St37Panel({
               />
             </div>
           )}
+        </PanelSection>
+      )}
+      {member && well.statusClass !== 'licensed' && (
+        <PanelSection title="Crown royalty (estimate)">
+          <WellRoyalty
+            well={well}
+            uwis={legs.map((leg) => leg.uwi)}
+            organizationId={member.organizationId}
+            token={member.token}
+          />
         </PanelSection>
       )}
       {others > 0 && (

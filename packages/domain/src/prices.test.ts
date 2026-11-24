@@ -76,6 +76,9 @@ describe('sheetPrices', () => {
     const text = [
       'Monthly Reference Price Calculations - January 2030',
       'Propane ISC Reference Price $9.99 /GJ',
+      'Methane ISC Reference Price $1.01 /GJ',
+      'Methane ISC Par Price $1.02 /GJ',
+      'Methane ISC Par Price',
       'Ethane Reference Price $1.11 /GJ',
       'Ethane Par Price $1.12 /GJ',
       'Propane Spec Reference Price $222.22 /m³',
@@ -85,6 +88,7 @@ describe('sheetPrices', () => {
       'Sulphur Default Price $5.55 /tonne',
     ].join('\n');
     expect(sheetPrices(text, '2030-01')).toEqual([
+      { series: 'methane_isc_par', month: '2030-01', price: '1.02' },
       { series: 'ethane_reference', month: '2030-01', price: '1.11' },
       { series: 'ethane_par', month: '2030-01', price: '1.12' },
       { series: 'propane_spec_reference', month: '2030-01', price: '222.22' },
