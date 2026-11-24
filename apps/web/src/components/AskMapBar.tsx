@@ -2,11 +2,12 @@ import {
   describeMapSettings,
   MAP_ASK_REASON_TEXT,
   readMapRequest,
+  type MapAskAnswer,
   type MapAskReason,
   type MapSettings,
 } from '@grain/domain';
-import { ArrowUp, Sparkles, Undo2, X } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowUp, LoaderCircle, Sparkles, Undo2, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -15,8 +16,9 @@ import { Button } from './ui/button';
  * Ask the map (F-254 part 1): a bar at the bottom of the oil and gas map. A request typed in
  * plain words is read into the map's settings (MapSettings, packages/domain), which the page
  * applies as if clicked; the bar then names what it set, what it could not do, and offers Undo.
- * For now the reading is the domain's word matching, in the browser; Claude reads requests in
- * part 2 and the word matching stays as its fallback. Nothing is kept once the page is closed.
+ * Claude reads each request through the Worker (part 2, POST /petroleum/ask); when Claude cannot
+ * answer (not set up, too many requests, an error, too slow), the domain's word matching reads it
+ * in the browser instead and the bar says so. Nothing is kept once the page is closed.
  */
 
 /** Requests the map can answer today, offered while the box is empty. */
@@ -32,14 +34,19 @@ export const ASK_EXAMPLES = [
 interface Result {
   chips: string[];
   reasons: MapAskReason[];
+  /** Read by the word matching because Claude could not answer. */
+  fallback: boolean;
 }
 
 export function AskMapBar({
+  askClaude,
   onApply,
   canUndo,
   onUndo,
   className,
 }: {
+  /** Claude's reading of a request, through the Worker; it throws when Claude cannot answer. */
+  askClaude: (text: string) => Promise<MapAskAnswer>;
   /** Applies the settings read; the map keeps what it had before for Undo. */
   onApply: (settings: MapSettings) => void;
   canUndo: boolean;
@@ -49,14 +56,32 @@ export function AskMapBar({
   const [text, setText] = useState('');
   const [result, setResult] = useState<Result | null>(null);
   const [focused, setFocused] = useState(false);
+  const [asking, setAsking] = useState(false);
+  // Only the latest request's answer is applied.
+  const latest = useRef(0);
 
-  const ask = (request: string) => {
+  const ask = async (request: string) => {
     const trimmed = request.trim();
-    if (trimmed === '') return;
-    const reading = readMapRequest(trimmed);
+    if (trimmed === '' || asking) return;
+    const id = ++latest.current;
+    setAsking(true);
+    let reading: { settings: MapSettings; reasons: MapAskReason[] };
+    let fallback = false;
+    try {
+      reading = await askClaude(trimmed);
+    } catch {
+      reading = readMapRequest(trimmed);
+      fallback = true;
+    }
+    if (id !== latest.current) return;
+    setAsking(false);
     const chips = describeMapSettings(reading.settings);
+    const reasons =
+      chips.length === 0 && reading.reasons.length === 0
+        ? (['not_understood'] as MapAskReason[])
+        : reading.reasons;
     if (chips.length > 0) onApply(reading.settings);
-    setResult({ chips, reasons: reading.reasons });
+    setResult({ chips, reasons, fallback });
   };
 
   const showExamples = focused && text.trim() === '' && result === null;
@@ -78,9 +103,10 @@ export function AskMapBar({
               {MAP_ASK_REASON_TEXT[reason]}
             </span>
           ))}
-          {result.reasons.includes('not_understood') && (
+          {result.fallback && (
             <span className="text-muted-foreground">
-              The bar reads set phrasings for now: try one of the examples.
+              Claude could not answer, so the bar read the request by its own word matching, which
+              knows set phrasings only.
             </span>
           )}
           <span className="grow" />
@@ -124,7 +150,7 @@ export function AskMapBar({
               }}
               onClick={() => {
                 setText(example);
-                ask(example);
+                void ask(example);
               }}
               className="rounded-full border bg-card px-2 py-0.5 hover:bg-muted"
             >
@@ -139,7 +165,7 @@ export function AskMapBar({
         className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 py-1 pr-1 pl-3.5 shadow-md"
         onSubmit={(event) => {
           event.preventDefault();
-          ask(text);
+          void ask(text);
         }}
       >
         <Sparkles aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
@@ -164,10 +190,14 @@ export function AskMapBar({
           type="submit"
           size="icon-sm"
           className="rounded-full"
-          aria-label="Ask"
-          disabled={text.trim() === ''}
+          aria-label={asking ? 'Asking Claude' : 'Ask'}
+          disabled={text.trim() === '' || asking}
         >
-          <ArrowUp aria-hidden="true" />
+          {asking ? (
+            <LoaderCircle aria-hidden="true" className="animate-spin" />
+          ) : (
+            <ArrowUp aria-hidden="true" />
+          )}
         </Button>
       </form>
     </div>

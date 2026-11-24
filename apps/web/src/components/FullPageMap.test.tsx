@@ -317,13 +317,24 @@ describe('the side card (F-267)', () => {
   });
 });
 
-describe('Ask the map (F-254 part 1)', () => {
-  it('applies a request to the map, names what it set, and undoes it', async () => {
-    mockApi({
+describe('Ask the map (F-254)', () => {
+  const ASK = `POST /petroleum/ask?${ORGANIZATION}`;
+
+  it('applies Claude’s reading, names what it set, and undoes it', async () => {
+    const calls = mockApi({
       [LIST]: listOf(),
       ...noLegend,
       'GET /outlines/duvernay.geojson': OUTLINE_FILE,
       'GET /outlines/cardium.geojson': OUTLINE_FILE,
+      [ASK]: () =>
+        Response.json({
+          settings: {
+            basemap: 'satellite',
+            formations: { on: true, shown: ['cardium'] },
+            open: 'formations',
+          },
+          reasons: [],
+        }),
     });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const card = await screen.findByRole('complementary', { name: 'Map menu' });
@@ -339,14 +350,28 @@ describe('Ask the map (F-254 part 1)', () => {
     expect(within(card).getByRole('switch', { name: 'Cardium' })).toBeChecked();
     // The request stays in the box, to edit and send again.
     expect(box).toHaveValue('Cardium outline on satellite');
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      text: 'Cardium outline on satellite',
+    });
+    // Read by Claude: no word for the fallback.
+    expect(status).not.toHaveTextContent('word matching');
     await userEvent.click(within(status).getByRole('button', { name: 'Undo' }));
     expect(await screen.findByText('Stand-in map: map, 0 pins')).toBeInTheDocument();
     expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('says what it cannot do, and offers examples while empty', async () => {
-    mockApi({ [LIST]: listOf(), ...noLegend, 'GET /outlines/duvernay.geojson': OUTLINE_FILE });
+  it('reads by word matching when Claude cannot answer, says so, and offers examples', async () => {
+    mockApi({
+      [LIST]: listOf(),
+      ...noLegend,
+      'GET /outlines/duvernay.geojson': OUTLINE_FILE,
+      [ASK]: () =>
+        Response.json(
+          { error: { code: 'CLAUDE_NOT_CONFIGURED', message: 'Claude is not set up yet.' } },
+          { status: 503 },
+        ),
+    });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const box = await screen.findByRole('textbox', { name: 'Ask the map' });
     await userEvent.click(box);
@@ -360,6 +385,9 @@ describe('Ask the map (F-254 part 1)', () => {
     expect(await screen.findByText('Wells: abandoned')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(
       'This map cannot filter by production yet.',
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Claude could not answer, so the bar read the request by its own word matching',
     );
     const card = screen.getByRole('complementary', { name: 'Map menu' });
     const chips = within(card).getByRole('group', { name: 'Statuses shown' });

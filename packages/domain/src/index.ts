@@ -50,3 +50,4 @@ export * from './geology';
 export * from './geologyGrid';
 export * from './mapSettings';
 export * from './mapRequestWords';
+export * from './mapAskClaude';
