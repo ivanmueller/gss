@@ -282,10 +282,7 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-| ID | What to check | Pull requests |
-|---|---|---|
-| F-239 | Oil and gas map page: open https://map.torvenco.com (Ctrl+F5 if needed). Canada fills the window, no pins, the map style switch top left, a Layers button and (admins) a Settings button. | ivanmueller/gss#260, #266 |
-| F-247 | Oil and gas layers: map.torvenco.com → Settings → Add map layer → a live Alberta ArcGIS layer address → Check → publisher and terms → Add layer; it shows under Layers and on the map. Also Workspace → the map → Layers: grain's layers still draw as before (shared code changed). | ivanmueller/gss#268 |
+None open: the owner checked F-239, F-247, F-284, F-285 and F-288 on staging on 2026-11-23 ("All checks are good").
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 
