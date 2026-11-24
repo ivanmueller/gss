@@ -184,6 +184,14 @@ describe('the side card (F-267)', () => {
     await userEvent.click(sales);
     expect(wells).toHaveAttribute('aria-expanded', 'false');
     expect(sales).toHaveAttribute('aria-expanded', 'true');
+    // A year, or dates from and to (F-303).
+    expect(within(card).getByRole('combobox', { name: 'Sale year' })).toBeInTheDocument();
+    await userEvent.type(within(card).getByLabelText('Sales from'), '2023-03-01');
+    expect(within(card).getByLabelText('Sales from')).toHaveValue('2023-03-01');
+    expect(within(card).getByRole('button', { name: '2 yrs' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
     await userEvent.click(wells);
     // A section switched off stays open with its filters, to set before switching it on
     // (F-304): a status chosen while off is kept when it comes back on.
