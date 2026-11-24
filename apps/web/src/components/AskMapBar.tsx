@@ -4,6 +4,7 @@ import {
   readMapRequest,
   type MapAskAnswer,
   type MapAskReason,
+  type MapPlace,
   type MapSettings,
 } from '@grain/domain';
 import { ArrowUp, LoaderCircle, Sparkles, Undo2, X } from 'lucide-react';
@@ -47,8 +48,8 @@ export function AskMapBar({
 }: {
   /** Claude's reading of a request, through the Worker; it throws when Claude cannot answer. */
   askClaude: (text: string) => Promise<MapAskAnswer>;
-  /** Applies the settings read; the map keeps what it had before for Undo. */
-  onApply: (settings: MapSettings) => void;
+  /** Applies the settings read and moves to the place found; the map keeps what it had for Undo. */
+  onApply: (settings: MapSettings, place: MapPlace | undefined) => void;
   canUndo: boolean;
   onUndo: () => void;
   className?: string;
@@ -65,7 +66,7 @@ export function AskMapBar({
     if (trimmed === '' || asking) return;
     const id = ++latest.current;
     setAsking(true);
-    let reading: { settings: MapSettings; reasons: MapAskReason[] };
+    let reading: { settings: MapSettings; reasons: MapAskReason[]; place?: MapPlace | undefined };
     let fallback = false;
     try {
       reading = await askClaude(trimmed);
@@ -75,12 +76,16 @@ export function AskMapBar({
     }
     if (id !== latest.current) return;
     setAsking(false);
-    const chips = describeMapSettings(reading.settings);
+    // The place first: where the map went, then what was set there.
+    const chips = [
+      ...(reading.place ? [`Moved to ${reading.place.label}`] : []),
+      ...describeMapSettings(reading.settings),
+    ];
     const reasons =
       chips.length === 0 && reading.reasons.length === 0
         ? (['not_understood'] as MapAskReason[])
         : reading.reasons;
-    if (chips.length > 0) onApply(reading.settings);
+    if (chips.length > 0) onApply(reading.settings, reading.place);
     setResult({ chips, reasons, fallback });
   };
 

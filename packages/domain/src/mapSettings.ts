@@ -184,16 +184,18 @@ export const MAP_ASK_REASONS = [
   'field_or_pool',
   'other_province',
   'other_play',
+  'place_not_found',
 ] as const;
 export type MapAskReason = (typeof MAP_ASK_REASONS)[number];
 
 export const MAP_ASK_REASON_TEXT: Record<MapAskReason, string> = {
   not_understood: 'Nothing in the request matched what this map can show.',
   production_filter: 'This map cannot filter by production yet.',
-  place_by_name: 'This map cannot find towns or places by name yet.',
+  place_by_name: 'This map finds towns and legal land locations only, not other places by name.',
   field_or_pool: 'This map cannot filter by field or pool yet.',
   other_province: 'This map covers Alberta only.',
   other_play: 'Only the Duvernay is loaded whole so far.',
+  place_not_found: 'No town or legal land location by that name was found in Alberta.',
 };
 
 const names = <T extends string>(list: readonly T[], label: (key: T) => string) =>

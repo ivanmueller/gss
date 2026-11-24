@@ -1,5 +1,10 @@
 import {
+  isTyped,
   keepTypedNames,
+  parseLegalLand,
+  townBounds,
+  type MapAskReason,
+  type MapPlace,
   MAP_ASK_INSTRUCTIONS,
   MAP_ASK_JSON_SCHEMA,
   mapAskAnswerSchema,
@@ -14,6 +19,9 @@ import {
   type ClaudeFactory,
 } from './anthropic';
 import type { Membership } from './db';
+import { findAlbertaTown, GeocoderError } from './geocoding';
+import { LayerServiceError } from './map-layers';
+import { findLegalLand } from './township-grid';
 import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
 /**
@@ -60,6 +68,45 @@ export class AskLimiter {
       }
     }
     return true;
+  }
+}
+
+/**
+ * The place a request names (F-254 part 3): a legal land location read from the typed words by
+ * plain code and found on the province's township grid; else the town Claude named, kept only
+ * when it is in the typed words, found with Geocodio in Alberta. `missed` when one was named and
+ * not found (or its service could not be reached); only the outcome is logged, never the place.
+ */
+export async function findPlace(
+  text: string,
+  town: string | undefined,
+  geocodioKey: string | undefined,
+): Promise<{ place: MapPlace | null; missed: boolean }> {
+  const land = parseLegalLand(text);
+  if (land) {
+    try {
+      const place = await findLegalLand(land);
+      return { place, missed: place === null };
+    } catch (error) {
+      if (!(error instanceof LayerServiceError)) throw error;
+      console.warn(`Map ask: township grid not reached status=${String(error.status)}`);
+      return { place: null, missed: true };
+    }
+  }
+  if (town === undefined || !isTyped(town, text)) return { place: null, missed: false };
+  const key = geocodioKey?.trim() ?? '';
+  if (key === '') return { place: null, missed: true };
+  try {
+    const found = await findAlbertaTown(key, town);
+    if (found === null) return { place: null, missed: true };
+    return {
+      place: { label: found.label, bounds: townBounds(found.latitude, found.longitude) },
+      missed: false,
+    };
+  } catch (error) {
+    if (!(error instanceof GeocoderError)) throw error;
+    console.warn(`Map ask: town not looked up ${error.kind} status=${String(error.status)}`);
+    return { place: null, missed: true };
   }
 }
 
@@ -133,9 +180,15 @@ export function mapAskRoutes(
       `Map ask: read model=${model} in=${String(answer.inputTokens)} out=${String(answer.outputTokens)}`,
     );
     // A name Claude gives that is not in the request is dropped, never applied.
+    const settings = keepTypedNames(checked.data.settings, parsed.data.text);
+    const found = await findPlace(parsed.data.text, checked.data.town, c.env.GEOCODIO_API_KEY);
+    const reasons = new Set<MapAskReason>(checked.data.reasons);
+    if (found.place) reasons.delete('place_by_name');
+    if (found.missed) reasons.add('place_not_found');
     return c.json({
-      ...checked.data,
-      settings: keepTypedNames(checked.data.settings, parsed.data.text),
+      settings,
+      reasons: [...reasons],
+      ...(found.place && { place: found.place }),
     });
   });
 

@@ -361,6 +361,27 @@ describe('Ask the map (F-254)', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('names the place it moved to (F-254 part 3)', async () => {
+    mockApi({
+      [LIST]: listOf(),
+      ...noLegend,
+      'GET /outlines/duvernay.geojson': OUTLINE_FILE,
+      [ASK]: () =>
+        Response.json({
+          settings: { wells: { on: true } },
+          reasons: [],
+          place: { label: 'T62 R22 W5', bounds: [-117.2, 54.3, -117, 54.4] },
+        }),
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const box = await screen.findByRole('textbox', { name: 'Ask the map' });
+    await userEvent.type(box, 'wells in Twp 62 Rge 22 W5{Enter}');
+    const status = await screen.findByRole('status');
+    expect(within(status).getByText('Moved to T62 R22 W5')).toBeInTheDocument();
+    expect(within(status).getByText('Wells on')).toBeInTheDocument();
+    expect(within(status).getByRole('button', { name: 'Undo' })).toBeInTheDocument();
+  });
+
   it('reads by word matching when Claude cannot answer, says so, and offers examples', async () => {
     mockApi({
       [LIST]: listOf(),

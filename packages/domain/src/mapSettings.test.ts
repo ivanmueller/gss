@@ -162,7 +162,7 @@ describe('readMapRequest', () => {
   it('gives fixed reasons for what the map cannot do', () => {
     expect(readMapRequest('what is the weather').reasons).toEqual(['not_understood']);
     expect(readMapRequest('wells above 1,000 bbl a day').reasons).toContain('production_filter');
-    expect(readMapRequest('wells near Fox Creek').reasons).toContain('place_by_name');
+    expect(readMapRequest('wells near Fox Creek').reasons).toContain('place_not_found');
     expect(readMapRequest('wells in the Pembina field').reasons).toContain('field_or_pool');
     expect(readMapRequest('Montney wells in British Columbia').reasons).toEqual([
       'other_play',

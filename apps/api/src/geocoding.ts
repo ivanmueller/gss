@@ -302,6 +302,29 @@ export async function findFreightPlace(
   };
 }
 
+/**
+ * A town in Alberta for the map's Ask bar (F-254 part 3): only the town's name and the province
+ * go to Geocodio. A result outside Alberta, or only the province or a county, is no match.
+ */
+export async function findAlbertaTown(
+  apiKey: string,
+  name: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ latitude: number; longitude: number; label: string } | null> {
+  const query = { city: name, state_province: 'AB', country: 'Canada' };
+  const results = await geocodeAddresses(apiKey, new Map([['town', query]]), fetchImpl);
+  const result = results.get('town') ?? null;
+  if (!result || TOO_VAGUE.has(result.accuracyType)) return null;
+  const country = result.country ? normalizeCountry(result.country) : null;
+  const region = country && result.region ? normalizeRegion(country, result.region) : null;
+  if (country !== 'CA' || region !== 'AB') return null;
+  return {
+    latitude: result.latitude,
+    longitude: result.longitude,
+    label: result.formattedAddress.slice(0, 120) || name,
+  };
+}
+
 /** True when the match is exactly as findFreightPlace signed it, and not expired. */
 export async function verifyFreightPlace(
   apiKey: string,
