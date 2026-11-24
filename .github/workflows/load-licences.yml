@@ -1,0 +1,83 @@
+name: Load licence transfers
+
+# Licence transfers (F-295, docs/FEATURES_OIL_GAS.md): who holds every well, facility and pipeline
+# licence in Alberta, read from the AER's three licence lists (its Licence Reports page; the well
+# list a status at a time), compared with the day before, and each licence that changed company
+# recorded in the oil and gas database (petroleum-staging). The first run records who holds what;
+# transfers are recorded from the second day on.
+#
+# Run by itself every day, and by hand from the Actions tab (Actions → Load licence transfers →
+# Run workflow). If more than a tenth of a kind's licences changed company in a day it stops,
+# as that reads as a list gone wrong; after a person has checked it is real (a large merger), run
+# it by hand with "accept large" ticked. The AER's data on the owner's decision
+# (docs/DECISIONS.md, 2026-11-19); the files stay on the runner, never in the repository or logs.
+on:
+  workflow_dispatch:
+    inputs:
+      accept_large:
+        description: 'Accept more than a tenth of a kind changing company today (checked by a person)'
+        type: boolean
+        default: false
+  schedule:
+    # 13:30 UTC, 7:30 in Alberta.
+    - cron: '30 13 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-licences
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 21 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 21)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB."
+      - name: Read the AER's licence lists
+        run: node --experimental-strip-types scripts/load-licences.js fetch "$RUNNER_TEMP/licences"
+      - name: Record the transfers
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          ACCEPT_LARGE: ${{ inputs.accept_large && 'accept-large' || '' }}
+        run: |
+          dir="$RUNNER_TEMP/licences"
+          # The last load and who held what then. Another run cannot slip in between: the load
+          # checks the last load is still this one, in the same transaction that writes.
+          previous=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select coalesce(max(id), 0) from petro.licence_loads")
+          psql "$PETROLEUM_STAGING_DB_URL" -q -c "\copy (select kind, ba_code, unnest(licences) from petro.licence_holdings) to '$dir/holdings.csv' with (format csv)"
+          node --experimental-strip-types scripts/load-licences.js sql "$dir/today.json" "$dir/holdings.csv" "$previous" "$GRAIN_BYTES" $ACCEPT_LARGE > "$dir/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$dir/load.sql"
+      - name: Remove the files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/licences"
