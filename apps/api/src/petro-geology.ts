@@ -10,7 +10,7 @@ import {
 } from '@grain/domain';
 
 import type { FormationCellRow } from './formation-db';
-import type { GeologyOfWell, PickedWellRow, PickNameRow } from './petro-geology-db';
+import type { GeologyOfWell, PickedWellRow, PickNameRow, PlaySamples } from './petro-geology-db';
 import { GEOLOGY_PICKS_KM, GEOLOGY_SAMPLES_KM } from './petro-geology-db';
 
 /**
@@ -275,4 +275,61 @@ export function geologyAnswer(data: GeologyOfWell): GeologyAnswer {
   }));
 
   return { source, play, zoneHere, legs, picked: pickedOut, samples, reach };
+}
+
+/** A sample on the Maturity map (F-287 part 4): where it is and what it reads. */
+export interface PlaySample {
+  sampleId: number;
+  run: number;
+  uwi: string | null;
+  site: 'well' | 'outcrop';
+  longitude: number;
+  latitude: number;
+  unit: string | null;
+  lithology: string | null;
+  depthM: string | null;
+  collectedOn: string | null;
+  tmaxC: string | null;
+  tocPct: string | null;
+  hydrogenIndex: string | null;
+  ro: number | null;
+  window: MaturityWindow | null;
+  note: 'no-tmax' | 'small-s2' | null;
+}
+
+export interface PlaySamplesAnswer {
+  source: { name: string; loadedAt: string | null; sourceDate: string | null };
+  play: { key: string; name: string };
+  samples: PlaySample[];
+}
+
+/** A play's samples with the maturity each one reads, the same rules as a well's panel. */
+export function playSamplesAnswer(
+  play: { key: string; name: string },
+  data: PlaySamples,
+): PlaySamplesAnswer {
+  return {
+    source: {
+      name: SAMPLES_SOURCE_NAME,
+      loadedAt: data.load?.loadedAt ?? null,
+      sourceDate: data.load?.sourceDate ?? null,
+    },
+    play,
+    samples: data.samples.map((s) => ({
+      sampleId: s.sampleId,
+      run: s.run,
+      uwi: s.uwi,
+      site: s.site,
+      longitude: s.longitude,
+      latitude: s.latitude,
+      unit: s.unit,
+      lithology: s.lithology,
+      depthM: s.topDepthM,
+      collectedOn: s.collectedOn,
+      tmaxC: s.tmaxC,
+      tocPct: s.tocPct,
+      hydrogenIndex: s.hydrogenIndex,
+      ...sampleMaturity(s.tmaxC, s.s2),
+    })),
+  };
 }

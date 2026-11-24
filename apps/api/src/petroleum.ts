@@ -1,4 +1,4 @@
-import { PIPELINE_LEVELS, type St37Zone } from '@grain/domain';
+import { GEOLOGY_MAPS, PIPELINE_LEVELS, PLAY_SAMPLE_UNITS, type St37Zone } from '@grain/domain';
 import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
@@ -50,7 +50,7 @@ import {
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
 import { FRAC_SCHEMA_VERSION, fracAnswer, parseLicence } from './petro-frac';
-import { GEOLOGY_SCHEMA_VERSION, geologyAnswer } from './petro-geology';
+import { GEOLOGY_SCHEMA_VERSION, geologyAnswer, playSamplesAnswer } from './petro-geology';
 import { PRICES_SCHEMA_VERSION, pricesAnswer } from './petro-prices';
 import {
   parsePipelineId,
@@ -861,6 +861,41 @@ export function petroleumRoutes(
         );
         if (data.well === null) return apiError(c, 404, 'NOT_FOUND', 'No such well is loaded.');
         return keptJson(c, geologyAnswer(data));
+      });
+    });
+  });
+
+  // /petroleum/geology/samples?play=: every Rock-Eval sample of a play's units with the maturity
+  // it reads, for the Geology section's Maturity map (F-287 part 4). Membership first, as above.
+  // Open data (Open Government Licence – Alberta), the Survey named.
+  routes.get('/geology/samples', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const key = c.req.query('play');
+    const play = GEOLOGY_MAPS.find((m) => m.key === key);
+    const units = key === undefined ? undefined : PLAY_SAMPLE_UNITS[key];
+    if (!play || !units) return apiError(c, 400, 'VALIDATION_FAILED', 'No such play.');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < GEOLOGY_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const data = await petroleum.playSamples(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          units,
+        );
+        return keptJson(c, playSamplesAnswer({ key: play.key, name: play.name }, data));
       });
     });
   });

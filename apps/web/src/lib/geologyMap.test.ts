@@ -7,9 +7,11 @@ import { FORMATION_LAYERS } from './formationsMap';
 import {
   GEOLOGY_LAYERS,
   GEOLOGY_RAMPS,
+  GEOLOGY_SAMPLE_LAYER,
   geologyPixels,
   rampColour,
   syncGeology,
+  type GeologyShading,
   type GeologyView,
 } from './geologyMap';
 import { LAND_LAYERS } from './landMap';
@@ -68,7 +70,7 @@ const CORNERS: [number, number][] = [
   [-115, 54],
   [-116, 54],
 ];
-const VIEW: GeologyView = {
+const SHADING: GeologyShading = {
   measure: 'depth',
   image: 'data:image/png;base64,AAAA',
   corners: CORNERS,
@@ -88,6 +90,17 @@ const VIEW: GeologyView = {
       },
     ],
   },
+};
+const VIEW: GeologyView = { shading: SHADING, samples: null };
+const DOTS: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      properties: { colour: '#15803d', tip: 'Sample 1' },
+      geometry: { type: 'Point', coordinates: [-116, 54.5] },
+    },
+  ],
 };
 
 describe('the ramp', () => {
@@ -149,9 +162,14 @@ describe('syncGeology', () => {
 
   it('changes the picture and the lines in place, and removes everything when off', () => {
     const { map, order, sources, updates } = fakeMap(['background', 'pins']);
-    syncGeology(map, { ...VIEW, contours: null }, 'light', 'pins');
-    expect(sources.get('geology-image')).toMatchObject({ type: 'image', url: VIEW.image });
-    syncGeology(map, { ...VIEW, image: 'data:image/png;base64,BBBB' }, 'light', 'pins');
+    syncGeology(map, { shading: { ...SHADING, contours: null }, samples: null }, 'light', 'pins');
+    expect(sources.get('geology-image')).toMatchObject({ type: 'image', url: SHADING.image });
+    syncGeology(
+      map,
+      { shading: { ...SHADING, image: 'data:image/png;base64,BBBB' }, samples: null },
+      'light',
+      'pins',
+    );
     expect(updates).toHaveLength(2);
     syncGeology(map, null, 'light', 'pins');
     expect(order).toEqual(['background', 'pins']);
@@ -165,13 +183,40 @@ describe('syncGeology', () => {
       version: 8,
       glyphs: 'mapbox://fonts/mapbox/{fontstack}/{range}.pbf',
       sources: {
-        'geology-image': { type: 'image', url: VIEW.image, coordinates: CORNERS },
-        'geology-contours': { type: 'geojson', data: VIEW.contours },
+        'geology-image': { type: 'image', url: SHADING.image, coordinates: CORNERS },
+        'geology-contours': { type: 'geojson', data: SHADING.contours },
       },
       layers: Object.values(GEOLOGY_LAYERS).map((id) => {
         const { paint, ...rest } = layers.get(id) ?? { paint: {} };
         return { ...rest, paint };
       }),
+    };
+    expect(validate(style)).toEqual([]);
+  });
+});
+
+describe('the samples (F-287 part 4)', () => {
+  it('draws the dots under the pins, in their colours, and takes the shading away', () => {
+    const { map, order, layers, sources } = fakeMap(['background', ST37_LAYERS.wells, 'pins']);
+    syncGeology(map, VIEW, 'light', 'pins');
+    syncGeology(map, { shading: null, samples: DOTS }, 'light', 'pins');
+    expect(order).toEqual(['background', ST37_LAYERS.wells, GEOLOGY_SAMPLE_LAYER, 'pins']);
+    expect(layers.get(GEOLOGY_SAMPLE_LAYER)?.paint['circle-color']).toEqual(['get', 'colour']);
+    expect(layers.get(GEOLOGY_SAMPLE_LAYER)?.paint['circle-stroke-color']).toBe('#ffffff');
+    expect([...sources.keys()]).toEqual(['geology-sample-points']);
+    syncGeology(map, null, 'dark', 'pins');
+    expect(order).toEqual(['background', ST37_LAYERS.wells, 'pins']);
+    expect(sources.size).toBe(0);
+  });
+
+  it('makes a layer Mapbox accepts', () => {
+    const { map, layers } = fakeMap(['pins']);
+    syncGeology(map, { shading: null, samples: DOTS }, 'dark', 'pins');
+    const { paint, ...rest } = layers.get(GEOLOGY_SAMPLE_LAYER) ?? { paint: {} };
+    const style = {
+      version: 8,
+      sources: { 'geology-sample-points': { type: 'geojson', data: DOTS } },
+      layers: [{ ...rest, paint }],
     };
     expect(validate(style)).toEqual([]);
   });

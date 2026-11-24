@@ -111,7 +111,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // The formations' outlines (F-280), each switched by itself, not tied to the wells.
   const formations = useFormations();
   // A formation's depth or thickness (F-287 part 3), off when the map opens.
-  const geology = useGeologyMaps();
+  const geology = useGeologyMaps(session.organization.id, session.token);
   // Rigs, all of Alberta (F-282): their keys answer the pointer and the click before the wells.
   const rigs = useRigs(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {

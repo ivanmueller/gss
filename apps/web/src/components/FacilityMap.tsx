@@ -34,7 +34,7 @@ import {
 } from '../lib/facilitiesMap';
 import { EDGE_LABELS_FROM, gridEdgeLabels, type GridTownship } from '../lib/gridEdges';
 import { placeFormations, syncFormations, type FormationsView } from '../lib/formationsMap';
-import { syncGeology, type GeologyView } from '../lib/geologyMap';
+import { GEOLOGY_SAMPLE_LAYER, syncGeology, type GeologyView } from '../lib/geologyMap';
 import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
 import {
   PIPELINE_PICKABLE,
@@ -815,13 +815,33 @@ export default function FacilityMap(props: FacilityMapProps) {
       box.style.top = `${String(point.y)}px`;
       box.style.transform = `translate(${left ? 'calc(-100% - 14px)' : '14px'}, ${up ? 'calc(-100% - 14px)' : '14px'})`;
     };
-    // The depth and thickness under the pointer, where nothing else answers it; null hides it.
+    // The Geology section's words under the pointer, where nothing else answers it (F-287): the
+    // samples' dots there (part 4), else the depth and thickness (part 3); null hides the box.
+    const samplesAt = (point: mapboxgl.Point): string | null => {
+      if (!instance.getLayer(GEOLOGY_SAMPLE_LAYER)) return null;
+      const near: [mapboxgl.PointLike, mapboxgl.PointLike] = [
+        [point.x - 5, point.y - 5],
+        [point.x + 5, point.y + 5],
+      ];
+      const tips = instance
+        .queryRenderedFeatures(near, { layers: [GEOLOGY_SAMPLE_LAYER] })
+        .map((f) => f.properties?.tip as unknown)
+        .filter((tip): tip is string => typeof tip === 'string');
+      if (tips.length === 0) return null;
+      // Several samples of one well lie on one dot: the first three, and how many more.
+      const more = tips.length > 3 ? `\n\nand ${String(tips.length - 3)} more here` : '';
+      return tips.slice(0, 3).join('\n\n') + more;
+    };
     const showGeology = (point: mapboxgl.Point | null) => {
       const box = geologyTip.current;
       if (!box) return;
       const tipAt = latest.current.geologyTipAt;
       const at = point && tipAt ? instance.unproject(point) : null;
-      const text = at && tipAt ? tipAt(at.lng, at.lat) : null;
+      const text = point
+        ? (samplesAt(point) ?? (at && tipAt ? tipAt(at.lng, at.lat) : null))
+        : null;
+      // A dot is something to point at; the shaded squares everywhere are not.
+      if (text !== null && !tipAt) instance.getCanvas().style.cursor = 'pointer';
       box.hidden = text === null;
       if (box.textContent !== (text ?? '')) box.textContent = text ?? '';
     };
@@ -1271,7 +1291,7 @@ export default function FacilityMap(props: FacilityMapProps) {
           ref={geologyTip}
           role="status"
           hidden
-          className="w-64 rounded-card border bg-card px-3 py-2.5 text-sm shadow-md"
+          className="w-64 rounded-card border bg-card px-3 py-2.5 text-sm whitespace-pre-line shadow-md"
         />
       </div>
       {details && selectedId !== closedId && (

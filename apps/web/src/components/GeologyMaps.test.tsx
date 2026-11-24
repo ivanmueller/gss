@@ -5,10 +5,19 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { geologyTip, gridBytes, useGeologyMaps } from './GeologyMaps';
+import {
+  geologyTip,
+  gridBytes,
+  sampleFeatures,
+  sampleTip,
+  useGeologyMaps,
+  type PlaySample,
+  type PlaySamplesAnswer,
+} from './GeologyMaps';
 
-// The Geology section (F-287 part 3): the Duvernay's depth or thickness from the Survey's model,
-// off when the map opens. A made-up grid of two squares only.
+// The Geology section (F-287 parts 3 and 4): the Duvernay's depth or thickness from the Survey's model,
+// or its samples by maturity window, off when the map opens. A made-up grid of two squares and
+// made-up samples only.
 
 const [WEST, NORTH] = toMercator(-116, 54);
 const GRID = {
@@ -24,13 +33,59 @@ const LINES = { type: 'FeatureCollection', features: [] };
 /** A place inside the first square. */
 const [LON, LAT] = fromMercator(WEST + 100, NORTH - 100);
 
+const ORG = '00000000-0000-4000-8000-000000000001';
+
+const SAMPLE: PlaySample = {
+  sampleId: 4321,
+  run: 1,
+  uwi: '00/01-01-060-20W5/0',
+  site: 'well',
+  longitude: -116.8,
+  latitude: 54.4,
+  unit: 'Duvernay',
+  lithology: 'shale',
+  depthM: '3050.20',
+  collectedOn: null,
+  tmaxC: '450',
+  tocPct: '3.10',
+  hydrogenIndex: '120',
+  ro: 0.94,
+  window: 'oil',
+  note: null,
+};
+const SAMPLES: PlaySamplesAnswer = {
+  source: { name: 'Digital Dataset 2013-0003', loadedAt: null, sourceDate: null },
+  play: { key: 'duvernay', name: 'Duvernay / Muskwa' },
+  samples: [
+    SAMPLE,
+    {
+      ...SAMPLE,
+      sampleId: 4322,
+      uwi: null,
+      site: 'outcrop',
+      depthM: null,
+      ro: null,
+      window: null,
+      note: 'no-tmax',
+      tmaxC: null,
+      tocPct: null,
+      hydrogenIndex: null,
+    },
+  ],
+};
+
 function Harness() {
-  const geology = useGeologyMaps();
+  const geology = useGeologyMaps(ORG, 'token');
   return (
     <div>
       {geology.section({ open: true, onToggle: () => undefined })}
       <output data-testid="tip">{geology.tipAt?.(LON, LAT) ?? 'none'}</output>
-      <output data-testid="view">{geology.view ? geology.view.measure : 'off'}</output>
+      <output data-testid="view">
+        {geology.view
+          ? (geology.view.shading?.measure ??
+            `dots ${String(geology.view.samples?.features.length)}`)
+          : 'off'}
+      </output>
       <div data-testid="legend">{geology.legend()}</div>
       {geology.about()}
     </div>
@@ -42,6 +97,9 @@ function answer(url: string): Response {
     return new Response(gzipSync(encodeGeologyGrid(GRID)));
   }
   if (url.startsWith('/geology/duvernay-')) return Response.json(LINES);
+  if (url === `/api/v1/petroleum/geology/samples?play=duvernay&organization_id=${ORG}`) {
+    return Response.json(SAMPLES);
+  }
   return new Response(null, { status: 404 });
 }
 
@@ -141,5 +199,67 @@ describe('the Geology section', () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('view')).toHaveTextContent('off');
     expect(screen.getByTestId('tip')).toHaveTextContent('none');
+  });
+});
+
+describe('the samples (F-287 part 4)', () => {
+  it('gives each sample its box and its colour', () => {
+    expect(sampleTip(SAMPLE)).toBe(
+      'Sample 4321 · Duvernay · 3,050 m\nOil window · Ro 0.94% · Tmax 450 °C\nTOC 3.1% · HI 120\n00/01-01-060-20W5/0',
+    );
+    const none = SAMPLES.samples[1];
+    if (!none) throw new Error('no sample');
+    expect(sampleTip(none)).toBe('Sample 4322 · Duvernay · outcrop\nNo window: no Tmax');
+    expect(sampleTip({ ...none, note: 'small-s2', ro: 0.94, tmaxC: '450' })).toBe(
+      'Sample 4322 · Duvernay · outcrop\nNo window: S2 too small to read Tmax · Ro 0.94% · Tmax 450 °C',
+    );
+    const dots = sampleFeatures(SAMPLES.samples);
+    expect(dots.features.map((f) => f.properties?.colour as unknown)).toEqual([
+      '#15803d',
+      '#e5e7eb',
+    ]);
+    expect(dots.features[0]?.geometry).toEqual({ type: 'Point', coordinates: [-116.8, 54.4] });
+  });
+
+  it('asks for the samples only on Maturity, then shows them by window', async () => {
+    const fetchMock = vi.fn((url: string) => Promise.resolve(answer(url)));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('switch', { name: 'Geology' }));
+    await screen.findByText(/contour lines every 250 m/);
+    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(
+      `/api/v1/petroleum/geology/samples?play=duvernay&organization_id=${ORG}`,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Maturity' }));
+    expect(
+      await screen.findByText(
+        '2 measured samples of the Duvernay and the Muskwa, by maturity window',
+      ),
+    ).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/geology/duvernay-grid.bin',
+      '/geology/duvernay-depth.geojson',
+      `/api/v1/petroleum/geology/samples?play=duvernay&organization_id=${ORG}`,
+    ]);
+    expect(screen.getByTestId('view')).toHaveTextContent('dots 2');
+    // No squares' words on Maturity: a dot's own box answers.
+    expect(screen.getByTestId('tip')).toHaveTextContent('none');
+    expect(screen.getByTestId('legend')).toHaveTextContent('Duvernay / Muskwa maturity');
+    expect(screen.getByTestId('legend')).toHaveTextContent('Oil window');
+    expect(screen.getByText(/Digital Dataset 2013-0003/)).toBeInTheDocument();
+  });
+
+  it('says so when the samples cannot be loaded', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(null, { status: 500 }))),
+    );
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('switch', { name: 'Geology' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Maturity' }));
+    expect(
+      await screen.findByText('The samples could not be loaded. Try again later.'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('view')).toHaveTextContent('off');
   });
 });

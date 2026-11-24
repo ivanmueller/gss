@@ -81,9 +81,64 @@ export interface GeologyOfWell {
   loads: { picks: GeologyLoad | null; samples: GeologyLoad | null; model: GeologyLoad | null };
 }
 
+export interface PlaySamples {
+  samples: SampleRow[];
+  load: GeologyLoad | null;
+}
+
 export interface GeologyDatabase {
   /** Members: what the panel's Geology section needs for one well. */
   geologyOfWell(ctx: PetroleumContext, uwi: string): Promise<GeologyOfWell>;
+  /**
+   * Members: every sample of a play's units, as the samples' file names them (F-287 part 4,
+   * the Maturity map). A few hundred at most.
+   */
+  playSamples(ctx: PetroleumContext, units: readonly string[]): Promise<PlaySamples>;
+}
+
+interface SampleDbRow {
+  sample_id: number;
+  run: number;
+  uwi: string | null;
+  site: 'well' | 'outcrop';
+  longitude: string;
+  latitude: string;
+  top_depth_m: string | null;
+  unit: string | null;
+  lithology: string | null;
+  collected_on: string | null;
+  tmax_c: string | null;
+  s2: string | null;
+  toc_pct: string | null;
+  hydrogen_index: string | null;
+}
+
+function sampleOf(r: SampleDbRow): SampleRow {
+  return {
+    sampleId: r.sample_id,
+    run: r.run,
+    uwi: r.uwi,
+    site: r.site,
+    longitude: Number(r.longitude),
+    latitude: Number(r.latitude),
+    topDepthM: r.top_depth_m,
+    unit: r.unit,
+    lithology: r.lithology,
+    collectedOn: r.collected_on,
+    tmaxC: r.tmax_c,
+    s2: r.s2,
+    tocPct: r.toc_pct,
+    hydrogenIndex: r.hydrogen_index,
+  };
+}
+
+/** The member's settings for the policies, inside a transaction. */
+async function asMember(tx: postgres.TransactionSql, ctx: PetroleumContext) {
+  await tx`select set_config('statement_timeout', '15s', true),
+                  set_config('petro.user_id', ${ctx.userId}, true),
+                  set_config('petro.organization_id', ${ctx.organizationId}, true),
+                  set_config('petro.member_role', ${ctx.role}, true),
+                  set_config('petro.request_id', ${ctx.requestId}, true)`;
 }
 
 const num = (v: string | number | null) => (v === null ? null : Number(v));
@@ -224,24 +279,7 @@ export function geologyQueries(sql: postgres.Sql): GeologyDatabase {
 
         const s = reachDegrees(lat, GEOLOGY_SAMPLES_KM);
         const legUwis = legs.map((l) => l.uwi);
-        const sampleRows = await tx<
-          {
-            sample_id: number;
-            run: number;
-            uwi: string | null;
-            site: 'well' | 'outcrop';
-            longitude: string;
-            latitude: string;
-            top_depth_m: string | null;
-            unit: string | null;
-            lithology: string | null;
-            collected_on: string | null;
-            tmax_c: string | null;
-            s2: string | null;
-            toc_pct: string | null;
-            hydrogen_index: string | null;
-          }[]
-        >`
+        const sampleRows = await tx<SampleDbRow[]>`
           select sample_id, run, uwi, site, longitude, latitude, top_depth_m::text as top_depth_m,
                  unit, lithology, to_char(collected_on, 'YYYY-MM-DD') as collected_on,
                  tmax_c::text as tmax_c, s2::text as s2, toc_pct::text as toc_pct,
@@ -250,22 +288,7 @@ export function geologyQueries(sql: postgres.Sql): GeologyDatabase {
           where uwi = any(${pgArray(legUwis)}::text[])
              or (latitude between ${lat - s.dlat} and ${lat + s.dlat}
                  and longitude between ${lon - s.dlon} and ${lon + s.dlon})`;
-        const samples = sampleRows.map((r) => ({
-          sampleId: r.sample_id,
-          run: r.run,
-          uwi: r.uwi,
-          site: r.site,
-          longitude: Number(r.longitude),
-          latitude: Number(r.latitude),
-          topDepthM: r.top_depth_m,
-          unit: r.unit,
-          lithology: r.lithology,
-          collectedOn: r.collected_on,
-          tmaxC: r.tmax_c,
-          s2: r.s2,
-          tocPct: r.toc_pct,
-          hydrogenIndex: r.hydrogen_index,
-        }));
+        const samples = sampleRows.map(sampleOf);
 
         // The model's cells under the legs (and the well's two ends): a few kilometres at most.
         const lons = [well.surface[0], well.bottom[0]];
@@ -293,6 +316,31 @@ export function geologyQueries(sql: postgres.Sql): GeologyDatabase {
           bases: c.bases,
         }));
         return { well, legs, picked, names, samples, cells, loads };
+      });
+    },
+    playSamples(ctx, units) {
+      return sql.begin(async (tx) => {
+        await asMember(tx, ctx);
+        const [load] = await tx<{ loaded_at: Date; source_date: string | null }[]>`
+          select loaded_at, to_char(source_date, 'YYYY-MM-DD') as source_date
+          from petro.geology_loads where kind = 'samples' order by id desc limit 1`;
+        // Units as the file names them, any case; the names are the code's own (PLAY_SAMPLE_UNITS).
+        const names = units.map((u) => u.trim().toLowerCase());
+        const rows = await tx<SampleDbRow[]>`
+          select sample_id, run, uwi, site, longitude, latitude, top_depth_m::text as top_depth_m,
+                 unit, lithology, to_char(collected_on, 'YYYY-MM-DD') as collected_on,
+                 tmax_c::text as tmax_c, s2::text as s2, toc_pct::text as toc_pct,
+                 hydrogen_index::text as hydrogen_index
+          from petro.maturity_samples
+          where lower(btrim(unit)) = any(${pgArray(names)}::text[])
+          order by sample_id, run
+          limit 2000`;
+        return {
+          samples: rows.map(sampleOf),
+          load: load
+            ? { loadedAt: load.loaded_at.toISOString(), sourceDate: load.source_date }
+            : null,
+        };
       });
     },
   };
