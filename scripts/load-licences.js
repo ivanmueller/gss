@@ -12,7 +12,7 @@
 //     dumped by the workflow) and writes the SQL that records the changes and replaces the
 //     holdings in one transaction: refused if another load came in between, if more than a
 //     tenth of a kind's licences changed company (unless accept-large, after a person looked),
-//     or if grain's and the oil and gas databases together would pass 400 MB.
+//     or if grain's and the oil and gas databases together would pass 450 MB.
 //
 // Only the AER's own addresses are asked for, and redirects are not followed.
 
@@ -28,7 +28,7 @@ import {
   readLicenceHolders,
 } from '../packages/domain/src/licenceHolders.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 // Fewer licences than this means a list is not the one expected: nothing is loaded. Read on
 // 2026-11-23: 476,023 wells, 41,641 facilities, 57,166 pipelines.
 export const FEWEST = { well: 400_000, facility: 35_000, pipeline: 50_000 };
@@ -237,7 +237,7 @@ export function sqlFor(
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(grainBytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

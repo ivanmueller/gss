@@ -52,7 +52,7 @@ describe('load-prices.js sql', () => {
       sql,
       /insert into petro\.price_loads \(prices, first_month, last_month, unread\) values \(3, '2030-01-01', '2031-01-01', array\['https:\/\/open\.alberta\.ca\/x''y\.pdf'\]::text\[\]\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.match(sql, /commit;/);
   });
 

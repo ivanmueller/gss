@@ -10,7 +10,7 @@
 //
 //   node --experimental-strip-types scripts/load-frac.js sql <frac.json> <grain-bytes> > load.sql
 //     writes the SQL that replaces the whole copy in one transaction, refused if grain's and the
-//     oil and gas databases together would pass 400 MB.
+//     oil and gas databases together would pass 450 MB.
 //
 // Only the AER's own address is asked for, and redirects are not followed.
 
@@ -22,7 +22,7 @@ import { fracWells } from '../packages/domain/src/frac.ts';
 
 export const SOURCE_URL =
   'https://static.aer.ca/prd/documents/by-topic/hydraulic-fracturing/SummaryChemical-WaterUse.csv';
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 // Fewer wells than this means the file is not the one expected: nothing is loaded.
 const FEWEST_WELLS = 20_000;
 
@@ -148,7 +148,7 @@ export function sqlFor({ wells, skipped, sourceDate }, grainBytes) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(grainBytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

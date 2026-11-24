@@ -103,7 +103,7 @@ describe('load-land.js', () => {
       /values \('png_agreements', 'https:\/\/geospatial\.alberta\.ca\/titan\/rest\/services\/energy\/mineral_agreement\/MapServer\/8', -117, 53, -115, 55, 1\);/,
     );
     assert.match(sql, /values \('oil_sands_agreements', [^\n]+, 0\);/);
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
   });
 

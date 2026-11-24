@@ -21,7 +21,7 @@
 // places each parcel's land on those sections, joins the results, and writes the SQL that
 // replaces the whole copy in one transaction. Parcels with no land in the area are left out.
 // <grain-bytes> is the size of grain's database: the load is refused, and nothing changes, if
-// both databases together would pass 400 MB (docs/DECISIONS.md, 2026-11-19).
+// both databases together would pass 450 MB (docs/DECISIONS.md, 2026-11-19).
 //
 //   node --experimental-strip-types scripts/load-land-sales.js area <west> <south> <east> \
 //     <north> <outline.geojson>
@@ -45,7 +45,7 @@ import {
   sectionCorners,
 } from '../packages/domain/src/landSales.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 const ALBERTA = { west: -120.1, south: 48.9, east: -109.9, north: 60.1 };
 const SITE = 'https://content2.energy.alberta.ca';
 const PAGE_URL = `${SITE}/petroleum-and-natural-gas-tenure-public-offerings-and-results/`;
@@ -374,7 +374,7 @@ function mainSql(argv) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

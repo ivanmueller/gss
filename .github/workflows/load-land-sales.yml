@@ -12,7 +12,7 @@ name: Load land sales
 # The notices and accepted offers are published by the province under the Open Government
 # Licence - Alberta (docs/DECISIONS.md, 2026-11-21). The files stay on the runner and in that
 # database, never in the repository or the run's logs or artifacts. The load is refused if
-# grain's and the oil and gas databases together would pass 400 MB (the free plan's limit is
+# grain's and the oil and gas databases together would pass 450 MB (the free plan's limit is
 # shared by both).
 on:
   workflow_dispatch:

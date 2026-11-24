@@ -65,7 +65,7 @@ describe('load-frac.js sql', () => {
       sql,
       /insert into petro\.frac_loads \(source_url, source_date, wells, skipped\) values \('https:\/\/static\.aer\.ca\/[^']+', '2030-01-28', 2, 2\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.match(sql, /commit;/);
   });
 

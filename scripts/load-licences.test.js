@@ -72,7 +72,7 @@ describe('load-licences.js sql', () => {
     // W 0000002, not in today's lists, keeps its holder.
     assert.match(sql, /"well","ZZ01","\{""W 0000002"",/);
     assert.match(sql, /truncate petro\.licence_holdings;/);
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.match(sql, /\ncommit;\n/);
   });
 

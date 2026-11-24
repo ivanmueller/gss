@@ -4,7 +4,7 @@ name: Load geology
 # picked in wells (the Geological Framework of Alberta, Version 4: its bulk download "Point
 # data.zip", about 370 MB), kept for the wells we hold and the picked wells nearest them, and its
 # Rock-Eval samples (Digital Dataset 2013-0003: Tmax, TOC and the rest). Each set is replaced in
-# one transaction in the oil and gas database (petroleum-staging), under the shared 400 MB guard.
+# one transaction in the oil and gas database (petroleum-staging), under the shared 450 MB guard.
 #
 # Run by hand from the Actions tab (Actions → Load geology → Run workflow), and again after Load
 # ST37 wells adds a play: the picks kept follow the wells held. The Survey's data is open (Open

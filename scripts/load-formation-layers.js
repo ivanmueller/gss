@@ -21,7 +21,7 @@
 // <dir> holds top_NN.bil and base_NN.bil for NN = 01 to 90: each grid on that lattice as raw
 // 32-bit numbers, the north row first, -9999 where the zone is absent. <grain-bytes> is the size
 // of grain's database: the load is refused, and nothing changes, if both databases together
-// would pass 400 MB (the free plan's limit is shared, docs/DECISIONS.md, 2026-11-19).
+// would pass 450 MB (the free plan's limit is shared, docs/DECISIONS.md, 2026-11-19).
 //
 // The SQL replaces the whole copy in one transaction. The Survey's data is open (Open
 // Government Licence – Alberta); its files still live only on the runner.
@@ -38,7 +38,7 @@ import {
   formationCell,
 } from '../packages/domain/src/formationZones.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 /** The ground kept around each well's surface and bottom hole, in kilometres. */
 export const KEEP_KM = 10;
 const NO_DATA = -9999;
@@ -190,7 +190,7 @@ export function sqlFor(rows, sourceUrl, sourceDate, grainBytes) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(grainBytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',
