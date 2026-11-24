@@ -30,6 +30,7 @@ describe('operators as petro_api', () => {
       await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
       await admin`delete from petro.facilities where facility_id like 'ABZY%'`;
       await admin`delete from petro.pipelines where licence_number like 'ZY%'`;
+      await admin`delete from petro.land_agreements where agreement_type = 'ZQ9'`;
     };
     try {
       await clean();
@@ -48,11 +49,19 @@ describe('operators as petro_api', () => {
                 box(point(-119.99, 59.95), point(-119.95, 59.96)),
                 '{-11999000,5995000,-11995000,5996000}', '{}')`;
 
+      await admin`
+        insert into petro.land_agreements (rights, agreement_type, agreement_number, holder,
+          bounds, shape)
+        values ('png', 'ZQ9', '0199990001', 'ZQXEXAMPLE ENERGY LTD.',
+                box(point(-119.99, 59.95), point(-119.95, 59.96)),
+                '[[[[-119.99,59.95],[-119.95,59.95],[-119.95,59.96],[-119.99,59.95]]]]')`;
+
       const rows = (await db.operators(member())).filter((r) =>
         (r.name ?? '').toUpperCase().startsWith('ZQX'),
       );
       expect(rows.sort((a, b) => a.source.localeCompare(b.source))).toEqual([
         { source: 'facilities', code: 'Z0Y1', name: 'Zqxexample Energy Ltd.', count: 1 },
+        { source: 'land', code: null, name: 'ZQXEXAMPLE ENERGY LTD.', count: 1 },
         { source: 'pipelines', code: 'Z0Y2', name: 'Zqxsample Midstream Ltd.', count: 1 },
         { source: 'wells', code: null, name: 'ZQXEXAMPLE ENERGY LTD.', count: 2 },
       ]);

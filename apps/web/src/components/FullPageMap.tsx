@@ -210,9 +210,16 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             wells.operatorsInView,
             facilities.operatorsInView,
             pipelines.operatorsInView,
+            land.operatorsInView,
           ])
         : null,
-    [colourBy, wells.operatorsInView, facilities.operatorsInView, pipelines.operatorsInView],
+    [
+      colourBy,
+      wells.operatorsInView,
+      facilities.operatorsInView,
+      pipelines.operatorsInView,
+      land.operatorsInView,
+    ],
   );
   const wellsView = useMemo(
     () => (wells.view && byOperator ? { ...wells.view, byOperator } : wells.view),
@@ -221,6 +228,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const facilitiesView = useMemo(
     () => (facilities.view && byOperator ? { ...facilities.view, byOperator } : facilities.view),
     [facilities.view, byOperator],
+  );
+  // Crown land by its holder's name (part 3); the sales keep their prices' colours.
+  const landView = useMemo(
+    () => (land.view && byOperator ? { ...land.view, byOperator } : land.view),
+    [land.view, byOperator],
   );
   const pipelinesView = useMemo(
     () => (pipelines.view && byOperator ? { ...pipelines.view, byOperator } : pipelines.view),
@@ -231,6 +243,9 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
     wells.apply({ operator: text });
     facilities.apply({ operator: text });
     pipelines.apply({ licensee: text });
+    // Land by name only (part 3): the holder of Crown land, the buyer at a sale.
+    land.apply({ holder: text });
+    sales.apply({ buyer: text }, goTo);
   };
   const applyAll = (next: MapApplied) => {
     if (next.basemap) setBasemap(next.basemap);
@@ -291,7 +306,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // Coloured by operator, the wells', facilities' and pipelines' own colours mean nothing on
   // the map: their legends make way for the operators'.
   const ownColours = (name: SideSection) =>
-    byOperator === null || !['wells', 'facilities', 'pipelines'].includes(name);
+    byOperator === null || !['wells', 'facilities', 'pipelines', 'land'].includes(name);
   const legends = sideOrder(section)
     .filter(ownColours)
     .map((name) => ({
@@ -348,7 +363,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             setClicked(found);
           }}
           st37Locked={locked}
-          land={land.view}
+          land={landView}
           landSales={sales.view}
           grid={grid.view}
           gridTownships={grid.townships}
@@ -727,6 +742,11 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                       </li>
                     ))}
                   </ul>
+                )}
+                {land.view !== null && (
+                  <p className="mt-1.5 text-muted-foreground">
+                    Crown land by its holder’s name, matched to the operators by name.
+                  </p>
                 )}
               </div>
             )}

@@ -1,4 +1,10 @@
-import { formatAlberta, LAND_RIGHTS, type Bbox, type MapSettings } from '@grain/domain';
+import {
+  formatAlberta,
+  LAND_RIGHTS,
+  operatorMatches,
+  type Bbox,
+  type MapSettings,
+} from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -154,7 +160,6 @@ export function saleFiltered(
     until?: string | null;
   },
 ): LandSaleParcel[] {
-  const text = filters.buyer.trim().toLowerCase();
   const since = filters.since ?? null;
   const until = filters.until ?? null;
   return parcels.filter(
@@ -162,7 +167,8 @@ export function saleFiltered(
       (since === null || p.saleDate >= since) &&
       (until === null || p.saleDate < until) &&
       filters.states.has(landSaleState(p, filters.today)) &&
-      (text === '' || (p.buyers ?? '').toLowerCase().includes(text)),
+      // Names compared whatever their case or punctuation (F-302).
+      operatorMatches(p.buyers, filters.buyer),
   );
 }
 

@@ -1,14 +1,15 @@
 /**
  * Operators across the oil and gas map's layers (F-302): the AER's wells (ST37) name their
  * licensee only, its facilities (ST102) and pipelines name a company with its four-character
- * business associate code. Names are written differently from one list to the next
+ * business associate code, and the province's Crown agreements name their holder only (part 3,
+ * matched by name). Names are written differently from one list to the next
  * ("EXAMPLE ENERGY LTD." and "Example Energy Ltd."), so they are compared by a key: upper case,
  * a trailing "(A1XX)" code taken off, every other character than letters and digits a space.
  */
 
 /** A company as one source counts it: its code when the source has one, its name, how many. */
 export interface OperatorSourceRow {
-  source: 'wells' | 'facilities' | 'pipelines';
+  source: 'wells' | 'facilities' | 'pipelines' | 'land';
   code: string | null;
   name: string | null;
   count: number;
@@ -21,6 +22,8 @@ export interface Operator {
   wells: number;
   facilities: number;
   pipelines: number;
+  /** Crown agreement tracts held (by the holder's name). */
+  land: number;
 }
 
 const CODE_SUFFIX = /\s*\(([0-9A-Z]{4})\)\s*$/;
@@ -71,7 +74,7 @@ export function mergeOperators(rows: readonly OperatorSourceRow[]): Operator[] {
     let entry = byKey.get(key);
     if (!entry) {
       entry = {
-        operator: { name, codes: [], wells: 0, facilities: 0, pipelines: 0 },
+        operator: { name, codes: [], wells: 0, facilities: 0, pipelines: 0, land: 0 },
         shown: { name, count: row.count },
         codes: new Set(),
       };
@@ -83,7 +86,7 @@ export function mergeOperators(rows: readonly OperatorSourceRow[]): Operator[] {
     if (code !== null) entry.codes.add(code);
     entry.operator[row.source] += row.count;
   }
-  const total = (o: Operator) => o.wells + o.facilities + o.pipelines;
+  const total = (o: Operator) => o.wells + o.facilities + o.pipelines + o.land;
   return [...byKey.values()]
     .map(({ operator, codes }) => ({ ...operator, codes: [...codes].sort() }))
     .sort((a, b) => total(b) - total(a) || a.name.localeCompare(b.name, 'en-CA'));

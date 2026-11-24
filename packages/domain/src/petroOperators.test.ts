@@ -43,11 +43,34 @@ describe('mergeOperators', () => {
       { source: 'wells', code: null, name: 'Other Sample Corp.(C0Z3)', count: 2 },
       { source: 'wells', code: null, name: null, count: 9 },
       { source: 'facilities', code: 'D0W4', name: 'Empty Corp.', count: 0 },
+      // A holder of Crown land, matched by name only (part 3).
+      { source: 'land', code: null, name: 'EXAMPLE ENERGY LTD.', count: 7 },
     ]);
     expect(merged).toEqual([
-      { name: 'Sample Midstream Ltd.', codes: ['B0Y2'], wells: 0, facilities: 0, pipelines: 80 },
-      { name: 'Example Energy Ltd.', codes: ['A0X1'], wells: 40, facilities: 5, pipelines: 12 },
-      { name: 'Other Sample Corp.', codes: ['C0Z3'], wells: 2, facilities: 0, pipelines: 0 },
+      {
+        name: 'Sample Midstream Ltd.',
+        codes: ['B0Y2'],
+        wells: 0,
+        facilities: 0,
+        pipelines: 80,
+        land: 0,
+      },
+      {
+        name: 'Example Energy Ltd.',
+        codes: ['A0X1'],
+        wells: 40,
+        facilities: 5,
+        pipelines: 12,
+        land: 7,
+      },
+      {
+        name: 'Other Sample Corp.',
+        codes: ['C0Z3'],
+        wells: 2,
+        facilities: 0,
+        pipelines: 0,
+        land: 0,
+      },
     ]);
   });
 

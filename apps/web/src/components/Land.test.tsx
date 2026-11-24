@@ -133,6 +133,8 @@ describe('landTerm and landFiltered', () => {
   it('keeps the holders whose name holds the text typed, whatever its case', () => {
     expect(ids(' sample ')).toEqual(['3']);
     expect(ids('energy', 'continued')).toEqual([]);
+    // As the Operator box fills it: whatever its punctuation (F-302 part 3).
+    expect(ids('Sample Resources Inc')).toEqual(['3']);
   });
 });
 

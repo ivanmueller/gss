@@ -5,7 +5,7 @@ import type { PetroleumContext } from './petroleum-db';
 
 /**
  * The operators of what is stored (F-302): the AER's wells by licensee name, its facilities by
- * operator and its pipelines by licensee, each with its business associate code where the
+ * operator, its pipelines by licensee and the Crown's agreements by holder (part 3), each with its business associate code where the
  * source has one, counted. Read as `petro_api` with the person's membership, as every other
  * oil and gas read; no table of its own.
  */
@@ -32,7 +32,10 @@ export function operatorQueries(sql: postgres.Sql): OperatorsDatabase {
           from petro.facilities where operator is not null group by operator_code, operator
           union all
           select 'pipelines', licensee_code, licensee, count(*)::int
-          from petro.pipelines where licensee is not null group by licensee_code, licensee`;
+          from petro.pipelines where licensee is not null group by licensee_code, licensee
+          union all
+          select 'land', null, holder, count(*)::int
+          from petro.land_agreements where holder is not null group by holder`;
         return rows.map((r) => ({ source: r.source, code: r.code, name: r.name, count: r.n }));
       });
     },

@@ -19,14 +19,16 @@ export function operatorHolds(o: Operator): string {
   each(o.wells, 'well', 'wells');
   each(o.facilities, 'facility', 'facilities');
   each(o.pipelines, 'pipeline segment', 'pipeline segments');
+  each(o.land, 'land agreement tract', 'land agreement tracts');
   return parts.join(' · ');
 }
 
 /**
  * One Operator box for the whole map (F-302, the owner, 2026-11-24): every operator with a well,
- * facility or pipeline in what is loaded, to pick or type. What is typed fills the operator box
- * of Wells & licences, Facilities and Pipelines at once (each can still be changed on its own),
- * names compared whatever their case or punctuation. The list is asked for once, when the box
+ * facility, pipeline or Crown land in what is loaded, to pick or type. What is typed fills the
+ * operator box of Wells & licences, Facilities and Pipelines, Land today's Holder and Land
+ * sales' Buyer at once (each can still be changed on its own), names compared whatever their
+ * case or punctuation; land by name only (part 3). The list is asked for once, when the box
  * is first used, and kept by the browser.
  */
 export function OperatorPicker({
@@ -119,7 +121,7 @@ export function OperatorPicker({
         <p className="text-xs text-muted-foreground">Loaded: {operatorHolds(picked)}.</p>
       ) : value !== '' ? (
         <p className="text-xs text-muted-foreground">
-          Wells, facilities and pipelines of the operators whose name holds this.
+          Wells, facilities, pipelines and land of the operators whose name holds this.
         </p>
       ) : null}
     </div>

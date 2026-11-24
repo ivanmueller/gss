@@ -228,6 +228,7 @@ describe('the side card (F-267)', () => {
               wells: 0,
               facilities: 3,
               pipelines: 80,
+              land: 0,
             },
           ],
         }),
@@ -247,9 +248,14 @@ describe('the side card (F-267)', () => {
     expect(within(card).getByPlaceholderText('Any operator')).toHaveValue('Sample Midstream Ltd.');
     await userEvent.click(within(card).getByRole('button', { name: 'Pipelines' }));
     expect(within(card).getByPlaceholderText('Any licensee')).toHaveValue('Sample Midstream Ltd.');
+    // Land by name too (part 3): Land today's Holder and Land sales' Buyer.
+    await userEvent.click(within(card).getByRole('button', { name: 'Land today' }));
+    expect(within(card).getByPlaceholderText('Any holder')).toHaveValue('Sample Midstream Ltd.');
+    await userEvent.click(within(card).getByRole('button', { name: 'Land sales' }));
+    expect(within(card).getByPlaceholderText('Any buyer')).toHaveValue('Sample Midstream Ltd.');
     await userEvent.click(within(card).getByRole('button', { name: 'Every operator' }));
     expect(box).toHaveValue('');
-    expect(within(card).getByPlaceholderText('Any licensee')).toHaveValue('');
+    expect(within(card).getByPlaceholderText('Any buyer')).toHaveValue('');
   });
 
   // F-302 part 2: colour by operator, the ten in view in the legend in place of the statuses.
