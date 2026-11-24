@@ -45,8 +45,52 @@ export const SALE_PERIODS = [
 ] as const;
 export type SalePeriod = (typeof SALE_PERIODS)[number]['key'];
 
-/** What the panel's When row holds: a period ending today, or one sale by its date (F-267). */
-export type SaleWhen = SalePeriod | { sale: string };
+/** Dates chosen (YYYY-MM-DD), both included; null for no limit on that side (F-303). */
+export interface SaleRange {
+  from: string | null;
+  to: string | null;
+}
+
+/**
+ * What the panel's When row holds: a period ending today, one sale by its date (F-267), or a
+ * year or dates chosen (F-303).
+ */
+export type SaleWhen = SalePeriod | { sale: string } | SaleRange;
+
+/** A whole year as dates: 2023 is 2023-01-01 to 2023-12-31. */
+export function saleYear(year: number): SaleRange {
+  return { from: `${String(year)}-01-01`, to: `${String(year)}-12-31` };
+}
+
+/** The year a range is, when it is exactly one whole year; null otherwise. */
+export function saleRangeYear(range: SaleRange): number | null {
+  if (range.from === null || range.to === null) return null;
+  const year = Number(range.from.slice(0, 4));
+  const whole = saleYear(year);
+  return range.from === whole.from && range.to === whole.to ? year : null;
+}
+
+/** The sales a When holds: from this date on, and before that one (null: no limit). */
+export function saleWindow(
+  when: SaleWhen,
+  today: string,
+): { since: string | null; until: string | null } {
+  if (typeof when !== 'object') return { since: saleSince(when, today), until: null };
+  if ('sale' in when) return { since: when.sale, until: saleNextDay(when.sale) };
+  return { since: when.from, until: when.to === null ? null : saleNextDay(when.to) };
+}
+
+/** A range in words: `2023`, `Mar 1, 2023 to Jun 30, 2024`, `from Mar 1, 2023`. */
+export function saleRangeTitle(range: SaleRange): string {
+  const year = saleRangeYear(range);
+  if (year !== null) return String(year);
+  if (range.from !== null && range.to !== null) {
+    return `${saleDay(range.from, true)} to ${saleDay(range.to, true)}`;
+  }
+  if (range.from !== null) return `from ${saleDay(range.from, true)}`;
+  if (range.to !== null) return `up to ${saleDay(range.to, true)}`;
+  return 'all years';
+}
 
 /** The day after a date (YYYY-MM-DD): one sale's parcels are those from its day to before it. */
 export function saleNextDay(date: string): string {
@@ -234,7 +278,11 @@ export interface LandSalesState {
 }
 
 /** The section's settings, with one sale alone named by its date as well as next or last. */
-export type LandSalesSnapshot = NonNullable<MapSettings['sales']> & { saleDate?: string };
+export type LandSalesSnapshot = NonNullable<MapSettings['sales']> & {
+  saleDate?: string;
+  /** A year or dates chosen in the panel (F-303); not among the Ask bar's settings. */
+  saleRange?: SaleRange;
+};
 
 export function useLandSales(organizationId: string, token: string): LandSalesState {
   // Off when the map opens (F-284); Jump to and its section's switch turn it on.
@@ -255,9 +303,10 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   const [picked, setPicked] = useState<readonly string[]>(NONE);
   const today = useMemo(() => landToday(), []);
   // One sale alone is its day to the day after (F-267).
-  const oneSale = typeof when === 'object' ? when.sale : null;
-  const since = typeof when === 'object' ? when.sale : saleSince(when, today);
-  const until = oneSale !== null ? saleNextDay(oneSale) : null;
+  const oneSale = typeof when === 'object' && 'sale' in when ? when.sale : null;
+  // A year or dates chosen (F-303): to the day after the last day, so it is included.
+  const range = typeof when === 'object' && !('sale' in when) ? when : null;
+  const { since, until } = saleWindow(when, today);
   // With a play's rights every parcel is asked for once, whatever the view and the period, and
   // kept: zooming, moving and choosing a period then ask for nothing (F-263). They come in
   // pieces, the newest sales first. Without a play the parcels are too many to hold: those of
@@ -427,7 +476,18 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   const periodTitle =
     oneSale !== null
       ? `sale of ${saleDay(oneSale, true)}`
-      : (SALE_PERIODS.find((p) => p.key === when)?.title ?? '');
+      : range !== null
+        ? saleRangeTitle(range)
+        : (SALE_PERIODS.find((p) => p.key === when)?.title ?? '');
+  // The years with a sale, newest first, for the Year list (F-303).
+  const saleYears = [...new Set(allSales.map((sale) => Number(sale.date.slice(0, 4))))].sort(
+    (a, b) => b - a,
+  );
+  const rangeYear = range !== null ? saleRangeYear(range) : null;
+  // A date typed in From or To: the other side kept, an empty box no limit.
+  const setRange = (next: SaleRange) => {
+    setWhen(next.from === null && next.to === null ? 'all' : next);
+  };
   const held = settled?.filter === filter ? answer : null;
 
   const showSale = (date: string, goTo: (bounds: MapBounds) => void) => {
@@ -456,7 +516,11 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   const settings: LandSalesSnapshot = {
     on,
     rights: rights === null || Object.hasOwn(LAND_RIGHTS, rights) ? rights : null,
-    ...(typeof when === 'object' ? { saleDate: when.sale } : { period: when }),
+    ...(oneSale !== null
+      ? { saleDate: oneSale }
+      : range !== null
+        ? { saleRange: range }
+        : { period: when as SalePeriod }),
     buyer,
     states: ALL_STATES.filter((state) => states.has(state)),
   };
@@ -464,6 +528,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     if (next.on !== undefined) setOn(next.on);
     if (next.rights !== undefined) setRights(next.rights);
     if (next.period !== undefined) setWhen(next.period);
+    if (next.saleRange !== undefined) setWhen(next.saleRange);
     if (next.buyer !== undefined) setBuyer(next.buyer);
     if (next.states) setStates(new Set(next.states));
     const date =
@@ -549,6 +614,45 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
               {p.label}
             </FilterChip>
           ))}
+        </div>
+        {/* A year, or dates from and to, both included (the owner, 2026-11-24, F-303). */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select
+            aria-label="Sale year"
+            className="h-8 rounded-md border bg-card px-2 text-[0.8125rem] font-medium"
+            value={rangeYear ?? ''}
+            onChange={(event) => {
+              if (event.target.value !== '') setWhen(saleYear(Number(event.target.value)));
+            }}
+          >
+            <option value="">Year</option>
+            {saleYears.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+          <input
+            type="date"
+            aria-label="Sales from"
+            className="h-8 min-w-0 flex-1 rounded-md border bg-card px-2 text-[0.8125rem]"
+            value={range?.from ?? ''}
+            max={range?.to ?? undefined}
+            onChange={(event) => {
+              setRange({ from: event.target.value || null, to: range?.to ?? null });
+            }}
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input
+            type="date"
+            aria-label="Sales to"
+            className="h-8 min-w-0 flex-1 rounded-md border bg-card px-2 text-[0.8125rem]"
+            value={range?.to ?? ''}
+            min={range?.from ?? undefined}
+            onChange={(event) => {
+              setRange({ from: range?.from ?? null, to: event.target.value || null });
+            }}
+          />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">

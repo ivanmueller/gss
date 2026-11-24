@@ -10,7 +10,11 @@ import {
   saleHectares,
   saleMoney,
   saleNextDay,
+  saleRangeTitle,
+  saleRangeYear,
   saleSince,
+  saleWindow,
+  saleYear,
 } from './LandSales';
 
 // Crown land sales on the oil and gas map (F-242). Made-up parcels, buyers and prices only.
@@ -89,6 +93,52 @@ describe('saleFiltered', () => {
     expect(one('2026-12-02')).toEqual(['3']);
     expect(one('2026-11-04')).toEqual(['1', '2', '4']);
     expect(one('2026-11-05')).toEqual([]);
+  });
+});
+
+describe('a year or dates chosen (F-303)', () => {
+  const all = new Set(['sold', 'no_offers', 'upcoming'] as const);
+  const list = [
+    parcel('a', { saleDate: '2022-12-31' }),
+    parcel('b', { saleDate: '2023-01-01' }),
+    parcel('c', { saleDate: '2023-12-31' }),
+    parcel('d', { saleDate: '2024-01-01' }),
+  ];
+  const kept = (when: Parameters<typeof saleWindow>[0]) =>
+    saleFiltered(list, {
+      buyer: '',
+      states: all,
+      today: '2026-11-01',
+      ...saleWindow(when, '2026-11-01'),
+    }).map((p) => p.id);
+
+  it('keeps a whole year, its first and last days included', () => {
+    expect(kept(saleYear(2023))).toEqual(['b', 'c']);
+  });
+
+  it('keeps the dates chosen, both included, either side open', () => {
+    expect(kept({ from: '2022-12-31', to: '2023-01-01' })).toEqual(['a', 'b']);
+    expect(kept({ from: '2023-12-31', to: null })).toEqual(['c', 'd']);
+    expect(kept({ from: null, to: '2022-12-31' })).toEqual(['a']);
+  });
+
+  it('still reads a period and one sale as before', () => {
+    expect(saleWindow('2', '2026-11-01')).toEqual({ since: '2024-11-01', until: null });
+    expect(saleWindow({ sale: '2026-11-04' }, '2026-11-01')).toEqual({
+      since: '2026-11-04',
+      until: '2026-11-05',
+    });
+  });
+
+  it('names a year as a year, and dates as dates', () => {
+    expect(saleRangeYear(saleYear(2023))).toBe(2023);
+    expect(saleRangeYear({ from: '2023-01-01', to: '2023-12-30' })).toBeNull();
+    expect(saleRangeTitle(saleYear(2023))).toBe('2023');
+    expect(saleRangeTitle({ from: '2023-03-01', to: '2024-06-30' })).toBe(
+      'Mar 1, 2023 to Jun 30, 2024',
+    );
+    expect(saleRangeTitle({ from: '2023-03-01', to: null })).toBe('from Mar 1, 2023');
+    expect(saleRangeTitle({ from: null, to: '2024-06-30' })).toBe('up to Jun 30, 2024');
   });
 });
 
