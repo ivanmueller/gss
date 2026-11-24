@@ -13,6 +13,7 @@ import {
   type PipelineParts,
   type PipelineSubstance,
   type Tile,
+  operatorMatches,
 } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -218,13 +219,13 @@ export function pipelinesShown(
   entries: readonly PipelineEntry[],
   filter: PipelineFilter,
 ): PipelineEntry[] {
-  const text = filter.licensee.trim().toLowerCase();
+  // Names compared whatever their case or punctuation (F-302).
   return entries.filter(
     (p) =>
       filter.statuses.has(p.status ?? '') &&
       filter.groups.has(p.group) &&
       (filter.minMm === 0 || (p.diameterMm ?? 0) >= filter.minMm) &&
-      (text === '' || (p.licensee?.name ?? '').toLowerCase().includes(text)),
+      operatorMatches(p.licensee?.name, filter.licensee),
   );
 }
 

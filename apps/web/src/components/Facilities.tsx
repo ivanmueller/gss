@@ -1,4 +1,10 @@
-import { FACILITY_GROUPS, type Bbox, type FacilityGroup, type MapSettings } from '@grain/domain';
+import {
+  FACILITY_GROUPS,
+  operatorMatches,
+  type Bbox,
+  type FacilityGroup,
+  type MapSettings,
+} from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
@@ -95,12 +101,12 @@ export function facilitiesShown(
   statuses: ReadonlySet<string>,
   operator: string,
 ): FacilityEntry[] {
-  const text = operator.trim().toLowerCase();
+  // Names compared whatever their case or punctuation (F-302).
   return entries.filter(
     (f) =>
       groups.has(f.group) &&
       statuses.has(f.status ?? '') &&
-      (text === '' || (f.operator?.name ?? '').toLowerCase().includes(text)),
+      operatorMatches(f.operator?.name, operator),
   );
 }
 

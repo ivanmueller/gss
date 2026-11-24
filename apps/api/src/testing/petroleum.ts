@@ -90,6 +90,7 @@ export function fakePetroleum() {
     facilities: vi.fn<PetroleumDatabase['facilities']>(() =>
       Promise.resolve({ load: null, rows: [] }),
     ),
+    operators: vi.fn<PetroleumDatabase['operators']>(() => Promise.resolve([])),
     prices: vi.fn<PetroleumDatabase['prices']>(() => Promise.resolve({ load: null, rows: [] })),
     fracOfLicence: vi.fn<PetroleumDatabase['fracOfLicence']>(() =>
       Promise.resolve({ load: null, rows: [] }),

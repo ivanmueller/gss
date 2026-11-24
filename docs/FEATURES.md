@@ -282,7 +282,8 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-- **F-303, land sales by year or dates** (oil and gas map, once merged): **Land sales** → under When, pick a **Year**, or type **From** and **To** dates; the parcels and the counts follow.
+- **F-302 part 1, one Operator box** (oil and gas map, once merged): `map.torvenco.com` → the side card → **Operator** → type "kingston" and pick from the list; the wells, facilities and pipelines of that operator only, in what is loaded (switch Facilities and Pipelines on to see theirs); × shows every operator again.
+- **F-303, land sales by year or dates** (oil and gas map, live since #367): **Land sales** → under When, pick a **Year**, or type **From** and **To** dates; the parcels and the counts follow.
 - **F-301 and F-304, the map's corners and filters before a layer is on** (oil and gas map, live since #366): `map.torvenco.com` → the legend bottom right, level with the side card's foot; the distance bar under + and −; the little "i" bottom left, beside the card. Then switch **Wells & licences** off, open it, untick a status, set a spud year, and switch it on: the wells come back as chosen.
 - **F-254 part 3b, fields and pools by name** (oil and gas map, live since #365): `map.torvenco.com` → the bar → "wells in the Kaybob South field"; the wells are filtered, the Wells section shows the field with **Clear**, the map moves there. Details in `docs/HANDOFF.md`.
 - **F-254 part 3a, towns and legal land locations**: the bar → "rigs near Fox Creek", "Twp 62 Rge 22 W5", "10-12-062-22W5"; the map moves there and the first chip names the place.

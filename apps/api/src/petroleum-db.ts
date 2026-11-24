@@ -7,6 +7,7 @@ import { formationQueries, type FormationDatabase } from './formation-db';
 import { landQueries, type LandDatabase } from './land-db';
 import { landSalesQueries, type LandSalesDatabase } from './land-sales-db';
 import { facilityQueries, type FacilitiesDatabase } from './petro-facilities-db';
+import { operatorQueries, type OperatorsDatabase } from './petro-operators-db';
 import { fracQueries, type FracDatabase } from './petro-frac-db';
 import { geologyQueries, type GeologyDatabase } from './petro-geology-db';
 import { priceQueries, type PricesDatabase } from './petro-prices-db';
@@ -49,6 +50,7 @@ export interface PetroleumDatabase
     FormationDatabase,
     LandSalesDatabase,
     FacilitiesDatabase,
+    OperatorsDatabase,
     PipelinesDatabase,
     PricesDatabase,
     FracDatabase,
@@ -205,6 +207,7 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
     ...formationQueries(sql),
     ...landSalesQueries(sql),
     ...facilityQueries(sql),
+    ...operatorQueries(sql),
     ...pipelineQueries(sql),
     ...priceQueries(sql),
     ...fracQueries(sql),
