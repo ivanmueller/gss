@@ -110,6 +110,8 @@ describe('st37Features', () => {
           uwi: second.uwi,
           licence: '0509395',
           status: 'producing',
+          // The operator's key, for colour by operator (F-302 part 2).
+          op: 'EXAMPLE ENERGY LTD',
           pad: '0509395',
           leg: 'main',
           part: 'well',

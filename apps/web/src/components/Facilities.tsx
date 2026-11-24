@@ -1,10 +1,12 @@
 import {
   FACILITY_GROUPS,
+  operatorKey,
   operatorMatches,
   type Bbox,
   type FacilityGroup,
   type MapSettings,
 } from '@grain/domain';
+import { countOperators, type OperatorCount } from '../lib/operatorColours';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
@@ -116,6 +118,8 @@ const inside = (f: FacilityEntry, b: Bbox) =>
 export interface Facilities {
   /** What the map draws; null while off or not loaded. */
   view: FacilitiesView | null;
+  /** The operators of what is drawn in view, counted (F-302 part 2); null while off. */
+  operatorsInView: readonly OperatorCount[] | null;
   byKey: ReadonlyMap<string, FacilityEntry>;
   setPicked: (keys: readonly string[]) => void;
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
@@ -193,6 +197,7 @@ export function useFacilities(organizationId: string, token: string): Facilities
         properties: {
           key: f.key,
           colour: FACILITY_COLOURS[f.group],
+          op: operatorKey(f.operator?.name),
           faint: !facilityLive(f.status),
         },
       })),
@@ -242,6 +247,14 @@ export function useFacilities(organizationId: string, token: string): Facilities
     [at, close],
   );
   const inView = useMemo(() => countInView(shown), [countInView, shown]);
+  // Drawn close in only: no operator counted further out (F-302 part 2).
+  const operatorsInView = useMemo(
+    () =>
+      on && at && close
+        ? countOperators(shown.filter((f) => inside(f, at.view)).map((f) => f.operator?.name))
+        : null,
+    [on, at, close, shown],
+  );
   // Each kind in view, chosen or not, so a chip shows what it would add.
   const kindsInView = useMemo(
     () => countInView(facilitiesShown(entries, ALL_GROUPS, statusesOn, operator)),
@@ -393,6 +406,7 @@ export function useFacilities(organizationId: string, token: string): Facilities
 
   return {
     view,
+    operatorsInView,
     byKey,
     setPicked,
     onViewChange,
