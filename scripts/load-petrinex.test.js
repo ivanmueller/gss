@@ -78,7 +78,7 @@ describe('load-petrinex.js', () => {
       sql,
       /values \('https:\/\/www\.petrinex\.gov\.ab\.ca\/publicdata\/API\/Files\/AB\/Vol\/', 'duvernay', '2022-01-01', '2026-08-01', 56, 1, 2\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
   });
 

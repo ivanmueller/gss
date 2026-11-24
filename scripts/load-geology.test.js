@@ -414,7 +414,7 @@ describe('the SQL', () => {
       /"00\/11-23-030-27W4\/0","0999999","-116\.500000","54\.200000","812\.40","\{1\}","\{3105\.2\}","\{1\}"/,
     );
     assert.match(sql, /values \('picks', '.*Point%20data\.zip', '2026-10-31', 1, 3\);/);
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 12345 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 12345 > 471859200/);
     assert.match(sql, /\ncommit;\n/);
   });
 

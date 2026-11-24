@@ -192,7 +192,7 @@ describe('load-pipelines.js', () => {
       sql,
       /values \('https:\/\/static\.aer\.ca\/prd\/data\/pipeline\/Pipelines_SHP\.zip', '2026-11-22', -117, 53, -115, 55, 2\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
     assert.match(out.stderr, /2 segments in the area, 1 outside it, 1 left out/);
   });

@@ -16,7 +16,7 @@
 // reads <dir>/<layer>.ndjson for the four layers and writes the SQL that replaces the whole copy
 // in one transaction, so the map never shows half a load. <grain-bytes> is the size of grain's
 // database: the load is refused, and nothing changes, if both databases together would pass
-// 400 MB (the free plan's limit is shared, docs/DECISIONS.md, 2026-11-19).
+// 450 MB (the free plan's limit is shared, docs/DECISIONS.md, 2026-11-19).
 //
 // Offset notices come from a server of the province's that can be down while the others answer
 // (2026-11-22: it listed its layer groups with none of their layers). When their file is missing,
@@ -32,7 +32,7 @@ import { URLSearchParams } from 'node:url';
 
 import { LAND_LAYER_KEYS, LAND_LAYERS, landRows } from '../packages/domain/src/land.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 const ALBERTA = { west: -120.1, south: 48.9, east: -109.9, north: 60.1 };
 const PAGE = 1000;
 /** No layer of one area is expected to hold more; a service that never ends is stopped here. */
@@ -316,7 +316,7 @@ function mainSql(argv) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

@@ -27,7 +27,7 @@
 //        <source-url> <source-date|-> <grain-bytes> > load.sql
 //
 // writes the SQL that replaces that set in one transaction, refused if grain's and the oil and
-// gas databases together would pass 400 MB.
+// gas databases together would pass 450 MB.
 
 import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
@@ -42,7 +42,7 @@ import {
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 /** For each well we hold, the picked wells kept nearest to its surface or bottom hole. */
 export const KEEP_NEAREST = 3;
 /** And no farther than this, in kilometres. */
@@ -663,7 +663,7 @@ function guard(grainBytes) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(grainBytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

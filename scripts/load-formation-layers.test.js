@@ -108,7 +108,7 @@ describe('load-formation-layers', () => {
       sql,
       /values \('https:\/\/example\.blob\.core\.windows\.net\/gfa\/Modelled%20elevation%20surfaces\.zip', '2026-11-02'::date, 'Geological Framework of Alberta, Version 4', 0\.016, 0\.009, \d+\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.ok(sql.indexOf('raise exception') < sql.indexOf('commit;'));
   });
 

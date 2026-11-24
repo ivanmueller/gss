@@ -27,7 +27,7 @@ export const WELLS_SERVICE =
 export const WELLS_SCHEMA_VERSION = 4;
 
 /** Grain's and the oil and gas databases together never pass this (the shared limit is 500 MB). */
-export const WELLS_SIZE_BUDGET_BYTES = 400 * 1024 * 1024;
+export const WELLS_SIZE_BUDGET_BYTES = 450 * 1024 * 1024;
 const PAGE_SIZE = 2000;
 /** More than one page of wells takes in the database (about 0.5 MB with its indexes). */
 const PAGE_RESERVE_BYTES = 5 * 1024 * 1024;

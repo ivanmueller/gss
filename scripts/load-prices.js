@@ -11,7 +11,7 @@
 //
 //   node --experimental-strip-types scripts/load-prices.js sql <prices.json> <grain-bytes> > load.sql
 //     writes the SQL that replaces the whole copy in one transaction, refused if grain's and the
-//     oil and gas databases together would pass 400 MB.
+//     oil and gas databases together would pass 450 MB.
 //
 // Only the province's own addresses are asked for, and redirects are not followed.
 
@@ -32,7 +32,7 @@ import {
   sheetPrices,
 } from '../packages/domain/src/prices.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 const GAS_PAGE = 'https://www.alberta.ca/alberta-natural-gas-reference-price';
 const OIL_PAGE = 'https://www.alberta.ca/oil-par-prices';
 const DATASET = (year) =>
@@ -228,7 +228,7 @@ function sql(file, grainBytes) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

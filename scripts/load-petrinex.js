@@ -15,7 +15,7 @@
 //     <first YYYY-MM> <last YYYY-MM> <files> <grain-bytes> > load.sql
 //
 // <grain-bytes> is the size of grain's database: the load is refused, and nothing changes, if
-// both databases together would pass 400 MB (the free plan's limit is shared, docs/DECISIONS.md,
+// both databases together would pass 450 MB (the free plan's limit is shared, docs/DECISIONS.md,
 // 2026-11-19). Petrinex's data is used on the owner's decision (docs/DECISIONS.md, 2026-11-20):
 // it is never written to the repository; the files live only on the runner.
 
@@ -25,7 +25,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 import { petrinexDecimal, petrinexMonth } from '../packages/domain/src/petrinex.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 export const SOURCE_URL = 'https://www.petrinex.gov.ab.ca/publicdata/API/Files/AB/Vol/';
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const UWI = /^[0-9A-Z]{2}\/[0-9]{2}-[0-9]{2}-[0-9]{3}-[0-9]{2}W[4-6]\/[0-9A-Z]$/;
@@ -93,7 +93,7 @@ export function sqlFor(rows, formation, first, last, files, grainBytes) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(grainBytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

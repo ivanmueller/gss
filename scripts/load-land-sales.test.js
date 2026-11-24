@@ -152,7 +152,7 @@ describe('load-land-sales.js', () => {
       sql,
       /values \('https:\/\/content2\.energy\.alberta\.ca\/[^']+', '2026-11-04', '2026-12-02', -117, 53, -115, 55, 2, 3, '\{\}'::jsonb\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
     assert.match(
       out.stderr,

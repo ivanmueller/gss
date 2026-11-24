@@ -9,7 +9,7 @@
 // <dir> holds surface.geojson, bottom.geojson, strings.geojson and paths.geojson, the four
 // layers of ST_37_Wells.gdb cut to the area (or to the formation's licences) by ogr2ogr
 // (EPSG:4326; the paths with their elevations, -dim XYZ, for the 3D view, F-261). <grain-bytes> is the size of grain's database: the load is refused, and nothing
-// changes, if both databases together would pass 400 MB (the free plan's limit is shared,
+// changes, if both databases together would pass 450 MB (the free plan's limit is shared,
 // docs/DECISIONS.md, 2026-11-19).
 //
 // With a formation (`duvernay`), <dir> also holds licences.json, written by the first step:
@@ -43,7 +43,7 @@ import {
   st37UwiLsd,
 } from '../packages/domain/src/st37.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 const ALBERTA = { west: -120.1, south: 48.9, east: -109.9, north: 60.1 };
 /** The province's township grid, legal subdivisions (as the Worker's daily lists use it). */
 const ATS_LSD_QUERY =
@@ -176,7 +176,7 @@ export function sqlFor(wells, area, sourceUrl, sourceDate, grainBytes, formation
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(grainBytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

@@ -8,7 +8,7 @@
 // reads every facility of the file, keeps those whose point is in the area, and writes the SQL
 // that replaces the whole copy in one transaction, so the map never shows half a load.
 // <grain-bytes> is the size of grain's database: the load is refused, and nothing changes, if
-// both databases together would pass 400 MB (the free plan's limit is shared,
+// both databases together would pass 450 MB (the free plan's limit is shared,
 // docs/DECISIONS.md, 2026-11-19). <file-date> is the file's Last-Modified day (YYYY-MM-DD), or -.
 //
 // The AER's data is never written to the repository: the files live only on the runner.
@@ -17,7 +17,7 @@ import { readFileSync, writeSync } from 'node:fs';
 
 import { dbaseRecords, facilityRow, shapefilePoints } from '../packages/domain/src/facilities.ts';
 
-const BUDGET_BYTES = 400 * 1024 * 1024;
+const BUDGET_BYTES = 450 * 1024 * 1024;
 const ALBERTA = { west: -120.1, south: 48.9, east: -109.9, north: 60.1 };
 const SOURCE_URL = 'https://static.aer.ca/prd/data/codes/ST102-SHP.zip';
 
@@ -169,7 +169,7 @@ function main(argv) {
     'do $$',
     'begin',
     `  if pg_database_size(current_database()) + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
-    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 400 MB; nothing was loaded.';",
+    "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',
     '$$;',

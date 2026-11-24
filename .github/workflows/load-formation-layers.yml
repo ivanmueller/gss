@@ -9,7 +9,7 @@ name: Load formation layers
 #
 # Open data: the Survey's material is under the Open Government Licence – Alberta, the Survey
 # acknowledged where it is shown (docs/DECISIONS.md, 2026-11-22). Its files stay on the runner.
-# The load is refused if grain's and the oil and gas databases together would pass 400 MB (the
+# The load is refused if grain's and the oil and gas databases together would pass 450 MB (the
 # free plan's limit is shared by both). Run it after Load ST37 wells: the cells kept are those
 # around the wells loaded.
 on:

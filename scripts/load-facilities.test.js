@@ -128,7 +128,7 @@ describe('load-facilities.js', () => {
       sql,
       /values \('https:\/\/static\.aer\.ca\/prd\/data\/codes\/ST102-SHP\.zip', '2026-11-22', -117, 53, -115, 55, 1\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 419430400/);
+    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
     assert.match(out.stderr, /1 facilities in the area, 1 outside it, 1 left out/);
   });
