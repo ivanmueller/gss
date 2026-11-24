@@ -13,7 +13,7 @@ import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 
 /**
- * Ask the map (F-254 part 1): a bar at the bottom of the oil and gas map. A request typed in
+ * Ask the map (F-254 part 1): a bar at the top of the oil and gas map. A request typed in
  * plain words is read into the map's settings (MapSettings, packages/domain), which the page
  * applies as if clicked; the bar then names what it set, what it could not do, and offers Undo.
  * Claude reads each request through the Worker (part 2, POST /petroleum/ask); when Claude cannot
@@ -87,7 +87,49 @@ export function AskMapBar({
   const showExamples = focused && text.trim() === '' && result === null;
 
   return (
+    // At the top of the map: the box first, then the examples or the answer below it.
     <div className={cn('pointer-events-none flex flex-col items-stretch gap-2', className)}>
+      <form
+        role="search"
+        aria-label="Ask the map"
+        className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 py-1 pr-1 pl-3.5 shadow-md"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void ask(text);
+        }}
+      >
+        <Sparkles aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        <input
+          type="text"
+          aria-label="Ask the map"
+          maxLength={500}
+          placeholder="Ask the map, e.g. “Duvernay wells drilled since 2020”"
+          className="h-8 min-w-0 grow bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+          onFocus={() => {
+            setFocused(true);
+          }}
+          onBlur={() => {
+            setFocused(false);
+          }}
+        />
+        <Button
+          type="submit"
+          size="icon-sm"
+          className="rounded-full"
+          aria-label={asking ? 'Asking Claude' : 'Ask'}
+          disabled={text.trim() === '' || asking}
+        >
+          {asking ? (
+            <LoaderCircle aria-hidden="true" className="animate-spin" />
+          ) : (
+            <ArrowUp aria-hidden="true" />
+          )}
+        </Button>
+      </form>
       {result && (
         <div
           role="status"
@@ -159,47 +201,6 @@ export function AskMapBar({
           ))}
         </div>
       )}
-      <form
-        role="search"
-        aria-label="Ask the map"
-        className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 py-1 pr-1 pl-3.5 shadow-md"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void ask(text);
-        }}
-      >
-        <Sparkles aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-        <input
-          type="text"
-          aria-label="Ask the map"
-          maxLength={500}
-          placeholder="Ask the map, e.g. “Duvernay wells drilled since 2020”"
-          className="h-8 min-w-0 grow bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          onFocus={() => {
-            setFocused(true);
-          }}
-          onBlur={() => {
-            setFocused(false);
-          }}
-        />
-        <Button
-          type="submit"
-          size="icon-sm"
-          className="rounded-full"
-          aria-label={asking ? 'Asking Claude' : 'Ask'}
-          disabled={text.trim() === '' || asking}
-        >
-          {asking ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" />
-          ) : (
-            <ArrowUp aria-hidden="true" />
-          )}
-        </Button>
-      </form>
     </div>
   );
 }
