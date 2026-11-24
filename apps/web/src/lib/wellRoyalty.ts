@@ -1,7 +1,10 @@
 import {
   cStar,
   estimateWellRoyalties,
+  fromThousandths,
   gasEnergyGJ,
+  thousandths,
+  type ProppantPlaced,
   royaltyTotals,
   type RoyaltyBlock,
   type WellMonthInput,
@@ -24,6 +27,60 @@ export interface RoyaltyWell {
   spudDate: string | null;
   totalDepthM: number | null;
   trueVerticalDepthM: number | null;
+}
+
+/** One well event's fracs, as GET /petroleum/frac/licence sends them (F-288). */
+export interface FracLeg {
+  uwi: string;
+  firstFracDate: string;
+  lastFracDate: string;
+  fracs: number;
+  stages: number | null;
+  waterM3: string;
+  proppantT: string;
+  upgradeHintT: string;
+  refracProppantT: string;
+  maxTvdM: string | null;
+  suspect: boolean;
+}
+
+export interface FracAnswer {
+  source: { name: string; page: string; loadedAt: string | null; sourceDate: string | null };
+  wells: FracLeg[];
+}
+
+/** Adds decimal strings of up to three decimals exactly. */
+export function addTonnes(values: readonly string[]): string {
+  return fromThousandths(values.reduce((sum, v) => sum + (thousandths(v) ?? 0), 0));
+}
+
+/** A frac report is due within days of the frac; a well spud less than this long ago may have none yet. */
+const FRAC_REPORT_DAYS = 365;
+
+/**
+ * The proppant C* counts, from the licence's well events: every tonne as plain sand (factor 1),
+ * the lowest C* the rules allow, as the file does not say which proppant the province accepted as
+ * coated or engineered. No report for a well spud over a year ago: no proppant, as the province
+ * counts a figure not provided. Not loaded yet, or spud within the year: still waiting.
+ */
+export function cStarProppant(
+  frac: FracAnswer | null,
+  spudDate: string | null,
+  today: string,
+): { proppant: ProppantPlaced[] | null; suspect: boolean } {
+  if (!frac?.source.loadedAt) return { proppant: null, suspect: false };
+  if (frac.wells.some((w) => w.suspect)) return { proppant: null, suspect: true };
+  if (frac.wells.length === 0) {
+    const recent =
+      spudDate === null ||
+      new Date(`${spudDate}T00:00:00Z`).getTime() + FRAC_REPORT_DAYS * 86_400_000 >
+        new Date(`${today}T00:00:00Z`).getTime();
+    return { proppant: recent ? null : [], suspect: false };
+  }
+  return {
+    proppant: [{ kind: 'sand', tonnes: addTonnes(frac.wells.map((w) => w.proppantT)) }],
+    suspect: false,
+  };
 }
 
 /** The price series each product's rate and value use. */
@@ -95,6 +152,10 @@ export function wellRoyalty(
   well: RoyaltyWell,
   answers: readonly ProductionAnswer[],
   prices: PricesAnswer,
+  frac: FracAnswer | null = null,
+  today: string = new Date().toISOString().slice(0, 10),
+  /** Every leg's depths, the main leg among them; without it, the main leg's alone. */
+  legs: readonly RoyaltyWell[] = [well],
 ): WellRoyalty {
   const firstLoaded = answers[0]?.source.firstMonth ?? null;
   const table = priceTable(prices);
@@ -117,10 +178,15 @@ export function wellRoyalty(
       };
     });
   const spud = well.spudDate;
-  // C* only for wells on the modernized rules from the start; the frac data (F-288) is not
-  // loaded yet, so it waits. The ACCI of the spud year: the guideline names the year of the
-  // activity for re-entries and says nothing else for new wells.
+  // C* only for wells on the modernized rules from the start, with the frac data's proppant
+  // (F-288). The ACCI of the spud year: the guideline names the year of the activity for
+  // re-entries and says nothing else for new wells. Depths over the legs: the deepest TVD, their
+  // average, and the longest measured depth (the guideline adds each further leg's length from its
+  // own kick-off point, which is not known here, so a multi-leg well's C* reads low).
   const needsCStar = spud !== null && spud >= '2017-01-01';
+  const tvds = legs.flatMap((l) => (l.trueVerticalDepthM === null ? [] : [l.trueVerticalDepthM]));
+  const tds = legs.flatMap((l) => (l.totalDepthM === null ? [] : [l.totalDepthM]));
+  const fracked = cStarProppant(frac, spud, today);
   return {
     firstLoaded,
     estimate: estimateWellRoyalties({
@@ -128,9 +194,12 @@ export function wellRoyalty(
       measuredDepthM: well.totalDepthM === null ? null : well.totalDepthM.toFixed(2),
       cStar: needsCStar
         ? cStar({
-            tvdMaxM: well.trueVerticalDepthM === null ? null : well.trueVerticalDepthM.toFixed(2),
-            tmdM: well.totalDepthM === null ? null : well.totalDepthM.toFixed(2),
-            proppant: null,
+            tvdMaxM: tvds.length === 0 ? null : Math.max(...tvds).toFixed(2),
+            tvdAvgM:
+              tvds.length === 0 ? null : (tvds.reduce((a, b) => a + b, 0) / tvds.length).toFixed(2),
+            tmdM: tds.length === 0 ? null : Math.max(...tds).toFixed(2),
+            proppant: fracked.proppant,
+            proppantSuspect: fracked.suspect,
             acciYear: Number(spud.slice(0, 4)),
           })
         : null,
@@ -160,7 +229,9 @@ export function blockedReasons(months: readonly WellMonthRoyalty[]): [RoyaltyBlo
 export function blockText(reason: RoyaltyBlock, firstLoaded: string | null): string {
   switch (reason) {
     case 'waiting_on_frac_data':
-      return 'Royalty estimate waiting on frac data: the well’s drilling and completion cost allowance (C*) needs the proppant placed.';
+      return 'Royalty estimate waiting on frac data: the well’s drilling and completion cost allowance (C*) needs the proppant placed, and the AER has no frac report for it yet.';
+    case 'frac_data_suspect':
+      return 'Its frac report gives more than 1,000 t of proppant a stage, which reads as a reporting error, so its drilling and completion cost allowance (C*) is not worked out.';
     case 'c_star_inputs_missing':
       return 'Its drilling and completion cost allowance (C*) needs its depths, which are not known.';
     case 'production_history_incomplete':

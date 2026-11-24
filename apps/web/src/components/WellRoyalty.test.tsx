@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mockApi } from '../test/api';
 import type { PricesAnswer } from './Prices';
 import { clearProductionCache, type ProductionAnswer } from './Production';
+import { clearFrac } from './WellFrac';
 import { clearRoyaltyPrices, WellRoyalty } from './WellRoyalty';
 
 // A well's estimated Crown royalty on its panel (F-285 part 4). Made-up wells and prices only.
@@ -37,10 +38,35 @@ const PRICES: PricesAnswer = {
 afterEach(() => {
   clearProductionCache();
   clearRoyaltyPrices();
+  clearFrac();
   vi.unstubAllGlobals();
 });
 
-const props = { uwis: [UWI], organizationId: 'org-a', token: 't' };
+const props = { uwis: [UWI], organizationId: 'org-a', token: 't', licence: '0999999' };
+const FRAC_PATH = 'GET /petroleum/frac/licence?organization_id=org-a&licence=0999999';
+const FRAC = {
+  source: {
+    name: 'Alberta Energy Regulator',
+    page: 'https://www.aer.ca/',
+    loadedAt: '2026-11-20T00:00:00.000Z',
+    sourceDate: '2026-11-16',
+  },
+  wells: [
+    {
+      uwi: UWI,
+      firstFracDate: '2023-10-01',
+      lastFracDate: '2023-10-10',
+      fracs: 1,
+      stages: 30,
+      waterM3: '40000',
+      proppantT: '4000',
+      upgradeHintT: '0',
+      refracProppantT: '0',
+      maxTvdM: '2233',
+      suspect: false,
+    },
+  ],
+};
 
 describe('the royalty section', () => {
   it('shows the effective rate, the royalty and the rules of an older well', async () => {
@@ -74,6 +100,37 @@ describe('the royalty section', () => {
     );
     expect(await screen.findByText(/^Royalty estimate waiting on frac data/)).toBeInTheDocument();
     expect(screen.queryByText('Effective rate')).not.toBeInTheDocument();
+  });
+
+  it('works out a newer well from its frac data: 5% while below its C*', async () => {
+    mockApi({
+      [WELL_PATH]: () => Response.json(PRODUCTION),
+      [PRICES_PATH]: () => Response.json(PRICES),
+      [FRAC_PATH]: () => Response.json(FRAC),
+    });
+    render(
+      <WellRoyalty
+        well={{ spudDate: '2023-09-03', totalDepthM: 5846, trueVerticalDepthM: 2233 }}
+        {...props}
+      />,
+    );
+    expect(await screen.findByText('5.0%')).toBeInTheDocument();
+    expect(screen.getByText(/still paying 5% until its revenue reaches/)).toBeInTheDocument();
+  });
+
+  it('does not use a frac report that reads as a reporting error', async () => {
+    mockApi({
+      [WELL_PATH]: () => Response.json(PRODUCTION),
+      [PRICES_PATH]: () => Response.json(PRICES),
+      [FRAC_PATH]: () => Response.json({ ...FRAC, wells: [{ ...FRAC.wells[0], suspect: true }] }),
+    });
+    render(
+      <WellRoyalty
+        well={{ spudDate: '2023-09-03', totalDepthM: 5846, trueVerticalDepthM: 2233 }}
+        {...props}
+      />,
+    );
+    expect(await screen.findByText(/reads as a reporting error/)).toBeInTheDocument();
   });
 
   it('says when the prices cannot be read', async () => {

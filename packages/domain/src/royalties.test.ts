@@ -373,3 +373,28 @@ describe('gas energy and totals', () => {
     ).toEqual({ months: 2, valueCad: '4000', royaltyCad: '400', effectivePct: '10' });
   });
 });
+
+describe('a frac report that reads as a reporting error', () => {
+  it('leaves C* unworked and says why', () => {
+    const suspect = cStar({
+      tvdMaxM: '3000',
+      tmdM: '5000',
+      proppant: null,
+      proppantSuspect: true,
+      acciYear: 2020,
+    });
+    expect(suspect).toEqual({ status: 'waiting', missing: ['proppant_suspect'] });
+    const estimate = estimateWellRoyalties({
+      spudDate: '2020-02-01',
+      measuredDepthM: null,
+      cStar: suspect,
+      fromFirstProduction: true,
+      months: [monthOf('2023-01')],
+    });
+    expect(estimate.months[0]).toEqual({
+      month: '2023-01',
+      status: 'blocked',
+      blockedBy: ['frac_data_suspect'],
+    });
+  });
+});

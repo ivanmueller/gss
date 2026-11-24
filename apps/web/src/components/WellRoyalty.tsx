@@ -10,6 +10,7 @@ import {
   type RoyaltyWell,
 } from '../lib/wellRoyalty';
 import { PanelTiles } from './MapPanel';
+import { useFrac } from './WellFrac';
 import type { PricesAnswer } from './Prices';
 import { monthLabel, useProductions, wellProductionPath } from './Production';
 
@@ -85,12 +86,18 @@ function rulesLine(month: Extract<WellMonthRoyalty, { status: 'estimated' }>): s
 export function WellRoyalty({
   well,
   uwis,
+  legs,
+  licence,
   organizationId,
   token,
 }: {
   well: RoyaltyWell;
   /** Every leg of the well, added together. */
   uwis: readonly string[];
+  /** Every leg's depths, the main leg among them, for C*. */
+  legs?: readonly RoyaltyWell[];
+  /** The well's licence, whose frac data gives C* its proppant (F-288). */
+  licence: string;
   organizationId: string;
   token: string;
 }) {
@@ -100,9 +107,22 @@ export function WellRoyalty({
     250,
   );
   const prices = usePricesAnswer(organizationId, token);
+  // Frac data that cannot be read leaves C* waiting; it never stops the older wells' estimate.
+  const frac = useFrac(organizationId, token, licence);
+  const fracReady = frac !== null;
   const result = useMemo(
-    () => (answers && prices.answer ? wellRoyalty(well, answers, prices.answer) : null),
-    [well, answers, prices.answer],
+    () =>
+      answers && prices.answer && fracReady
+        ? wellRoyalty(
+            well,
+            answers,
+            prices.answer,
+            frac === 'failed' ? null : frac,
+            undefined,
+            legs ?? [well],
+          )
+        : null,
+    [well, legs, answers, prices.answer, frac, fracReady],
   );
   if (state === 'failed' || prices.failed) {
     return (

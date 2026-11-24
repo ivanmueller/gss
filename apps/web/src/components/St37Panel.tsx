@@ -9,6 +9,7 @@ import { WellProduction } from './Production';
 import { st37Place, st37Plan } from './St37Wells';
 import { Button } from './ui/button';
 import { Well3d } from './Well3d';
+import { WellFrac } from './WellFrac';
 import { WellRoyalty } from './WellRoyalty';
 
 /**
@@ -294,10 +295,21 @@ export function St37Panel({
         </PanelSection>
       )}
       {member && well.statusClass !== 'licensed' && (
+        <PanelSection title="Frac">
+          <WellFrac
+            organizationId={member.organizationId}
+            token={member.token}
+            licence={well.licenceNumber}
+          />
+        </PanelSection>
+      )}
+      {member && well.statusClass !== 'licensed' && (
         <PanelSection title="Crown royalty (estimate)">
           <WellRoyalty
             well={well}
             uwis={legs.map((leg) => leg.uwi)}
+            legs={legs}
+            licence={well.licenceNumber}
             organizationId={member.organizationId}
             token={member.token}
           />

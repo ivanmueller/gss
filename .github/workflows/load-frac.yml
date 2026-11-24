@@ -1,0 +1,71 @@
+name: Load frac data
+
+# The AER's frac data (F-288, docs/FEATURES_OIL_GAS.md): the Hydraulic Fracturing Summary Chemical
+# and Water Use Data of Directive 059
+# (https://www.aer.ca/data-and-performance-reports/activity-and-data/lists-and-activities/hydraulic-fracture-fluid-data),
+# every frac reported in Alberta since 2013, read into one line per well event (dates, stages,
+# water, proppant) and the whole copy replaced in one transaction in the oil and gas database
+# (petroleum-staging).
+#
+# Run by hand from the Actions tab (Actions → Load frac data → Run workflow), and by itself on the
+# 20th of each month, after the AER's monthly update. The AER's data on the owner's decision
+# (docs/DECISIONS.md, 2026-11-19); the file stays on the runner, never in the repository or logs.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '45 15 20 * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-frac
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 20 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 20)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB."
+      - name: Read the AER's frac file
+        run: node --experimental-strip-types scripts/load-frac.js fetch "$RUNNER_TEMP/frac"
+      - name: Load the frac data
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          dir="$RUNNER_TEMP/frac"
+          node --experimental-strip-types scripts/load-frac.js sql "$dir/frac.json" "$GRAIN_BYTES" > "$dir/load.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$dir/load.sql"
+      - name: Remove the files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/frac"
