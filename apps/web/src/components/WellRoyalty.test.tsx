@@ -83,7 +83,12 @@ describe('the royalty section', () => {
     expect(screen.getByText('Royalty: loading…')).toBeInTheDocument();
     expect(await screen.findByText('21.9%')).toBeInTheDocument();
     expect(screen.getByText('Jun 2026: oil 21.9%.')).toBeInTheDocument();
-    expect(screen.getByText(/^Under the earlier rules/)).toBeInTheDocument();
+    // The rules and what is assumed are behind More info, closed at first.
+    for (const text of [/^Under the earlier rules/, /^An estimate, as if all Crown land/]) {
+      const details = screen.getByText(text).closest('details');
+      expect(details).not.toHaveAttribute('open');
+      expect(details?.querySelector('summary')).toHaveTextContent('More info');
+    }
     expect(screen.getByText(/37\.3 GJ per 10³ m³/)).toBeInTheDocument();
   });
 
@@ -98,7 +103,9 @@ describe('the royalty section', () => {
         {...props}
       />,
     );
-    expect(await screen.findByText(/^Royalty estimate waiting on frac data/)).toBeInTheDocument();
+    // With nothing estimated, the reason stays in view, not behind More info.
+    const reason = await screen.findByText(/^Royalty estimate waiting on frac data/);
+    expect(reason.closest('details')).toBeNull();
     expect(screen.queryByText('Effective rate')).not.toBeInTheDocument();
   });
 

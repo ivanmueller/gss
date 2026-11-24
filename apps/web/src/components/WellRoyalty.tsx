@@ -142,6 +142,19 @@ export function WellRoyalty({
   const last = estimated.at(-1);
   const year = lastMonthsTotals(estimate.months, 12);
   const firstEstimated = estimated[0];
+  const reasonList =
+    reasons.length > 0 ? (
+      <ul className="mt-2 flex flex-col gap-0.5 text-xs" aria-label="Months not estimated">
+        {reasons.map(([reason, count]) => (
+          <li key={reason}>
+            {estimated.length > 0
+              ? `${String(count)} ${count === 1 ? 'month' : 'months'} not estimated. `
+              : ''}
+            {blockText(reason, firstLabel)}
+          </li>
+        ))}
+      </ul>
+    ) : null;
   return (
     <div>
       {last && firstEstimated ? (
@@ -172,31 +185,28 @@ export function WellRoyalty({
               .join(', ')}
             .
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{rulesLine(last)}</p>
         </>
       ) : null}
-      {reasons.length > 0 && (
-        <ul className="mt-2 flex flex-col gap-0.5 text-xs" aria-label="Months not estimated">
-          {reasons.map(([reason, count]) => (
-            <li key={reason}>
-              {estimated.length > 0
-                ? `${String(count)} ${count === 1 ? 'month' : 'months'} not estimated. `
-                : ''}
-              {blockText(reason, firstLabel)}
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="mt-2 text-[0.6875rem] leading-snug text-muted-foreground">
-        An estimate, as if all Crown land, before cost allowances; royalties actually paid are
-        confidential. Gas is valued at {CER_GJ_PER_E3M3} GJ per 10³ m³ (the Canada Energy
-        Regulator&rsquo;s standard conversion; Petrinex gives no energy for a well&rsquo;s gas) and
-        rated as methane: liquids taken out at the plant are not counted. Oil at the light oil par
-        price, the regulation&rsquo;s default without its density. The new-well programs of 2011 to
-        2016 are not applied, so such a well&rsquo;s first months may read higher than it paid.
-        {firstLabel ? ` Production from ${firstLabel} only.` : ''} Formulas: Government of Alberta
-        (version {estimate.version}).
-      </p>
+      {/* With nothing estimated, the reasons are the answer and stay in view. */}
+      {!last && reasonList}
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
+          More info
+        </summary>
+        {last && <p className="mt-1 text-xs text-muted-foreground">{rulesLine(last)}</p>}
+        {last && reasonList}
+        <p className="mt-2 text-[0.6875rem] leading-snug text-muted-foreground">
+          An estimate, as if all Crown land, before cost allowances; royalties actually paid are
+          confidential. Gas is valued at {CER_GJ_PER_E3M3} GJ per 10³ m³ (the Canada Energy
+          Regulator&rsquo;s standard conversion; Petrinex gives no energy for a well&rsquo;s gas)
+          and rated as methane: liquids taken out at the plant are not counted. Oil at the light oil
+          par price, the regulation&rsquo;s default without its density. The new-well programs of
+          2011 to 2016 are not applied, so such a well&rsquo;s first months may read higher than it
+          paid.
+          {firstLabel ? ` Production from ${firstLabel} only.` : ''} Formulas: Government of Alberta
+          (version {estimate.version}).
+        </p>
+      </details>
     </div>
   );
 }
