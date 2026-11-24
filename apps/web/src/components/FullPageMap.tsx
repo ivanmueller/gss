@@ -515,7 +515,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           </aside>
         )}
       </Suspense>
-      {/* Ask the map (F-254): at the bottom, clear of the card and the legend. */}
+      {/* Ask the map (F-254): at the top (the owner, 2026-11-24), beside the card and clear of
+          the zoom buttons; below the folded card's title on a narrow screen. */}
       <AskMapBar
         askClaude={(text) =>
           sendJson<MapAskAnswer>(
@@ -526,8 +527,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           )
         }
         className={cn(
-          'absolute right-3 bottom-8 z-10 lg:right-14',
-          folded ? 'left-3 lg:left-[17.75rem]' : 'left-3 md:left-[24rem] lg:left-[41rem]',
+          'absolute right-14 z-10 mx-auto max-w-2xl',
+          folded ? 'top-16 left-3 md:top-3 md:left-[17rem]' : 'top-3 left-3 md:left-[24rem]',
         )}
         onApply={(settings) => {
           setBefore(snapshot());
@@ -604,7 +605,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           role="group"
           aria-label="Legend"
           className={cn(
-            'absolute bottom-24 z-10 flex max-h-[calc(100%-13rem)] lg:bottom-8 lg:max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
+            'absolute bottom-8 z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
             beside,
             !folded && 'hidden md:flex',
           )}
