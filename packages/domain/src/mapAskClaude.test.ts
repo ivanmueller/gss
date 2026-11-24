@@ -50,6 +50,19 @@ describe('MAP_ASK_JSON_SCHEMA', () => {
         'grid',
       ].sort(),
     );
+    // Claude never names a field or pool in the settings, nor the reasons only the Worker gives.
+    const wells = (settings as { wells: { properties: object } }).wells.properties;
+    expect(Object.keys(wells)).not.toContain('field');
+    expect(Object.keys(wells)).not.toContain('pool');
+    const reasons = JSON.stringify(MAP_ASK_JSON_SCHEMA.properties.reasons);
+    for (const worker of [
+      'place_not_found',
+      'field_not_found',
+      'field_not_loaded',
+      'pool_needs_field',
+    ]) {
+      expect(reasons).not.toContain(worker);
+    }
     // Each outline offered is one the map has, and the instructions name it.
     for (const f of FORMATION_OUTLINES) expect(MAP_ASK_INSTRUCTIONS).toContain(f.key);
   });

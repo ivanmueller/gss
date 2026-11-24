@@ -238,7 +238,8 @@ export function readMapRequest(input: string): MapRequestReading {
   if (/\bproduction\b|\bbbl\b|\bbarrels?\b|\bboe\b|\bmcf\b|\bm3\b|\brates?\b/.test(t)) {
     reasons.add('production_filter');
   }
-  if (/\b(?:field|pool)s?\b/.test(t)) reasons.add('field_or_pool');
+  // Fields and pools are looked up by the Worker with Claude's reading: the word matching finds none.
+  if (/\b(?:field|pool)s?\b/.test(t)) reasons.add('field_not_found');
   if (/\bbritish columbia\b|\bb\.?c\.?\b|\bsaskatchewan\b|\bsask\b|\bmanitoba\b/.test(t)) {
     reasons.add('other_province');
   }

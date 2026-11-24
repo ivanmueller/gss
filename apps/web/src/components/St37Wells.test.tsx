@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { st37Features, st37Legs, st37Pads, type St37MapWell } from '../lib/st37Map';
 import {
+  st37ByField,
   st37ByOperator,
   st37BySpud,
   st37Covers,
@@ -258,5 +259,21 @@ describe('st37BySpud (F-254)', () => {
     expect(uwis(st37BySpud(wells, 2020, null))).toEqual(['B', 'C']);
     expect(uwis(st37BySpud(wells, null, 2020))).toEqual(['A', 'B']);
     expect(uwis(st37BySpud(wells, 2024, 2024))).toEqual(['C']);
+  });
+});
+
+describe('st37ByField (F-254 part 3b)', () => {
+  const wells = [
+    well('A', { fieldName: 'EXAMPLE SOUTH', poolName: 'EXAMPLE A' }),
+    well('B', { fieldName: 'EXAMPLE SOUTH', poolName: 'EXAMPLE B' }),
+    well('C', { fieldName: 'EXAMPLE NORTH', poolName: 'EXAMPLE A' }),
+    well('D', { fieldName: null, poolName: null }),
+  ];
+  const uwis = (list: St37MapWell[]) => list.map((w) => w.uwi);
+
+  it('keeps the wells of the field, and of the pool in it, as the list names them', () => {
+    expect(uwis(st37ByField(wells, null, null))).toEqual(['A', 'B', 'C', 'D']);
+    expect(uwis(st37ByField(wells, 'EXAMPLE SOUTH', null))).toEqual(['A', 'B']);
+    expect(uwis(st37ByField(wells, 'EXAMPLE SOUTH', 'EXAMPLE A'))).toEqual(['A']);
   });
 });

@@ -204,6 +204,32 @@ describe('the ST37 wells as petro_api', () => {
       expect(await db.st37Drilled(member(), 'another_play')).toEqual([]);
       expect(await db.st37Drilled({ ...member(), role: 'stranger' }, PLAY)).toEqual([]);
 
+      // A field found by its name as typed, any case, or by the start of its name (F-254 part 3b).
+      expect(await db.st37FieldFind(member(), 'example south', null)).toEqual({
+        field: { code: 990002, name: 'EXAMPLE SOUTH' },
+        pool: null,
+        wells: 2,
+        bounds: [-119.91, 59.95, -119.88, 59.96],
+      });
+      expect(await db.st37FieldFind(member(), 'Example Sou', 'example a')).toEqual({
+        field: { code: 990002, name: 'EXAMPLE SOUTH' },
+        pool: { code: 728001, name: 'EXAMPLE A' },
+        wells: 1,
+        bounds: [-119.91, 59.95, -119.9, 59.95],
+      });
+      // No such pool in the field; no such field; a LIKE wildcard taken literally.
+      expect(await db.st37FieldFind(member(), 'example south', 'example z')).toMatchObject({
+        pool: null,
+        wells: 0,
+        bounds: null,
+      });
+      expect((await db.st37FieldFind(member(), 'nowhere at all', null)).field).toBeNull();
+      expect((await db.st37FieldFind(member(), 'EXAMPLE%', null)).field).toBeNull();
+      // Someone not a member reads no field.
+      expect(
+        (await db.st37FieldFind({ ...member(), role: 'stranger' }, 'example south', null)).field,
+      ).toBeNull();
+
       // A play whose wells are gone is no longer listed.
       await admin`delete from petro.st37_wells where uwi in ${admin(UWIS)}`;
       const after = await db.st37Wells(member(), BOX, 10);

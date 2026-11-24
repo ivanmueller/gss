@@ -47,6 +47,8 @@ export const mapAskAnswerSchema = z
     settings: mapSettingsSchema,
     reasons,
     town: z.string().trim().max(80).optional(),
+    field: z.string().trim().max(80).optional(),
+    pool: z.string().trim().max(80).optional(),
   })
   .strict();
 
@@ -111,6 +113,13 @@ const flag = { type: 'boolean' };
 const text = { type: 'string' };
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
 const PLAYS = Object.keys(LAND_RIGHTS);
+/** Reasons only the Worker gives, from what it looked up: never Claude's. */
+const WORKER_REASONS = new Set<string>([
+  'place_not_found',
+  'field_not_found',
+  'field_not_loaded',
+  'pool_needs_field',
+]);
 
 export const MAP_ASK_JSON_SCHEMA = object(
   {
@@ -170,8 +179,10 @@ export const MAP_ASK_JSON_SCHEMA = object(
       geology: object({ on: flag, shown: oneOf(GEOLOGY_SHOWN) }),
       grid: object({ on: flag }),
     }),
-    reasons: listOf(MAP_ASK_REASONS.filter((r) => r !== 'place_not_found')),
+    reasons: listOf(MAP_ASK_REASONS.filter((r) => !WORKER_REASONS.has(r))),
     town: text,
+    field: text,
+    pool: text,
   },
   ['settings', 'reasons'],
 );
@@ -197,6 +208,7 @@ The map's sections and what each setting means:
 - prices (Alberta's royalty reference prices, charts only): on; product = gas, oil, propane, butanes, pentanes, sulphur; period = "5", "15" (years) or "all" (since 1994).
 - geology (the Duvernay / Muskwa only): on; shown = depth (to its top), thickness, maturity (Rock-Eval samples by window).
 - grid: the township grid on or off.
+- field and pool (outside settings): an oil or gas field, and a pool in it, the request names ("wells in the Kaybob South field" is field "Kaybob South"; "the Duvernay A pool of Fox Creek" is field "Fox Creek", pool "Duvernay A"), copied as typed, without the words "field" or "pool". The map filters the wells by them and moves there. Leave them out when the request names none. A field named only as a place to go ("near Fox Creek") is a town, not a field.
 - town (outside settings): a town, city, village or hamlet in Alberta the request names, to move the map there ("wells near Fox Creek" is town "Fox Creek"), copied as typed. Leave it out when the request names none. Legal land locations ("Twp 62 Rge 22 W5", "10-12-062-22W5") are read elsewhere: leave them out of town and settings.
 
 Rules:
@@ -206,7 +218,6 @@ Rules:
 - reasons: add a code for each part of the request the map cannot do, and set the rest:
   production_filter: filtering by production, rates or volumes;
   place_by_name: a place by name that is not a town or a legal land location (a county, a river, a lake, a park, a road);
-  field_or_pool: a field or pool by name;
   other_province: a province or state other than Alberta;
   other_play: wells, land or sales of a play other than ${PLAYS.join(', ')} (its outline can still be shown under formations);
   not_understood: nothing in the request can be set, or it is not about the map.

@@ -67,6 +67,9 @@ export function fakePetroleum() {
       Promise.resolve({ loads: [], wells: [] }),
     ),
     st37Drilled: vi.fn<PetroleumDatabase['st37Drilled']>(() => Promise.resolve([])),
+    st37FieldFind: vi.fn<PetroleumDatabase['st37FieldFind']>(() =>
+      Promise.resolve({ field: null, pool: null, wells: 0, bounds: null }),
+    ),
     st37Well3d: vi.fn<PetroleumDatabase['st37Well3d']>(() =>
       Promise.resolve({ loadedAt: null, legs: [] }),
     ),

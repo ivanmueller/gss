@@ -282,7 +282,8 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-- **F-254 part 3a, places by name** (oil and gas map): `map.torvenco.com` → the bar → "rigs near Fox Creek", "Twp 62 Rge 22 W5", "10-12-062-22W5"; the map moves there and the first chip names the place. Details in `docs/HANDOFF.md`.
+- **F-254 part 3b, fields and pools by name** (oil and gas map): `map.torvenco.com` → the bar → "wells in the Kaybob South field"; the wells are filtered, the Wells section shows the field with **Clear**, the map moves there. Details in `docs/HANDOFF.md`.
+- **F-254 part 3a, towns and legal land locations**: the bar → "rigs near Fox Creek", "Twp 62 Rge 22 W5", "10-12-062-22W5"; the map moves there and the first chip names the place.
 - Earlier: the owner checked F-254 parts 1 and 2 and the bar at the top on 2026-11-24 ("Staging is good"), and F-287 (geology, all four parts) on 2026-11-24 ("Geology staging is good"), F-239, F-247, F-284, F-285 and F-288 on 2026-11-23 ("All checks are good") and F-287 part 2 on 2026-11-24 ("Staging is good").
 
 ### Company summaries: how many are done, waiting or stopped (F-201)

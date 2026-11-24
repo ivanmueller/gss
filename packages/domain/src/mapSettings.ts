@@ -79,6 +79,12 @@ export const mapSettingsSchema = z
         statuses: several(z.enum(ST37_STATUS_CLASSES)).optional(),
         play: z.enum(PLAY_KEYS).optional(),
         operator: text.optional(),
+        /**
+         * The AER's field and pool names, exactly as its list writes them; null clears them.
+         * Set by the Worker from the list (F-254 part 3b), never by Claude or the word matching.
+         */
+        field: z.string().trim().min(1).max(60).nullable().optional(),
+        pool: z.string().trim().min(1).max(60).nullable().optional(),
         /** Spud year from and to, both included; null clears it. */
         spudFrom: year.nullable().optional(),
         spudTo: year.nullable().optional(),
@@ -181,7 +187,9 @@ export const MAP_ASK_REASONS = [
   'not_understood',
   'production_filter',
   'place_by_name',
-  'field_or_pool',
+  'field_not_found',
+  'field_not_loaded',
+  'pool_needs_field',
   'other_province',
   'other_play',
   'place_not_found',
@@ -192,7 +200,9 @@ export const MAP_ASK_REASON_TEXT: Record<MapAskReason, string> = {
   not_understood: 'Nothing in the request matched what this map can show.',
   production_filter: 'This map cannot filter by production yet.',
   place_by_name: 'This map finds towns and legal land locations only, not other places by name.',
-  field_or_pool: 'This map cannot filter by field or pool yet.',
+  field_not_found: 'No field or pool by that name is on the AER’s list.',
+  field_not_loaded: 'That field has no wells loaded yet: only the Duvernay’s wells are loaded.',
+  pool_needs_field: 'Name the field too: several fields have a pool by that name.',
   other_province: 'This map covers Alberta only.',
   other_play: 'Only the Duvernay is loaded whole so far.',
   place_not_found: 'No town or legal land location by that name was found in Alberta.',
@@ -242,6 +252,8 @@ export function describeMapSettings(s: MapSettings): string[] {
       );
     }
     if (w.play) out.push(`Wells of the ${playName(w.play)}`);
+    if (w.field) out.push(w.pool ? `Field ${w.field}, pool ${w.pool}` : `Field ${w.field}`);
+    else if (w.field === null) out.push('Any field');
     if (w.operator !== undefined) {
       out.push(w.operator === '' ? 'Any well operator' : `Well operator “${w.operator}”`);
     }
