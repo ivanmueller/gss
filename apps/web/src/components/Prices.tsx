@@ -23,7 +23,11 @@ export interface PricesAnswer {
 
 /** The products, each with its series as the province names them, older and newer apart. */
 export const PRICE_GROUPS = [
-  { key: 'gas', name: 'Gas', series: ['gas_reference', 'ethane_reference', 'ethane_par'] },
+  {
+    key: 'gas',
+    name: 'Gas',
+    series: ['gas_reference', 'methane_isc_par', 'ethane_reference', 'ethane_par'],
+  },
   {
     key: 'oil',
     name: 'Oil',

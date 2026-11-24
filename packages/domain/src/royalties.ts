@@ -12,7 +12,17 @@ import { Decimal } from 'decimal.js';
 // The sources and what is left out are listed in docs/FEATURES_OIL_GAS.md, F-285.
 
 /** Changes whenever a formula or a constant here changes; kept with every saved estimate. */
-export const ROYALTY_FORMULAS_VERSION = 'alberta-royalty-2026-11-23';
+export const ROYALTY_FORMULAS_VERSION = 'alberta-royalty-2026-11-23.2';
+
+/**
+ * The energy of a well's gas where its own is not published (F-285 part 4; the owner,
+ * 2026-11-23: "rooted in truth and logic", changeable later): the Canada Energy Regulator's
+ * energy conversion tables give 1 m3 of natural gas as 0.0373 GJ ("Based on 1000 Btu/cf"), so
+ * 37.3 GJ per e3m3. Petrinex's public volumetric data has no energy on any well's gas line
+ * (June 2025's file, checked 2026-11-23). One value, to be replaced by measured heat content.
+ */
+export const CER_GJ_PER_E3M3 = '37.3';
+export const CER_CONVERSION_SOURCE = 'https://apps.cer-rec.gc.ca/Conversion/conversion-tables.aspx';
 
 const Exact = Decimal.clone({ precision: 60, rounding: Decimal.ROUND_HALF_EVEN });
 type Num = InstanceType<typeof Exact>;
@@ -606,6 +616,35 @@ export function estimateWellRoyalties(input: WellRoyaltyInput): WellRoyaltyEstim
     royaltyCad: toMoney(totalRoyalty),
     effectivePct: share(totalRoyalty, totalValue),
   };
+}
+
+/** The value, royalty and effective rate of the estimated months among those given. */
+export function royaltyTotals(months: readonly WellMonthRoyalty[]): {
+  months: number;
+  valueCad: string;
+  royaltyCad: string;
+  effectivePct: string | null;
+} {
+  let value = ZERO;
+  let royalty = ZERO;
+  let count = 0;
+  for (const m of months) {
+    if (m.status !== 'estimated') continue;
+    value = value.plus(m.valueCad);
+    royalty = royalty.plus(m.royaltyCad);
+    count += 1;
+  }
+  return {
+    months: count,
+    valueCad: toMoney(value),
+    royaltyCad: toMoney(royalty),
+    effectivePct: share(royalty, value),
+  };
+}
+
+/** A volume of gas, e3m3, in GJ at the Canada Energy Regulator's 37.3 GJ per e3m3. */
+export function gasEnergyGJ(gasE3m3: string): string {
+  return text(num(gasE3m3, 'gas').times(CER_GJ_PER_E3M3));
 }
 
 function estimateMonth(

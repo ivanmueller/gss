@@ -19,6 +19,8 @@ export type RoyaltyPriceUnit = '$/GJ' | '$/m3' | '$/tonne';
  */
 export const PRICE_SERIES = [
   { key: 'gas_reference', name: 'Gas reference price', unit: '$/GJ' },
+  // The rate of methane under both frameworks (F-285 part 4): every monthly sheet since 2009.
+  { key: 'methane_isc_par', name: 'Methane ISC par price', unit: '$/GJ' },
   { key: 'ethane_reference', name: 'Ethane reference price', unit: '$/GJ' },
   { key: 'ethane_par', name: 'Ethane par price', unit: '$/GJ' },
   { key: 'propane_reference', name: 'Propane reference price', unit: '$/m3' },
@@ -138,6 +140,9 @@ export function sheetMonth(fileName: string): string | null {
 // The liquids' and sulphur's lines of a monthly sheet, as `pdftotext -raw` gives them: the name
 // at the start of a line, then the price, its unit after it or not at all (1998).
 const SHEET_LINES: readonly [RegExp, PriceSeriesKey][] = [
+  // On one line in the sheets checked of 2010, 2018 and 2022 to 2026; the December 2012 sheet
+  // sets the name apart from its price, so such months stay missing (and block an estimate).
+  [/^Methane ISC Par Price\b/, 'methane_isc_par'],
   [/^Ethane Reference Price\b/, 'ethane_reference'],
   [/^Ethane Par Price\b/, 'ethane_par'],
   [/^Propane Reference Price\b/, 'propane_reference'],
