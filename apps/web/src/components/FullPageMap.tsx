@@ -30,6 +30,7 @@ import {
   useMapLayers,
 } from './MapLayers';
 import { MapLayerSettings } from './MapLayerSettings';
+import { OperatorPicker } from './OperatorPicker';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
 import { useFacilities, type FacilitiesSnapshot } from './Facilities';
@@ -194,6 +195,15 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       grid: { on: grid.on },
       camera: at ? [at.west, at.south, at.east, at.north] : null,
     };
+  };
+  // One Operator box for the whole map (F-302): what is typed or picked fills the operator box
+  // of Wells & licences, Facilities and Pipelines at once.
+  const [operator, setOperator] = useState('');
+  const pickOperator = (text: string) => {
+    setOperator(text);
+    wells.apply({ operator: text });
+    facilities.apply({ operator: text });
+    pipelines.apply({ licensee: text });
   };
   const applyAll = (next: MapApplied) => {
     if (next.basemap) setBasemap(next.basemap);
@@ -410,6 +420,12 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                   Crown land sales, who holds the land, wells, rigs and production
                 </p>
               </div>
+              <OperatorPicker
+                organizationId={session.organization.id}
+                token={session.token}
+                value={operator}
+                onChange={pickOperator}
+              />
               <div className="flex flex-wrap items-center gap-2">
                 <MapLayersButton state={layers} />
                 <SegmentedControl

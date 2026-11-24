@@ -214,6 +214,44 @@ describe('the side card (F-267)', () => {
     expect(screen.getByRole('complementary', { name: 'Map menu' })).toBeInTheDocument();
   });
 
+  // F-302: one Operator box fills the operator boxes of wells, facilities and pipelines.
+  it('fills every layer’s operator box from the one Operator box', async () => {
+    const calls = mockApi({
+      [LIST]: listOf(),
+      ...noLegend,
+      [`GET /petroleum/operators?${ORGANIZATION}`]: () =>
+        Response.json({
+          operators: [
+            {
+              name: 'Sample Midstream Ltd.',
+              codes: ['B0Y2'],
+              wells: 0,
+              facilities: 3,
+              pipelines: 80,
+            },
+          ],
+        }),
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    const box = within(card).getByPlaceholderText('Every operator');
+    await userEvent.click(box);
+    await waitFor(() => {
+      expect(calls.some((c) => c.path.startsWith('/petroleum/operators?'))).toBe(true);
+    });
+    await userEvent.type(box, 'Sample Midstream Ltd.');
+    expect(
+      await within(card).findByText('Loaded: 3 facilities · 80 pipeline segments.'),
+    ).toBeInTheDocument();
+    // Wells & licences is open: its own box holds the same name.
+    expect(within(card).getByPlaceholderText('Any operator')).toHaveValue('Sample Midstream Ltd.');
+    await userEvent.click(within(card).getByRole('button', { name: 'Pipelines' }));
+    expect(within(card).getByPlaceholderText('Any licensee')).toHaveValue('Sample Midstream Ltd.');
+    await userEvent.click(within(card).getByRole('button', { name: 'Every operator' }));
+    expect(box).toHaveValue('');
+    expect(within(card).getByPlaceholderText('Any licensee')).toHaveValue('');
+  });
+
   it('leads the legend with the open section', () => {
     const all = [
       'sales',

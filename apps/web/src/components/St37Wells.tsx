@@ -5,6 +5,7 @@ import {
   type Bbox,
   type MapSettings,
   type St37StatusClass,
+  operatorMatches,
 } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -514,9 +515,9 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
 
 /** The wells of the operators whose name holds the text typed; every well for no text. */
 export function st37ByOperator(wells: readonly St37MapWell[], operator: string): St37MapWell[] {
-  const text = operator.trim().toLowerCase();
-  if (text === '') return [...wells];
-  return wells.filter((w) => (w.licensee ?? '').toLowerCase().includes(text));
+  // Names compared whatever their case or punctuation (F-302).
+  if (operator.trim() === '') return [...wells];
+  return wells.filter((w) => operatorMatches(w.licensee, operator));
 }
 
 /**

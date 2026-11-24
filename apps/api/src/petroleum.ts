@@ -49,6 +49,7 @@ import {
   st37Well3dAnswer,
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
+import { OPERATORS_SCHEMA_VERSION, operatorsAnswer } from './petro-operators';
 import { FRAC_SCHEMA_VERSION, fracAnswer, parseLicence } from './petro-frac';
 import { GEOLOGY_SCHEMA_VERSION, geologyAnswer, playSamplesAnswer } from './petro-geology';
 import { PRICES_SCHEMA_VERSION, pricesAnswer } from './petro-prices';
@@ -764,6 +765,34 @@ export function petroleumRoutes(
           requestId: ctx.requestId,
         });
         return keptJson(c, facilitiesAnswer(load, rows));
+      });
+    });
+  });
+
+  // /petroleum/operators: every operator of what is stored (F-302), its wells, facilities and
+  // pipelines counted and its names joined across the AER's lists, for the side card's Operator
+  // list. Membership first. JSON for the map only (the AER's terms, docs/DECISIONS.md 2026-11-19).
+  routes.get('/operators', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < OPERATORS_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const rows = await petroleum.operators({
+          userId: ctx.userId,
+          organizationId: membership.organizationId,
+          role: membership.role,
+          requestId: ctx.requestId,
+        });
+        return keptJson(c, operatorsAnswer(rows));
       });
     });
   });
