@@ -251,11 +251,14 @@ export interface CStarInput {
   tmdM: string | null;
   /** Proppant placed; null until the well's frac data is loaded (F-288). */
   proppant: readonly ProppantPlaced[] | null;
+  /** True when the well's frac report reads as a reporting error (F-288): its proppant is not used. */
+  proppantSuspect?: boolean;
   /** The year whose ACCI applies. */
   acciYear: number;
 }
 
-export type CStarMissing = 'true_vertical_depth' | 'measured_depth' | 'proppant' | 'acci';
+export type CStarMissing =
+  'true_vertical_depth' | 'measured_depth' | 'proppant' | 'proppant_suspect' | 'acci';
 
 export type CStarResult =
   | { status: 'calculated'; cStar: string; lateralLengthM: string; y: string; tppe: string }
@@ -271,7 +274,8 @@ export function cStar(input: CStarInput): CStarResult {
   const missing: CStarMissing[] = [];
   if (input.tvdMaxM === null) missing.push('true_vertical_depth');
   if (input.tmdM === null) missing.push('measured_depth');
-  if (input.proppant === null) missing.push('proppant');
+  if (input.proppantSuspect === true) missing.push('proppant_suspect');
+  else if (input.proppant === null) missing.push('proppant');
   const acci = ACCI[input.acciYear];
   if (acci === undefined) missing.push('acci');
   if (
@@ -545,6 +549,7 @@ export type RoyaltyBlock =
   | 'before_2009'
   | 'early_opt_in_unknown'
   | 'waiting_on_frac_data'
+  | 'frac_data_suspect'
   | 'c_star_inputs_missing'
   | 'production_history_incomplete'
   | 'oil_par_price'
@@ -670,12 +675,13 @@ function estimateMonth(
   if (condensate.gt(0) && m.prices.pentanesPlusPar === null) blocks.push('pentanes_plus_par_price');
   if (which.framework === 'mrf') {
     if (input.cStar === null || input.cStar.status === 'waiting') {
+      const missing = input.cStar?.status === 'waiting' ? input.cStar.missing : [];
       blocks.push(
-        input.cStar?.status === 'waiting' &&
-          input.cStar.missing.length === 1 &&
-          input.cStar.missing[0] === 'proppant'
+        missing.length === 1 && missing[0] === 'proppant'
           ? 'waiting_on_frac_data'
-          : 'c_star_inputs_missing',
+          : missing.length === 1 && missing[0] === 'proppant_suspect'
+            ? 'frac_data_suspect'
+            : 'c_star_inputs_missing',
       );
     }
     if (!input.fromFirstProduction) blocks.push('production_history_incomplete');

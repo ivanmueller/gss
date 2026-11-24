@@ -42,5 +42,6 @@ export * from './landRights';
 export * from './townshipGrid';
 export * from './facilities';
 export * from './pipelines';
+export * from './frac';
 export * from './prices';
 export * from './royalties';

@@ -49,6 +49,7 @@ import {
   st37Well3dAnswer,
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
+import { FRAC_SCHEMA_VERSION, fracAnswer, parseLicence } from './petro-frac';
 import { PRICES_SCHEMA_VERSION, pricesAnswer } from './petro-prices';
 import {
   parsePipelineId,
@@ -791,6 +792,39 @@ export function petroleumRoutes(
           requestId: ctx.requestId,
         });
         return keptJson(c, pricesAnswer(load, rows));
+      });
+    });
+  });
+
+  // /petroleum/frac/licence?licence=: the AER's frac data (F-288) of one licence's well events,
+  // for a well's panel and its royalty's C*. Membership first. The AER's data on the owner's
+  // decision (docs/DECISIONS.md, 2026-11-19): members only, the AER named.
+  routes.get('/frac/licence', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const asked = parseLicence(c.req.query('licence'));
+    if (typeof asked === 'string') return apiError(c, 400, 'VALIDATION_FAILED', asked);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < FRAC_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const { load, rows } = await petroleum.fracOfLicence(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          asked.licence,
+        );
+        return keptJson(c, fracAnswer(load, rows));
       });
     });
   });

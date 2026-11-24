@@ -5,6 +5,7 @@ import type { ProductionAnswer } from '../components/Production';
 import {
   blockText,
   blockedReasons,
+  cStarProppant,
   lastMonthsTotals,
   wellMonths,
   wellRoyalty,
@@ -130,5 +131,80 @@ describe('the well and its months', () => {
       PRICES,
     );
     expect(blockedReasons(estimate.months)).toEqual([['early_opt_in_unknown', 1]]);
+  });
+});
+
+describe('the proppant C* counts', () => {
+  const source = {
+    name: 'AER',
+    page: 'https://www.aer.ca/',
+    loadedAt: '2026-11-20',
+    sourceDate: null,
+  };
+  const leg = {
+    uwi: '00/11-23-030-27W4/0',
+    firstFracDate: '2023-10-01',
+    lastFracDate: '2023-10-10',
+    fracs: 1,
+    stages: 30,
+    waterM3: '1',
+    proppantT: '4000.125',
+    upgradeHintT: '1000',
+    refracProppantT: '99',
+    maxTvdM: null,
+    suspect: false,
+  };
+
+  it("adds the legs' first completions, every tonne as sand", () => {
+    expect(
+      cStarProppant(
+        { source, wells: [leg, { ...leg, proppantT: '0.875' }] },
+        '2023-09-03',
+        '2026-11-23',
+      ),
+    ).toEqual({ proppant: [{ kind: 'sand', tonnes: '4001' }], suspect: false });
+  });
+
+  it('waits until the data is loaded, and for a report a recent well may not have filed yet', () => {
+    expect(cStarProppant(null, '2023-09-03', '2026-11-23').proppant).toBeNull();
+    expect(
+      cStarProppant(
+        { source: { ...source, loadedAt: null }, wells: [] },
+        '2023-09-03',
+        '2026-11-23',
+      ).proppant,
+    ).toBeNull();
+    expect(cStarProppant({ source, wells: [] }, '2026-06-01', '2026-11-23').proppant).toBeNull();
+    // Spud over a year ago and no report: no proppant, as the province counts it.
+    expect(cStarProppant({ source, wells: [] }, '2024-06-01', '2026-11-23').proppant).toEqual([]);
+  });
+
+  it('does not use a report that reads as a reporting error', () => {
+    expect(
+      cStarProppant({ source, wells: [{ ...leg, suspect: true }] }, '2023-09-03', '2026-11-23'),
+    ).toEqual({
+      proppant: null,
+      suspect: true,
+    });
+  });
+
+  it('gives a newer well an estimate once its frac data is in', () => {
+    const { estimate } = wellRoyalty(
+      NEW_WELL,
+      [
+        answer([
+          { month: '2026-06', oil: 150, gas: null, water: null, condensate: null, hours: 720 },
+        ]),
+      ],
+      PRICES,
+      { source, wells: [leg] },
+      '2026-11-23',
+    );
+    expect(estimate.months[0]).toMatchObject({
+      status: 'estimated',
+      framework: 'mrf',
+      cStarPhase: 'pre',
+      effectivePct: '5',
+    });
   });
 });
