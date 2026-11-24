@@ -1,7 +1,9 @@
+import { operatorKey } from '@grain/domain';
 import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
 import { SALE_LAYERS } from './landSalesMap';
 import { DETAIL_GONE, fadeIn } from './mapDetail';
+import { operatorColourExpression, type OperatorColour } from './operatorColours';
 import { ST37_LAYERS } from './st37Map';
 
 /**
@@ -141,6 +143,11 @@ export interface LandView {
   land: GeoJSON.FeatureCollection;
   /** The keys of the shapes whose card is open, outlined bold. */
   picked: readonly string[];
+  /**
+   * Coloured by operator (F-302 part 3): agreements by their holder's key (`op`), matched to
+   * the operators by name; else each holder's own soft colour.
+   */
+  byOperator?: readonly OperatorColour[] | null;
 }
 
 /**
@@ -178,6 +185,7 @@ export function landFeatures(
       ...land.agreements.map((a) =>
         feature(landKey(a.rights, a.id), 'agreement', a.shape, {
           colour: byHolder ? landHolderColour(a.holder) : LAND_PLAIN,
+          op: operatorKey(a.holder),
           expiring: landExpiring(a.expiryText, today),
         }),
       ),
@@ -371,6 +379,12 @@ export function syncLand(
       under,
     );
   }
+  const own: ExpressionSpecification = ['get', 'colour'];
+  map.setPaintProperty(
+    LAND_LAYERS.agreementFill,
+    'fill-color',
+    view.byOperator ? operatorColourExpression(view.byOperator) : own,
+  );
   map.setPaintProperty(LAND_LAYERS.picked, 'line-color', tone === 'light' ? '#1c1917' : '#fafaf9');
   map.setFilter(LAND_LAYERS.picked, ['in', ['get', 'key'], ['literal', [...view.picked]]]);
 }

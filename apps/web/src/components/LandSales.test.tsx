@@ -69,6 +69,8 @@ describe('saleFiltered', () => {
 
   it('keeps the buyers whose name holds the text typed', () => {
     expect(ids(' sample ', 'sold', 'no_offers', 'upcoming')).toEqual(['4']);
+    // Whatever the case or punctuation, as the Operator box fills it (F-302 part 3).
+    expect(ids('Sample Resources Inc', 'sold', 'no_offers', 'upcoming')).toEqual(['4']);
   });
 
   it('keeps the sales of the period, when every year is held (F-263)', () => {

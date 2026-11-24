@@ -156,9 +156,11 @@ describe('landFeatures', () => {
         key: 'png:7',
         look: 'agreement',
         colour: landHolderColour('EXAMPLE ENERGY LTD.'),
+        // The holder's key, for colour by operator (F-302 part 3); '' for no holder.
+        op: 'EXAMPLE ENERGY LTD',
         expiring: false,
       },
-      { key: 'oil_sands:8', look: 'agreement', colour: LAND_PLAIN, expiring: true },
+      { key: 'oil_sands:8', look: 'agreement', colour: LAND_PLAIN, op: '', expiring: true },
       { key: 'offset:3', look: 'offset' },
       { key: 'offset:4', look: 'offset_passed' },
     ]);

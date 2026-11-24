@@ -1,4 +1,11 @@
-import { formatAlberta, LAND_RIGHTS, type Bbox, type MapSettings } from '@grain/domain';
+import {
+  formatAlberta,
+  LAND_RIGHTS,
+  operatorKey,
+  operatorMatches,
+  type Bbox,
+  type MapSettings,
+} from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { apiJson } from '../lib/api';
@@ -17,6 +24,7 @@ import {
   type LandView,
 } from '../lib/landMap';
 import { DETAIL_GONE } from '../lib/mapDetail';
+import type { OperatorCount } from '../lib/operatorColours';
 import {
   FilterChip,
   LegendTitle,
@@ -158,9 +166,9 @@ export function landFiltered(
   agreements: readonly LandMapAgreement[],
   filters: { holder: string; terms: ReadonlySet<LandTerm>; today: string },
 ): LandMapAgreement[] {
-  const text = filters.holder.trim().toLowerCase();
+  // Names compared whatever their case or punctuation (F-302).
   return agreements.filter((a) => {
-    if (text !== '' && !(a.holder ?? '').toLowerCase().includes(text)) return false;
+    if (!operatorMatches(a.holder, filters.holder)) return false;
     if (filters.terms.size === 0) return true;
     const term = landTerm(a);
     return (
@@ -247,6 +255,8 @@ export interface LandPick {
 
 export interface LandState {
   view: LandView | null;
+  /** The holders of the agreements in view, by name key, tracts counted (F-302 part 3). */
+  operatorsInView: readonly OperatorCount[] | null;
   agreements: ReadonlyMap<string, LandMapAgreement>;
   offsets: ReadonlyMap<string, LandMapOffset>;
   freehold: ReadonlyMap<string, LandMapFreehold>;
@@ -460,6 +470,19 @@ export function useLand(organizationId: string, token: string): LandState {
     () => landHolders(shown.agreements, at?.view ?? null),
     [shown.agreements, at],
   );
+  // The same holders by name key, for colour by operator (F-302 part 3); null with no land on.
+  const operatorsInView = useMemo((): OperatorCount[] | null => {
+    if (view === null) return null;
+    const byKey = new Map<string, OperatorCount>();
+    for (const h of holders) {
+      const key = operatorKey(h.holder);
+      if (key === '') continue;
+      const found = byKey.get(key);
+      if (found) found.count += h.tracts;
+      else byKey.set(key, { key, name: h.holder, count: h.tracts });
+    }
+    return [...byKey.values()];
+  }, [view, holders]);
 
   const onViewChange = useCallback((bbox: Bbox | null, zoom: number) => {
     setAt(bbox ? { view: bbox, zoom } : null);
@@ -718,6 +741,7 @@ export function useLand(organizationId: string, token: string): LandState {
 
   return {
     view,
+    operatorsInView,
     agreements,
     offsets,
     freehold,
