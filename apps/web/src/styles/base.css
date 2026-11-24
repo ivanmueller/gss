@@ -65,6 +65,17 @@
   background-color: color-mix(in oklch, var(--color-card) 80%, transparent);
   color: var(--color-foreground);
 }
+/* The bottom-left corner (the attribution "i" and Mapbox's logo) moved clear of a side card that
+   covers the map's left edge; the page sets --map-left-inset to the card's width (F-301). */
+.mapboxgl-map .mapboxgl-ctrl-bottom-left {
+  left: var(--map-left-inset, 0px);
+}
+/* On a phone the distance bar would sit under the Ask bar: the zoom buttons are enough there. */
+@media (max-width: 767px) {
+  .mapboxgl-map .mapboxgl-ctrl-top-right .mapboxgl-ctrl-scale {
+    display: none;
+  }
+}
 .dark .mapboxgl-map .mapboxgl-ctrl-attrib-button {
   filter: invert(1);
 }

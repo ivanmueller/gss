@@ -522,10 +522,13 @@ function MapGroup({
 export function MapLayersPanel({
   state,
   side,
+  className,
 }: {
   state: MapLayersState;
   /** The side of the map its zoom buttons are on. */
   side: 'left' | 'right';
+  /** Placement overrides: lower, under a distance bar below the zoom buttons (F-301). */
+  className?: string;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const api = useLayerApi();
@@ -537,6 +540,7 @@ export function MapLayersPanel({
         // Below the zoom buttons (10 px from the top, two 29 px buttons).
         'absolute top-20 bottom-3 z-10 flex w-72 max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-card border bg-card text-sm shadow-md',
         side === 'left' ? 'left-3' : 'right-3',
+        className,
       )}
     >
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">

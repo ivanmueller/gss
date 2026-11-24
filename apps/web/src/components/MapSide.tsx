@@ -56,7 +56,8 @@ export function Toggle({
 /**
  * One section of the card: its title opens and closes it, the chip names the play it is
  * narrowed to (its × lets the play go), the sample shows its colours and the switch takes it
- * off the map. Open, its title and left edge are in the accent.
+ * off the map. It opens whether on or off, so its filters can be set first (F-304). Open, its
+ * title and left edge are in the accent.
  */
 export function MapSection({
   title,
@@ -79,7 +80,8 @@ export function MapSection({
   sample?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const shown = open && on;
+  // Open whether on or off, so its filters can be set before the layer is switched on (F-304).
+  const shown = open;
   const Arrow = shown ? ChevronDown : ChevronRight;
   return (
     <section
@@ -119,7 +121,16 @@ export function MapSection({
         {sample}
         <Toggle label={title} checked={on} onChange={onSwitch} />
       </div>
-      {shown && <div className="flex flex-col gap-3 pb-4">{children}</div>}
+      {shown && (
+        <div className="flex flex-col gap-3 pb-4">
+          {!on && (
+            <p className="text-xs text-muted-foreground">
+              Off: choose the filters, then switch it on. The counts start once it is on.
+            </p>
+          )}
+          {children}
+        </div>
+      )}
     </section>
   );
 }
