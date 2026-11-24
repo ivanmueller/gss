@@ -242,7 +242,8 @@ export function readMapRequest(input: string): MapRequestReading {
   if (/\bbritish columbia\b|\bb\.?c\.?\b|\bsaskatchewan\b|\bsask\b|\bmanitoba\b/.test(t)) {
     reasons.add('other_province');
   }
-  if (/\b(?:near|around|close to|outside of)\s+[a-z]/.test(t)) reasons.add('place_by_name');
+  // A place is looked up by the Worker with Claude's reading: the word matching finds none.
+  if (/\b(?:near|around|close to|outside of)\s+[a-z]/.test(t)) reasons.add('place_not_found');
 
   const settings = mapSettingsSchema.parse(s);
   if (Object.keys(settings).length === 0 && reasons.size === 0) reasons.add('not_understood');

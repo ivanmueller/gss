@@ -157,3 +157,159 @@ describe('AskLimiter', () => {
     expect(limiter.take('a', 61_001)).toBe(true);
   });
 });
+
+describe('POST /api/v1/petroleum/ask, places by name (F-254 part 3)', () => {
+  const WITH_GEOCODIO = { ...WITH_KEY, GEOCODIO_API_KEY: 'synthetic-geocodio' };
+  const AUTH_USER = Response.json({ id: USER_ID, email: 'adam@example.test' });
+  const square = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { M: 5, RGE: 22, TWP: 62 },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [-117.2, 54.3],
+              [-117.0, 54.3],
+              [-117.0, 54.4],
+              [-117.2, 54.3],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+  const town = (country: string, region: string, accuracy = 'place') =>
+    Response.json({
+      results: {
+        town: {
+          query: {},
+          response: {
+            input: {},
+            results: [
+              {
+                location: { lat: 54.4, lng: -116.8 },
+                accuracy: 1,
+                accuracy_type: accuracy,
+                formatted_address: 'Fox Creek, AB',
+                address_components: { country, state_province: region },
+              },
+            ],
+          },
+        },
+      },
+    });
+  /** The auth server, the province's grid and Geocodio, each answered by its address. */
+  function services(grid: () => Response, geocodio: () => Response) {
+    const fetchMock = mockAuthServer(AUTH_USER);
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes('alberta_township')
+          ? grid()
+          : url.includes('geocod.io')
+            ? geocodio()
+            : AUTH_USER.clone(),
+      ),
+    );
+    return fetchMock;
+  }
+
+  it('moves to a legal land location read from the words, found on the province’s grid', async () => {
+    const fetchMock = services(
+      () => Response.json(square),
+      () => town('CA', 'AB'),
+    );
+    claude.readCall.mockReturnValueOnce(
+      read({ settings: { wells: { on: true } }, reasons: ['place_by_name'] }),
+    );
+    const res = await ask('wells in Twp 62 Rge 22 W5', WITH_GEOCODIO);
+    expect(await res.json()).toEqual({
+      settings: { wells: { on: true } },
+      reasons: [],
+      place: { label: 'T62 R22 W5', bounds: [-117.2, 54.3, -117, 54.4] },
+    });
+    const gridUrl = fetchMock.mock.calls.map(([url]) => url).find((u) => u.includes('township'));
+    expect(new URL(gridUrl ?? 'https://x').searchParams.get('where')).toBe(
+      'M=5 AND RGE=22 AND TWP=62',
+    );
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('geocod.io'))).toBe(false);
+  });
+
+  it('moves to a town Claude named as typed, found in Alberta only', async () => {
+    const fetchMock = services(
+      () => Response.json(square),
+      () => town('CA', 'AB'),
+    );
+    claude.readCall.mockReturnValueOnce(
+      read({ settings: { rigs: { on: true } }, reasons: [], town: 'Fox Creek' }),
+    );
+    const res = await ask('rigs near Fox Creek', WITH_GEOCODIO);
+    const body = await res.json<{
+      place: { label: string; bounds: number[] };
+      reasons: string[];
+    }>();
+    expect(body.place.label).toBe('Fox Creek, AB');
+    expect(body.reasons).toEqual([]);
+    const geocodio = fetchMock.mock.calls.find(([url]) => url.includes('geocod.io'));
+    // Only the town's name and the province go to Geocodio.
+    expect(JSON.parse(geocodio?.[1]?.body as string)).toEqual({
+      town: { city: 'Fox Creek', state_province: 'AB', country: 'Canada' },
+    });
+
+    // In another province, or only a county: no place.
+    for (const [country, region, accuracy] of [
+      ['CA', 'BC', 'place'],
+      ['CA', 'AB', 'county'],
+    ] as const) {
+      services(
+        () => Response.json(square),
+        () => town(country, region, accuracy),
+      );
+      claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [], town: 'Fox Creek' }));
+      expect(await (await ask('rigs near Fox Creek', WITH_GEOCODIO)).json()).toEqual({
+        settings: {},
+        reasons: ['place_not_found'],
+      });
+    }
+  });
+
+  it('never looks up a town that is not in the typed words, and says when none was found', async () => {
+    const fetchMock = services(
+      () => Response.json({ type: 'FeatureCollection', features: [] }),
+      () => town('CA', 'AB'),
+    );
+    claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [], town: 'Edmonton' }));
+    expect(await (await ask('rigs near the city', WITH_GEOCODIO)).json()).toEqual({
+      settings: {},
+      reasons: [],
+    });
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('geocod.io'))).toBe(false);
+    // A township the grid does not hold.
+    claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [] }));
+    expect(await (await ask('126-34W6', WITH_GEOCODIO)).json()).toEqual({
+      settings: {},
+      reasons: ['place_not_found'],
+    });
+    // No Geocodio key: the town is not found, the rest still applies.
+    claude.readCall.mockReturnValueOnce(
+      read({ settings: { rigs: { on: true } }, reasons: [], town: 'Fox Creek' }),
+    );
+    expect(await (await ask('rigs near Fox Creek')).json()).toEqual({
+      settings: { rigs: { on: true } },
+      reasons: ['place_not_found'],
+    });
+  });
+
+  it('says so when the province’s grid cannot be reached', async () => {
+    services(
+      () => new Response('down', { status: 503 }),
+      () => town('CA', 'AB'),
+    );
+    claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [] }));
+    const res = await ask('62-22W5', WITH_GEOCODIO);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ settings: {}, reasons: ['place_not_found'] });
+  });
+});

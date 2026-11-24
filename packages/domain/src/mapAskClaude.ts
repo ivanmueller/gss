@@ -19,6 +19,7 @@ import {
 } from './mapSettings';
 import { PIPELINE_STATUSES, PIPELINE_SUBSTANCES } from './pipelines';
 import type { MapSettings } from './mapSettings';
+import { mapPlaceSchema } from './mapPlaces';
 import { ST37_STATUS_CLASSES } from './st37';
 
 /**
@@ -36,13 +37,24 @@ export const mapAskRequestSchema = z
   .object({ text: z.string().trim().min(1).max(MAP_ASK_MAX_CHARS) })
   .strict();
 
+const reasons = z
+  .array(z.enum(MAP_ASK_REASONS))
+  .refine((list) => new Set(list).size === list.length);
+
+/** Claude's answer: settings, reasons, and a town to move to, named as typed (part 3). */
 export const mapAskAnswerSchema = z
   .object({
     settings: mapSettingsSchema,
-    reasons: z.array(z.enum(MAP_ASK_REASONS)).refine((list) => new Set(list).size === list.length),
+    reasons,
+    town: z.string().trim().max(80).optional(),
   })
   .strict();
-export type MapAskAnswer = z.infer<typeof mapAskAnswerSchema>;
+
+/** The Worker's answer to the page: Claude's settings and reasons, and the place it found. */
+export const mapAskReplySchema = z
+  .object({ settings: mapSettingsSchema, reasons, place: mapPlaceSchema.optional() })
+  .strict();
+export type MapAskAnswer = z.infer<typeof mapAskReplySchema>;
 
 /** Letters and digits only, lower case: how a name is looked for in the request. */
 const plain = (s: string) =>
@@ -57,10 +69,15 @@ const plain = (s: string) =>
  * or guessed is dropped, so the map filters only by what the person wrote. An empty name (which
  * clears a filter) is kept.
  */
+/** Whether a name is in the request as typed, whole words, letters and digits compared. */
+export function isTyped(name: string, request: string): boolean {
+  const wanted = plain(name);
+  return wanted !== '' && ` ${plain(request)} `.includes(` ${wanted} `);
+}
+
 export function keepTypedNames(settings: MapSettings, request: string): MapSettings {
-  const typed = ` ${plain(request)} `;
   const ok = (name: string | undefined) =>
-    name === undefined || plain(name) === '' || typed.includes(` ${plain(name)} `);
+    name === undefined || plain(name) === '' || isTyped(name, request);
   const out: MapSettings = { ...settings };
   const drop = <T extends object>(part: T | undefined, keys: (keyof T)[]): T | undefined => {
     if (part === undefined) return undefined;
@@ -153,7 +170,8 @@ export const MAP_ASK_JSON_SCHEMA = object(
       geology: object({ on: flag, shown: oneOf(GEOLOGY_SHOWN) }),
       grid: object({ on: flag }),
     }),
-    reasons: listOf(MAP_ASK_REASONS),
+    reasons: listOf(MAP_ASK_REASONS.filter((r) => r !== 'place_not_found')),
+    town: text,
   },
   ['settings', 'reasons'],
 );
@@ -179,6 +197,7 @@ The map's sections and what each setting means:
 - prices (Alberta's royalty reference prices, charts only): on; product = gas, oil, propane, butanes, pentanes, sulphur; period = "5", "15" (years) or "all" (since 1994).
 - geology (the Duvernay / Muskwa only): on; shown = depth (to its top), thickness, maturity (Rock-Eval samples by window).
 - grid: the township grid on or off.
+- town (outside settings): a town, city, village or hamlet in Alberta the request names, to move the map there ("wells near Fox Creek" is town "Fox Creek"), copied as typed. Leave it out when the request names none. Legal land locations ("Twp 62 Rge 22 W5", "10-12-062-22W5") are read elsewhere: leave them out of town and settings.
 
 Rules:
 - A section the request is about is switched on ("on": true) unless the request asks to hide it.
@@ -186,7 +205,7 @@ Rules:
 - Never invent a value that is not in the lists above.
 - reasons: add a code for each part of the request the map cannot do, and set the rest:
   production_filter: filtering by production, rates or volumes;
-  place_by_name: a town, city, county or other place by name, or "near" a place;
+  place_by_name: a place by name that is not a town or a legal land location (a county, a river, a lake, a park, a road);
   field_or_pool: a field or pool by name;
   other_province: a province or state other than Alberta;
   other_play: wells, land or sales of a play other than ${PLAYS.join(', ')} (its outline can still be shown under formations);

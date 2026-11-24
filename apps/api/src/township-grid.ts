@@ -1,4 +1,9 @@
 import {
+  featuresBounds,
+  legalLandLabel,
+  legalLandQuery,
+  type LegalLand,
+  type MapPlace,
   ALBERTA_BOX,
   ATS_SERVICE,
   GRID_LEVELS,
@@ -76,6 +81,45 @@ export function parseGridPoint(
     point.lat <= ALBERTA_BOX.north
     ? point
     : null;
+}
+
+/** The province's address for a legal land location by its numbers (F-254 part 3). */
+export function legalLandUrl(land: LegalLand): string {
+  const { level, where } = legalLandQuery(land);
+  const spec = GRID_SPECS[level];
+  const params = new URLSearchParams({
+    f: 'geojson',
+    where: spec.landOnly ? `${where} AND RA = ' '` : where,
+    outFields: spec.fields.join(','),
+    returnGeometry: 'true',
+    outSR: '4326',
+    geometryPrecision: '5',
+  });
+  return `${ATS_SERVICE}/${String(spec.layer)}/query?${params.toString()}`;
+}
+
+/**
+ * A legal land location found on the province's township grid: its name and box; null when the
+ * grid has no such square. Throws LayerServiceError when the service cannot be reached.
+ */
+export async function findLegalLand(land: LegalLand): Promise<MapPlace | null> {
+  const { body } = await fetchService(
+    legalLandUrl(land),
+    /^(application|text)\/(json|plain|geo\+json)$/,
+    MAX_GRID_BYTES,
+  );
+  let answer: unknown;
+  try {
+    answer = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return null;
+  }
+  const features =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { features?: unknown }).features
+      : undefined;
+  const bounds = Array.isArray(features) ? featuresBounds(features) : null;
+  return bounds ? { label: legalLandLabel(land), bounds } : null;
 }
 
 /** The province's address for the legal subdivision under a point, with its outline. */

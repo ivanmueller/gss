@@ -530,9 +530,10 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           'absolute right-14 z-10 mx-auto max-w-2xl',
           folded ? 'top-16 left-3 md:top-3 md:left-[17rem]' : 'top-3 left-3 md:left-[24rem]',
         )}
-        onApply={(settings) => {
+        onApply={(settings, place) => {
           setBefore(snapshot());
-          applyAll(settings);
+          // A place named moves the map last, over a play's area.
+          applyAll(place ? { ...settings, camera: place.bounds } : settings);
         }}
         canUndo={before !== null}
         onUndo={() => {
