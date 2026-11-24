@@ -5,13 +5,17 @@ import { MAP_ASK_MODEL, ReadingDeadlineError, type ClaudeClient } from './anthro
 import type { Database } from './db';
 import { createApp } from './index';
 import { ASK_PER_MINUTE, AskLimiter } from './map-ask';
+import { PETROLEUM_SCHEMA_VERSION, type PetroleumFactory } from './petroleum-db';
 import { ENV, fakeDatabase, mockAuthServer, USER_ID, VALID_TOKEN } from './testing/helpers';
+import { fakePetroleum } from './testing/petroleum';
 
 // Ask the map, read by Claude (F-254 part 2): members only, the fixed instructions and the typed
 // words sent, the answer checked against the map's settings, names kept only as typed.
 
 let db = fakeDatabase();
 const openDatabase = vi.fn<(url: string) => Database>(() => db);
+let petroleum = fakePetroleum();
+const openPetroleum = vi.fn<PetroleumFactory>(() => petroleum);
 let claude: { readCall: ReturnType<typeof vi.fn<ClaudeClient['readCall']>> };
 let app = createApp(openDatabase);
 
@@ -47,8 +51,11 @@ beforeEach(() => {
       }),
     ),
   };
+  petroleum = fakePetroleum();
+  petroleum.schemaVersion.mockResolvedValue(PETROLEUM_SCHEMA_VERSION);
   app = createApp(openDatabase, {
     claude: (env) => (env.ANTHROPIC_API_KEY ? claude : null),
+    petroleum: openPetroleum,
   });
 });
 
@@ -311,5 +318,110 @@ describe('POST /api/v1/petroleum/ask, places by name (F-254 part 3)', () => {
     const res = await ask('62-22W5', WITH_GEOCODIO);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ settings: {}, reasons: ['place_not_found'] });
+  });
+});
+
+describe('POST /api/v1/petroleum/ask, fields and pools by name (F-254 part 3b)', () => {
+  const WITH_PETROLEUM = {
+    ...WITH_KEY,
+    PETROLEUM_DATABASE_URL: 'postgresql://petro_api.ref:secret@db.example.test:5432/postgres',
+  };
+  const FOUND = {
+    field: { code: 990002, name: 'EXAMPLE SOUTH' },
+    pool: null,
+    wells: 12,
+    bounds: [-117.3, 54.2, -116.9, 54.5] as [number, number, number, number],
+  };
+
+  it('filters the wells by the field on the AER’s list and moves to them', async () => {
+    petroleum.st37FieldFind.mockResolvedValueOnce(FOUND);
+    claude.readCall.mockReturnValueOnce(
+      read({
+        // A field Claude writes into the settings is never applied: only the list's name is.
+        settings: { wells: { statuses: ['producing'], field: 'MADE UP' } },
+        reasons: [],
+        field: 'example south',
+      }),
+    );
+    const res = await ask('producing wells in the Example South field', WITH_PETROLEUM);
+    expect(await res.json()).toEqual({
+      settings: {
+        wells: { statuses: ['producing'], on: true, field: 'EXAMPLE SOUTH', pool: null },
+      },
+      reasons: [],
+      place: { label: 'EXAMPLE SOUTH field', bounds: [-117.3, 54.2, -116.9, 54.5] },
+    });
+    expect(petroleum.st37FieldFind).toHaveBeenCalledWith(
+      {
+        userId: USER_ID,
+        organizationId: 'org-a',
+        role: 'trader',
+        requestId: expect.any(String) as string,
+      },
+      'example south',
+      null,
+    );
+  });
+
+  it('names a pool in its field', async () => {
+    petroleum.st37FieldFind.mockResolvedValueOnce({
+      ...FOUND,
+      pool: { code: 728001, name: 'EXAMPLE A' },
+      wells: 3,
+    });
+    claude.readCall.mockReturnValueOnce(
+      read({ settings: {}, reasons: [], field: 'Example South', pool: 'Example A' }),
+    );
+    const body = await (
+      await ask('the Example A pool of Example South', WITH_PETROLEUM)
+    ).json<{ settings: unknown; place: { label: string } }>();
+    expect(body.settings).toEqual({
+      wells: { on: true, field: 'EXAMPLE SOUTH', pool: 'EXAMPLE A' },
+    });
+    expect(body.place.label).toBe('EXAMPLE A pool, EXAMPLE SOUTH field');
+    expect(petroleum.st37FieldFind).toHaveBeenLastCalledWith(
+      expect.anything(),
+      'Example South',
+      'Example A',
+    );
+  });
+
+  it('says when the field is not on the list, has no wells loaded, or a pool has no field', async () => {
+    const cases: [Awaited<ReturnType<typeof petroleum.st37FieldFind>>, string][] = [
+      [{ field: null, pool: null, wells: 0, bounds: null }, 'field_not_found'],
+      [{ ...FOUND, wells: 0, bounds: null }, 'field_not_loaded'],
+    ];
+    for (const [found, reason] of cases) {
+      petroleum.st37FieldFind.mockResolvedValueOnce(found);
+      claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [], field: 'Example' }));
+      expect(await (await ask('wells in the Example field', WITH_PETROLEUM)).json()).toEqual({
+        settings: {},
+        reasons: [reason],
+      });
+    }
+    claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [], pool: 'Example A' }));
+    expect(await (await ask('the Example A pool', WITH_PETROLEUM)).json()).toEqual({
+      settings: {},
+      reasons: ['pool_needs_field'],
+    });
+  });
+
+  it('never looks up a field that is not in the typed words, and copes without the database', async () => {
+    claude.readCall.mockReturnValueOnce(read({ settings: {}, reasons: [], field: 'Pembina' }));
+    expect(await (await ask('wells in that field', WITH_PETROLEUM)).json()).toEqual({
+      settings: {},
+      reasons: [],
+    });
+    expect(petroleum.st37FieldFind).not.toHaveBeenCalled();
+    // The oil and gas database not set up: the field is not found, the rest still applies.
+    claude.readCall.mockReturnValueOnce(
+      read({ settings: { rigs: { on: true } }, reasons: [], field: 'Pembina' }),
+    );
+    const res = await ask('rigs in the Pembina field');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      settings: { rigs: { on: true } },
+      reasons: ['field_not_found'],
+    });
   });
 });

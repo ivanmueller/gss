@@ -125,7 +125,7 @@ class DeadlineError extends Error {
  * PETROLEUM_NOT_READY if not), runs `handle`, and answers 503 (logged) if it is unreachable or
  * takes longer than `deadlineMs`, in which case the connection is dropped.
  */
-async function withPetroleum(
+export async function withPetroleum(
   c: ApiContext,
   openPetroleum: PetroleumFactory,
   handle: (db: PetroleumDatabase) => Promise<Response>,

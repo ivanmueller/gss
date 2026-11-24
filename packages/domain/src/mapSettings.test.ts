@@ -70,6 +70,10 @@ describe('describeMapSettings', () => {
     expect(describeMapSettings({ wells: { spudFrom: null, spudTo: null } })).toEqual([
       'Any spud year',
     ]);
+    expect(describeMapSettings({ wells: { field: 'EXAMPLE SOUTH', pool: 'EXAMPLE A' } })).toEqual([
+      'Field EXAMPLE SOUTH, pool EXAMPLE A',
+    ]);
+    expect(describeMapSettings({ wells: { field: null } })).toEqual(['Any field']);
     expect(describeMapSettings({})).toEqual([]);
   });
 });
@@ -163,7 +167,7 @@ describe('readMapRequest', () => {
     expect(readMapRequest('what is the weather').reasons).toEqual(['not_understood']);
     expect(readMapRequest('wells above 1,000 bbl a day').reasons).toContain('production_filter');
     expect(readMapRequest('wells near Fox Creek').reasons).toContain('place_not_found');
-    expect(readMapRequest('wells in the Pembina field').reasons).toContain('field_or_pool');
+    expect(readMapRequest('wells in the Pembina field').reasons).toContain('field_not_found');
     expect(readMapRequest('Montney wells in British Columbia').reasons).toEqual([
       'other_play',
       'other_province',

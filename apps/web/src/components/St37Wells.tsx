@@ -143,6 +143,9 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   // Spud years, both included; null for no limit (F-254).
   const [spudFrom, setSpudFrom] = useState<number | null>(null);
   const [spudTo, setSpudTo] = useState<number | null>(null);
+  // The AER's field and pool, as its list names them, set from the Ask bar (F-254 part 3b).
+  const [field, setField] = useState<string | null>(null);
+  const [pool, setPool] = useState<string | null>(null);
   const [view, setView] = useState<Bbox | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
 
@@ -189,8 +192,8 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   // The wells drawn: those of an operator whose name holds the text typed (F-267). A clicked
   // well's panel still reads every well loaded.
   const listed = useMemo(
-    () => st37BySpud(st37ByOperator(wells, operator), spudFrom, spudTo),
-    [wells, operator, spudFrom, spudTo],
+    () => st37ByField(st37BySpud(st37ByOperator(wells, operator), spudFrom, spudTo), field, pool),
+    [wells, operator, spudFrom, spudTo, field, pool],
   );
   const features = useMemo(() => st37Features(listed), [listed]);
   const byUwi = useMemo(() => new Map(wells.map((w) => [w.uwi, w])), [wells]);
@@ -232,6 +235,8 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     operator,
     spudFrom,
     spudTo,
+    field,
+    pool,
   };
   const apply = (next: WellsSettings) => {
     if (next.on !== undefined) setOn(next.on);
@@ -243,6 +248,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     if (next.operator !== undefined) setOperator(next.operator);
     if (next.spudFrom !== undefined) setSpudFrom(next.spudFrom);
     if (next.spudTo !== undefined) setSpudTo(next.spudTo);
+    if (next.field !== undefined) {
+      setField(next.field);
+      setPool(next.field === null ? null : (next.pool ?? null));
+    } else if (next.pool !== undefined) setPool(next.pool);
   };
 
   const toggle = (status: St37StatusClass) => {
@@ -323,6 +332,25 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
         <SpudYear label="Spud from" value={spudFrom} onChange={setSpudFrom} />
         <SpudYear label="Spud to" value={spudTo} onChange={setSpudTo} />
       </div>
+      {field !== null && (
+        <div className="flex items-center gap-2 text-[0.8125rem]">
+          <span className={SIDE_LABEL}>Field</span>
+          <span className="grow font-medium">
+            {field}
+            {pool !== null ? ` · pool ${pool}` : ''}
+          </span>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => {
+              setField(null);
+              setPool(null);
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <div className="flex items-start gap-3">
         <span className={`${SIDE_LABEL} pt-2`}>Show</span>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Statuses shown">
@@ -495,6 +523,16 @@ export function st37ByOperator(wells: readonly St37MapWell[], operator: string):
  * The wells spud in the years chosen, both included; every well with no limit. A limit leaves out
  * the wells with no spud date (licensed, not drilled yet).
  */
+/** The wells of the AER's field (and pool) named; every well for none. Names compared as listed. */
+export function st37ByField(
+  wells: readonly St37MapWell[],
+  field: string | null,
+  pool: string | null,
+): St37MapWell[] {
+  if (field === null) return [...wells];
+  return wells.filter((w) => w.fieldName === field && (pool === null || w.poolName === pool));
+}
+
 export function st37BySpud(
   wells: readonly St37MapWell[],
   from: number | null,

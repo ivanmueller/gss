@@ -104,7 +104,25 @@ export interface St37Database {
    * the zones where they cluster (F-255).
    */
   st37Drilled(ctx: PetroleumContext, formation: string): Promise<ZoneWell[]>;
+  /**
+   * Members (F-254 part 3b): the AER's field named as typed (its exact name, any case; else the
+   * one field whose name starts so), the pool of that name in it when one is asked for, and how
+   * many loaded wells lie in them with the box around their surface and bottom holes.
+   */
+  st37FieldFind(ctx: PetroleumContext, field: string, pool: string | null): Promise<St37FieldFound>;
 }
+
+export interface St37FieldFound {
+  field: { code: number; name: string } | null;
+  /** The pool asked for in the field; null when none was asked for or none has that name. */
+  pool: { code: number; name: string } | null;
+  /** The loaded wells in the field (and the pool), and their box [west, south, east, north]. */
+  wells: number;
+  bounds: [number, number, number, number] | null;
+}
+
+/** Typed text for LIKE, its wildcards taken literally. */
+const likeText = (text: string) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 interface WellDbRow {
   uwi: string;
@@ -308,6 +326,61 @@ export function st37Queries(sql: postgres.Sql): St37Database {
             groundElevationM: num(r.ground_elevation_m),
             points: r.path_3d,
           })),
+        };
+      });
+    },
+    st37FieldFind(ctx, field, pool) {
+      return sql.begin(async (tx) => {
+        await asMember(tx, ctx);
+        let fields = await tx<{ field_code: number; name: string }[]>`
+          select field_code, name from petro.fields where upper(name) = upper(${field}) limit 2`;
+        if (fields.length === 0) {
+          fields = await tx<{ field_code: number; name: string }[]>`
+            select field_code, name from petro.fields
+            where upper(name) like upper(${likeText(field)}) || '%' order by name limit 2`;
+        }
+        const one = fields.length === 1 ? fields[0] : undefined;
+        if (!one) return { field: null, pool: null, wells: 0, bounds: null };
+        let found: { pool_code: number; name: string } | undefined;
+        if (pool !== null) {
+          [found] = await tx<{ pool_code: number; name: string }[]>`
+            select pool_code, name from petro.pools
+            where field_code = ${one.field_code} and upper(name) = upper(${pool}) limit 1`;
+          if (!found) {
+            return {
+              field: { code: one.field_code, name: one.name },
+              pool: null,
+              wells: 0,
+              bounds: null,
+            };
+          }
+        }
+        const [box] = await tx<
+          {
+            wells: number;
+            west: string | null;
+            south: string | null;
+            east: string | null;
+            north: string | null;
+          }[]
+        >`
+          select count(*)::int as wells,
+                 least(min(surface_longitude), min(bottom_longitude))::text as west,
+                 least(min(surface_latitude), min(bottom_latitude))::text as south,
+                 greatest(max(surface_longitude), max(bottom_longitude))::text as east,
+                 greatest(max(surface_latitude), max(bottom_latitude))::text as north
+          from petro.st37_wells
+          where field_code = ${one.field_code}
+            and (${found?.pool_code ?? null}::int is null or pool_code = ${found?.pool_code ?? null})`;
+        const wells = box?.wells ?? 0;
+        return {
+          field: { code: one.field_code, name: one.name },
+          pool: found ? { code: found.pool_code, name: found.name } : null,
+          wells,
+          bounds:
+            wells > 0 && box?.west && box.south && box.east && box.north
+              ? [Number(box.west), Number(box.south), Number(box.east), Number(box.north)]
+              : null,
         };
       });
     },

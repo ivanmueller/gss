@@ -180,7 +180,7 @@ export function createApp(
   app.route('/emails', emailRoutes(openDatabase, mailer, claude));
   app.route('/email-auto-drafts', emailAutoDraftRoutes(openDatabase));
   // Ask the map (F-254 part 2): before /petroleum, whose routes do not answer it.
-  app.route('/petroleum/ask', mapAskRoutes(openDatabase, claude));
+  app.route('/petroleum/ask', mapAskRoutes(openDatabase, openPetroleum, claude));
   app.route(
     '/petroleum',
     petroleumRoutes(openDatabase, openPetroleum, options.petroleumLayersDeadlineMs),

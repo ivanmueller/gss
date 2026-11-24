@@ -21,6 +21,9 @@ import {
 import type { Membership } from './db';
 import { findAlbertaTown, GeocoderError } from './geocoding';
 import { LayerServiceError } from './map-layers';
+import { withPetroleum } from './petroleum';
+import type { PetroleumContext, PetroleumFactory } from './petroleum-db';
+import type { St37FieldFound } from './st37-db';
 import { findLegalLand } from './township-grid';
 import { apiError, readJson, withDatabase, type ApiEnv, type DatabaseFactory } from './respond';
 
@@ -117,6 +120,7 @@ function membershipOf(named: string | undefined, memberships: Membership[]): Mem
 
 export function mapAskRoutes(
   openDatabase: DatabaseFactory,
+  openPetroleum: PetroleumFactory,
   claude: ClaudeFactory,
   limiter = new AskLimiter(),
 ) {
@@ -134,11 +138,9 @@ export function mapAskRoutes(
     if (client === null) {
       return apiError(c, 503, 'CLAUDE_NOT_CONFIGURED', 'Claude is not set up yet.');
     }
+    let membership: Membership | null = null;
     const member = await withDatabase(c, openDatabase, async (db, ctx) => {
-      const membership = membershipOf(
-        c.req.query('organization_id'),
-        await db.memberships(ctx.userId),
-      );
+      membership = membershipOf(c.req.query('organization_id'), await db.memberships(ctx.userId));
       return membership === null
         ? apiError(c, 403, 'FORBIDDEN', 'You are not a member of this organization.')
         : new Response(null, { status: 204 });
@@ -180,15 +182,73 @@ export function mapAskRoutes(
       `Map ask: read model=${model} in=${String(answer.inputTokens)} out=${String(answer.outputTokens)}`,
     );
     // A name Claude gives that is not in the request is dropped, never applied.
-    const settings = keepTypedNames(checked.data.settings, parsed.data.text);
-    const found = await findPlace(parsed.data.text, checked.data.town, c.env.GEOCODIO_API_KEY);
+    const text = parsed.data.text;
+    const settings = keepTypedNames(checked.data.settings, text);
+    // A field and pool are set only from the AER's list, below: never as Claude wrote them.
+    if (settings.wells) {
+      settings.wells = Object.fromEntries(
+        Object.entries(settings.wells).filter(([key]) => key !== 'field' && key !== 'pool'),
+      );
+    }
     const reasons = new Set<MapAskReason>(checked.data.reasons);
-    if (found.place) reasons.delete('place_by_name');
+
+    // A field (and a pool in it), named as typed, found on the AER's list (part 3b).
+    const typed = (name: string | undefined) =>
+      name !== undefined && isTyped(name, text) ? name : undefined;
+    const field = typed(checked.data.field);
+    const pool = typed(checked.data.pool);
+    let fieldPlace: MapPlace | null = null;
+    const who = membership as Membership | null;
+    if (pool !== undefined && field === undefined) reasons.add('pool_needs_field');
+    if (field !== undefined && who !== null) {
+      const ctx: PetroleumContext = {
+        userId: c.get('user').id,
+        organizationId: who.organizationId,
+        role: who.role,
+        requestId: c.get('requestId'),
+      };
+      let found: St37FieldFound | null = null;
+      const answered = await withPetroleum(c, openPetroleum, async (petroleum) => {
+        found = await petroleum.st37FieldFind(ctx, field, pool ?? null);
+        return new Response(null, { status: 204 });
+      });
+      const result = found as St37FieldFound | null;
+      if (answered.status !== 204 || result === null) {
+        console.warn(`Map ask: field not looked up status=${String(answered.status)}`);
+        reasons.add('field_not_found');
+      } else if (result.field === null || (pool !== undefined && result.pool === null)) {
+        reasons.add('field_not_found');
+      } else if (result.bounds === null) {
+        reasons.add('field_not_loaded');
+      } else {
+        settings.wells = {
+          ...settings.wells,
+          on: true,
+          field: result.field.name,
+          pool: result.pool?.name ?? null,
+        };
+        fieldPlace = {
+          label: result.pool
+            ? `${result.pool.name} pool, ${result.field.name} field`
+            : `${result.field.name} field`,
+          bounds: result.bounds,
+        };
+      }
+    }
+
+    // A legal land location comes first; a field's wells next; a town last.
+    const found = await findPlace(
+      text,
+      fieldPlace ? undefined : checked.data.town,
+      c.env.GEOCODIO_API_KEY,
+    );
+    const place = found.place ?? fieldPlace;
+    if (place) reasons.delete('place_by_name');
     if (found.missed) reasons.add('place_not_found');
     return c.json({
       settings,
       reasons: [...reasons],
-      ...(found.place && { place: found.place }),
+      ...(place && { place }),
     });
   });
 
