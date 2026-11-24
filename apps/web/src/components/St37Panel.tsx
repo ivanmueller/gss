@@ -10,6 +10,7 @@ import { st37Place, st37Plan } from './St37Wells';
 import { Button } from './ui/button';
 import { Well3d } from './Well3d';
 import { WellFrac } from './WellFrac';
+import { WellGeology } from './WellGeology';
 import { WellRoyalty } from './WellRoyalty';
 
 /**
@@ -263,6 +264,11 @@ export function St37Panel({
               </li>
             ))}
           </ul>
+        </PanelSection>
+      )}
+      {member && well.statusClass !== 'licensed' && (
+        <PanelSection title="Geology">
+          <WellGeology organizationId={member.organizationId} token={member.token} uwi={well.uwi} />
         </PanelSection>
       )}
       {member && well.statusClass !== 'licensed' && (

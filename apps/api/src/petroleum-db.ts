@@ -8,6 +8,7 @@ import { landQueries, type LandDatabase } from './land-db';
 import { landSalesQueries, type LandSalesDatabase } from './land-sales-db';
 import { facilityQueries, type FacilitiesDatabase } from './petro-facilities-db';
 import { fracQueries, type FracDatabase } from './petro-frac-db';
+import { geologyQueries, type GeologyDatabase } from './petro-geology-db';
 import { priceQueries, type PricesDatabase } from './petro-prices-db';
 import { pipelineQueries, type PipelinesDatabase } from './petro-pipelines-db';
 import { productionQueries, type ProductionDatabase } from './production-db';
@@ -50,7 +51,8 @@ export interface PetroleumDatabase
     FacilitiesDatabase,
     PipelinesDatabase,
     PricesDatabase,
-    FracDatabase {
+    FracDatabase,
+    GeologyDatabase {
   /** The database's schema version (petro.schema_version()). Reads no data. */
   schemaVersion(): Promise<number>;
   /** The organization the database sees for this person: the health check. */
@@ -206,6 +208,7 @@ export function createPetroleumDatabase(sql: postgres.Sql): PetroleumDatabase {
     ...pipelineQueries(sql),
     ...priceQueries(sql),
     ...fracQueries(sql),
+    ...geologyQueries(sql),
     async schemaVersion() {
       const [row] = await sql.begin(async (tx) => {
         await tx`select set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;

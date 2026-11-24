@@ -50,6 +50,7 @@ import {
 } from './st37';
 import { FACILITIES_SCHEMA_VERSION, facilitiesAnswer } from './petro-facilities';
 import { FRAC_SCHEMA_VERSION, fracAnswer, parseLicence } from './petro-frac';
+import { GEOLOGY_SCHEMA_VERSION, geologyAnswer } from './petro-geology';
 import { PRICES_SCHEMA_VERSION, pricesAnswer } from './petro-prices';
 import {
   parsePipelineId,
@@ -825,6 +826,41 @@ export function petroleumRoutes(
           asked.licence,
         );
         return keptJson(c, fracAnswer(load, rows));
+      });
+    });
+  });
+
+  // /petroleum/geology/well?uwi=: a well's Geology section (F-287 part 2): the Alberta
+  // Geological Survey's tops picked in it or nearest it, its play's zone under it, and the play's
+  // nearest Rock-Eval samples. Membership first, as above. Open data (Open Government Licence –
+  // Alberta), the Survey named; the well itself is the AER's (members only).
+  routes.get('/geology/well', (c) => {
+    c.header('Cache-Control', 'no-store');
+    const asked = parseUwi(c.req.query('uwi'));
+    if (typeof asked === 'string') return apiError(c, 400, 'VALIDATION_FAILED', asked);
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < GEOLOGY_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const data = await petroleum.geologyOfWell(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          asked.uwi,
+        );
+        if (data.well === null) return apiError(c, 404, 'NOT_FOUND', 'No such well is loaded.');
+        return keptJson(c, geologyAnswer(data));
       });
     });
   });

@@ -91,6 +91,17 @@ export function fakePetroleum() {
     fracOfLicence: vi.fn<PetroleumDatabase['fracOfLicence']>(() =>
       Promise.resolve({ load: null, rows: [] }),
     ),
+    geologyOfWell: vi.fn<PetroleumDatabase['geologyOfWell']>(() =>
+      Promise.resolve({
+        well: null,
+        legs: [],
+        picked: [],
+        names: [],
+        samples: [],
+        cells: [],
+        loads: { picks: null, samples: null, model: null },
+      }),
+    ),
     pipelineSquare: vi.fn<PetroleumDatabase['pipelineSquare']>(() =>
       Promise.resolve({ load: null, rows: [] }),
     ),

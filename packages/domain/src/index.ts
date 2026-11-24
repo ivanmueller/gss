@@ -46,3 +46,4 @@ export * from './frac';
 export * from './licenceHolders';
 export * from './prices';
 export * from './royalties';
+export * from './geology';
