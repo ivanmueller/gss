@@ -1,4 +1,4 @@
-import { albertaDay, formatAlberta, type Bbox } from '@grain/domain';
+import { albertaDay, formatAlberta, type Bbox, type MapSettings } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, apiJson } from '../lib/api';
@@ -171,10 +171,16 @@ export interface Rigs {
   setPicked: (keys: readonly string[]) => void;
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
   updated: string | null;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: RigsSnapshot;
+  apply: (settings: RigsSnapshot) => void;
   section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   legend: () => React.ReactNode;
   about: () => React.ReactNode;
 }
+
+/** The section's settings, with the activity types hidden, so Undo brings them back. */
+export type RigsSnapshot = NonNullable<MapSettings['rigs']> & { hidden?: readonly string[] };
 
 const PERIODS: { value: RigPeriod; label: string }[] = [
   { value: 'now', label: 'Now' },
@@ -467,6 +473,14 @@ export function useRigs(organizationId: string, token: string): Rigs {
     setPicked,
     onViewChange,
     updated: answer?.source.lastSeenAt ?? null,
+    settings: { on, period, contractor, operator, hidden: [...hidden] },
+    apply: (next: RigsSnapshot) => {
+      if (next.on !== undefined) setOn(next.on);
+      if (next.period) setPeriod(next.period);
+      if (next.contractor !== undefined) setContractor(next.contractor);
+      if (next.operator !== undefined) setOperator(next.operator);
+      if (next.hidden) setHidden(new Set(next.hidden));
+    },
     section,
     legend,
     about,

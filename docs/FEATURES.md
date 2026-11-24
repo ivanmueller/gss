@@ -282,7 +282,8 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-- **F-287 part 4, the Duvernay's maturity map** (oil and gas map → side card → **Geology** → **Maturity**), after its deploy. Part 3's depth and thickness maps were seen by the owner on 2026-11-24. The owner checked F-239, F-247, F-284, F-285 and F-288 on 2026-11-23 ("All checks are good") and F-287 part 2 on 2026-11-24 ("Staging is good").
+- **F-254 part 1, Ask the map** (oil and gas map): `map.torvenco.com` → the bar at the bottom → an example or "Duvernay wells drilled since 2020" → Enter; check the chips and **Undo**. Details in `docs/HANDOFF.md`.
+- Earlier: the owner checked F-287 (geology, all four parts) on 2026-11-24 ("Geology staging is good"), F-239, F-247, F-284, F-285 and F-288 on 2026-11-23 ("All checks are good") and F-287 part 2 on 2026-11-24 ("Staging is good").
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 

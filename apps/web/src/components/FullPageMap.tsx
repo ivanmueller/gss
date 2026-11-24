@@ -1,6 +1,6 @@
-import { formatAlberta, LAND_RIGHTS } from '@grain/domain';
+import { formatAlberta, LAND_RIGHTS, type Bbox, type MapSettings } from '@grain/domain';
 import { CircleCheck, Minus, Plus, Settings, TriangleAlert, Waves } from 'lucide-react';
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 
 import { LayerApiContext, petroleumLayers } from '../lib/layerApi';
 import {
@@ -13,6 +13,7 @@ import {
 import { useTheme } from '../lib/theme';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
+import { AskMapBar } from './AskMapBar';
 import type { St37Hover } from './FacilityMap';
 import {
   MapLayersButton,
@@ -24,7 +25,7 @@ import {
 import { MapLayerSettings } from './MapLayerSettings';
 import { Button } from './ui/button';
 import { Callout } from './ui/callout';
-import { useFacilities } from './Facilities';
+import { useFacilities, type FacilitiesSnapshot } from './Facilities';
 import { usePrices } from './Prices';
 import { FacilityPanel, FacilityTip } from './FacilityPanel';
 import { useFormations } from './Formations';
@@ -33,10 +34,10 @@ import { PipelinePanel, PipelineTip } from './PipelinePanel';
 import { usePipelines, type PipelineEntry } from './Pipelines';
 import { useLand, type LandPick } from './Land';
 import { LandPanel, LandTip } from './LandPanel';
-import { saleDay, useLandSales } from './LandSales';
+import { saleDay, useLandSales, type LandSalesSnapshot } from './LandSales';
 import { SIDE_LABEL } from './MapSide';
 import { RigPanel, RigTip } from './RigPanel';
-import { useRigs } from './Rigs';
+import { useRigs, type RigsSnapshot } from './Rigs';
 import { St37Panel, St37Tip } from './St37Panel';
 import { useSt37Wells } from './St37Wells';
 import { GridPanel, useTownshipGrid } from './TownshipGrid';
@@ -54,6 +55,19 @@ const FacilityMap = lazy(() => import('./FacilityMap'));
 export const CANADA: MapBounds = [-141, 41.7, -52.6, 70];
 
 const NO_PINS = [] as const;
+
+/**
+ * Settings applied to the whole map at once (F-254): a request read by the Ask the map bar, or
+ * the map as it was before it, for Undo (which also names one sale, the exact statuses and the
+ * place the map showed).
+ */
+type MapApplied = Omit<MapSettings, 'open' | 'sales' | 'facilities' | 'rigs'> & {
+  open?: SideSection | null | undefined;
+  sales?: LandSalesSnapshot | undefined;
+  facilities?: FacilitiesSnapshot | undefined;
+  rigs?: RigsSnapshot | undefined;
+  camera?: MapBounds | null | undefined;
+};
 
 /**
  * The map on its own page (F-238, map.torvenco.com), for the oil and gas side of the platform
@@ -153,6 +167,46 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       return before?.join(',') === bounds.join(',') ? [west, south, east, north + 1e-9] : bounds;
     });
   }, []);
+  // Where the map is, for Undo after a request moved it.
+  const camera = useRef<Bbox | null>(null);
+  const [before, setBefore] = useState<MapApplied | null>(null);
+  const snapshot = (): MapApplied => {
+    const at = camera.current;
+    return {
+      open: section,
+      basemap,
+      wells: wells.settings,
+      sales: sales.settings,
+      land: land.settings,
+      facilities: facilities.settings,
+      pipelines: pipelines.settings,
+      rigs: rigs.settings,
+      formations: formations.settings,
+      prices: prices.settings,
+      geology: geology.settings,
+      grid: { on: grid.on },
+      camera: at ? [at.west, at.south, at.east, at.north] : null,
+    };
+  };
+  const applyAll = (next: MapApplied) => {
+    if (next.basemap) setBasemap(next.basemap);
+    if (next.wells) wells.apply(next.wells);
+    if (next.sales) sales.apply(next.sales, goTo);
+    if (next.land) land.apply(next.land);
+    if (next.facilities) facilities.apply(next.facilities);
+    if (next.pipelines) pipelines.apply(next.pipelines);
+    if (next.rigs) rigs.apply(next.rigs);
+    if (next.formations) formations.apply(next.formations);
+    if (next.prices) prices.apply(next.prices);
+    if (next.geology) geology.apply(next.geology);
+    if (next.grid?.on !== undefined) grid.setOn(next.grid.on);
+    if (next.open !== undefined) setSection(next.open);
+    if (next.goTo) {
+      const play = wells.formations.find((f) => f.key === next.goTo);
+      if (play) goTo([play.area.west, play.area.south, play.area.east, play.area.north]);
+    }
+    if (next.camera) goTo(next.camera);
+  };
   const admin = session.organization.role === 'org_admin';
   const tone = theme === 'dark' || basemap === 'satellite' ? 'dark' : 'light';
 
@@ -263,6 +317,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           }
           fitTo={fitTo}
           onViewChange={(bbox, zoom) => {
+            camera.current = bbox;
             layers.onViewChange(bbox, zoom);
             wells.onViewChange(bbox);
             land.onViewChange(bbox, zoom);
@@ -453,6 +508,22 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           </aside>
         )}
       </Suspense>
+      {/* Ask the map (F-254): at the bottom, clear of the card and the legend. */}
+      <AskMapBar
+        className={cn(
+          'absolute right-3 bottom-8 z-10 lg:right-14',
+          folded ? 'left-3 lg:left-[17.75rem]' : 'left-3 md:left-[24rem] lg:left-[41rem]',
+        )}
+        onApply={(settings) => {
+          setBefore(snapshot());
+          applyAll(settings);
+        }}
+        canUndo={before !== null}
+        onUndo={() => {
+          if (before) applyAll(before);
+          setBefore(null);
+        }}
+      />
       {/* Below the zoom buttons, top right (F-139). */}
       <MapLayersPanel state={layers} side="right" />
       <LandPanel
@@ -518,7 +589,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           role="group"
           aria-label="Legend"
           className={cn(
-            'absolute bottom-8 z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
+            'absolute bottom-24 z-10 flex max-h-[calc(100%-13rem)] lg:bottom-8 lg:max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
             beside,
             !folded && 'hidden md:flex',
           )}

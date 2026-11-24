@@ -48,3 +48,5 @@ export * from './prices';
 export * from './royalties';
 export * from './geology';
 export * from './geologyGrid';
+export * from './mapSettings';
+export * from './mapRequestWords';

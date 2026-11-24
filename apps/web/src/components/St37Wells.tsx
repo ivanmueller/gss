@@ -3,6 +3,7 @@ import {
   ST37_STATUS_CLASSES,
   ST37_STATUS_LABELS,
   type Bbox,
+  type MapSettings,
   type St37StatusClass,
 } from '@grain/domain';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -117,6 +118,9 @@ export interface St37State {
   choose: (key: string) => void;
   /** When the wells were last loaded; null before an answer. */
   updated: string | null;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: WellsSettings;
+  apply: (settings: WellsSettings) => void;
   section: (props: {
     open: boolean;
     onToggle: () => void;
@@ -129,11 +133,16 @@ export interface St37State {
   about: () => React.ReactNode;
 }
 
+export type WellsSettings = NonNullable<MapSettings['wells']>;
+
 export function useSt37Wells(organizationId: string, token: string): St37State {
   const [on, setOn] = useState(true);
   const [hidden, setHidden] = useState<ReadonlySet<St37StatusClass>>(new Set());
   const [chosen, setChosen] = useState<string | null>(null);
   const [operator, setOperator] = useState('');
+  // Spud years, both included; null for no limit (F-254).
+  const [spudFrom, setSpudFrom] = useState<number | null>(null);
+  const [spudTo, setSpudTo] = useState<number | null>(null);
   const [view, setView] = useState<Bbox | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
 
@@ -179,7 +188,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   const wells = useMemo(() => answer?.wells ?? [], [answer]);
   // The wells drawn: those of an operator whose name holds the text typed (F-267). A clicked
   // well's panel still reads every well loaded.
-  const listed = useMemo(() => st37ByOperator(wells, operator), [wells, operator]);
+  const listed = useMemo(
+    () => st37BySpud(st37ByOperator(wells, operator), spudFrom, spudTo),
+    [wells, operator, spudFrom, spudTo],
+  );
   const features = useMemo(() => st37Features(listed), [listed]);
   const byUwi = useMemo(() => new Map(wells.map((w) => [w.uwi, w])), [wells]);
   const legsOf = useMemo(() => st37Legs(wells), [wells]);
@@ -212,6 +224,26 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
   const onViewChange = useCallback((bbox: Bbox | null) => {
     setView(bbox);
   }, []);
+
+  const settings: WellsSettings = {
+    on,
+    statuses: ST37_STATUS_CLASSES.filter((status) => !hidden.has(status)),
+    ...(chosen !== null && formations.some((f) => f.key === chosen) ? { play: chosen } : {}),
+    operator,
+    spudFrom,
+    spudTo,
+  };
+  const apply = (next: WellsSettings) => {
+    if (next.on !== undefined) setOn(next.on);
+    if (next.statuses) {
+      const kept = new Set(next.statuses);
+      setHidden(new Set(ST37_STATUS_CLASSES.filter((status) => !kept.has(status))));
+    }
+    if (next.play !== undefined) setChosen(next.play);
+    if (next.operator !== undefined) setOperator(next.operator);
+    if (next.spudFrom !== undefined) setSpudFrom(next.spudFrom);
+    if (next.spudTo !== undefined) setSpudTo(next.spudTo);
+  };
 
   const toggle = (status: St37StatusClass) => {
     setHidden((before) => {
@@ -287,6 +319,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
           />
         </label>
       </div>
+      <div className="grid grid-cols-2 gap-2">
+        <SpudYear label="Spud from" value={spudFrom} onChange={setSpudFrom} />
+        <SpudYear label="Spud to" value={spudTo} onChange={setSpudTo} />
+      </div>
       <div className="flex items-start gap-3">
         <span className={`${SIDE_LABEL} pt-2`}>Show</span>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Statuses shown">
@@ -308,7 +344,11 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
         <p className="text-xs text-muted-foreground">
           {formationTotal(formation.totals).toLocaleString('en-CA')} wells in the {formation.name},
           every status; {listed.length.toLocaleString('en-CA')} in view
-          {operator.trim() ? ' for this operator' : ''}.
+          {operator.trim() ? ' for this operator' : ''}
+          {spudFrom !== null || spudTo !== null
+            ? ' spud in the years chosen (not yet drilled: left out)'
+            : ''}
+          .
         </p>
       )}
       {formation && (
@@ -436,6 +476,8 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     formations,
     choose: setChosen,
     updated: answer?.source.loadedAt ?? null,
+    settings,
+    apply,
     section,
     legend,
     about,
@@ -447,6 +489,58 @@ export function st37ByOperator(wells: readonly St37MapWell[], operator: string):
   const text = operator.trim().toLowerCase();
   if (text === '') return [...wells];
   return wells.filter((w) => (w.licensee ?? '').toLowerCase().includes(text));
+}
+
+/**
+ * The wells spud in the years chosen, both included; every well with no limit. A limit leaves out
+ * the wells with no spud date (licensed, not drilled yet).
+ */
+export function st37BySpud(
+  wells: readonly St37MapWell[],
+  from: number | null,
+  to: number | null,
+): St37MapWell[] {
+  if (from === null && to === null) return [...wells];
+  return wells.filter((w) => {
+    const year = w.spudDate ? Number(w.spudDate.slice(0, 4)) : null;
+    if (year === null || !Number.isFinite(year)) return false;
+    return (from === null || year >= from) && (to === null || year <= to);
+  });
+}
+
+/** A year box: empty for no limit; kept only once four digits are typed. */
+function SpudYear({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (year: number | null) => void;
+}) {
+  const [typed, setTyped] = useState<string | null>(null);
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className={SIDE_LABEL}>{label}</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        maxLength={4}
+        className={SIDE_INPUT}
+        placeholder="Any year"
+        value={typed ?? (value === null ? '' : String(value))}
+        onChange={(event) => {
+          const text = event.target.value.replace(/\D/g, '');
+          setTyped(text);
+          if (text === '') onChange(null);
+          else if (text.length === 4) onChange(Number(text));
+        }}
+        onBlur={() => {
+          setTyped(null);
+        }}
+      />
+    </label>
+  );
 }
 
 /** The statuses in a word or two, for the chips; the legend gives them in full. */

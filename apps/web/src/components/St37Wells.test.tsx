@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { st37Features, st37Legs, st37Pads, type St37MapWell } from '../lib/st37Map';
-import { st37ByOperator, st37Covers, st37Place, st37Plan, st37Request } from './St37Wells';
+import {
+  st37ByOperator,
+  st37BySpud,
+  st37Covers,
+  st37Place,
+  st37Plan,
+  st37Request,
+} from './St37Wells';
 
 // The AER's ST37 wells on the oil and gas map (F-243 part 4). Made-up wells only.
 
@@ -231,5 +238,25 @@ describe('st37ByOperator (F-267)', () => {
 
   it('keeps every well for no text', () => {
     expect(st37ByOperator(list, '  ')).toHaveLength(3);
+  });
+});
+
+describe('st37BySpud (F-254)', () => {
+  const wells = [
+    well('A', { spudDate: '2019-12-31' }),
+    well('B', { spudDate: '2020-01-01' }),
+    well('C', { spudDate: '2024-06-30' }),
+    well('D', { spudDate: null, statusClass: 'licensed' }),
+  ];
+  const uwis = (list: St37MapWell[]) => list.map((w) => w.uwi);
+
+  it('keeps every well, undrilled ones too, with no limit', () => {
+    expect(uwis(st37BySpud(wells, null, null))).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('keeps the years chosen, both included, and leaves out wells with no spud date', () => {
+    expect(uwis(st37BySpud(wells, 2020, null))).toEqual(['B', 'C']);
+    expect(uwis(st37BySpud(wells, null, 2020))).toEqual(['A', 'B']);
+    expect(uwis(st37BySpud(wells, 2024, 2024))).toEqual(['C']);
   });
 });

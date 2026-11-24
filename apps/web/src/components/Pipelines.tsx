@@ -8,6 +8,7 @@ import {
   pipelineSubstanceOf,
   tileBounds,
   type Bbox,
+  type MapSettings,
   type PipelineLevel,
   type PipelineParts,
   type PipelineSubstance,
@@ -296,12 +297,17 @@ export interface Pipelines {
   onViewChange: (bbox: Bbox | null, zoom: number) => void;
   updated: string | null;
   fileDate: string | null;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: PipelinesSettings;
+  apply: (settings: PipelinesSettings) => void;
   section: (props: { open: boolean; onToggle: () => void }) => React.ReactNode;
   legend: () => React.ReactNode;
   about: () => React.ReactNode;
 }
 
 const ALL_GROUPS: ReadonlySet<PipelineSubstance> = new Set(PIPELINE_SUBSTANCES.map((s) => s.key));
+
+export type PipelinesSettings = NonNullable<MapSettings['pipelines']>;
 /** When the section is first switched on (F-284): operating lines only, and no substance yet. */
 export const PIPELINE_STATUSES_AT_START: ReadonlySet<string> = new Set(['Operating']);
 export const PIPELINE_GROUPS_AT_START: ReadonlySet<PipelineSubstance> = new Set();
@@ -551,6 +557,20 @@ export function usePipelines(organizationId: string, token: string): Pipelines {
     onViewChange,
     updated: load?.loadedAt ?? null,
     fileDate: load?.fileDate ?? null,
+    settings: {
+      on,
+      statuses: PIPELINE_STATUSES.filter((status) => statuses.has(status)),
+      substances: PIPELINE_SUBSTANCES.map((x) => x.key).filter((key) => groups.has(key)),
+      licensee,
+      minSizeMm: minMm,
+    },
+    apply: (next: PipelinesSettings) => {
+      if (next.on !== undefined) setOn(next.on);
+      if (next.statuses) setStatuses(new Set(next.statuses));
+      if (next.substances) setGroups(new Set(next.substances));
+      if (next.licensee !== undefined) setLicensee(next.licensee);
+      if (next.minSizeMm !== undefined) setMinMm(next.minSizeMm);
+    },
     section,
     legend,
     about,

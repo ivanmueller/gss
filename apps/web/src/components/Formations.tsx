@@ -1,4 +1,4 @@
-import { FORMATION_OUTLINES } from '@grain/domain';
+import { FORMATION_OUTLINES, type MapSettings } from '@grain/domain';
 import { useEffect, useMemo, useState } from 'react';
 
 import { FORMATION_COLOURS, type FormationsView } from '../lib/formationsMap';
@@ -56,7 +56,12 @@ export interface Formations {
   }) => React.ReactNode;
   legend: (tone: 'light' | 'dark') => React.ReactNode;
   about: () => React.ReactNode;
+  /** Every setting of the section as it is now, and a way to set some of them (F-254). */
+  settings: FormationsSettings;
+  apply: (settings: FormationsSettings) => void;
 }
+
+export type FormationsSettings = NonNullable<MapSettings['formations']>;
 
 export function useFormations(): Formations {
   const [on, setOn] = useState(true);
@@ -197,5 +202,17 @@ export function useFormations(): Formations {
     </p>
   );
 
-  return { view, section, legend, about };
+  const settings: FormationsSettings = {
+    on,
+    shown: FORMATION_OUTLINES.map((f) => f.key).filter((key) => shown.has(key)),
+  };
+  const apply = (next: FormationsSettings) => {
+    if (next.on !== undefined) setOn(next.on);
+    // Only outlines the map has; an unknown key is left out.
+    if (next.shown) {
+      setShown(new Set(next.shown.filter((key) => FORMATION_OUTLINES.some((f) => f.key === key))));
+    }
+  };
+
+  return { view, section, legend, about, settings, apply };
 }

@@ -317,6 +317,63 @@ describe('the side card (F-267)', () => {
   });
 });
 
+describe('Ask the map (F-254 part 1)', () => {
+  it('applies a request to the map, names what it set, and undoes it', async () => {
+    mockApi({
+      [LIST]: listOf(),
+      ...noLegend,
+      'GET /outlines/duvernay.geojson': OUTLINE_FILE,
+      'GET /outlines/cardium.geojson': OUTLINE_FILE,
+    });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
+    const box = screen.getByRole('textbox', { name: 'Ask the map' });
+    await userEvent.type(box, 'Cardium outline on satellite{Enter}');
+    expect(await screen.findByText('Stand-in map: satellite, 0 pins')).toBeInTheDocument();
+    expect(await screen.findByText('Outlines: cardium', { selector: 'p' })).toBeInTheDocument();
+    const status = screen.getByRole('status');
+    expect(within(status).getByText('Satellite view')).toBeInTheDocument();
+    expect(within(status).getByText('Outlines: cardium')).toBeInTheDocument();
+    // The section the request named is the one left open.
+    expect(within(card).getByRole('switch', { name: 'Cardium' })).toBeChecked();
+    // The request stays in the box, to edit and send again.
+    expect(box).toHaveValue('Cardium outline on satellite');
+    await userEvent.click(within(status).getByRole('button', { name: 'Undo' }));
+    expect(await screen.findByText('Stand-in map: map, 0 pins')).toBeInTheDocument();
+    expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('says what it cannot do, and offers examples while empty', async () => {
+    mockApi({ [LIST]: listOf(), ...noLegend, 'GET /outlines/duvernay.geojson': OUTLINE_FILE });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const box = await screen.findByRole('textbox', { name: 'Ask the map' });
+    await userEvent.click(box);
+    expect(screen.getByRole('button', { name: 'Rigs now' })).toBeInTheDocument();
+    await userEvent.type(box, 'the weather tomorrow{Enter}');
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Nothing in the request matched what this map can show.');
+    expect(within(status).queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+    await userEvent.clear(box);
+    await userEvent.type(box, 'Abandoned wells with production over 100 bbl{Enter}');
+    expect(await screen.findByText('Wells: abandoned')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'This map cannot filter by production yet.',
+    );
+    const card = screen.getByRole('complementary', { name: 'Map menu' });
+    const chips = within(card).getByRole('group', { name: 'Statuses shown' });
+    expect(within(chips).getByRole('button', { name: 'Abandoned' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(chips).getByRole('button', { name: 'Producing' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+});
+
 describe('FullPageMap', () => {
   it('shows a map of Canada with map styles, no companies and only oil and gas layers (F-239, F-247)', async () => {
     const calls = mockApi({ [LIST]: listOf(), ...noLegend });
