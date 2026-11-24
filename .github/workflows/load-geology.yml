@@ -1,0 +1,103 @@
+name: Load geology
+
+# Geology (F-287 part 1, docs/FEATURES_OIL_GAS.md): the Alberta Geological Survey's formation tops
+# picked in wells (the Geological Framework of Alberta, Version 4: its bulk download "Point
+# data.zip", about 370 MB), kept for the wells we hold and the picked wells nearest them, and its
+# Rock-Eval samples (Digital Dataset 2013-0003: Tmax, TOC and the rest). Each set is replaced in
+# one transaction in the oil and gas database (petroleum-staging), under the shared 400 MB guard.
+#
+# Run by hand from the Actions tab (Actions → Load geology → Run workflow), and again after Load
+# ST37 wells adds a play: the picks kept follow the wells held. The Survey's data is open (Open
+# Government Licence – Alberta); its files still stay on the runner, never in the repository.
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: Which set to load
+        type: choice
+        options:
+          - both
+          - picks
+          - samples
+        default: both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-geology
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check the databases
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          # Only ever petroleum-staging, as Deploy staging checks it (F-247-1-R10-02).
+          ref=ubgyatbzjctsgzcsvwgc
+          pooler="^postgres(ql)?://postgres\.${ref}:[^@:/?#]+@aws-1-us-east-2\.pooler\.supabase\.com:5432/postgres$"
+          direct="^postgres(ql)?://postgres:[^@:/?#]+@db\.${ref}\.supabase\.co:5432/postgres$"
+          if ! [[ "$PETROLEUM_STAGING_DB_URL" =~ $pooler || "$PETROLEUM_STAGING_DB_URL" =~ $direct ]]; then
+            echo "::error::PETROLEUM_STAGING_DB_URL is not petroleum-staging's postgres login in the expected form; nothing was loaded."
+            exit 1
+          fi
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "::error::SUPABASE_STAGING_DB_URL is not set: grain's database size cannot be checked, so nothing was loaded."
+            exit 1
+          fi
+          version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
+          if [ "$version" -lt 22 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 22)."
+            exit 1
+          fi
+          grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          petro=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
+          echo "GRAIN_BYTES=$grain" >> "$GITHUB_ENV"
+          echo "Grain's database: $((grain / 1048576)) MB; oil and gas: $((petro / 1048576)) MB."
+          mkdir -p "$RUNNER_TEMP/geology"
+      - name: Load the formation tops picked in wells
+        if: inputs.what != 'samples'
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          dir="$RUNNER_TEMP/geology"
+          psql "$PETROLEUM_STAGING_DB_URL" -tA -F ',' -c "select licence_number, surface_longitude, surface_latitude, bottom_longitude, bottom_latitude from petro.st37_wells" > "$dir/held.csv"
+          if [ ! -s "$dir/held.csv" ]; then
+            echo "::error::No wells in the oil and gas database: run Load ST37 wells first."
+            exit 1
+          fi
+          url='https://aercclrsuatagsgispub01.blob.core.windows.net/arcgis-online/projects/GFA/Bulk_download/Point%20data.zip'
+          curl -sSf --retry 3 --max-redirs 0 -D "$dir/headers.txt" -o "$dir/points.zip" "$url"
+          modified=$(grep -i '^last-modified:' "$dir/headers.txt" | cut -d' ' -f2- | tr -d '\r' || true)
+          date=$(date -u -d "$modified" +%F 2>/dev/null || echo -)
+          echo "Downloaded $(( $(stat -c %s "$dir/points.zip") / 1048576 )) MB, dated $date."
+          node --experimental-strip-types scripts/load-geology.js picks "$dir/points.zip" "$dir/held.csv" "$dir/picks.json"
+          node --experimental-strip-types scripts/load-geology.js sql picks "$dir/picks.json" "$url" "$date" "$GRAIN_BYTES" > "$dir/picks.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$dir/picks.sql"
+          rm -f "$dir/points.zip" "$dir/picks.sql"
+      - name: Load the Rock-Eval samples
+        if: inputs.what != 'picks'
+        env:
+          PETROLEUM_STAGING_DB_URL: ${{ secrets.PETROLEUM_STAGING_DB_URL }}
+        run: |
+          dir="$RUNNER_TEMP/geology"
+          url='https://static.ags.aer.ca/files/document/DIG/DIG_2013_0003.zip'
+          curl -sSf --retry 3 --max-redirs 0 -D "$dir/headers-dig.txt" -o "$dir/dig.zip" "$url"
+          modified=$(grep -i '^last-modified:' "$dir/headers-dig.txt" | cut -d' ' -f2- | tr -d '\r' || true)
+          date=$(date -u -d "$modified" +%F 2>/dev/null || echo -)
+          node --experimental-strip-types scripts/load-geology.js samples "$dir/dig.zip" "$dir/samples.json"
+          node --experimental-strip-types scripts/load-geology.js sql samples "$dir/samples.json" "$url" "$date" "$GRAIN_BYTES" > "$dir/samples.sql"
+          psql "$PETROLEUM_STAGING_DB_URL" -q -f "$dir/samples.sql"
+      - name: Remove the files from the runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/geology"
