@@ -282,7 +282,7 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-None open: the owner checked F-239, F-247, F-284, F-285 and F-288 on staging on 2026-11-23 ("All checks are good").
+- **F-287 part 3, the Duvernay's depth and thickness maps** (oil and gas map → side card → **Geology**), after its deploy. The owner checked F-239, F-247, F-284, F-285 and F-288 on 2026-11-23 ("All checks are good") and F-287 part 2 on 2026-11-24 ("Staging is good").
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 

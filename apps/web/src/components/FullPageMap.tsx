@@ -28,6 +28,7 @@ import { useFacilities } from './Facilities';
 import { usePrices } from './Prices';
 import { FacilityPanel, FacilityTip } from './FacilityPanel';
 import { useFormations } from './Formations';
+import { useGeologyMaps } from './GeologyMaps';
 import { PipelinePanel, PipelineTip } from './PipelinePanel';
 import { usePipelines, type PipelineEntry } from './Pipelines';
 import { useLand, type LandPick } from './Land';
@@ -109,6 +110,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   const [pipelinePicked, setPipelinePicked] = useState<PipelineEntry | null>(null);
   // The formations' outlines (F-280), each switched by itself, not tied to the wells.
   const formations = useFormations();
+  // A formation's depth or thickness (F-287 part 3), off when the map opens.
+  const geology = useGeologyMaps();
   // Rigs, all of Alberta (F-282): their keys answer the pointer and the click before the wells.
   const rigs = useRigs(session.organization.id, session.token);
   const pickLand = (pick: LandPick | null) => {
@@ -202,7 +205,9 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 ? rigs.legend()
                 : name === 'formations'
                   ? formations.legend(tone)
-                  : wells.legend(tone),
+                  : name === 'geology'
+                    ? geology.legend()
+                    : wells.legend(tone),
   }));
   // Beside the card, or at the map's edge while the card is folded.
   const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
@@ -238,6 +243,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           pipelines={pipelines.view}
           rigs={rigs.view}
           formations={formations.view}
+          geology={geology.view}
+          geologyTipAt={geology.tipAt}
           onLandClick={pickLand}
           onLandHover={setLandHover}
           landHover={hoverShape}
@@ -422,6 +429,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               tone,
             })}
             {prices.section({ open: section === 'prices', onToggle: openOnly('prices') })}
+            {geology.section({ open: section === 'geology', onToggle: openOnly('geology') })}
             {/* What the card shows and where it comes from, out of the way until asked for.
                 The sources stay here: their terms ask that they be named. */}
             <details className="mt-auto border-t px-4 py-3 text-xs text-muted-foreground">
@@ -439,6 +447,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {formations.about()}
                 {grid.about()}
                 {prices.about()}
+                {geology.about()}
               </div>
             </details>
           </aside>
@@ -544,7 +553,15 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
 }
 
 type SideSection =
-  'sales' | 'land' | 'facilities' | 'pipelines' | 'rigs' | 'wells' | 'formations' | 'prices';
+  | 'sales'
+  | 'land'
+  | 'facilities'
+  | 'pipelines'
+  | 'rigs'
+  | 'wells'
+  | 'formations'
+  | 'prices'
+  | 'geology';
 
 /** The sections' legends in order: the open one first, the rest as the card lists them. */
 export function sideOrder(open: SideSection | null): SideSection[] {
@@ -557,6 +574,7 @@ export function sideOrder(open: SideSection | null): SideSection[] {
     'rigs',
     'wells',
     'formations',
+    'geology',
   ];
   return open === null || !all.includes(open)
     ? all

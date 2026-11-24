@@ -47,3 +47,4 @@ export * from './licenceHolders';
 export * from './prices';
 export * from './royalties';
 export * from './geology';
+export * from './geologyGrid';

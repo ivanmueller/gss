@@ -196,7 +196,16 @@ describe('the side card (F-267)', () => {
   });
 
   it('leads the legend with the open section', () => {
-    const all = ['sales', 'land', 'facilities', 'pipelines', 'rigs', 'wells', 'formations'];
+    const all = [
+      'sales',
+      'land',
+      'facilities',
+      'pipelines',
+      'rigs',
+      'wells',
+      'formations',
+      'geology',
+    ];
     expect(sideOrder('sales')).toEqual(all);
     expect(sideOrder('wells')).toEqual([
       'wells',
@@ -206,8 +215,12 @@ describe('the side card (F-267)', () => {
       'pipelines',
       'rigs',
       'formations',
+      'geology',
     ]);
-    expect(sideOrder('formations')).toEqual(['formations', ...all.slice(0, 6)]);
+    expect(sideOrder('formations')).toEqual(['formations', ...all.slice(0, 6), 'geology']);
+    expect(sideOrder('geology')).toEqual(['geology', ...all.slice(0, 7)]);
+    // Prices draws nothing on the map: the order stays as the card lists it.
+    expect(sideOrder('prices')).toEqual(all);
     expect(sideOrder(null)).toEqual(all);
   });
 
