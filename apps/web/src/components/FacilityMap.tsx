@@ -34,6 +34,7 @@ import {
 } from '../lib/facilitiesMap';
 import { EDGE_LABELS_FROM, gridEdgeLabels, type GridTownship } from '../lib/gridEdges';
 import { placeFormations, syncFormations, type FormationsView } from '../lib/formationsMap';
+import { syncGeology, type GeologyView } from '../lib/geologyMap';
 import { placeGrid, syncGrid, type GridView } from '../lib/gridMap';
 import {
   PIPELINE_PICKABLE,
@@ -165,6 +166,16 @@ export interface FacilityMapProps {
    * wells' zones and the grid.
    */
   formations?: FormationsView | null;
+  /**
+   * A formation's depth or thickness (F-287 part 3), shaded under everything else drawn over
+   * the base map.
+   */
+  geology?: GeologyView | null;
+  /**
+   * The words for the pointer where no well or land is under it (F-287 part 3): written into
+   * the box at the pointer by the map itself, so the page is not drawn again at each square.
+   */
+  geologyTipAt?: ((lon: number, lat: number) => string | null) | null;
   /**
    * The AER's facilities (F-278), over the land and the grid, under the wells. Their keys
    * ("facility:ID") answer the pointer and the click as land does, before it.
@@ -551,6 +562,8 @@ export default function FacilityMap(props: FacilityMapProps) {
   const landTold = useRef<string | null>(null);
   // The box at the pointer, moved with it (F-265).
   const tip = useRef<HTMLDivElement>(null);
+  // The depth and thickness at the pointer (F-287 part 3), inside that box.
+  const geologyTip = useRef<HTMLParagraphElement>(null);
   // The range and township numbers along the map's edges, written by the map at each move.
   const edges = useRef<HTMLDivElement>(null);
   const drawEdges = useRef<() => void>(NOTHING);
@@ -720,6 +733,12 @@ export default function FacilityMap(props: FacilityMapProps) {
         st37Tone(latest.current.basemap, latest.current.theme),
         PINS,
       );
+      syncGeology(
+        instance,
+        latest.current.geology ?? null,
+        st37Tone(latest.current.basemap, latest.current.theme),
+        PINS,
+      );
       handlers.current.place();
     });
     // The wells under the pointer: their card and the first one highlighted (F-243 part 4).
@@ -796,6 +815,16 @@ export default function FacilityMap(props: FacilityMapProps) {
       box.style.top = `${String(point.y)}px`;
       box.style.transform = `translate(${left ? 'calc(-100% - 14px)' : '14px'}, ${up ? 'calc(-100% - 14px)' : '14px'})`;
     };
+    // The depth and thickness under the pointer, where nothing else answers it; null hides it.
+    const showGeology = (point: mapboxgl.Point | null) => {
+      const box = geologyTip.current;
+      if (!box) return;
+      const tipAt = latest.current.geologyTipAt;
+      const at = point && tipAt ? instance.unproject(point) : null;
+      const text = at && tipAt ? tipAt(at.lng, at.lat) : null;
+      box.hidden = text === null;
+      if (box.textContent !== (text ?? '')) box.textContent = text ?? '';
+    };
     // `clicked`: the click that keeps a well's panel open lights the leg clicked, also while
     // another well's panel is kept open (it used to leave the earlier one lit).
     const hover = (point: mapboxgl.Point, clicked = false) => {
@@ -812,6 +841,7 @@ export default function FacilityMap(props: FacilityMapProps) {
       const land = onLand && !first ? (rig ?? landAt(point)) : null;
       instance.getCanvas().style.cursor = first || land ? 'pointer' : '';
       placeTip(point);
+      showGeology(first || land || clicked ? null : point);
       // The page is told only when what is under the pointer changes, not at every move of
       // it: each telling draws the whole page again (F-263). A click tells it of nothing: the
       // panel it opens takes the place of the box at the pointer (F-265).
@@ -896,6 +926,7 @@ export default function FacilityMap(props: FacilityMapProps) {
     });
     instance.on('mouseout', () => {
       pointer = null;
+      showGeology(null);
       if (landTold.current !== null) {
         landTold.current = null;
         latest.current.onLandHover?.(null);
@@ -1208,6 +1239,16 @@ export default function FacilityMap(props: FacilityMapProps) {
     }
   }, [rigs, basemap, theme]);
 
+  const { geology } = props;
+  useEffect(() => {
+    const instance = map.current;
+    // Before the style is ready, its 'style.load' draws the shading as it is then. It goes
+    // under everything else of ours by itself (placeGeology), so nothing else moves.
+    if (instance && styleReady.current) {
+      syncGeology(instance, geology ?? null, st37Tone(basemap, theme), PINS);
+    }
+  }, [geology, basemap, theme]);
+
   // Compared as text, so a new array with the same bounds does not move the map.
   const fitKey = props.fitTo ? props.fitTo.join(',') : null;
   useEffect(() => {
@@ -1226,6 +1267,12 @@ export default function FacilityMap(props: FacilityMapProps) {
       <div ref={edges} aria-hidden="true" className="pointer-events-none absolute inset-0 z-10" />
       <div ref={tip} className="pointer-events-none absolute top-0 left-0 z-30">
         {props.hoverBox}
+        <p
+          ref={geologyTip}
+          role="status"
+          hidden
+          className="w-64 rounded-card border bg-card px-3 py-2.5 text-sm shadow-md"
+        />
       </div>
       {details && selectedId !== closedId && (
         <PinDetailsBox details={details} anchor={anchor} onClose={closeBox} />
