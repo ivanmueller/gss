@@ -1,7 +1,14 @@
-import { formatAlberta, LAND_RIGHTS, type Bbox, type MapSettings } from '@grain/domain';
+import {
+  formatAlberta,
+  LAND_RIGHTS,
+  type Bbox,
+  type MapAskAnswer,
+  type MapSettings,
+} from '@grain/domain';
 import { CircleCheck, Minus, Plus, Settings, TriangleAlert, Waves } from 'lucide-react';
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 
+import { sendJson } from '../lib/api';
 import { LayerApiContext, petroleumLayers } from '../lib/layerApi';
 import {
   BASEMAPS,
@@ -510,6 +517,14 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       </Suspense>
       {/* Ask the map (F-254): at the bottom, clear of the card and the legend. */}
       <AskMapBar
+        askClaude={(text) =>
+          sendJson<MapAskAnswer>(
+            `/petroleum/ask?organization_id=${encodeURIComponent(session.organization.id)}`,
+            session.token,
+            'POST',
+            { text },
+          )
+        }
         className={cn(
           'absolute right-3 bottom-8 z-10 lg:right-14',
           folded ? 'left-3 lg:left-[17.75rem]' : 'left-3 md:left-[24rem] lg:left-[41rem]',

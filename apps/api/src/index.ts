@@ -25,6 +25,7 @@ import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { mapLayerRoutes } from './map-layers';
 import { memberRoutes } from './members';
+import { mapAskRoutes } from './map-ask';
 import { petroleumReadyRoute, petroleumRoutes } from './petroleum';
 import { postgresPetroleum, type PetroleumFactory } from './petroleum-db';
 import { commodityRoutes, quoteRoutes } from './quotes';
@@ -178,6 +179,8 @@ export function createApp(
   app.route('/map-layers', mapLayerRoutes(openDatabase));
   app.route('/emails', emailRoutes(openDatabase, mailer, claude));
   app.route('/email-auto-drafts', emailAutoDraftRoutes(openDatabase));
+  // Ask the map (F-254 part 2): before /petroleum, whose routes do not answer it.
+  app.route('/petroleum/ask', mapAskRoutes(openDatabase, claude));
   app.route(
     '/petroleum',
     petroleumRoutes(openDatabase, openPetroleum, options.petroleumLayersDeadlineMs),

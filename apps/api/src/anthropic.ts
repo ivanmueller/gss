@@ -13,6 +13,12 @@ export interface AnthropicBindings {
 
 /** The model that reads calls: the owner's choice of 2026-11-05. */
 export const READING_MODEL = 'claude-opus-5-5';
+/**
+ * The model that reads the map's Ask bar (F-254 part 2): the fastest and cheapest, the owner's
+ * choice of 2026-11-24 ("whatever will do the job the fastest and cheapest"). Anthropic offers
+ * no fallback model for it: a declined request is answered by the bar's own word matching.
+ */
+export const MAP_ASK_MODEL = 'claude-haiku-5-5';
 
 /** How long the request may take. */
 export const READING_TIMEOUT_MS = 150_000;
@@ -46,6 +52,10 @@ export interface ReadingRequest {
   maxTokens?: number;
   /** How long the whole request may take; the client's deadline when not given. */
   deadlineMs?: number;
+  /** The model; READING_MODEL when not given. Only READING_MODEL is sent with a fallback. */
+  model?: typeof READING_MODEL | typeof MAP_ASK_MODEL;
+  /** How much Claude thinks; medium when not given. */
+  effort?: 'low' | 'medium';
 }
 
 export type ReadingAnswer =
@@ -109,13 +119,15 @@ export const claudeClient = (
       const response = await withDeadline(request.deadlineMs ?? deadlineMs, (signal) =>
         client.beta.messages.create(
           {
-            model: READING_MODEL,
+            model: request.model ?? READING_MODEL,
             max_tokens: request.maxTokens ?? READING_MAX_TOKENS,
             // A declined request is tried again on the model Anthropic recommends for it.
-            betas: ['server-side-fallback-2026-07-01'],
-            fallbacks: 'default',
+            ...((request.model ?? READING_MODEL) === READING_MODEL && {
+              betas: ['server-side-fallback-2026-07-01'],
+              fallbacks: 'default' as const,
+            }),
             output_config: {
-              effort: 'medium',
+              effort: request.effort ?? 'medium',
               format: { type: 'json_schema', schema: request.schema },
             },
             system: [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }],
