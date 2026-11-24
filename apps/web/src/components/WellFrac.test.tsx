@@ -62,7 +62,10 @@ describe('the frac section', () => {
       screen.getByText('Water 50,000 m³ · re-fractured later with 250 t · 2 legs reported.'),
     ).toBeInTheDocument();
     expect(screen.getByText(/1,000 t of it is named as coated or ceramic/)).toBeInTheDocument();
-    expect(screen.getByText(/^Source: Alberta Energy Regulator/)).toBeInTheDocument();
+    // The source is behind More info, closed at first.
+    const source = screen.getByText(/^Source: Alberta Energy Regulator/);
+    expect(source.closest('details')).not.toHaveAttribute('open');
+    expect(source.closest('details')?.querySelector('summary')).toHaveTextContent('More info');
   });
 
   it('says when nothing was reported, when the data is not loaded, and a likely error', async () => {

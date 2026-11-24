@@ -128,11 +128,16 @@ export function WellFrac({
           than sand (×1.5 or ×2.5) if the province accepted it; here every tonne counts as sand.
         </p>
       )}
-      <p className="mt-2 text-[0.6875rem] leading-snug text-muted-foreground">
-        Source: Alberta Energy Regulator, Hydraulic Fracturing Summary Chemical and Water Use Data
-        (Directive 059){frac.source.sourceDate ? `, file of ${frac.source.sourceDate}` : ''}; not an
-        official version. The first completion is every frac within a year of the first.
-      </p>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
+          More info
+        </summary>
+        <p className="mt-1 text-[0.6875rem] leading-snug text-muted-foreground">
+          Source: Alberta Energy Regulator, Hydraulic Fracturing Summary Chemical and Water Use Data
+          (Directive 059){frac.source.sourceDate ? `, file of ${frac.source.sourceDate}` : ''}; not
+          an official version. The first completion is every frac within a year of the first.
+        </p>
+      </details>
     </div>
   );
 }
