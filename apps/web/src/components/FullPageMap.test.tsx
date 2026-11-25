@@ -275,6 +275,19 @@ describe('the side card (F-267)', () => {
     expect(within(legend).queryByRole('group', { name: 'Operators in view' })).toBeNull();
   });
 
+  // F-307: the sources leave the menu for a window opened from the legend's foot; the AER
+  // asks to be named as the source.
+  it('names the sources in a window opened from the legend, not in the menu', async () => {
+    mockApi({ [LIST]: listOf(), ...noLegend });
+    render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
+    const card = await screen.findByRole('complementary', { name: 'Map menu' });
+    expect(within(card).queryByText(/Sources & licence/)).toBeNull();
+    const legend = screen.getByRole('group', { name: 'Legend' });
+    await userEvent.click(within(legend).getByRole('button', { name: /Sources & licence/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Sources & licence' });
+    expect(within(dialog).getAllByText(/AER/).length).toBeGreaterThan(0);
+  });
+
   it('leads the legend with the open section', () => {
     const all = [
       'sales',
