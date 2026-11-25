@@ -45,6 +45,7 @@ export function AskMapBar({
   canUndo,
   onUndo,
   className,
+  autoFocus = false,
 }: {
   /** Claude's reading of a request, through the Worker; it throws when Claude cannot answer. */
   askClaude: (text: string) => Promise<MapAskAnswer>;
@@ -53,6 +54,8 @@ export function AskMapBar({
   canUndo: boolean;
   onUndo: () => void;
   className?: string;
+  /** Ready to type as soon as it shows: opened by its button in the side card (F-305). */
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState('');
   const [result, setResult] = useState<Result | null>(null);
@@ -92,7 +95,7 @@ export function AskMapBar({
   const showExamples = focused && text.trim() === '' && result === null;
 
   return (
-    // At the top of the map: the box first, then the examples or the answer below it.
+    // The box first, then the examples or the answer below it.
     <div className={cn('pointer-events-none flex flex-col items-stretch gap-2', className)}>
       <form
         role="search"
@@ -107,6 +110,8 @@ export function AskMapBar({
         <input
           type="text"
           aria-label="Ask the map"
+          // Opened on purpose by its button, so the cursor goes straight into the box (F-305).
+          autoFocus={autoFocus}
           maxLength={500}
           placeholder="Ask the map, e.g. “Duvernay wells drilled since 2020”"
           className="h-8 min-w-0 grow bg-transparent text-sm outline-none placeholder:text-muted-foreground"

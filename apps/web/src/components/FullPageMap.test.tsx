@@ -399,6 +399,13 @@ describe('the side card (F-267)', () => {
 
 describe('Ask the map (F-254)', () => {
   const ASK = `POST /petroleum/ask?${ORGANIZATION}`;
+  // In the side card behind its button (F-305): pressed, the box shows, ready to type.
+  const openAsk = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask the map' }));
+    const box = screen.getByRole('textbox', { name: 'Ask the map' });
+    expect(box).toHaveFocus();
+    return box;
+  };
 
   it('applies Claude’s reading, names what it set, and undoes it', async () => {
     const calls = mockApi({
@@ -419,7 +426,10 @@ describe('Ask the map (F-254)', () => {
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
     const card = await screen.findByRole('complementary', { name: 'Map menu' });
     expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
-    const box = screen.getByRole('textbox', { name: 'Ask the map' });
+    // Not on the map until asked for.
+    expect(screen.queryByRole('textbox', { name: 'Ask the map' })).toBeNull();
+    const box = await openAsk();
+    expect(within(card).getByRole('search', { name: 'Ask the map' })).toBeInTheDocument();
     await userEvent.type(box, 'Cardium outline on satellite{Enter}');
     expect(await screen.findByText('Stand-in map: satellite, 0 pins')).toBeInTheDocument();
     expect(await screen.findByText('Outlines: cardium', { selector: 'p' })).toBeInTheDocument();
@@ -454,7 +464,7 @@ describe('Ask the map (F-254)', () => {
         }),
     });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
-    const box = await screen.findByRole('textbox', { name: 'Ask the map' });
+    const box = await openAsk();
     await userEvent.type(box, 'wells in Twp 62 Rge 22 W5{Enter}');
     const status = await screen.findByRole('status');
     expect(within(status).getByText('Moved to T62 R22 W5')).toBeInTheDocument();
@@ -474,8 +484,7 @@ describe('Ask the map (F-254)', () => {
         ),
     });
     render(<FullPageMap session={SESSION} mapbox={MAPBOX} />);
-    const box = await screen.findByRole('textbox', { name: 'Ask the map' });
-    await userEvent.click(box);
+    const box = await openAsk();
     expect(screen.getByRole('button', { name: 'Rigs now' })).toBeInTheDocument();
     await userEvent.type(box, 'the weather tomorrow{Enter}');
     const status = await screen.findByRole('status');
@@ -835,7 +844,7 @@ describe('FullPageMap', () => {
     });
   });
 
-  // F-301: the legend is bottom right, the clicked shape's details bottom left; on a wide
+  // F-301, F-305: the legend is bottom right, the clicked shape's details bottom left; on a wide
   // screen both stay (on a phone the legend still makes way, F-247-2-R3-02).
   it('keeps the legend, bottom right, while a clicked shape’s details are open', async () => {
     const lines: MapLayerView = {
@@ -854,7 +863,8 @@ describe('FullPageMap', () => {
     await screen.findByRole('button', { name: 'Close details' });
     expect(screen.getByRole('list', { name: 'Map layers shown' })).toBeInTheDocument();
     const legend = screen.getByRole('group', { name: 'Legend' });
-    expect(legend).toHaveClass('bottom-3', 'right-3', 'max-md:hidden');
+    // Flush in the bottom-right corner (F-305).
+    expect(legend).toHaveClass('bottom-0', 'right-0', 'max-md:hidden');
   });
 
   // F-247-2-R9-02: an admin removes a picture layer while a teammate has the map open. The
