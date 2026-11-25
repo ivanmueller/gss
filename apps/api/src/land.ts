@@ -95,6 +95,24 @@ export function landLimits(kinds: readonly LandKind[]): Record<LandKind, number>
   };
 }
 
+/**
+ * At most this many agreements sent as dots (F-312): every Crown agreement loaded (57,228 on
+ * 2026-11-25), each without its outline.
+ */
+export const LAND_DOTS_MAX = 100_000;
+
+export function landDotsAnswer(rows: {
+  loads: LandRows['loads'];
+  agreements: LandRows['agreements'];
+}) {
+  return {
+    source: { name: LAND_SOURCE_NAME, loads: rows.loads },
+    agreements: cut(rows.agreements, LAND_DOTS_MAX),
+    offsets: cut([], 0),
+    freehold: cut([], 0),
+  };
+}
+
 function cut<T>(rows: T[], max: number) {
   const truncated = rows.length > max;
   return { truncated, items: truncated ? rows.slice(0, max) : rows };

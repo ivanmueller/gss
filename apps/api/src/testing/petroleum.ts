@@ -116,6 +116,12 @@ export function fakePetroleum() {
     landSales: vi.fn<PetroleumDatabase['landSales']>(() =>
       Promise.resolve({ load: null, parcels: [] }),
     ),
+    landSaleDots: vi.fn<PetroleumDatabase['landSaleDots']>(() =>
+      Promise.resolve({ load: null, parcels: [] }),
+    ),
+    landAgreementDots: vi.fn<PetroleumDatabase['landAgreementDots']>(() =>
+      Promise.resolve({ loads: [], agreements: [] }),
+    ),
     landSaleSummary: vi.fn<PetroleumDatabase['landSaleSummary']>(() =>
       Promise.resolve({
         offered: 0,

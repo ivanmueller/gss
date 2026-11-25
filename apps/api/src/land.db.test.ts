@@ -137,6 +137,24 @@ describe('land held today as petro_api', () => {
       expect(some.offsets).toEqual([]);
       expect(some.freehold).toHaveLength(2);
 
+      // Every agreement as a dot, wherever it lies (F-312): the middle of its box, no outline,
+      // parties or zone.
+      const dots = await db.landAgreementDots(member(), 100);
+      const ours = dots.agreements.filter((a) => a.agreementType === 'ZZ9');
+      expect(ours.map((a) => a.agreementNumber)).toEqual(['1', '2', '3']);
+      expect(ours[0]).toMatchObject({
+        holder: 'EXAMPLE ENERGY LTD.',
+        areaHa: 256.5,
+        expiryText: 'INDEFINITE',
+        shape: [],
+        centre: [-119.995, 59.955],
+      });
+      expect(ours[0]).not.toHaveProperty('parties');
+      expect(ours[0]).not.toHaveProperty('zone');
+      expect(
+        (await db.landAgreementDots({ ...member(), role: 'stranger' }, 100)).agreements,
+      ).toEqual([]);
+
       // Without a member the rows are not read at all.
       const nobody = await db.land({ ...member(), role: 'stranger' }, VIEW, ALL);
       expect([nobody.agreements, nobody.offsets, nobody.freehold, nobody.loads]).toEqual([

@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Database } from './db';
 import { createApp } from './index';
 import {
+  LAND_DOTS_MAX,
   LAND_MAX,
   LAND_SCHEMA_VERSION,
   landAnswer,
+  landDotsAnswer,
   clearLandRightsZones,
   landLimits,
   landRightsZones,
@@ -231,5 +233,24 @@ describe('GET /api/v1/petroleum/land', () => {
     expect(petroleum.landZones).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
     );
+  });
+  it('gives every agreement as a dot, with no box, a member only (F-312)', async () => {
+    grain.memberships.mockResolvedValueOnce([]);
+    const dots = (q = '') => app.request(`/api/v1/petroleum/land/dots${q}`, { headers: AUTH }, env);
+    expect((await dots()).status).toBe(403);
+    expect(openPetroleum).not.toHaveBeenCalled();
+    viewer();
+    const dot = { ...agreement('7'), shape: [], centre: [-117.5, 54.25] as [number, number] };
+    petroleum.landAgreementDots.mockResolvedValue({ loads: [], agreements: [dot] });
+    const res = await dots();
+    expect(res.status).toBe(200);
+    const body = await res.json<ReturnType<typeof landDotsAnswer>>();
+    expect(body.agreements).toEqual({ truncated: false, items: [dot] });
+    expect(body.freehold.items).toEqual([]);
+    expect(petroleum.landAgreementDots).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
+      LAND_DOTS_MAX,
+    );
+    expect(petroleum.land).not.toHaveBeenCalled();
   });
 });

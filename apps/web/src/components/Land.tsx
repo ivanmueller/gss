@@ -209,7 +209,11 @@ export function landHolders(
   for (const a of agreements) {
     if (!a.holder) continue;
     if (view) {
-      const b = landBounds(a.shape);
+      // An agreement sent as a dot (F-312) is where its centre is.
+      const b =
+        a.shape.length === 0 && a.centre
+          ? { west: a.centre[0], south: a.centre[1], east: a.centre[0], north: a.centre[1] }
+          : landBounds(a.shape);
       if (
         b.east < view.west ||
         b.west > view.east ||
@@ -297,6 +301,8 @@ function useLandAnswer(
   rights: string | null,
   ground: Bbox | 'all' | null,
   moved: string,
+  /** Where to ask: the land with its outlines, or every agreement as a dot (F-312). */
+  path: '/petroleum/land' | '/petroleum/land/dots' = '/petroleum/land',
 ) {
   const [settled, setSettled] = useState<Settled | null>(null);
   const covered =
@@ -315,7 +321,7 @@ function useLandAnswer(
         : landRequest(ground);
   const again = ground === 'all' && settled?.failed === true ? `@${moved}` : '';
   const key = box
-    ? `${kinds.join(',')}:${rights ?? ''}:${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}${again}`
+    ? `${path}:${kinds.join(',')}:${rights ?? ''}:${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}${again}`
     : null;
   const loading = key !== null && settled?.key !== key;
   const failed = settled?.failed === true && settled.key === key;
@@ -333,7 +339,7 @@ function useLandAnswer(
       layers: asked.join(','),
     });
     if (rights !== null) query.set('rights', rights);
-    apiJson<Answer>(`/petroleum/land?${query.toString()}`, token, { signal: controller.signal })
+    apiJson<Answer>(`${path}?${query.toString()}`, token, { signal: controller.signal })
       .then((answer) => {
         setSettled({ key, asked: box, kinds: asked, rights, answer, failed: false });
       })
@@ -405,27 +411,40 @@ export function useLand(organizationId: string, token: string): LandState {
     : '';
   const held = useLandAnswer(organizationId, token, wholeKinds, rights, 'all', moved);
   const seen = useLandAnswer(organizationId, token, viewKinds, null, at?.view ?? null, moved);
-  const loading = held.loading || seen.loading;
-  const failed = held.failed || seen.failed;
+  // Without a play: every agreement as a dot, held whole, its outline read close in (F-312).
+  const dotsOn = on.agreements && rights === null;
+  const dotKinds = useMemo((): LandKind[] => (dotsOn ? ['agreements'] : []), [dotsOn]);
+  const dotted = useLandAnswer(
+    organizationId,
+    token,
+    dotKinds,
+    null,
+    'all',
+    moved,
+    '/petroleum/land/dots',
+  );
+  const loading = held.loading || seen.loading || dotted.loading;
+  const failed = held.failed || seen.failed || dotted.failed;
 
   const heldAnswer = held.settled?.answer ?? null;
   const heldRights = held.settled?.rights ?? null;
   const seenAnswer = seen.settled?.answer ?? null;
-  const answer = heldAnswer ?? seenAnswer;
+  const dottedAnswer = dotsOn ? (dotted.settled?.answer ?? null) : null;
+  const answer = heldAnswer ?? seenAnswer ?? dottedAnswer;
   // Only what is switched on is drawn, and agreements read for other rights than those now
   // asked for are let go. What is held whole is drawn whatever the zoom: the map's layers fade
   // it out far out, with nothing to read again.
-  const loaded = useMemo(
-    () =>
-      rights !== null
-        ? on.agreements && heldRights === rights
-          ? (heldAnswer?.agreements.items ?? [])
-          : []
-        : viewKinds.includes('agreements')
-          ? (seenAnswer?.agreements.items ?? [])
-          : [],
-    [heldAnswer, heldRights, seenAnswer, on, viewKinds, rights],
-  );
+  const loaded = useMemo(() => {
+    if (rights !== null) {
+      return on.agreements && heldRights === rights ? (heldAnswer?.agreements.items ?? []) : [];
+    }
+    const close = viewKinds.includes('agreements') ? (seenAnswer?.agreements.items ?? []) : [];
+    const dots = dottedAnswer?.agreements.items ?? [];
+    if (dots.length === 0) return close;
+    // An agreement read with its outline takes the place of its dot.
+    const outlined = new Map(close.map((a) => [a.id, a]));
+    return dots.map((a) => outlined.get(a.id) ?? a);
+  }, [heldAnswer, heldRights, seenAnswer, dottedAnswer, on, viewKinds, rights]);
   const shown = useMemo(
     () => ({
       agreements: landFiltered(loaded, { holder, terms, today }),
@@ -436,10 +455,11 @@ export function useLand(organizationId: string, token: string): LandState {
   );
   const truncated =
     wholeKinds.some((kind) => heldAnswer?.[kind].truncated) ||
-    viewKinds.some((kind) => seenAnswer?.[kind].truncated);
+    viewKinds.some((kind) => seenAnswer?.[kind].truncated) ||
+    dottedAnswer?.agreements.truncated === true;
   const features = useMemo(
-    () => landFeatures(shown, { byHolder, today }),
-    [shown, byHolder, today],
+    () => landFeatures(shown, { byHolder, today, lateOutlines: rights === null }),
+    [shown, byHolder, today, rights],
   );
   const agreements = useMemo(() => new Map(shown.agreements.map((a) => [a.id, a])), [shown]);
   const offsets = useMemo(() => new Map(shown.offsets.map((o) => [o.id, o])), [shown]);
@@ -488,11 +508,16 @@ export function useLand(organizationId: string, token: string): LandState {
     setAt(bbox ? { view: bbox, zoom } : null);
   }, []);
 
-  const loads = [...(heldAnswer?.source.loads ?? []), ...(seenAnswer?.source.loads ?? [])];
+  const loads = [
+    ...(heldAnswer?.source.loads ?? []),
+    ...(seenAnswer?.source.loads ?? []),
+    ...(dottedAnswer?.source.loads ?? []),
+  ];
   const loadedAt = loads.map((l) => l.loadedAt).sort()[loads.length - 1] ?? null;
+  // Agreements are drawn from LAND_FROM_RIGHTS with or without a play: without one as dots
+  // until their outlines are read close in (F-312).
   const far = (kind: LandKind) =>
-    at !== null &&
-    at.zoom < (kind === 'agreements' && rights !== null ? LAND_FROM_RIGHTS : LAND_FROM[kind]);
+    at !== null && at.zoom < (kind === 'agreements' ? LAND_FROM_RIGHTS : LAND_FROM[kind]);
   const count = (kind: LandKind) =>
     !on[kind] ? '' : far(kind) ? 'zoom in' : shown[kind].length.toLocaleString('en-CA');
   const rightsName = rights !== null ? (LAND_RIGHTS[rights]?.name ?? rights) : null;
@@ -595,7 +620,7 @@ export function useLand(organizationId: string, token: string): LandState {
             Who holds the Crown rights today, drawn under the sale parcels and the wells.{' '}
             {rightsName
               ? `Only agreements whose rights include the ${rightsName}.`
-              : 'Every agreement: zoom in to see them.'}
+              : 'Every agreement: dots far out, outlines close in.'}
           </p>
         </>
       )}

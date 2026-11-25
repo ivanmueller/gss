@@ -12,8 +12,10 @@ import {
 } from './aer-lists';
 import type { Membership } from './db';
 import {
+  LAND_DOTS_MAX,
   LAND_SCHEMA_VERSION,
   landAnswer,
+  landDotsAnswer,
   landLimits,
   landRightsZones,
   parseLandKinds,
@@ -741,6 +743,36 @@ export function petroleumRoutes(
     });
   });
 
+  // /petroleum/land/dots: every Crown agreement as a dot, without its outline (F-312): drawn far
+  // out when no play's rights narrow them, the outlines of the view read close in.
+  routes.get('/land/dots', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return withDatabase(c, openDatabase, async (db, ctx) => {
+      const membership = membershipOf(c, await db.memberships(ctx.userId));
+      if (membership === null) return apiError(c, 403, 'FORBIDDEN', NOT_A_MEMBER);
+      return withPetroleum(c, openPetroleum, async (petroleum) => {
+        if ((await petroleum.schemaVersion()) < LAND_SCHEMA_VERSION) {
+          return apiError(
+            c,
+            503,
+            'PETROLEUM_NOT_READY',
+            'The oil and gas database is being updated. Try again in a few minutes.',
+          );
+        }
+        const rows = await petroleum.landAgreementDots(
+          {
+            userId: ctx.userId,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            requestId: ctx.requestId,
+          },
+          LAND_DOTS_MAX,
+        );
+        return keptJson(c, landDotsAnswer(rows));
+      });
+    });
+  });
+
   // /petroleum/facilities: every facility of the latest "Load facilities" (F-278), the AER's ST102
   // list, in one answer the browser keeps until a load changes it. Membership first. JSON for
   // the map only, never another format (the AER's terms, docs/DECISIONS.md 2026-11-19).
@@ -1056,6 +1088,16 @@ export function petroleumRoutes(
       return landSalesAnswer(load, parcels);
     });
   });
+
+  // /petroleum/land-sales/dots: every parcel the filter keeps, anywhere, as a dot (F-312): no
+  // outline, the middle of its box. Every right's parcels are too many to send with their
+  // outlines; the page draws these far out and reads the outlines of its view close in.
+  routes.get('/land-sales/dots', (c) =>
+    landSales(c, async (petroleum, ctx, filter) => {
+      const { load, parcels } = await petroleum.landSaleDots(ctx, filter, LAND_SALES_MAX);
+      return landSalesAnswer(load, parcels);
+    }),
+  );
 
   routes.get('/land-sales/summary', (c) =>
     landSales(c, async (petroleum, ctx, filter) =>

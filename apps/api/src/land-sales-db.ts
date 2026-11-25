@@ -27,22 +27,28 @@ export interface LandSaleParcelRow {
   bonus: string | null;
   dollarsPerHectare: string | null;
   buyers: string | null;
+  // The five below are left out of a parcel sent as a dot (F-312), read again close in.
   /** The restriction codes that apply to it, separated by spaces (F-265); null for none. */
-  restrictions: string | null;
+  restrictions?: string | null;
   /** Its deeper rights reversion zone codes, the same way; null for none. */
-  reversionZones: string | null;
+  reversionZones?: string | null;
   /**
    * Its rights tract by tract, as the notice writes them, each tract's lines joined by `; `
    * (F-276); null until the load has kept them.
    */
-  tractRights: string[] | null;
+  tractRights?: string[] | null;
   /**
    * The agreement the province issued from it, among the land held today that is loaded, and
    * who holds it (F-276); null when the parcel was not sold or no such agreement is loaded.
    */
-  heldAgreement: string | null;
-  heldBy: string | null;
+  heldAgreement?: string | null;
+  heldBy?: string | null;
   shape: LandShape;
+  /**
+   * Where its dot goes, the middle of its box (F-312): sent in place of the outline when every
+   * parcel is asked for at once (`shape` then empty).
+   */
+  centre?: [number, number];
 }
 
 /** A list of texts as the database keeps one (jsonb); null for anything else or none. */
@@ -105,6 +111,17 @@ export interface LandSalesDatabase {
   landSales(
     ctx: PetroleumContext,
     box: St37Box,
+    filter: LandSaleFilter,
+    limit: number,
+  ): Promise<{ load: LandSaleLoad | null; parcels: LandSaleParcelRow[] }>;
+  /**
+   * Members: the latest load, and up to `limit` parcels anywhere (one more tells the caller
+   * there are more), the newest sales first, without their outlines: each with the middle of
+   * its box, and without its rights by tract, restrictions and agreement held, which are read
+   * close in (F-312).
+   */
+  landSaleDots(
+    ctx: PetroleumContext,
     filter: LandSaleFilter,
     limit: number,
   ): Promise<{ load: LandSaleLoad | null; parcels: LandSaleParcelRow[] }>;
@@ -270,6 +287,96 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             heldAgreement: r.held_agreement,
             heldBy: r.held_agreement === null ? null : r.held_by,
             shape: storedLandShape(r),
+          })),
+        };
+      });
+    },
+    landSaleDots(ctx, filter, limit) {
+      return sql.begin(async (tx) => {
+        await asMember(tx, ctx);
+        const [load] = await tx<
+          {
+            loaded_at: Date;
+            first_sale: string;
+            last_sale: string;
+            west: string;
+            south: string;
+            east: string;
+            north: string;
+            documents: unknown;
+          }[]
+        >`
+          select loaded_at, first_sale::text as first_sale, last_sale::text as last_sale,
+                 west, south, east, north, documents
+          from petro.land_sale_loads order by id desc limit 1`;
+        const rows = await tx<
+          {
+            id: string;
+            sale_date: string;
+            contract_no: string;
+            contract_type: string | null;
+            region: string | null;
+            hectares: string | null;
+            zone: string | null;
+            land: string;
+            inexact: boolean;
+            status: string | null;
+            bonus: string | null;
+            dollars_per_hectare: string | null;
+            buyers: string | null;
+            // As float8 the driver gives a number; read through Number() either way.
+            x: number | string;
+            y: number | string;
+          }[]
+        >`
+          with ${outlineRings(tx, filter)}
+          select id::text as id, sale_date::text as sale_date, contract_no, contract_type,
+                 region, hectares::text as hectares, zone, land, inexact, status,
+                 bonus::text as bonus, dollars_per_hectare::text as dollars_per_hectare, buyers,
+                 round(((center(bounds))[0])::numeric, 5)::float8 as x,
+                 round(((center(bounds))[1])::numeric, 5)::float8 as y
+          from petro.land_sale_parcels
+          where (${filter.zones === null}::boolean
+                 or md5(zone) in (select jsonb_array_elements_text(
+                   (${JSON.stringify(filter.zones ?? [])}::text)::jsonb)))
+            and (${filter.since}::date is null or sale_date >= ${filter.since}::date)
+            and (${filter.until ?? null}::date is null
+                 or sale_date < ${filter.until ?? null}::date)
+            and ${inOutline(tx, filter)}
+          order by sale_date desc, contract_no
+          limit ${limit + 1}`;
+        return {
+          load: load
+            ? {
+                loadedAt: load.loaded_at.toISOString(),
+                firstSale: load.first_sale,
+                lastSale: load.last_sale,
+                area: {
+                  west: Number(load.west),
+                  south: Number(load.south),
+                  east: Number(load.east),
+                  north: Number(load.north),
+                },
+                documents: load.documents,
+              }
+            : null,
+          parcels: rows.map((r) => ({
+            id: r.id,
+            saleDate: r.sale_date,
+            contractNo: r.contract_no,
+            contractType: r.contract_type,
+            region: r.region,
+            hectares: r.hectares,
+            zone: r.zone,
+            land: r.land,
+            inexact: r.inexact,
+            status: r.status,
+            bonus: r.bonus,
+            dollarsPerHectare: r.dollars_per_hectare,
+            buyers: r.buyers,
+            // Left out, not null: the panel then says nothing of them rather than "none".
+            shape: [],
+            centre: [Number(r.x), Number(r.y)] as [number, number],
           })),
         };
       });

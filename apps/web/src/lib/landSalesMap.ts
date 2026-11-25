@@ -26,13 +26,47 @@ export const SALE_AREAS_FULL = 8.1;
 export const SALE_DOTS_FULL = 7.5;
 export const SALE_AREAS_GONE = 7.2;
 
+/**
+ * Without a play's rights (F-312) every parcel is held as a dot and the outlines are read close
+ * in, from zoom 9 (`saleFromZoom`): those parcels (`late`) turn from dots to outlines from
+ * SALE_LATE_FROM to SALE_LATE_FULL, as the others do farther out.
+ */
+export const SALE_LATE_FROM = 9;
+export const SALE_LATE_FULL = 9.5;
+const late = (yes: number | ExpressionSpecification, no: number | ExpressionSpecification) =>
+  ['case', ['==', ['get', 'late'], true], yes, no] as ExpressionSpecification;
+
 /** A parcel's opacity: `full` close in, steadily less from SALE_AREAS_FULL out, then nothing. */
 function areaFade(full: number | ExpressionSpecification): ExpressionSpecification {
-  return ['interpolate', ['linear'], ['zoom'], SALE_AREAS_GONE, 0, SALE_AREAS_FULL, full];
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    SALE_AREAS_GONE,
+    0,
+    SALE_AREAS_FULL,
+    late(0, full),
+    SALE_LATE_FROM,
+    late(0, full),
+    SALE_LATE_FULL,
+    full,
+  ];
 }
 /** A dot's opacity: nothing while the parcels are whole, `full` from SALE_DOTS_FULL out. */
 function dotFade(full: number): ExpressionSpecification {
-  return ['interpolate', ['linear'], ['zoom'], SALE_DOTS_FULL, full, SALE_AREAS_FULL, 0];
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    SALE_DOTS_FULL,
+    full,
+    SALE_AREAS_FULL,
+    late(full, 0),
+    SALE_LATE_FROM,
+    late(full, 0),
+    SALE_LATE_FULL,
+    0,
+  ];
 }
 
 export interface LandSaleParcel {
@@ -65,7 +99,9 @@ export interface LandSaleParcel {
    */
   heldAgreement?: string | null;
   heldBy?: string | null;
+  /** Empty for a parcel sent as a dot (F-312), with its `centre` instead. */
   shape: LandShape;
+  centre?: [number, number];
 }
 
 /** A sale's notice and results as PDF files on the department's site (F-265); null for none. */
@@ -189,6 +225,8 @@ function centreOf(shape: LandShape): [number, number] | null {
 export function landSaleFeatures(
   parcels: readonly LandSaleParcel[],
   today: string,
+  /** Every right's parcels, turning to outlines only close in (F-312). */
+  lateOutlines = false,
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
   for (const p of [...parcels].sort((a, b) => a.saleDate.localeCompare(b.saleDate))) {
@@ -196,13 +234,17 @@ export function landSaleFeatures(
       key: landSaleKey(p.id),
       state: landSaleState(p, today),
       colour: landSaleColour(p, today),
+      late: lateOutlines,
     };
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'MultiPolygon', coordinates: p.shape },
-      properties: { ...properties, part: 'area' },
-    });
-    const centre = landSaleCentre(p.shape);
+    // A parcel sent as a dot has no outline to draw.
+    if (p.shape.length > 0) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'MultiPolygon', coordinates: p.shape },
+        properties: { ...properties, part: 'area' },
+      });
+    }
+    const centre = p.shape.length > 0 ? landSaleCentre(p.shape) : (p.centre ?? null);
     if (centre) {
       features.push({
         type: 'Feature',
@@ -305,7 +347,8 @@ export function syncLandSales(
         id: SALE_LAYERS.dots,
         type: 'circle',
         source: SOURCE,
-        maxzoom: SALE_AREAS_FULL,
+        // Every right's parcels stay dots farther in (F-312).
+        maxzoom: SALE_LATE_FULL,
         filter: ['==', ['get', 'part'], 'dot'],
         paint: {
           'circle-color': ['get', 'colour'],

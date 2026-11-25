@@ -301,6 +301,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   );
   const [at, setAt] = useState<{ view: Bbox; zoom: number } | null>(null);
   const [settled, setSettled] = useState<Settled | null>(null);
+  const [closeSettled, setCloseSettled] = useState<Settled | null>(null);
   const [summary, setSummary] = useState<{
     key: string;
     rights: string | null;
@@ -313,37 +314,52 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   // A year or dates chosen (F-303): to the day after the last day, so it is included.
   const range = typeof when === 'object' && !('sale' in when) ? when : null;
   const { since, until } = saleWindow(when, today);
-  // With a play's rights every parcel is asked for once, whatever the view and the period, and
-  // kept: zooming, moving and choosing a period then ask for nothing (F-263). They come in
-  // pieces, the newest sales first. Without a play the parcels are too many to hold: those of
-  // the view and the period, close in, as before.
-  const whole = rights !== null;
-  const filter = whole ? `${rights}|` : `|${since ?? ''}|${until ?? ''}`;
+  // Every parcel is asked for once, whatever the view and the period, and kept: zooming, moving
+  // and choosing a period then ask for nothing (F-263). They come in pieces, the newest sales
+  // first. With a play's rights they come with their outlines. Without one they are too many
+  // for that: they come as dots (F-312), and the outlines of the view and the period are read
+  // close in, from saleFromZoom, as before.
+  const dots = rights === null;
+  const filter = `${rights ?? ''}|`;
   const summaryFilter = `${rights ?? ''}|${since ?? ''}|${until ?? ''}`;
 
-  const far = at !== null && at.zoom < saleFromZoom(rights);
-  const wanted = on && (whole || (at !== null && !far));
-  // The piece to read next, of a play's parcels.
-  const piece = whole && settled?.filter === filter ? settled.pieces : 0;
+  const wanted = on;
+  // The piece to read next.
+  const piece = settled?.filter === filter ? settled.pieces : 0;
   const covered =
     settled !== null &&
     !settled.failed &&
     settled.filter === filter &&
     settled.answer !== null &&
-    (whole
-      ? piece >= SALE_PIECES.length
-      : !settled.answer.truncated && at !== null && inside(settled.asked, at.view));
-  const box = !wanted || covered ? null : whole ? ALBERTA : at ? landRequest(at.view) : null;
+    piece >= SALE_PIECES.length;
+  const box = !wanted || covered ? null : ALBERTA;
   // A piece that failed is asked for again when the map next moves.
   const again =
-    whole && settled?.failed === true && at
+    settled?.failed === true && at
       ? `@${String(round(at.view.west))},${String(round(at.view.south))},${String(round(at.zoom))}`
       : '';
-  const key = box
-    ? `${filter}:${whole ? `piece ${String(piece)}` : ''}${String(round(box.west))},${String(round(box.south))},${String(round(box.east))},${String(round(box.north))}${again}`
+  const key = box ? `${filter}:piece ${String(piece)}${again}` : null;
+
+  // Without a play: the outlines of the view and the period, close in (F-312).
+  const closeIn = on && dots && at !== null && at.zoom >= saleFromZoom(rights);
+  const closeFilter = `|${since ?? ''}|${until ?? ''}`;
+  const closeCovered =
+    closeSettled !== null &&
+    !closeSettled.failed &&
+    closeSettled.filter === closeFilter &&
+    closeSettled.answer !== null &&
+    !closeSettled.answer.truncated &&
+    at !== null &&
+    inside(closeSettled.asked, at.view);
+  const closeBox = !closeIn || closeCovered ? null : landRequest(at.view);
+  const closeKey = closeBox
+    ? `${closeFilter}:${String(round(closeBox.west))},${String(round(closeBox.south))},${String(round(closeBox.east))},${String(round(closeBox.north))}`
     : null;
-  const loading = key !== null && settled?.key !== key;
-  const failed = settled?.failed === true && settled.key === key;
+  const loading =
+    (key !== null && settled?.key !== key) || (closeKey !== null && closeSettled?.key !== closeKey);
+  const failed =
+    (settled?.failed === true && settled.key === key) ||
+    (closeSettled?.failed === true && closeSettled.key === closeKey);
 
   const query = useCallback(
     (extra: Record<string, string> = {}) => {
@@ -368,14 +384,14 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
       }),
     );
     // Every year of them, a piece at a time: the period is then chosen here, from what is held.
-    const years = whole ? SALE_PIECES[piece] : undefined;
-    if (years) {
-      q.delete('since');
-      q.delete('until');
-      if (years.since !== null) q.set('since', years.since);
-      if (years.until !== null) q.set('until', years.until);
-    }
-    apiJson<ParcelsAnswer>(`/petroleum/land-sales?${q.toString()}`, token, {
+    const years = SALE_PIECES[piece];
+    q.delete('since');
+    q.delete('until');
+    if (years?.since) q.set('since', years.since);
+    if (years?.until) q.set('until', years.until);
+    // Without a play, as dots: no outlines (F-312).
+    const path = dots ? '/petroleum/land-sales/dots' : '/petroleum/land-sales';
+    apiJson<ParcelsAnswer>(`${path}?${q.toString()}`, token, {
       signal: controller.signal,
     })
       .then((answer) => {
@@ -417,6 +433,48 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, token]);
 
+  // Close in without a play: the outlines of the view and the period (F-312).
+  useEffect(() => {
+    if (closeKey === null || closeBox === null) return;
+    const controller = new AbortController();
+    apiJson<ParcelsAnswer>(
+      `/petroleum/land-sales?${query({
+        west: String(round(closeBox.west)),
+        south: String(round(closeBox.south)),
+        east: String(round(closeBox.east)),
+        north: String(round(closeBox.north)),
+      })}`,
+      token,
+      { signal: controller.signal },
+    )
+      .then((answer) => {
+        setCloseSettled({
+          key: closeKey,
+          filter: closeFilter,
+          asked: closeBox,
+          pieces: 0,
+          answer,
+          failed: false,
+        });
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setCloseSettled((before) => ({
+          key: closeKey,
+          filter: before?.filter ?? '',
+          asked: closeBox,
+          pieces: 0,
+          answer: before?.answer ?? null,
+          failed: true,
+        }));
+      });
+    return () => {
+      controller.abort();
+    };
+    // `closeBox` and the filter are described by `closeKey`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeKey, token]);
+
   // The totals and the history by quarter: of every parcel loaded, not of the view. Asked for
   // also while the section is off, so the Jump to buttons know the next and the last sale.
   useEffect(() => {
@@ -438,20 +496,24 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
   }, [summaryFilter, query, token]);
 
   const answer = settled?.answer ?? null;
+  // The outlines read close in, while they are of this period and the map is close in.
+  const closeAnswer =
+    closeIn && closeSettled?.filter === closeFilter ? (closeSettled.answer ?? null) : null;
+  const parcels = useMemo(() => {
+    const all = answer?.parcels ?? [];
+    if (closeAnswer === null || closeAnswer.parcels.length === 0) return all;
+    // A parcel read with its outline takes the place of its dot.
+    const outlined = new Map(closeAnswer.parcels.map((p) => [p.id, p]));
+    return all.map((p) => outlined.get(p.id) ?? p);
+  }, [answer, closeAnswer]);
   const shown = useMemo(
     () =>
       wanted && settled?.filter === filter
-        ? saleFiltered(answer?.parcels ?? [], {
-            buyer,
-            states,
-            today,
-            since: whole ? since : null,
-            until: whole ? until : null,
-          })
+        ? saleFiltered(parcels, { buyer, states, today, since, until })
         : [],
-    [wanted, settled?.filter, filter, answer, buyer, states, today, whole, since, until],
+    [wanted, settled?.filter, filter, parcels, buyer, states, today, since, until],
   );
-  const features = useMemo(() => landSaleFeatures(shown, today), [shown, today]);
+  const features = useMemo(() => landSaleFeatures(shown, today, dots), [shown, today, dots]);
   const byId = useMemo(() => new Map(shown.map((p) => [p.id, p])), [shown]);
   const documents = answer?.documents ?? NO_DOCUMENTS;
   const view = useMemo<LandSalesView | null>(
@@ -503,7 +565,11 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
     const box = { west: Infinity, south: Infinity, east: -Infinity, north: -Infinity };
     for (const p of held?.parcels ?? []) {
       if (p.saleDate !== date) continue;
-      const b = landBounds(p.shape);
+      // A dot (F-312) has its centre and no outline.
+      const b =
+        p.shape.length === 0 && p.centre
+          ? { west: p.centre[0], south: p.centre[1], east: p.centre[0], north: p.centre[1] }
+          : landBounds(p.shape);
       box.west = Math.min(box.west, b.west);
       box.south = Math.min(box.south, b.south);
       box.east = Math.max(box.east, b.east);
@@ -697,7 +763,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
           ? `Parcels whose rights include it, inside the ${rightsName ?? ''} outline (shown under Formations).`
           : rightsName
             ? `Parcels whose rights include the ${rightsName}, in the area loaded.`
-            : 'Every parcel in the area loaded: zoom in to see them.'}
+            : 'Every parcel in the area loaded: dots far out, outlines close in.'}
       </p>
       <div className="rounded-lg border bg-card px-3 py-2.5">
         <p className={LABEL}>Bonus paid · {periodTitle}</p>
@@ -774,9 +840,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
         </button>
       </div>
       <p className="text-xs text-muted-foreground">
-        {far
-          ? 'Zoom in to see the parcels.'
-          : `${shown.length.toLocaleString('en-CA')} ${shown.length === 1 ? 'parcel' : 'parcels'}${whole ? '' : ' in view'}.`}
+        {`${shown.length.toLocaleString('en-CA')} ${shown.length === 1 ? 'parcel' : 'parcels'}.`}
         {loading ? ' Loading…' : ''}
       </p>
       {failed && (
@@ -784,7 +848,7 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
           The parcels could not be loaded. Move the map to try again.
         </p>
       )}
-      {!far && answer?.truncated && (
+      {(answer?.truncated === true || closeAnswer?.truncated === true) && (
         <p className="text-xs text-muted-foreground">
           More parcels than can be drawn at once here: the newest sales are shown. Zoom in, or
           choose a shorter period, to see every one.
