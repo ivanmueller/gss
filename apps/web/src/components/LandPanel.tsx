@@ -266,13 +266,35 @@ export function LandTip({
 
 /** The shape of a piece of land, for the map to move to it. */
 function shapeOf(entry: LandEntry): LandShape {
-  return entry.kind === 'sale'
-    ? entry.parcel.shape
-    : entry.kind === 'agreement'
-      ? entry.agreement.shape
-      : entry.kind === 'offset'
-        ? entry.offset.shape
-        : entry.freehold.shape;
+  // Land sent as a dot (F-312) has no outline: a small square about its centre, to move to.
+  const centre =
+    entry.kind === 'sale'
+      ? entry.parcel.centre
+      : entry.kind === 'agreement'
+        ? entry.agreement.centre
+        : undefined;
+  const shape =
+    entry.kind === 'sale'
+      ? entry.parcel.shape
+      : entry.kind === 'agreement'
+        ? entry.agreement.shape
+        : entry.kind === 'offset'
+          ? entry.offset.shape
+          : entry.freehold.shape;
+  if (shape.length > 0 || !centre) return shape;
+  const [x, y] = centre;
+  const d = 0.02;
+  return [
+    [
+      [
+        [x - d, y - d],
+        [x + d, y - d],
+        [x + d, y + d],
+        [x - d, y + d],
+        [x - d, y - d],
+      ],
+    ],
+  ];
 }
 
 /** The box around a shape with a little ground about it; null for a shape with no ground. */

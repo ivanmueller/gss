@@ -154,6 +154,17 @@ describe('landHolders', () => {
     ]);
     expect(landHolders(list, null)[0]?.holder).toBe('FAR AWAY LTD.');
   });
+
+  it('places an agreement sent as a dot by its centre (F-312)', () => {
+    const list = [
+      agreement('1', { holder: 'DOT ENERGY LTD.', areaHa: 64, shape: [], centre: [-116, 54] }),
+      agreement('2', { holder: 'AWAY LTD.', areaHa: 64, shape: [], centre: [-112, 51] }),
+    ];
+    const view = { west: -117, south: 53.5, east: -115.5, north: 54.5 };
+    expect(landHolders(list, view)).toEqual([
+      { holder: 'DOT ENERGY LTD.', hectares: 64, tracts: 1 },
+    ]);
+  });
 });
 
 describe('names and dates', () => {

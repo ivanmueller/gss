@@ -14,6 +14,8 @@ import {
   SALE_AREAS_GONE,
   SALE_BLUES,
   SALE_DOTS_FULL,
+  SALE_LATE_FROM,
+  SALE_LATE_FULL,
   SALE_LAYERS,
   SALE_NO_OFFERS,
   SALE_PICKABLE,
@@ -136,16 +138,16 @@ describe('landSaleFeatures', () => {
     expect(
       PARCELS.features.filter((f) => f.properties?.part === 'area').map((f) => f.properties),
     ).toEqual([
-      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4], part: 'area' },
-      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING, part: 'area' },
+      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4], late: false, part: 'area' },
+      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING, late: false, part: 'area' },
     ]);
   });
 
   it('gives each parcel the dot it becomes zoomed out, in its colour (F-262)', () => {
     const dots = PARCELS.features.filter((f) => f.properties?.part === 'dot');
     expect(dots.map((f) => f.properties)).toEqual([
-      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4], part: 'dot' },
-      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING, part: 'dot' },
+      { key: 'sale:1', state: 'sold', colour: SALE_BLUES[4], late: false, part: 'dot' },
+      { key: 'sale:2', state: 'upcoming', colour: SALE_UPCOMING, late: false, part: 'dot' },
     ]);
     expect(dots.every((f) => f.geometry.type === 'Point')).toBe(true);
   });
@@ -197,7 +199,7 @@ describe('syncLandSales', () => {
       expect(layer?.minzoom).toBe(SALE_AREAS_GONE);
       const opacity = layer?.paint[id === SALE_LAYERS.fill ? 'fill-opacity' : 'line-opacity'];
       // One steady fade from whole to nothing, with no step in it (F-264).
-      expect(opacity as unknown[]).toHaveLength(7);
+      expect(opacity as unknown[]).toHaveLength(11);
       expect((opacity as unknown[]).slice(0, 5)).toEqual([
         'interpolate',
         ['linear'],
@@ -213,8 +215,10 @@ describe('syncLandSales', () => {
     expect(SALE_DOTS_FULL).toBeGreaterThan(SALE_AREAS_GONE);
     const dots = layers.get(SALE_LAYERS.dots);
     expect(dots?.minzoom).toBeUndefined();
-    expect(dots?.maxzoom).toBe(SALE_AREAS_FULL);
+    // Every right's parcels stay dots until SALE_LATE_FULL (F-312).
+    expect(dots?.maxzoom).toBe(SALE_LATE_FULL);
     expect(dots?.filter).toEqual(['==', ['get', 'part'], 'dot']);
+    const late = (yes: number, no: number) => ['case', ['==', ['get', 'late'], true], yes, no];
     expect(dots?.paint['circle-opacity']).toEqual([
       'interpolate',
       ['linear'],
@@ -222,6 +226,10 @@ describe('syncLandSales', () => {
       SALE_DOTS_FULL,
       1,
       SALE_AREAS_FULL,
+      late(1, 0),
+      SALE_LATE_FROM,
+      late(1, 0),
+      SALE_LATE_FULL,
       0,
     ]);
     // A click finds a parcel by its dot as by its area.
@@ -252,5 +260,23 @@ describe('syncLandSales', () => {
       expect(at(SALE_LAYERS.picked)).toBeLessThan(at(ST37_LAYERS.density));
       if (salesFirst) expect(at(LAND_LAYERS.picked)).toBeLessThan(at(SALE_LAYERS.fill));
     }
+  });
+});
+
+describe('landSaleFeatures without a play (F-312)', () => {
+  it('draws a parcel sent as a dot at its centre only, and marks every parcel late', () => {
+    const features = landSaleFeatures(
+      [parcel('3', { shape: [], centre: [-117.5, 54.25] }), parcel('1')],
+      TODAY,
+      true,
+    ).features;
+    const of3 = features.filter((f) => f.properties?.key === 'sale:3');
+    expect(of3).toHaveLength(1);
+    expect(of3[0]?.properties?.part).toBe('dot');
+    expect(of3[0]?.geometry).toEqual({ type: 'Point', coordinates: [-117.5, 54.25] });
+    // A parcel read with its outline close in: its area and its dot, both late.
+    const of1 = features.filter((f) => f.properties?.key === 'sale:1');
+    expect(of1.map((f) => String(f.properties?.part)).sort()).toEqual(['area', 'dot']);
+    expect(features.every((f) => f.properties?.late === true)).toBe(true);
   });
 });

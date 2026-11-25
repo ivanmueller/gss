@@ -1,8 +1,8 @@
 import { operatorKey } from '@grain/domain';
 import type { ExpressionSpecification, GeoJSONSource, Map as MapboxMap } from 'mapbox-gl';
 
-import { SALE_LAYERS } from './landSalesMap';
-import { DETAIL_GONE, fadeIn } from './mapDetail';
+import { SALE_LAYERS, landSaleCentre } from './landSalesMap';
+import { DETAIL_FULL, DETAIL_GONE, fadeIn } from './mapDetail';
 import { operatorColourExpression, type OperatorColour } from './operatorColours';
 import { ST37_LAYERS } from './st37Map';
 
@@ -27,13 +27,16 @@ export interface LandMapAgreement {
   status: string | null;
   vintage: string | null;
   holder: string | null;
-  parties: string | null;
-  zone: string | null;
+  /** Both left out of an agreement sent as a dot (F-312). */
+  parties?: string | null;
+  zone?: string | null;
   areaHa: number | null;
   termDate: string | null;
   continuationDate: string | null;
   expiryText: string | null;
+  /** Empty for an agreement sent as a dot (F-312), with its `centre` instead. */
   shape: LandShape;
+  centre?: [number, number];
 }
 
 export interface LandMapOffset {
@@ -57,7 +60,50 @@ export interface LandMapFreehold {
 }
 
 /** How a shape is drawn. */
-export type LandLook = 'agreement' | 'offset' | 'offset_passed' | 'freehold' | 'reserve';
+export type LandLook =
+  'agreement' | 'agreement_dot' | 'offset' | 'offset_passed' | 'freehold' | 'reserve';
+
+/**
+ * Without a play's rights (F-312) every agreement is held as a dot and the outlines are read
+ * close in, from zoom 10 (LAND_FROM in Land.tsx): those agreements (`late`) turn from dots to
+ * outlines from LAND_LATE_FROM to LAND_LATE_FULL.
+ */
+export const LAND_LATE_FROM = 10;
+export const LAND_LATE_FULL = 10.5;
+const late = (yes: number | ExpressionSpecification, no: number | ExpressionSpecification) =>
+  ['case', ['==', ['get', 'late'], true], yes, no] as ExpressionSpecification;
+/** An agreement's outline: as fadeIn, and for a late one only from LAND_LATE_FROM in. */
+function outlineFade(full: number): ExpressionSpecification {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    DETAIL_GONE,
+    0,
+    DETAIL_FULL,
+    late(0, full),
+    LAND_LATE_FROM,
+    late(0, full),
+    LAND_LATE_FULL,
+    full,
+  ];
+}
+/** An agreement's dot: in with the land far out, gone as its outline comes in. */
+function dotFade(full: number): ExpressionSpecification {
+  return [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    DETAIL_GONE,
+    0,
+    DETAIL_FULL,
+    full,
+    LAND_LATE_FROM,
+    full,
+    LAND_LATE_FULL,
+    0,
+  ];
+}
 
 /**
  * Soft colours for holders, told apart side by side under the wells. A holder always gets the
@@ -122,6 +168,7 @@ export const LAND_LAYERS = {
   freeholdLine: 'land-freehold-line',
   agreementFill: 'land-agreement-fill',
   agreementLine: 'land-agreement-line',
+  agreementDots: 'land-agreement-dots',
   expiring: 'land-agreement-expiring',
   offsetFill: 'land-offset-fill',
   offsetLine: 'land-offset-line',
@@ -129,6 +176,7 @@ export const LAND_LAYERS = {
 } as const;
 /** The layers a click can find land on. */
 export const LAND_PICKABLE = [
+  LAND_LAYERS.agreementDots,
   LAND_LAYERS.agreementFill,
   LAND_LAYERS.offsetFill,
   LAND_LAYERS.freeholdFill,
@@ -160,7 +208,16 @@ export function landFeatures(
     offsets: readonly LandMapOffset[];
     freehold: readonly LandMapFreehold[];
   },
-  { byHolder = true, today }: { byHolder?: boolean; today: string },
+  {
+    byHolder = true,
+    today,
+    lateOutlines = false,
+  }: {
+    byHolder?: boolean;
+    today: string;
+    /** Every agreement, turning from dots to outlines only close in (F-312). */
+    lateOutlines?: boolean;
+  },
 ): GeoJSON.FeatureCollection {
   const feature = (
     key: string,
@@ -182,13 +239,31 @@ export function landFeatures(
           f.shape,
         ),
       ),
-      ...land.agreements.map((a) =>
-        feature(landKey(a.rights, a.id), 'agreement', a.shape, {
+      ...land.agreements.flatMap((a) => {
+        const key = landKey(a.rights, a.id);
+        const extra = {
           colour: byHolder ? landHolderColour(a.holder) : LAND_PLAIN,
           op: operatorKey(a.holder),
           expiring: landExpiring(a.expiryText, today),
-        }),
-      ),
+          late: lateOutlines,
+        };
+        const out: GeoJSON.Feature[] = [];
+        if (a.shape.length > 0) out.push(feature(key, 'agreement', a.shape, extra));
+        // Every agreement's dot, without a play: it fades as the outline comes in (F-312).
+        const centre = lateOutlines
+          ? a.shape.length > 0
+            ? landSaleCentre(a.shape)
+            : (a.centre ?? null)
+          : null;
+        if (centre) {
+          out.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: centre },
+            properties: { key, look: 'agreement_dot', ...extra },
+          });
+        }
+        return out;
+      }),
       ...land.offsets.map((o) =>
         feature(
           landKey('offset', o.id),
@@ -310,7 +385,7 @@ export function syncLand(
         source: SOURCE,
         minzoom: DETAIL_GONE,
         filter: looks('agreement'),
-        paint: { 'fill-color': ['get', 'colour'], 'fill-opacity': fadeIn(0.7) },
+        paint: { 'fill-color': ['get', 'colour'], 'fill-opacity': outlineFade(0.7) },
       },
       under,
     );
@@ -321,7 +396,27 @@ export function syncLand(
         source: SOURCE,
         minzoom: DETAIL_GONE,
         filter: looks('agreement'),
-        paint: { 'line-color': INK, 'line-width': thin, 'line-opacity': fadeIn(0.28) },
+        paint: { 'line-color': INK, 'line-width': thin, 'line-opacity': outlineFade(0.28) },
+      },
+      under,
+    );
+    // Every agreement as a dot far out, without a play (F-312), in its colour.
+    map.addLayer(
+      {
+        id: LAND_LAYERS.agreementDots,
+        type: 'circle',
+        source: SOURCE,
+        minzoom: DETAIL_GONE,
+        maxzoom: LAND_LATE_FULL,
+        filter: looks('agreement_dot'),
+        paint: {
+          'circle-color': ['get', 'colour'],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 2.2, 10, 3.6],
+          'circle-opacity': dotFade(0.85),
+          'circle-stroke-color': INK,
+          'circle-stroke-width': 0.4,
+          'circle-stroke-opacity': dotFade(0.3),
+        },
       },
       under,
     );
@@ -332,7 +427,7 @@ export function syncLand(
         source: SOURCE,
         minzoom: DETAIL_GONE,
         filter: ['all', looks('agreement'), ['==', ['get', 'expiring'], true]],
-        paint: { 'fill-pattern': HATCH.ink, 'fill-opacity': fadeIn(1) },
+        paint: { 'fill-pattern': HATCH.ink, 'fill-opacity': outlineFade(1) },
       },
       under,
     );
@@ -380,11 +475,9 @@ export function syncLand(
     );
   }
   const own: ExpressionSpecification = ['get', 'colour'];
-  map.setPaintProperty(
-    LAND_LAYERS.agreementFill,
-    'fill-color',
-    view.byOperator ? operatorColourExpression(view.byOperator) : own,
-  );
+  const fill = view.byOperator ? operatorColourExpression(view.byOperator) : own;
+  map.setPaintProperty(LAND_LAYERS.agreementFill, 'fill-color', fill);
+  map.setPaintProperty(LAND_LAYERS.agreementDots, 'circle-color', fill);
   map.setPaintProperty(LAND_LAYERS.picked, 'line-color', tone === 'light' ? '#1c1917' : '#fafaf9');
   map.setFilter(LAND_LAYERS.picked, ['in', ['get', 'key'], ['literal', [...view.picked]]]);
 }

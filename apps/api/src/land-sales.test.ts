@@ -216,6 +216,25 @@ describe('GET /api/v1/petroleum/land-sales', () => {
     );
   });
 
+  it('gives every parcel as a dot, with no box, a member only (F-312)', async () => {
+    grain.memberships.mockResolvedValue([]);
+    expect((await get('land-sales/dots')).status).toBe(403);
+    expect(openPetroleum).not.toHaveBeenCalled();
+    viewer();
+    const dot = { ...parcel('7'), shape: [], centre: [-117.5, 54.25] as [number, number] };
+    petroleum.landSaleDots.mockResolvedValue({ load: null, parcels: [dot] });
+    const res = await get('land-sales/dots?since=2021-01-01');
+    expect(res.status).toBe(200);
+    const body = await res.json<ReturnType<typeof landSalesAnswer>>();
+    expect(body.parcels).toEqual([dot]);
+    expect(petroleum.landSaleDots).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
+      { zones: null, since: '2021-01-01', until: null, outline: null },
+      LAND_SALES_MAX,
+    );
+    expect(petroleum.landSales).not.toHaveBeenCalled();
+  });
+
   it('gives the totals as the database summed them, money as text', async () => {
     viewer();
     petroleum.landSaleSummary.mockResolvedValue({

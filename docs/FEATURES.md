@@ -282,8 +282,8 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-- **F-310, land kept in less room** (oil and gas map, once merged): run two workflows, one after the other: GitHub → **Actions** → **Load land** → **Run workflow** (play: duvernay) → wait for green; then **Load land sales** → **Run workflow** (play: duvernay). Each prints its new size at the end of its last step. Then `map.torvenco.com` → Ctrl+F5 → **Land today** and **Land sales**: the outlines as before.
-- Earlier: the owner checked F-309 on 2026-11-25 ("Staging is good"); F-301 to F-308, F-302 parts 1 to 3 and F-254 parts 3a and 3b on 2026-11-25 ("Staging is good"); F-254 parts 1 and 2 and the bar at the top on 2026-11-24 ("Staging is good"), and F-287 (geology, all four parts) on 2026-11-24 ("Geology staging is good"), F-239, F-247, F-284, F-285 and F-288 on 2026-11-23 ("All checks are good") and F-287 part 2 on 2026-11-24 ("Staging is good").
+- **F-312, land for All rights as dots** (oil and gas map, once merged): `map.torvenco.com` → Ctrl+F5 → **Land sales** on, Rights include **All rights**: dots over the whole area loaded, coloured by price, coming in as the land does far out; zoom in past about 270 km across and they turn into outlines. The same for **Land today** (dots in holders' colours, outlines from about 135 km across). Duvernay chosen: as before.
+- Earlier: the owner checked F-310 on 2026-11-25 (both loads green, 279 MB in all, "Everything was good"); F-309 on 2026-11-25 ("Staging is good"); F-301 to F-308, F-302 parts 1 to 3 and F-254 parts 3a and 3b on 2026-11-25 ("Staging is good"); F-254 parts 1 and 2 and the bar at the top on 2026-11-24 ("Staging is good"), and F-287 (geology, all four parts) on 2026-11-24 ("Geology staging is good"), F-239, F-247, F-284, F-285 and F-288 on 2026-11-23 ("All checks are good") and F-287 part 2 on 2026-11-24 ("Staging is good").
 
 ### Company summaries: how many are done, waiting or stopped (F-201)
 

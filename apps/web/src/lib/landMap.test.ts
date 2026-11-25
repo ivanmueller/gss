@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   LAND_HOLDER_COLOURS,
   LAND_HOVER_LAYER,
+  LAND_LATE_FROM,
+  LAND_LATE_FULL,
   LAND_LAYERS,
   LAND_PLAIN,
   landExpiring,
@@ -16,7 +18,7 @@ import {
   syncLandHover,
   type LandShape,
 } from './landMap';
-import { DETAIL_GONE, fadeIn } from './mapDetail';
+import { DETAIL_FULL, DETAIL_GONE, fadeIn } from './mapDetail';
 import { ST37_LAYERS } from './st37Map';
 
 // Land held today on the oil and gas map (F-241). Made-up land only.
@@ -159,8 +161,16 @@ describe('landFeatures', () => {
         // The holder's key, for colour by operator (F-302 part 3); '' for no holder.
         op: 'EXAMPLE ENERGY LTD',
         expiring: false,
+        late: false,
       },
-      { key: 'oil_sands:8', look: 'agreement', colour: LAND_PLAIN, op: '', expiring: true },
+      {
+        key: 'oil_sands:8',
+        look: 'agreement',
+        colour: LAND_PLAIN,
+        op: '',
+        expiring: true,
+        late: false,
+      },
       { key: 'offset:3', look: 'offset' },
       { key: 'offset:4', look: 'offset_passed' },
     ]);
@@ -210,10 +220,32 @@ describe('syncLand', () => {
     for (const id of Object.values(LAND_LAYERS)) {
       const layer = layers.get(id);
       expect(layer?.minzoom).toBe(DETAIL_GONE);
-      const opacity = layer?.paint[layer.type === 'fill' ? 'fill-opacity' : 'line-opacity'];
+      const opacity =
+        layer?.paint[
+          layer.type === 'fill'
+            ? 'fill-opacity'
+            : layer.type === 'circle'
+              ? 'circle-opacity'
+              : 'line-opacity'
+        ];
       expect((opacity as unknown[]).slice(0, 6)).toEqual(fadeIn(1).slice(0, 6));
     }
-    expect(layers.get(LAND_LAYERS.agreementFill)?.paint['fill-opacity']).toEqual(fadeIn(0.7));
+    // Every agreement's outline, without a play, comes in only close in (F-312).
+    const late = (yes: number, no: number) => ['case', ['==', ['get', 'late'], true], yes, no];
+    expect(layers.get(LAND_LAYERS.agreementFill)?.paint['fill-opacity']).toEqual([
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      DETAIL_GONE,
+      0,
+      DETAIL_FULL,
+      late(0, 0.7),
+      LAND_LATE_FROM,
+      late(0, 0.7),
+      LAND_LATE_FULL,
+      0.7,
+    ]);
+    expect(layers.get(LAND_LAYERS.agreementDots)?.maxzoom).toBe(LAND_LATE_FULL);
   });
 
   it('outlines the land whose card is open, and lets it go', () => {
@@ -289,5 +321,29 @@ describe('syncLandHover (F-265)', () => {
     syncLandHover(map, null, 'dark');
     expect(given).toHaveLength(2);
     expect(given[1]?.features).toEqual([]);
+  });
+});
+
+describe('landFeatures without a play (F-312)', () => {
+  it('gives every agreement a dot, and an outline only when it has one', () => {
+    const features = landFeatures(
+      {
+        agreements: [agreement, { ...agreement, id: '9', shape: [], centre: [-117.5, 54.25] }],
+        offsets: [],
+        freehold: [],
+      },
+      { today: TODAY, lateOutlines: true },
+    ).features;
+    expect(features.map((f) => [String(f.properties?.key), String(f.properties?.look)])).toEqual([
+      ['png:7', 'agreement'],
+      ['png:7', 'agreement_dot'],
+      ['png:9', 'agreement_dot'],
+    ]);
+    expect(features[2]?.geometry).toEqual({ type: 'Point', coordinates: [-117.5, 54.25] });
+    expect(features.every((f) => f.properties?.late === true)).toBe(true);
+  });
+
+  it('draws no dots with a play', () => {
+    expect(LAND.features.some((f) => f.properties?.look === 'agreement_dot')).toBe(false);
   });
 });

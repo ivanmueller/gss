@@ -225,6 +225,31 @@ describe('land sales as petro_api', () => {
         (await db.landSales(member(), VIEW, { ...ALL, outline: null }, 10)).parcels,
       ).toHaveLength(2);
 
+      // Every parcel as a dot, wherever it lies (F-312): the middle of its box, no outline,
+      // and nothing of what is read close in; the rights and dates as for the view.
+      const dots = await db.landSaleDots(member(), ALL, 10);
+      expect(dots.parcels.map((p) => p.contractNo)).toEqual(['A0002', 'A0003', 'A0001']);
+      const dotOfA = dots.parcels.find((p) => p.contractNo === 'A0001');
+      expect(dotOfA).toMatchObject({
+        saleDate: '1990-02-07',
+        status: 'ACCEPTED',
+        dollarsPerHectare: '100.00',
+        buyers: 'EXAMPLE LAND LTD. 100%',
+        shape: [],
+        centre: [-119.995, 59.955],
+      });
+      expect(dotOfA).not.toHaveProperty('tractRights');
+      expect(dotOfA).not.toHaveProperty('heldAgreement');
+      expect(
+        (await db.landSaleDots(member(), { ...ALL, since: '1990-03-01' }, 10)).parcels.map(
+          (p) => p.contractNo,
+        ),
+      ).toEqual(['A0002', 'A0003']);
+      expect((await db.landSaleDots(member(), ALL, 1)).parcels).toHaveLength(2);
+      expect((await db.landSaleDots({ ...member(), role: 'stranger' }, ALL, 10)).parcels).toEqual(
+        [],
+      );
+
       // Without a member the rows are not read at all.
       const nobody = { ...member(), role: 'stranger' };
       expect((await db.landSales(nobody, VIEW, ALL, 10)).parcels).toEqual([]);
