@@ -7,10 +7,11 @@ import {
   type MapPlace,
   type MapSettings,
 } from '@grain/domain';
-import { ArrowUp, LoaderCircle, Sparkles, Undo2, X } from 'lucide-react';
+import { ArrowUp, LoaderCircle, Undo2, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { cn } from '../lib/utils';
+import { AskSparkle } from './AskSparkle';
 import { SIDE_ACCENT } from './MapSide';
 import { Button } from './ui/button';
 
@@ -108,7 +109,7 @@ export function AskMapBar({
       <div className="flex items-start gap-2 px-5 pt-5">
         <div className="grow">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <Sparkles aria-hidden="true" className="size-5" style={{ color: SIDE_ACCENT }} />
+            <AskSparkle className="size-5" style={{ color: SIDE_ACCENT }} />
             Ask the map
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">

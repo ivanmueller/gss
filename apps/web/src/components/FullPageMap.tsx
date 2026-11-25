@@ -5,7 +5,7 @@ import {
   type MapAskAnswer,
   type MapSettings,
 } from '@grain/domain';
-import { CircleCheck, Minus, Plus, Settings, Sparkles, TriangleAlert, Waves } from 'lucide-react';
+import { CircleCheck, Minus, Plus, Settings, TriangleAlert, Waves } from 'lucide-react';
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 
 import { sendJson } from '../lib/api';
@@ -22,6 +22,7 @@ import { OPERATOR_OTHER, topOperators } from '../lib/operatorColours';
 import { cn } from '../lib/utils';
 import type { DirectorySession } from '../pages/CounterpartiesPage';
 import { AskMapBar } from './AskMapBar';
+import { AskSparkle } from './AskSparkle';
 import type { St37Hover } from './FacilityMap';
 import {
   MapLayersButton,
@@ -581,8 +582,9 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             })}
             {prices.section({ open: section === 'prices', onToggle: openOnly('prices') })}
             {geology.section({ open: section === 'geology', onToggle: openOnly('geology') })}
-            {/* Ask the map at the menu's foot (the owner, 2026-11-24, F-306): a small pill whose
-                sparkle twinkles now and then (F-307); it slides its panel out beside the menu. */}
+            {/* Ask the map at the menu's foot (the owner, 2026-11-24, F-306): a small pill
+                (F-307) whose outline is traced in the accent colour every few seconds (F-308); it
+                slides its panel out beside the menu. */}
             <div className="sticky bottom-0 mt-auto flex justify-center border-t bg-card/95 py-2.5">
               <button
                 type="button"
@@ -591,16 +593,29 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                   setAsking((open) => !open);
                 }}
                 className={cn(
-                  'flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-[0.8125rem] font-medium shadow-xs transition hover:-translate-y-px hover:shadow-sm',
+                  'relative flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-[0.8125rem] font-medium shadow-xs transition hover:-translate-y-px hover:shadow-sm',
                   asking ? 'bg-muted' : 'bg-card',
                 )}
-                style={{ borderColor: `${SIDE_ACCENT}66` }}
+                style={{ borderColor: `${SIDE_ACCENT}40` }}
               >
-                <Sparkles
+                <svg
                   aria-hidden="true"
-                  className="size-3.5 animate-twinkle"
-                  style={{ color: SIDE_ACCENT }}
-                />
+                  className="pointer-events-none absolute -inset-px size-[calc(100%+2px)] overflow-visible"
+                >
+                  <rect
+                    x="0.75"
+                    y="0.75"
+                    rx="16"
+                    ry="16"
+                    pathLength={100}
+                    className="animate-trace [width:calc(100%-1.5px)] [height:calc(100%-1.5px)]"
+                    fill="none"
+                    stroke={SIDE_ACCENT}
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <AskSparkle className="size-3.5" style={{ color: SIDE_ACCENT }} />
                 Ask the map
               </button>
             </div>
