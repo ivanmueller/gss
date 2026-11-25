@@ -581,48 +581,26 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             })}
             {prices.section({ open: section === 'prices', onToggle: openOnly('prices') })}
             {geology.section({ open: section === 'geology', onToggle: openOnly('geology') })}
-            {/* What the card shows and where it comes from, out of the way until asked for.
-                The sources stay here: their terms ask that they be named. */}
-            <details className="mt-auto border-t px-4 py-3 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none hover:text-foreground">
-                Sources &amp; licence
-                {updated ? ` · updated ${formatAlberta(updated, { weekday: false })}` : ''}
-              </summary>
-              <div className="mt-2 flex flex-col gap-1.5">
-                {sales.about()}
-                {land.about()}
-                {wells.about()}
-                {facilities.about()}
-                {pipelines.about()}
-                {rigs.about()}
-                {formations.about()}
-                {grid.about()}
-                {prices.about()}
-                {geology.about()}
-              </div>
-            </details>
-            {/* Ask the map at the menu's foot (the owner, 2026-11-24, F-306): a button that slides
-                its panel out beside the menu. */}
-            <div className="sticky bottom-0 mt-auto flex justify-center border-t bg-card/95 py-3">
+            {/* Ask the map at the menu's foot (the owner, 2026-11-24, F-306): a small pill whose
+                sparkle twinkles now and then (F-307); it slides its panel out beside the menu. */}
+            <div className="sticky bottom-0 mt-auto flex justify-center border-t bg-card/95 py-2.5">
               <button
                 type="button"
                 aria-expanded={asking}
-                aria-label="Ask the map"
                 onClick={() => {
                   setAsking((open) => !open);
                 }}
-                className="group flex flex-col items-center gap-1 text-xs font-medium"
+                className={cn(
+                  'flex h-8 items-center gap-1.5 rounded-full border px-3.5 text-[0.8125rem] font-medium shadow-xs transition hover:-translate-y-px hover:shadow-sm',
+                  asking ? 'bg-muted' : 'bg-card',
+                )}
+                style={{ borderColor: `${SIDE_ACCENT}66` }}
               >
-                <span
+                <Sparkles
                   aria-hidden="true"
-                  className={cn(
-                    'flex size-12 items-center justify-center rounded-2xl border-2 bg-card shadow-sm transition-colors group-hover:bg-muted',
-                    asking && 'bg-muted',
-                  )}
-                  style={{ borderColor: SIDE_ACCENT, color: SIDE_ACCENT }}
-                >
-                  <Sparkles className="size-5" />
-                </span>
+                  className="size-3.5 animate-twinkle"
+                  style={{ color: SIDE_ACCENT }}
+                />
                 Ask the map
               </button>
             </div>
@@ -788,6 +766,39 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
             )}
             <MapLayersLegend state={layers} />
             <div>{grid.legend()}</div>
+            {/* Where the map's data comes from (F-307: out of the menu): the AER asks to be
+                named as the source, Petrinex that Crown copyright be acknowledged. */}
+            <div>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    Sources &amp; licence
+                    {updated ? ` · updated ${formatAlberta(updated, { weekday: false })}` : ''}
+                  </button>
+                </DialogTrigger>
+                <DialogContent
+                  title="Sources & licence"
+                  description="Where the map's data comes from, and on what terms."
+                  className="max-w-2xl"
+                >
+                  <div className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto text-xs text-muted-foreground">
+                    {sales.about()}
+                    {land.about()}
+                    {wells.about()}
+                    {facilities.about()}
+                    {pipelines.about()}
+                    {rigs.about()}
+                    {formations.about()}
+                    {grid.about()}
+                    {prices.about()}
+                    {geology.about()}
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
         )}
       </div>

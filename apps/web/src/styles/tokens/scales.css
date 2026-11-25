@@ -251,7 +251,30 @@
   }
 }
 
+/* The Ask the map button's sparkle: a slow, small twinkle now and then (F-307). */
+@theme {
+  --animate-twinkle: twinkle 3.2s ease-in-out infinite;
+
+  @keyframes twinkle {
+    0%,
+    70%,
+    100% {
+      transform: none;
+      opacity: 1;
+    }
+    80% {
+      transform: rotate(18deg) scale(1.18);
+      opacity: 0.75;
+    }
+    90% {
+      transform: rotate(-8deg) scale(0.95);
+      opacity: 1;
+    }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .animate-twinkle,
   .animate-dialog-in,
   .animate-drawer-in,
   .animate-panel-in {

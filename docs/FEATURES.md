@@ -282,7 +282,8 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-- **F-306, Ask the map as a slide-out panel** (oil and gas map, once merged): the button at the foot of the menu → the panel slides out beside it; click an example or type a request and press Enter; × closes it.
+- **F-307, the smaller twinkling Ask button; sources in the legend** (oil and gas map, once merged): the pill at the foot of the menu; **Sources & licence** at the legend's foot opens the credits.
+- **F-306, Ask the map as a slide-out panel** (oil and gas map, live since #372): the button at the foot of the menu → the panel slides out beside it; click an example or type a request and press Enter; × closes it.
 - **F-305, menu and legend at the page's edges** (oil and gas map, live since #371; its Ask the map button since moved by F-306): the menu runs from the page's left edge top to bottom; the legend sits in the bottom-right corner; no bar over the map: **Ask the map** beside **Layers** opens the box in the menu.
 - **F-302 part 3, land by operator** (oil and gas map, live since #370): the Operator box → a company that holds land; **Land today** and **Land sales** show only its land and sales (their Holder and Buyer boxes filled); with **Colour by → Operator** and Land today on, its agreements in its colour.
 - **F-302 part 2, colour by operator** (oil and gas map, live since #369): the side card → **Colour by** → **Operator**; zoom in on the Duvernay with wells (and facilities or pipelines) on: the ten largest operators in view in their own colours, the rest grey, the ten in the legend; **Status** brings the usual colours back.
