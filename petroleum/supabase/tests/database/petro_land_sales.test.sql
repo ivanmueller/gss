@@ -42,15 +42,15 @@ values ('https://content2.energy.alberta.ca/petroleum-and-natural-gas-tenure-pub
         '2003-01-08', '2026-12-02', -117, 53, -115, 55, 2, 2);
 insert into petro.land_sale_parcels
   (sale_date, contract_no, contract_type, region, hectares, zone, land, status, bonus,
-   dollars_per_hectare, buyers, bounds, shape)
+   dollars_per_hectare, buyers, bounds, path)
 values
   ('2026-11-04', 'A0001', 'LEASE', 'PLAINS', 256, 'PETROLEUM AND NATURAL GAS FROM SURFACE TO BASEMENT',
    '51806024', 'ACCEPTED', 56888.32, 222.22, 'EXAMPLE LAND LTD. 100%',
    '(-116.0,54.1),(-116.1,54.0)',
-   '[[[[-116.1,54.0],[-116.0,54.0],[-116.0,54.1],[-116.1,54.1],[-116.1,54.0]]]]'),
+   '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11610000,5410000}'),
   ('2026-12-02', 'B0002', 'LICENCE', 'NORTHERN', 512, null, '51806025 51806026', null, null,
    null, null, '(-115.0,53.1),(-115.1,53.0)',
-   '[[[[-115.1,53.0],[-115.0,53.0],[-115.0,53.1],[-115.1,53.1],[-115.1,53.0]]]]');
+   '{-11510000,5300000,-11500000,5300000,-11500000,5310000,-11510000,5310000}');
 
 select is(
   (select bonus::text || ' ' || dollars_per_hectare::text from petro.land_sale_parcels
@@ -64,24 +64,24 @@ select is(
   'a parcel of a sale not held yet has no result'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds, shape)
-    values ('2026-11-04', 'A0001', '51806024', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds, path)
+    values ('2026-11-04', 'A0001', '51806024', '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23505', null, 'a sale has one parcel of a contract number'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds, shape)
-    values ('2026-11-04', 'A1', '51806024', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds, path)
+    values ('2026-11-04', 'A1', '51806024', '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'a contract number is a letter and four digits'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bonus, bounds, shape)
-    values ('2026-11-04', 'A0009', '51806024', -1, '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bonus, bounds, path)
+    values ('2026-11-04', 'A0009', '51806024', -1, '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'a bonus is not negative'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds, shape)
-    values ('2026-11-04', 'A0009', '51806024', '(1,1),(0,0)', '[]')$$,
-  '23514', null, 'a shape holds at least one polygon'
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds, path)
+    values ('2026-11-04', 'A0009', '51806024', '(1,1),(0,0)', '{0,0,1,1}')$$,
+  '23514', null, 'a path holds at least three points'
 );
 select throws_ok(
   $$insert into petro.land_sale_loads (source_url, first_sale, last_sale, west, south, east, north, sales, parcels)

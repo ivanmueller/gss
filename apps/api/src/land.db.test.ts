@@ -73,15 +73,15 @@ describe('land held today as petro_api', () => {
       await admin`
         insert into petro.land_agreements
           (rights, agreement_type, agreement_number, tract, agreement_group, status, holder,
-           parties, zone, area_ha, term_date, expiry_text, bounds, shape)
+           parties, zone, area_ha, term_date, expiry_text, bounds, path)
         values
           ('png', 'ZZ9', '1', '00', 'LEASE', 'ACTIVE', 'EXAMPLE ENERGY LTD.',
            'EXAMPLE ENERGY LTD. 100%', 'PNG TO BASE EXAMPLE', 256.5, '2020-02-17', 'INDEFINITE',
-           ${inView.bounds}::box, ${admin.json(inView.shape)}),
+           ${inView.bounds}::box, ${packed(inView.shape).path}),
           ('oil_sands', 'ZZ9', '2', null, null, null, null, null, null, null, null, null,
-           ${next.bounds}::box, ${admin.json(next.shape)}),
+           ${next.bounds}::box, ${packed(next.shape).path}),
           ('png', 'ZZ9', '3', null, null, null, null, null, null, null, null, null,
-           ${elsewhere.bounds}::box, ${admin.json(elsewhere.shape)})`;
+           ${elsewhere.bounds}::box, ${packed(elsewhere.shape).path})`;
       await admin`
         insert into petro.land_offsets (offset_type, offset_number, holder, expiry_date, bounds, path, rings)
         values ('AAY', 'ZZTEST1', 'EXAMPLE ENERGY LTD.', '2027-05-08', ${inView.bounds}::box,
@@ -108,7 +108,7 @@ describe('land held today as petro_api', () => {
         termDate: '2020-02-17',
         continuationDate: null,
         expiryText: 'INDEFINITE',
-        shape: inView.shape,
+        shape: rounded(inView.shape),
       });
       expect(all.offsets).toMatchObject([
         { offsetNumber: 'ZZTEST1', expiryDate: '2027-05-08', shape: rounded(twoParts) },

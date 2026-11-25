@@ -1,6 +1,7 @@
 -- Land kept as whole numbers (F-310, 20261210010000_petro_land_compact.sql): each row holds its
--- shape as JSON (an older load) or as a path of whole numbers with its ring counts, never both
--- and never neither; members read the new columns, nobody but the database's owner writes them.
+-- shape as a path of whole numbers with its ring counts; the JSON form is gone since the cleanup
+-- (20261211010000_petro_land_shape_dropped.sql), the path required; members read the columns,
+-- nobody but the database's owner writes them.
 -- One transaction, rolled back. Synthetic data only.
 begin;
 create extension if not exists pgtap with schema extensions;
@@ -46,13 +47,10 @@ select is(
   'the Supabase API roles hold nothing on the new columns'
 );
 
--- The owner (the manual load) writes either form.
+-- The owner (the manual load) writes.
 insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, path)
 values ('png', '002', '924', '(-116.0,54.1),(-116.1,54.0)',
         '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11610000,5410000}');
-insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, shape)
-values ('png', '002', '925', '(-116.0,54.1),(-116.1,54.0)',
-        '[[[[-116.1,54.0],[-116.0,54.0],[-116.0,54.1],[-116.1,54.0]]]]');
 insert into petro.land_offsets (offset_number, bounds, path, rings)
 values ('2050843E02', '(-116.0,54.1),(-116.1,54.0)',
         '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11605000,5401000,-11604000,5401000,-11604000,5402000}',
@@ -68,24 +66,23 @@ select is(
   '{}'::integer[],
   'one polygon of one ring needs no counts'
 );
-select ok(
-  (select shape is null and path is not null from petro.land_freehold where land_key = 501032312),
-  'a compact row keeps no JSON shape'
+select is(
+  (select count(*)::int from information_schema.columns
+   where table_schema = 'petro' and column_name = 'shape'
+     and table_name in ('land_agreements', 'land_offsets', 'land_freehold', 'land_sale_parcels')),
+  0,
+  'no land table keeps a JSON shape any more'
 );
 
-select throws_ok(
-  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, shape, path)
-    values ('png', '002', '1', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]', '{0,0,1,0,1,1}')$$,
-  '23514', null, 'a row keeps one form of its shape, not both'
-);
+select ok((select petro.schema_version()) >= 24, 'the schema is at version 24 or later');
 select throws_ok(
   $$insert into petro.land_freehold (bounds) values ('(1,1),(0,0)')$$,
-  '23514', null, 'a row keeps a shape in one form or the other'
+  '23502', null, 'a row keeps its path'
 );
 select throws_ok(
   $$insert into petro.land_sale_parcels (sale_date, contract_no, land, bounds)
     values ('2026-11-04', 'A0002', '1', '(1,1),(0,0)')$$,
-  '23514', null, 'a parcel keeps a shape too'
+  '23502', null, 'a parcel keeps its path too'
 );
 select throws_ok(
   $$insert into petro.land_offsets (offset_number, bounds, path) values ('1', '(1,1),(0,0)', '{0,0,1,0,1}')$$,
@@ -133,7 +130,7 @@ select pg_temp.be('00000000-0000-4000-8000-0000000000a1',
                   '00000000-0000-4000-8000-0000000000b1', 'viewer', '');
 select is(
   pg_temp.as_petro('select string_agg(agreement_number || '':'' || (path is not null)::text, '' '' order by agreement_number) from petro.land_agreements'),
-  '924:true 925:false', 'a member reads the compact rows and the older ones');
+  '924:true', 'a member reads the rows and their paths');
 select is(
   pg_temp.as_petro('select (cardinality(path) / 2)::text || '' '' || rings::text from petro.land_offsets'),
   '6 {1,3,1,3}', 'a member reads a path with its counts');

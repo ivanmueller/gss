@@ -46,20 +46,20 @@ values ('png_agreements',
         -117, 53, -115, 55, 2);
 insert into petro.land_agreements
   (rights, agreement_type, agreement_number, tract, status, holder, parties, zone, area_ha,
-   term_date, expiry_text, bounds, shape)
+   term_date, expiry_text, bounds, path)
 values
   ('png', '002', '924', '00', 'ACTIVE', 'EXAMPLE ENERGY LTD.', 'EXAMPLE ENERGY LTD. 100%',
    'PNG TO BASE EXAMPLE', 256, '2020-02-17', 'INDEFINITE', '(-116.0,54.1),(-116.1,54.0)',
-   '[[[[-116.1,54.0],[-116.0,54.0],[-116.0,54.1],[-116.1,54.1],[-116.1,54.0]]]]'),
+   '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11610000,5410000}'),
   ('oil_sands', '010', 'A1B2', null, 'ACTIVE', null, null, null, null, null, null,
    '(-115.0,53.1),(-115.1,53.0)',
-   '[[[[-115.1,53.0],[-115.0,53.0],[-115.0,53.1],[-115.1,53.1],[-115.1,53.0]]]]');
-insert into petro.land_offsets (offset_type, offset_number, holder, expiry_date, bounds, shape)
+   '{-11510000,5300000,-11500000,5300000,-11500000,5310000,-11510000,5310000}');
+insert into petro.land_offsets (offset_type, offset_number, holder, expiry_date, bounds, path)
 values ('AAY', '2050843E02', 'EXAMPLE ENERGY LTD.', '2027-05-08', '(-116.0,54.1),(-116.1,54.0)',
-        '[[[[-116.1,54.0],[-116.0,54.0],[-116.0,54.1],[-116.1,54.1],[-116.1,54.0]]]]');
-insert into petro.land_freehold (land_key, substances, bounds, shape)
+        '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11610000,5410000}');
+insert into petro.land_freehold (land_key, substances, bounds, path)
 values (501032312, 'ALL MINERALS EXCEPT GOLD,SILVER', '(-114.0,52.1),(-114.1,52.0)',
-        '[[[[-114.1,52.0],[-114.0,52.0],[-114.0,52.1],[-114.1,52.1],[-114.1,52.0]]]]');
+        '{-11410000,5200000,-11400000,5200000,-11400000,5210000,-11410000,5210000}');
 
 select is(
   (select agreement_number from petro.land_agreements
@@ -74,32 +74,32 @@ select is(
   'a view elsewhere finds none'
 );
 select throws_ok(
-  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, shape)
-    values ('coal', '002', '1', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, path)
+    values ('coal', '002', '1', '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'an agreement is for petroleum and natural gas or for oil sands'
 );
 select throws_ok(
-  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, shape)
-    values ('png', '002', 'not a number', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, path)
+    values ('png', '002', 'not a number', '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'an agreement number is letters and digits'
 );
 select throws_ok(
-  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, area_ha, bounds, shape)
-    values ('png', '002', '1', -1, '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, area_ha, bounds, path)
+    values ('png', '002', '1', -1, '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'an area is not negative'
 );
 select throws_ok(
-  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, shape)
+  $$insert into petro.land_agreements (rights, agreement_type, agreement_number, bounds, path)
     values ('png', '002', '1', '(1,1),(0,0)', '{}')$$,
-  '23514', null, 'a shape is a list of polygons'
+  '23514', null, 'a path is not empty'
 );
 select throws_ok(
-  $$insert into petro.land_freehold (bounds, shape) values ('(1,1),(0,0)', '[]')$$,
-  '23514', null, 'a shape holds at least one polygon'
+  $$insert into petro.land_freehold (bounds, path) values ('(1,1),(0,0)', '{0,0,1,1}')$$,
+  '23514', null, 'a path holds at least three points'
 );
 select throws_ok(
-  $$insert into petro.land_offsets (offset_number, bounds, shape)
-    values ('x; y', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_offsets (offset_number, bounds, path)
+    values ('x; y', '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'an offset notice number is letters and digits'
 );
 select throws_ok(

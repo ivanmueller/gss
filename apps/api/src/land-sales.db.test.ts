@@ -38,6 +38,18 @@ const square = (west: number, south: number): { shape: LandShape; bounds: string
   ],
   bounds: `(${String(west + 0.01)},${String(south + 0.01)}),(${String(west)},${String(south)})`,
 });
+/** The path the loads write (F-310): every shape is kept as whole numbers since schema 24. */
+const path = (shape: LandShape) => packLandShape(shape)?.path ?? [];
+/** A shape as it comes back from whole numbers: five decimals, its ring closed. */
+const rounded = (shape: LandShape): LandShape =>
+  shape.map((polygon) =>
+    polygon.map((ring) =>
+      ring.map(([x, y]): [number, number] => [
+        Math.round(x * 1e5) / 1e5,
+        Math.round(y * 1e5) / 1e5,
+      ]),
+    ),
+  );
 const VIEW = { west: -120.05, south: 59.9, east: -119.9, north: 60.05 };
 // Only this test's rights, so the totals count none of a local load's parcels.
 const PLAY = 'IN THE TEST ONLY FM';
@@ -67,20 +79,19 @@ describe('land sales as petro_api', () => {
       await admin`
         insert into petro.land_sale_parcels
           (sale_date, contract_no, contract_type, region, hectares, zone, land, status, bonus,
-           dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, shape,
-           path)
+           dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, path)
         values
           ('1990-02-07', 'A0001', 'LEASE', 'PLAINS', 256, ${zone}, '61212624', 'ACCEPTED',
            25600.10, 100.00, 'EXAMPLE LAND LTD. 100%', 'SHA010301 SHA010401', 'D00004',
-           ${admin.json(TRACTS)}, ${a.bounds}::box, ${admin.json(a.shape)}, null),
+           ${admin.json(TRACTS)}, ${a.bounds}::box, ${path(a.shape)}),
           ('1990-05-09', 'A0002', 'LEASE', 'PLAINS', 64, ${zone}, '61212625SW', 'ACCEPTED',
            19200.20, 300.00, 'SAMPLE RESOURCES INC. 100%', null, null, null, ${b.bounds}::box,
-           null, ${packLandShape(b.shape)?.path ?? []}),
+           ${path(b.shape)}),
           ('1990-05-09', 'A0003', 'LICENCE', 'NORTHERN', 128, ${zone}, '61212626', 'NO OFFERS',
-           null, null, null, null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}, null),
+           null, null, null, null, null, null, ${far.bounds}::box, ${path(far.shape)}),
           ('1990-05-09', 'A0004', 'LEASE', 'PLAINS', 64, 'PETROLEUM AND NATURAL GAS IN THE OTHER FM',
            '61212627', 'ACCEPTED', 1, 1, null, null, null, null, ${a.bounds}::box,
-           ${admin.json(a.shape)}, null)`;
+           ${path(a.shape)})`;
       // Land held today (F-276): the lease issued from A0001 of the February sale, in two
       // tracts, its term starting the day after the sale. Beside it, agreements that are not
       // it: a licence with the same number's end, a lease from the month's other sale, a lease
@@ -92,9 +103,9 @@ describe('land sales as petro_api', () => {
         admin`
           insert into petro.land_agreements
             (rights, agreement_type, agreement_number, tract, agreement_group, holder, term_date,
-             bounds, shape)
+             bounds, path)
           values ('png', 'ZZ8', ${number}, ${tract}, ${group}, ${holder}, ${term}::date,
-                  ${away.bounds}::box, ${admin.json(away.shape)})`;
+                  ${away.bounds}::box, ${path(away.shape)})`;
       await held('0190020001', '01', 'LEASE', '1990-02-08', 'SAMPLE HOLDINGS LTD.');
       await held('0190020001', '02', 'LEASE', '1990-02-08', 'SAMPLE HOLDINGS LTD.');
       await held('5490020001', '00', 'LICENSE', '1990-02-08', 'OTHER KIND LTD.');
@@ -119,18 +130,12 @@ describe('land sales as petro_api', () => {
         buyers: 'EXAMPLE LAND LTD. 100%',
         restrictions: 'SHA010301 SHA010401',
         reversionZones: 'D00004',
-        shape: a.shape,
+        shape: rounded(a.shape),
       });
       // A parcel with no codes has none (F-265). Kept as whole numbers (F-310), its shape comes
       // back to five decimals, its ring closed.
       expect(inView.parcels[0]).toMatchObject({ restrictions: null, reversionZones: null });
-      expect(inView.parcels[0]?.shape).toEqual(
-        b.shape.map((polygon) =>
-          polygon.map((ring) =>
-            ring.map(([x, y]) => [Math.round(x * 1e5) / 1e5, Math.round(y * 1e5) / 1e5]),
-          ),
-        ),
-      );
+      expect(inView.parcels[0]?.shape).toEqual(rounded(b.shape));
       // Its rights tract by tract, and the agreement issued from it with its holder (F-276):
       // found by the database, once, whatever land the page has loaded.
       expect(inView.parcels[1]).toMatchObject({
