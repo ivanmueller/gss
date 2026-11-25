@@ -186,11 +186,19 @@ describe('the side card (F-267)', () => {
     expect(sales).toHaveAttribute('aria-expanded', 'true');
     // A year, or dates from and to (F-303).
     expect(within(card).getByRole('combobox', { name: 'Sale year' })).toBeInTheDocument();
+    // Every parcel at first, whatever its rights (the owner, 2026-11-25).
+    expect(within(card).getByRole('combobox', { name: 'Rights include' })).toHaveDisplayValue(
+      'All rights',
+    );
     await userEvent.type(within(card).getByLabelText('Sales from'), '2023-03-01');
     expect(within(card).getByLabelText('Sales from')).toHaveValue('2023-03-01');
     expect(within(card).getByRole('button', { name: '2 yrs' })).toHaveAttribute(
       'aria-pressed',
       'false',
+    );
+    await userEvent.click(within(card).getByRole('button', { name: 'Land today' }));
+    expect(within(card).getByRole('combobox', { name: 'Rights include' })).toHaveDisplayValue(
+      'All rights',
     );
     await userEvent.click(wells);
     // A section switched off stays open with its filters, to set before switching it on

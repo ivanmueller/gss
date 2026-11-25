@@ -368,7 +368,7 @@ export function useLand(organizationId: string, token: string): LandState {
     freehold: true,
   });
   // The play the agreements' rights must include; null for every agreement.
-  const [rights, setRights] = useState<string | null>('duvernay');
+  const [rights, setRights] = useState<string | null>(null);
   const [holder, setHolder] = useState('');
   const [terms, setTerms] = useState<ReadonlySet<LandTerm>>(new Set());
   const [byHolder, setByHolder] = useState(true);
@@ -537,12 +537,12 @@ export function useLand(organizationId: string, token: string): LandState {
                   setRights(event.target.value === '' ? null : event.target.value);
                 }}
               >
+                <option value="">All rights</option>
                 {Object.values(LAND_RIGHTS).map((r) => (
                   <option key={r.key} value={r.key}>
                     {r.name}
                   </option>
                 ))}
-                <option value="">All rights</option>
               </select>
             </label>
             <label className="flex flex-col gap-1.5">
