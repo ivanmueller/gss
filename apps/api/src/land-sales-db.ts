@@ -198,7 +198,6 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
             tract_rights: unknown;
             held_agreement: string | null;
             held_by: string | null;
-            shape: LandShape | null;
             path: number[] | null;
             rings: number[] | null;
           }[]
@@ -245,7 +244,7 @@ export function landSalesQueries(sql: postgres.Sql): LandSalesDatabase {
                  p.region, p.hectares::text as hectares, p.zone, p.land, p.inexact, p.status,
                  p.bonus::text as bonus, p.dollars_per_hectare::text as dollars_per_hectare,
                  p.buyers, p.restrictions, p.reversion_zones, p.tract_rights,
-                 h.agreement_number as held_agreement, h.holder as held_by, p.shape,
+                 h.agreement_number as held_agreement, h.holder as held_by,
                  -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
                  to_jsonb(p.path) as path, to_jsonb(p.rings) as rings
           from kept k

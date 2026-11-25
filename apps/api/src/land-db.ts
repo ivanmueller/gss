@@ -246,7 +246,6 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                   term_date: string | null;
                   continuation_date: string | null;
                   expiry_text: string | null;
-                  shape: LandShape | null;
                   path: number[] | null;
                   rings: number[] | null;
                 }[]
@@ -254,7 +253,7 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                 select id::text as id, rights, agreement_type, agreement_number, tract,
                        agreement_group, status, vintage, holder, parties, zone, area_ha,
                        term_date::text as term_date,
-                       continuation_date::text as continuation_date, expiry_text, shape,
+                       continuation_date::text as continuation_date, expiry_text,
                        -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
                        to_jsonb(path) as path, to_jsonb(rings) as rings
                 from petro.land_agreements
@@ -275,13 +274,12 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                   holder: string | null;
                   expiry_date: string | null;
                   zone: string | null;
-                  shape: LandShape | null;
                   path: number[] | null;
                   rings: number[] | null;
                 }[]
               >`
                 select id::text as id, offset_type, offset_number, tract, holder,
-                       expiry_date::text as expiry_date, zone, shape,
+                       expiry_date::text as expiry_date, zone,
                        -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
                        to_jsonb(path) as path, to_jsonb(rings) as rings
                 from petro.land_offsets
@@ -298,13 +296,11 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                   national_park: string | null;
                   reserve_number: string | null;
                   reserve_name: string | null;
-                  shape: LandShape | null;
                   path: number[] | null;
                   rings: number[] | null;
                 }[]
               >`
                 select id::text as id, substances, national_park, reserve_number, reserve_name,
-                       shape,
                        -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
                        to_jsonb(path) as path, to_jsonb(rings) as rings
                 from petro.land_freehold

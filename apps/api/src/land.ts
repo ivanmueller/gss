@@ -10,10 +10,10 @@ import { LAND_KINDS, type LandKind, type LandRows } from './land-db';
  */
 
 /**
- * The oil and gas schema version the land needs: the shapes are read as whole numbers too
- * (F-310, 20261210010000_petro_land_compact.sql).
+ * The oil and gas schema version the land needs: the shapes are read as whole numbers only
+ * (F-310, 20261211010000_petro_land_shape_dropped.sql).
  */
-export const LAND_SCHEMA_VERSION = 23;
+export const LAND_SCHEMA_VERSION = 24;
 
 /**
  * At most this many shapes of each kind per answer; a view holding more is drawn from the

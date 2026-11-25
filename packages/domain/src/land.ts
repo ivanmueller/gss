@@ -132,7 +132,8 @@ export function unpackLandShape(
 
 /** A row's shape, in whichever form it is kept: packed (F-310), or as JSON by an older load. */
 export function storedLandShape(row: {
-  shape: LandShape | null;
+  /** The JSON form, gone since oil and gas schema 24 (the F-310 cleanup). */
+  shape?: LandShape | null;
   path: readonly number[] | null;
   rings: readonly number[] | null;
 }): LandShape {

@@ -37,13 +37,13 @@ values ('https://content2.energy.alberta.ca/petroleum-and-natural-gas-tenure-pub
         '2003-01-08', '2026-12-02', -117, 53, -115, 55, 1, 2,
         '{"2026-11-04": {"notice": "/download/?s=png&id=20261104PON&ft=.pdf", "results": "/download/?s=png&id=20261104PSR&ft=.pdf"}}');
 insert into petro.land_sale_parcels
-  (sale_date, contract_no, land, restrictions, reversion_zones, bounds, shape)
+  (sale_date, contract_no, land, restrictions, reversion_zones, bounds, path)
 values
   ('2026-11-04', 'A0001', '51806024', 'SHA010301 SHA010401', 'D00039 D00004',
    '(-116.0,54.1),(-116.1,54.0)',
-   '[[[[-116.1,54.0],[-116.0,54.0],[-116.0,54.1],[-116.1,54.1],[-116.1,54.0]]]]'),
+   '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11610000,5410000}'),
   ('2026-11-04', 'A0002', '51806025', null, null, '(-115.0,53.1),(-115.1,53.0)',
-   '[[[[-115.1,53.0],[-115.0,53.0],[-115.0,53.1],[-115.1,53.1],[-115.1,53.0]]]]');
+   '{-11510000,5300000,-11500000,5300000,-11500000,5310000,-11510000,5310000}');
 
 select is(
   (select restrictions || ' | ' || reversion_zones from petro.land_sale_parcels
@@ -58,14 +58,14 @@ select is(
   'a parcel with none has none'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, restrictions, bounds, shape)
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, restrictions, bounds, path)
     values ('2026-11-04', 'A0009', '51806024', 'SHA010301; drop table x', '(1,1),(0,0)',
-            '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+            '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'restrictions are codes separated by spaces and nothing else'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, reversion_zones, bounds, shape)
-    values ('2026-11-04', 'A0009', '51806024', '', '(1,1),(0,0)', '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, reversion_zones, bounds, path)
+    values ('2026-11-04', 'A0009', '51806024', '', '(1,1),(0,0)', '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'no codes is null, not an empty text'
 );
 select throws_ok(

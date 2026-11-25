@@ -25,14 +25,14 @@ select is(
 );
 
 -- The owner (the manual load) writes.
-insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, shape)
+insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, path)
 values
   ('1990-03-07', 'B0001', '51806024 51806025',
    '["PETROLEUM AND NATURAL GAS FROM SURFACE; TO THE TOP OF THE EXAMPLE FM", "PETROLEUM AND NATURAL GAS BELOW THE BASE OF THE SAMPLE GRP; TO BASEMENT"]',
    '(-116.0,54.1),(-116.1,54.0)',
-   '[[[[-116.1,54.0],[-116.0,54.0],[-116.0,54.1],[-116.1,54.1],[-116.1,54.0]]]]'),
+   '{-11610000,5400000,-11600000,5400000,-11600000,5410000,-11610000,5410000}'),
   ('1990-03-07', 'B0002', '51806026', null, '(-115.0,53.1),(-115.1,53.0)',
-   '[[[[-115.1,53.0],[-115.0,53.0],[-115.0,53.1],[-115.1,53.1],[-115.1,53.0]]]]');
+   '{-11510000,5300000,-11500000,5300000,-11500000,5310000,-11510000,5310000}');
 
 select is(
   (select tract_rights ->> 1 from petro.land_sale_parcels where contract_no = 'B0001'),
@@ -46,27 +46,27 @@ select is(
   'a parcel loaded before has none'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, shape)
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, path)
     values ('1990-03-07', 'B0009', '51806024', '"PETROLEUM"', '(1,1),(0,0)',
-            '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+            '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'the tracts'' rights are a list'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, shape)
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, path)
     values ('1990-03-07', 'B0009', '51806024', '[]', '(1,1),(0,0)',
-            '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+            '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'no rights is null, not an empty list'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, shape)
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, path)
     values ('1990-03-07', 'B0009', '51806024', '["PETROLEUM", {"a": 1}]', '(1,1),(0,0)',
-            '[[[[0,0],[1,0],[1,1],[0,0]]]]')$$,
+            '{0,0,100000,0,100000,100000}')$$,
   '23514', null, 'each tract''s rights are a text and nothing else'
 );
 select throws_ok(
-  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, shape)
+  $$insert into petro.land_sale_parcels (sale_date, contract_no, land, tract_rights, bounds, path)
     select '1990-03-07', 'B0009', '51806024', jsonb_agg('TRACT ' || n), '(1,1),(0,0)',
-           '[[[[0,0],[1,0],[1,1],[0,0]]]]'
+           '{0,0,100000,0,100000,100000}'
     from generate_series(1, 41) n$$,
   '23514', null, 'at most forty wordings a parcel'
 );

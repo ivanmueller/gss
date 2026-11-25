@@ -51,10 +51,10 @@ describe('operators as petro_api', () => {
 
       await admin`
         insert into petro.land_agreements (rights, agreement_type, agreement_number, holder,
-          bounds, shape)
+          bounds, path)
         values ('png', 'ZQ9', '0199990001', 'ZQXEXAMPLE ENERGY LTD.',
                 box(point(-119.99, 59.95), point(-119.95, 59.96)),
-                '[[[[-119.99,59.95],[-119.95,59.95],[-119.95,59.96],[-119.99,59.95]]]]')`;
+                '{-11999000,5995000,-11995000,5995000,-11995000,5996000}')`;
 
       const rows = (await db.operators(member())).filter((r) =>
         (r.name ?? '').toUpperCase().startsWith('ZQX'),
