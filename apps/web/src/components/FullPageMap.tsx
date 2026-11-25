@@ -44,7 +44,7 @@ import { usePipelines, type PipelineEntry } from './Pipelines';
 import { useLand, type LandPick } from './Land';
 import { LandPanel, LandTip } from './LandPanel';
 import { saleDay, useLandSales, type LandSalesSnapshot } from './LandSales';
-import { SIDE_LABEL } from './MapSide';
+import { SIDE_ACCENT, SIDE_LABEL } from './MapSide';
 import { RigPanel, RigTip } from './RigPanel';
 import { useRigs, type RigsSnapshot } from './Rigs';
 import { St37Panel, St37Tip } from './St37Panel';
@@ -203,7 +203,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // Colour by operator (F-302 part 2, the owner, 2026-11-24): the ten operators with the most
   // wells, facilities and pipeline segments in view, a colour each on every layer, the rest grey.
   const [colourBy, setColourBy] = useState<'status' | 'operator'>('status');
-  // The Ask the map box, shown in the card when its button is pressed (F-305).
+  // The Ask the map panel, slid out beside the menu when its button is pressed (F-306).
   const [asking, setAsking] = useState(false);
   const byOperator = useMemo(
     () =>
@@ -491,19 +491,6 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <MapLayersButton state={layers} />
-                {/* Ask the map (F-254) in the card, behind its button, so it is not front and
-                    centre on the map (the owner, 2026-11-24, F-305). */}
-                <Button
-                  variant={asking ? 'secondary' : 'outline'}
-                  size="sm"
-                  aria-expanded={asking}
-                  onClick={() => {
-                    setAsking((open) => !open);
-                  }}
-                >
-                  <Sparkles aria-hidden="true" />
-                  Ask the map
-                </Button>
                 <SegmentedControl
                   label="Map style"
                   options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
@@ -514,29 +501,6 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                   onChange={setBasemap}
                 />
               </div>
-              {asking && (
-                <AskMapBar
-                  autoFocus
-                  askClaude={(text) =>
-                    sendJson<MapAskAnswer>(
-                      `/petroleum/ask?organization_id=${encodeURIComponent(session.organization.id)}`,
-                      session.token,
-                      'POST',
-                      { text },
-                    )
-                  }
-                  onApply={(settings, place) => {
-                    setBefore(snapshot());
-                    // A place named moves the map last, over a play's area.
-                    applyAll(place ? { ...settings, camera: place.bounds } : settings);
-                  }}
-                  canUndo={before !== null}
-                  onUndo={() => {
-                    if (before) applyAll(before);
-                    setBefore(null);
-                  }}
-                />
-              )}
               <div className="flex flex-col gap-2">
                 <p className={SIDE_LABEL}>Jump to</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -637,9 +601,63 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                 {geology.about()}
               </div>
             </details>
+            {/* Ask the map at the menu's foot (the owner, 2026-11-24, F-306): a button that slides
+                its panel out beside the menu. */}
+            <div className="sticky bottom-0 mt-auto flex justify-center border-t bg-card/95 py-3">
+              <button
+                type="button"
+                aria-expanded={asking}
+                aria-label="Ask the map"
+                onClick={() => {
+                  setAsking((open) => !open);
+                }}
+                className="group flex flex-col items-center gap-1 text-xs font-medium"
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'flex size-12 items-center justify-center rounded-2xl border-2 bg-card shadow-sm transition-colors group-hover:bg-muted',
+                    asking && 'bg-muted',
+                  )}
+                  style={{ borderColor: SIDE_ACCENT, color: SIDE_ACCENT }}
+                >
+                  <Sparkles className="size-5" />
+                </span>
+                Ask the map
+              </button>
+            </div>
           </aside>
         )}
       </Suspense>
+      {/* The Ask the map panel, sliding out from behind the menu (F-306); over the map on a
+          phone, where the menu takes the width. */}
+      {asking && !folded && (
+        <AskMapBar
+          autoFocus
+          className="absolute inset-y-0 left-0 z-30 w-[24rem] max-w-full animate-drawer-in md:left-[22.5rem] md:z-[15]"
+          onClose={() => {
+            setAsking(false);
+          }}
+          askClaude={(text) =>
+            sendJson<MapAskAnswer>(
+              `/petroleum/ask?organization_id=${encodeURIComponent(session.organization.id)}`,
+              session.token,
+              'POST',
+              { text },
+            )
+          }
+          onApply={(settings, place) => {
+            setBefore(snapshot());
+            // A place named moves the map last, over a play's area.
+            applyAll(place ? { ...settings, camera: place.bounds } : settings);
+          }}
+          canUndo={before !== null}
+          onUndo={() => {
+            if (before) applyAll(before);
+            setBefore(null);
+          }}
+        />
+      )}
       {/* Below the zoom buttons and the distance bar, top right (F-139, F-301). */}
       <MapLayersPanel state={layers} side="right" className="md:top-28" />
       <LandPanel
