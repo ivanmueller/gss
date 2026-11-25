@@ -212,7 +212,7 @@ The oil and gas features (the map page emptied of companies, live as ivanmueller
 
 #### 1g. F-313 — The oil and gas side as its own platform, in its own repository
 
-**Status:** Proposal, waiting for the owner's decisions and Codex's review; nothing built. **Asked:** 2026-11-25: separate the two sides completely; the oil and gas side becomes its own repository, built and reviewed under the strict Claude + Codex process again, taking this repository's foundation, rules and documents; grain stays here. **The plan, its risks and the owner's ten decisions:** `docs/PETROLEUM_SPLIT_PLAN.md`. First of them: the AER's and Petrinex's terms were accepted for a personal, non-commercial side project (`docs/DECISIONS.md`, 2026-11-19 and 2026-11-20), which the new purpose is not.
+**Status:** Proposal, revision 2 after Codex's first review ("sound with changes", 2026-11-25), waiting for the owner's decisions; nothing built. **Asked:** 2026-11-25: separate the two sides completely; the oil and gas side becomes its own repository, built and reviewed under the strict Claude + Codex process again, taking this repository's foundation, rules and documents; grain stays here. **The plan, its risks and the owner's twelve decisions:** `docs/PETROLEUM_SPLIT_PLAN.md`. First of them: the AER's and Petrinex's terms were accepted for a personal, non-commercial side project (`docs/DECISIONS.md`, 2026-11-19 and 2026-11-20), which the new purpose is not.
 
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
