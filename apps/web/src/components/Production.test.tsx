@@ -105,6 +105,30 @@ describe('WellProduction', () => {
     });
   });
 
+  it("charts an injector's water and gas injected, and adds its legs' injection (F-300)", async () => {
+    const empty = { oil: null, gas: null, water: null, condensate: null };
+    const injector: ProductionAnswer = {
+      source: SOURCE,
+      months: [
+        { month: '2026-06', ...empty, waterInjected: 1548, gasInjected: null, hours: 384 },
+        { month: '2026-07', ...empty, waterInjected: 1200.5, gasInjected: 2.5, hours: 400 },
+      ],
+    };
+    mockApi({ [WELL_PATH]: () => Response.json(injector) });
+    render(<WellProduction {...props} />);
+    expect(
+      await screen.findByRole('img', { name: /^Water injected, m³ a month, Jun 2026 to Sep 2026/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /^Gas injected, 10³ m³ a month/ })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /^Oil,/ })).not.toBeInTheDocument();
+    expect(productSeries(injector, 'waterInjected').total).toBe(2748.5);
+    expect(productionTotal([injector, injector]).answer?.months[1]).toMatchObject({
+      waterInjected: 2401,
+      gasInjected: 5,
+      oil: null,
+    });
+  });
+
   it('says so when it cannot be loaded', async () => {
     mockApi({});
     render(<WellProduction {...props} />);
@@ -122,11 +146,12 @@ describe('WellProduction', () => {
     };
     const later: ProductionAnswer = { source: SOURCE, months: WELL.months.slice(1) };
     const total = productionTotal([later, earlier]);
+    const none = { waterInjected: null, gasInjected: null };
     expect(total.answer?.months).toEqual([
-      { month: '2026-06', oil: 100.25, gas: null, water: 5, condensate: null },
-      { month: '2026-07', oil: 50, gas: null, water: null, condensate: null },
-      { month: '2026-08', oil: 310.5, gas: 80, water: null, condensate: null },
-      { month: '2026-09', oil: 250, gas: 70, water: null, condensate: null },
+      { month: '2026-06', oil: 100.25, gas: null, water: 5, condensate: null, ...none },
+      { month: '2026-07', oil: 50, gas: null, water: null, condensate: null, ...none },
+      { month: '2026-08', oil: 310.5, gas: 80, water: null, condensate: null, ...none },
+      { month: '2026-09', oil: 250, gas: 70, water: null, condensate: null, ...none },
     ]);
     expect(total.starts).toEqual(['2026-08']);
     // Two legs in the same month are added; legs that start together mark nothing.

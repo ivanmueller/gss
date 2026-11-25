@@ -248,6 +248,10 @@ export function pick(formation, poolStrings, licenceCsv) {
     const raw = f.properties?.Well_Licence_Number;
     const licence = typeof raw === 'string' ? raw.trim() : '';
     if (typeof pool !== 'number' || pool < formation.poolFrom || pool > formation.poolTo) continue;
+    // One pool of one field (F-300): pool codes repeat from field to field.
+    if (formation.fieldCode !== undefined && f.properties?.Field_Code !== formation.fieldCode) {
+      continue;
+    }
     if (!/^[0-9A-Z]{1,9}$/.test(licence)) continue;
     inPools += 1;
     licences.add(licence);
@@ -386,7 +390,13 @@ async function main(argv) {
   );
 }
 
-main(process.argv.slice(2)).catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+// Run as a script, not when a test imports it.
+if (
+  process.argv[1] &&
+  import.meta.url.endsWith(process.argv[1].replaceAll('\\', '/').split('/').pop() ?? '\0')
+) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

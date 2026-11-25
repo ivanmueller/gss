@@ -86,24 +86,47 @@ export function petrinexDecimal(thousandths: number): string {
   return `${String(whole)}.${String(thousandths - whole * 1000).padStart(3, '0')}`;
 }
 
+/**
+ * What went into a well in one month (F-300): the lines whose "to" is the well (FromToIDType WI)
+ * with activity INJ. Water of every kind (WATER, FSHWTR fresh, BRKWTR brackish) in thousandths
+ * of m3, gas (GAS) in thousandths of e3m3; hours as for production.
+ */
+export interface PetrinexWellInjection {
+  water: number | null;
+  gas: number | null;
+  hours: number | null;
+}
+
+const INJECTED: Record<string, 'water' | 'gas'> = {
+  WATER: 'water',
+  FSHWTR: 'water',
+  BRKWTR: 'water',
+  GAS: 'gas',
+};
+
 export interface PetrinexMonthResult {
   /** The production of the wells asked for, by UWI. */
   wells: Map<string, PetrinexWellMonth>;
-  /** Production lines of those wells left out as unreadable (a volume that is not a number). */
+  /** The injection of the wells asked for it, by UWI (F-300). */
+  injection: Map<string, PetrinexWellInjection>;
+  /** Lines of those wells left out as unreadable (a volume that is not a number). */
   skipped: number;
 }
 
 /**
  * Reads one month's file, line by line (the first is the header), and keeps the production of
- * the wells in `uwis`. A line of another month than `month` ("2026-08") is an error: the file
- * is not the one asked for.
+ * the wells in `uwis` and the injection of those in `injectUwis` (F-300). A line of another month
+ * than `month` ("2026-08") is an error: the file is not the one asked for.
  */
 export function petrinexMonth(
   lines: Iterable<string>,
   month: string,
   uwis: ReadonlySet<string>,
+  injectUwis: ReadonlySet<string> = new Set(),
 ): PetrinexMonthResult {
   const wells = new Map<string, PetrinexWellMonth>();
+  const injection = new Map<string, PetrinexWellInjection>();
+  const injecting = injectUwis.size > 0;
   let at: Record<Column, number> | null = null;
   let skipped = 0;
   for (const raw of lines) {
@@ -122,15 +145,31 @@ export function petrinexMonth(
       at = found;
       continue;
     }
-    // Most lines are not a well's production: a cheap look before splitting the line.
-    if (!line.includes(',PROD,')) continue;
+    // Most lines are not a well's production or injection: a cheap look before splitting.
+    if (!line.includes(',PROD,') && !(injecting && line.includes(',INJ,'))) continue;
     const fields = csvFields(line);
     const get = (c: Column) => (fields[at?.[c] ?? -1] ?? '').trim();
-    if (get('ActivityID') !== 'PROD' || get('FromToIDType') !== 'WI') continue;
+    const activity = get('ActivityID');
+    if ((activity !== 'PROD' && activity !== 'INJ') || get('FromToIDType') !== 'WI') continue;
     const uwi = petrinexWellUwi(get('FromToIDIdentifier'));
-    if (uwi === null || !uwis.has(uwi)) continue;
+    if (uwi === null || !(activity === 'PROD' ? uwis : injectUwis).has(uwi)) continue;
     if (get('ProductionMonth') !== month) {
       throw new Error(`The file holds ${get('ProductionMonth')}, not ${month}.`);
+    }
+    const hours = /^\d{1,3}$/.test(get('Hours')) ? Number(get('Hours')) : null;
+    if (activity === 'INJ') {
+      const fluid = INJECTED[get('ProductID')];
+      if (!fluid) continue;
+      const volume = petrinexThousandths(get('Volume'));
+      if (volume === null) {
+        skipped += 1;
+        continue;
+      }
+      const well = injection.get(uwi) ?? { water: null, gas: null, hours: null };
+      well[fluid] = (well[fluid] ?? 0) + volume;
+      if (hours !== null && hours <= 744) well.hours = Math.max(well.hours ?? 0, hours);
+      injection.set(uwi, well);
+      continue;
     }
     const product = PRODUCTS[get('ProductID')];
     if (!product) continue;
@@ -147,13 +186,12 @@ export function petrinexMonth(
       hours: null,
     };
     well[product] = (well[product] ?? 0) + volume;
-    const hours = /^\d{1,3}$/.test(get('Hours')) ? Number(get('Hours')) : null;
     // Hours come with one product or several: the well's are the most any of them reports.
     if (hours !== null && hours <= 744) well.hours = Math.max(well.hours ?? 0, hours);
     wells.set(uwi, well);
   }
   if (at === null) throw new Error('The file is empty.');
-  return { wells, skipped };
+  return { wells, injection, skipped };
 }
 
 /** The months from `first` to `last`, both "YYYY-MM", in order. */

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSt37Wells,
   ST37_FORMATIONS,
+  ST37_WATERFLOOD_KEYS,
   st37CsvFields,
   st37Date,
   st37FormationLicences,
@@ -351,6 +352,14 @@ describe('st37FormationLicences', () => {
 
   it('reads quoted fields', () => {
     expect(st37CsvFields('a,"b, ""c""",d')).toEqual(['a', 'b, "c"', 'd']);
+  });
+
+  it('takes no licence for one pool, which no licence names (F-300)', () => {
+    const pool = ST37_FORMATIONS.stettler_nisku_a;
+    if (!pool) throw new Error('no Stettler pool');
+    expect(st37FormationLicences(csv, pool).size).toBe(0);
+    expect(pool).toMatchObject({ fieldCode: 866, poolFrom: 696001, poolTo: 696001 });
+    expect(ST37_WATERFLOOD_KEYS).toEqual(['stettler_nisku_a']);
   });
 });
 

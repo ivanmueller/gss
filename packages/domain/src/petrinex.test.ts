@@ -98,6 +98,42 @@ describe('petrinexMonth', () => {
     expect(skipped).toBe(1);
   });
 
+  it("keeps a waterflood well's injection apart, water of every kind added up (F-300)", () => {
+    const INJECTOR = '100082203820W400';
+    const { wells, injection, skipped } = petrinexMonth(
+      [
+        HEADER,
+        line('INJ', 'WATER', 'WI', INJECTOR, '800.5', '720'),
+        line('INJ', 'FSHWTR', 'WI', INJECTOR, '10'),
+        line('INJ', 'BRKWTR', 'WI', INJECTOR, '2.25', '744'),
+        line('INJ', 'GAS', 'WI', INJECTOR, '1.5'),
+        // A fluid not kept, an unreadable volume, a well not asked for its injection.
+        line('INJ', 'CO2', 'WI', INJECTOR, '7'),
+        line('INJ', 'WATER', 'WI', INJECTOR, 'n/a'),
+        line('INJ', 'WATER', 'WI', WELL, '999'),
+        line('PROD', 'OIL', 'WI', WELL, '310.5', '744'),
+      ],
+      '2026-08',
+      uwis,
+      new Set(['00/08-22-038-20W4/0']),
+    );
+    expect([...injection.entries()]).toEqual([
+      ['00/08-22-038-20W4/0', { water: 812750, gas: 1500, hours: 744 }],
+    ]);
+    // The production is read as before; the injector is not a producer asked for.
+    expect([...wells.keys()]).toEqual([UWI]);
+    expect(skipped).toBe(1);
+  });
+
+  it('reads no injection when no well is asked for it', () => {
+    const { injection } = petrinexMonth(
+      [HEADER, line('INJ', 'WATER', 'WI', WELL, '999')],
+      '2026-08',
+      uwis,
+    );
+    expect(injection.size).toBe(0);
+  });
+
   it('refuses a file of another month, a file without its columns and an empty file', () => {
     expect(() =>
       petrinexMonth([HEADER, line('PROD', 'OIL', 'WI', WELL, '1')], '2026-07', uwis),

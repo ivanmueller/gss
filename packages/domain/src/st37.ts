@@ -627,8 +627,18 @@ export interface St37Formation {
   /** The pool codes of the formation, first and last, as ST37 writes them (numbers). */
   poolFrom: number;
   poolTo: number;
-  /** The formation as Petrinex's Well Licence file names it. */
-  petrinexFormation: string;
+  /**
+   * For one pool of one field (a waterflood, F-300): the field's code, as pool codes repeat from
+   * field to field. Absent for a formation, whose pools are taken in every field.
+   */
+  fieldCode?: number;
+  /**
+   * The formation as Petrinex's Well Licence file names it; null for one pool, whose wells are
+   * those of its production strings only (a licence names a formation, never a pool).
+   */
+  petrinexFormation: string | null;
+  /** A waterflooded pool: Load Petrinex production keeps its wells' injection too (F-300). */
+  waterflood?: boolean;
 }
 
 export const ST37_FORMATIONS: Record<string, St37Formation> = {
@@ -640,7 +650,23 @@ export const ST37_FORMATIONS: Record<string, St37Formation> = {
     poolTo: 728899,
     petrinexFormation: 'DUVERNAY FM',
   },
+  // F-300's test field, chosen 2026-11-25: Stettler, D-2 A pool (Nisku), field 866 and pool
+  // 696001 on ST103 (read 2026-11-25); the AER's waterflood scheme 5695F, active.
+  stettler_nisku_a: {
+    key: 'stettler_nisku_a',
+    name: 'Stettler D-2 A pool',
+    poolFrom: 696001,
+    poolTo: 696001,
+    fieldCode: 866,
+    petrinexFormation: null,
+    waterflood: true,
+  },
 };
+
+/** The keys of the waterflooded pools, whose wells' injection is loaded (F-300). */
+export const ST37_WATERFLOOD_KEYS: readonly string[] = Object.values(ST37_FORMATIONS)
+  .filter((f) => f.waterflood === true)
+  .map((f) => f.key);
 
 /** What a licence planned, from Petrinex's Well Licence file. */
 export interface St37Licence {
@@ -710,12 +736,15 @@ export function st37FormationLicences(
   const cProjected = column('ProjectedFormation');
   const cDepth = column('ProjectedTotalDepth');
   const out = new Map<string, St37Licence>();
+  const aimed = formation.petrinexFormation;
+  // One pool: no licence names it.
+  if (aimed === null) return out;
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i];
     // A cheap test first: the file has half a million lines.
-    if (!line?.includes(formation.petrinexFormation)) continue;
+    if (!line?.includes(aimed)) continue;
     const f = st37CsvFields(line);
-    if (f[cType] !== 'WELL' || (f[cProjected] ?? '').trim() !== formation.petrinexFormation) {
+    if (f[cType] !== 'WELL' || (f[cProjected] ?? '').trim() !== aimed) {
       continue;
     }
     if ((f[cStatus] ?? '').trim().toLowerCase() === 'cancelled') continue;
