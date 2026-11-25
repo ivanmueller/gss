@@ -210,6 +210,10 @@ As everywhere: nothing Claude drafts is saved until a person clicks **Verify**, 
 
 The oil and gas features (the map page emptied of companies, live as ivanmueller/gss#260; its own database, `petroleum-staging`, connected as ivanmueller/gss#263 and #264; its own layer system with a Settings button, live as ivanmueller/gss#268, merged by the owner without Codex's approval on 2026-11-19, what was left open being F-248 in `docs/FEATURES_OIL_GAS.md`; then Alberta's public land, agreement and well data) have their own list: `docs/FEATURES_OIL_GAS.md`, with the owner's answers. Asked 2026-11-18.
 
+#### 1g. F-313 — The oil and gas side as its own platform, in its own repository
+
+**Status:** Proposal, waiting for the owner's decisions and Codex's review; nothing built. **Asked:** 2026-11-25: separate the two sides completely; the oil and gas side becomes its own repository, built and reviewed under the strict Claude + Codex process again, taking this repository's foundation, rules and documents; grain stays here. **The plan, its risks and the owner's ten decisions:** `docs/PETROLEUM_SPLIT_PLAN.md`. First of them: the AER's and Petrinex's terms were accepted for a personal, non-commercial side project (`docs/DECISIONS.md`, 2026-11-19 and 2026-11-20), which the new purpose is not.
+
 #### 2. Paid-plan follow-ups (the Workers paid plan, 2026-11-09)
 
 Work shaped by the free plan's limit of about 10 ms of computing per request, to loosen or simplify now that the plan is paid. Cloudflare's paid limits were read from its published page and recorded in `docs/DECISIONS.md` on 2026-11-10: 30 seconds of computing per request by default (the Worker sets no lower limit), 30 seconds per run of the 2-minute job, waiting on Anthropic, Telnyx or the database not counted, memory still 128 MB. Each change keeps its tests; the size checks stay (they guard against abuse, not only the plan).
