@@ -11,10 +11,13 @@ import { ArrowUp, LoaderCircle, Sparkles, Undo2, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { cn } from '../lib/utils';
+import { SIDE_ACCENT } from './MapSide';
 import { Button } from './ui/button';
 
 /**
- * Ask the map (F-254 part 1): a bar at the top of the oil and gas map. A request typed in
+ * Ask the map (F-254 part 1): since F-306 a panel that slides out beside the side menu, opened
+ * by the button at the menu's foot (the owner, 2026-11-24): a heading, example requests as
+ * cards, the answer, and the box at the bottom. A request typed in
  * plain words is read into the map's settings (MapSettings, packages/domain), which the page
  * applies as if clicked; the bar then names what it set, what it could not do, and offers Undo.
  * Claude reads each request through the Worker (part 2, POST /petroleum/ask); when Claude cannot
@@ -46,6 +49,7 @@ export function AskMapBar({
   onUndo,
   className,
   autoFocus = false,
+  onClose,
 }: {
   /** Claude's reading of a request, through the Worker; it throws when Claude cannot answer. */
   askClaude: (text: string) => Promise<MapAskAnswer>;
@@ -56,10 +60,11 @@ export function AskMapBar({
   className?: string;
   /** Ready to type as soon as it shows: opened by its button in the side card (F-305). */
   autoFocus?: boolean;
+  /** Closes the panel (F-306). */
+  onClose?: () => void;
 }) {
   const [text, setText] = useState('');
   const [result, setResult] = useState<Result | null>(null);
-  const [focused, setFocused] = useState(false);
   const [asking, setAsking] = useState(false);
   // Only the latest request's answer is applied.
   const latest = useRef(0);
@@ -92,125 +97,144 @@ export function AskMapBar({
     setResult({ chips, reasons, fallback });
   };
 
-  const showExamples = focused && text.trim() === '' && result === null;
+  // The examples while nothing is typed or answered (F-306: always, not only on focus).
+  const showExamples = text.trim() === '' && result === null && !asking;
 
   return (
-    // The box first, then the examples or the answer below it.
-    <div className={cn('pointer-events-none flex flex-col items-stretch gap-2', className)}>
+    <section
+      aria-label="Ask the map panel"
+      className={cn('flex flex-col border-r bg-card/95 shadow-md', className)}
+    >
+      <div className="flex items-start gap-2 px-5 pt-5">
+        <div className="grow">
+          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+            <Sparkles aria-hidden="true" className="size-5" style={{ color: SIDE_ACCENT }} />
+            Ask the map
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Describe the map you want: wells, land, rigs, plays or a place.
+          </p>
+        </div>
+        {onClose && (
+          <Button size="icon-sm" variant="ghost" aria-label="Close Ask the map" onClick={onClose}>
+            <X aria-hidden="true" />
+          </Button>
+        )}
+      </div>
+      <div className="flex min-h-0 grow flex-col gap-3 overflow-y-auto px-5 py-4">
+        {showExamples && (
+          <div aria-label="Examples" className="grid grid-cols-2 gap-2">
+            {ASK_EXAMPLES.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => {
+                  setText(example);
+                  void ask(example);
+                }}
+                className="rounded-xl bg-muted px-3 py-2.5 text-left text-[0.8125rem] leading-snug hover:bg-accent"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        )}
+        {asking && <p className="text-sm text-muted-foreground">Reading your request…</p>}
+        {result && (
+          <div role="status" className="flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {result.chips.map((chip) => (
+                <span key={chip} className="rounded-full border bg-muted px-2 py-0.5">
+                  {chip}
+                </span>
+              ))}
+            </div>
+            {result.reasons.map((reason) => (
+              <p key={reason} className="text-muted-foreground">
+                {MAP_ASK_REASON_TEXT[reason]}
+              </p>
+            ))}
+            {result.fallback && (
+              <p className="text-muted-foreground">
+                Claude could not answer, so the bar read the request by its own word matching, which
+                knows set phrasings only.
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              {canUndo && result.chips.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onUndo();
+                    setResult(null);
+                  }}
+                >
+                  <Undo2 aria-hidden="true" />
+                  Undo
+                </Button>
+              )}
+              <span className="grow" />
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Close"
+                onClick={() => {
+                  setResult(null);
+                }}
+              >
+                <X aria-hidden="true" />
+                New request
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
       <form
         role="search"
         aria-label="Ask the map"
-        className="pointer-events-auto flex items-center gap-2 rounded-full border bg-card/95 py-1 pr-1 pl-3.5 shadow-md"
+        className="m-4 mt-0 flex flex-col gap-1 rounded-2xl border bg-card p-3 shadow-sm"
         onSubmit={(event) => {
           event.preventDefault();
           void ask(text);
         }}
       >
-        <Sparkles aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-        <input
-          type="text"
+        <textarea
           aria-label="Ask the map"
           // Opened on purpose by its button, so the cursor goes straight into the box (F-305).
           autoFocus={autoFocus}
           maxLength={500}
-          placeholder="Ask the map, e.g. “Duvernay wells drilled since 2020”"
-          className="h-8 min-w-0 grow bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          rows={2}
+          placeholder="Ask for a map, e.g. “Duvernay wells drilled since 2020”"
+          className="min-h-12 w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           value={text}
           onChange={(event) => {
             setText(event.target.value);
           }}
-          onFocus={() => {
-            setFocused(true);
-          }}
-          onBlur={() => {
-            setFocused(false);
+          onKeyDown={(event) => {
+            // Enter sends; Shift+Enter starts a new line.
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              void ask(text);
+            }
           }}
         />
-        <Button
-          type="submit"
-          size="icon-sm"
-          className="rounded-full"
-          aria-label={asking ? 'Asking Claude' : 'Ask'}
-          disabled={text.trim() === '' || asking}
-        >
-          {asking ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" />
-          ) : (
-            <ArrowUp aria-hidden="true" />
-          )}
-        </Button>
-      </form>
-      {result && (
-        <div
-          role="status"
-          className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-card border bg-card/95 px-3 py-2 text-xs shadow-xs"
-        >
-          {result.chips.map((chip) => (
-            <span key={chip} className="rounded-full border bg-muted px-2 py-0.5">
-              {chip}
-            </span>
-          ))}
-          {result.reasons.map((reason) => (
-            <span key={reason} className="text-muted-foreground">
-              {MAP_ASK_REASON_TEXT[reason]}
-            </span>
-          ))}
-          {result.fallback && (
-            <span className="text-muted-foreground">
-              Claude could not answer, so the bar read the request by its own word matching, which
-              knows set phrasings only.
-            </span>
-          )}
-          <span className="grow" />
-          {canUndo && result.chips.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                onUndo();
-                setResult(null);
-              }}
-            >
-              <Undo2 aria-hidden="true" />
-              Undo
-            </Button>
-          )}
+        <div className="flex justify-end">
           <Button
+            type="submit"
             size="icon-sm"
-            variant="ghost"
-            aria-label="Close"
-            onClick={() => {
-              setResult(null);
-            }}
+            className="rounded-full"
+            aria-label={asking ? 'Asking Claude' : 'Ask'}
+            disabled={text.trim() === '' || asking}
           >
-            <X aria-hidden="true" />
+            {asking ? (
+              <LoaderCircle aria-hidden="true" className="animate-spin" />
+            ) : (
+              <ArrowUp aria-hidden="true" />
+            )}
           </Button>
         </div>
-      )}
-      {showExamples && (
-        <div
-          aria-label="Examples"
-          className="pointer-events-auto flex flex-wrap gap-1.5 rounded-card border bg-card/95 px-3 py-2 text-xs shadow-xs"
-        >
-          {ASK_EXAMPLES.map((example) => (
-            <button
-              key={example}
-              type="button"
-              // Before the box loses focus, so the list is still there to be clicked.
-              onMouseDown={(event) => {
-                event.preventDefault();
-              }}
-              onClick={() => {
-                setText(example);
-                void ask(example);
-              }}
-              className="rounded-full border bg-card px-2 py-0.5 hover:bg-muted"
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+      </form>
+    </section>
   );
 }

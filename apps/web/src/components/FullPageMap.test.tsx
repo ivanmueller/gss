@@ -429,7 +429,13 @@ describe('Ask the map (F-254)', () => {
     // Not on the map until asked for.
     expect(screen.queryByRole('textbox', { name: 'Ask the map' })).toBeNull();
     const box = await openAsk();
-    expect(within(card).getByRole('search', { name: 'Ask the map' })).toBeInTheDocument();
+    // A panel beside the menu, opened by the button at the menu's foot (F-306).
+    const panel = screen.getByRole('region', { name: 'Ask the map panel' });
+    expect(within(panel).getByRole('search', { name: 'Ask the map' })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Ask the map' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
     await userEvent.type(box, 'Cardium outline on satellite{Enter}');
     expect(await screen.findByText('Stand-in map: satellite, 0 pins')).toBeInTheDocument();
     expect(await screen.findByText('Outlines: cardium', { selector: 'p' })).toBeInTheDocument();
@@ -449,6 +455,9 @@ describe('Ask the map (F-254)', () => {
     expect(await screen.findByText('Stand-in map: map, 0 pins')).toBeInTheDocument();
     expect(await screen.findByText('Outlines: duvernay')).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    // The panel's close button slides it away; the menu's button brings it back.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Close Ask the map' }));
+    expect(screen.queryByRole('region', { name: 'Ask the map panel' })).toBeNull();
   });
 
   it('names the place it moved to (F-254 part 3)', async () => {
