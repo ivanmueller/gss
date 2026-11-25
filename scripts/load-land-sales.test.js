@@ -152,7 +152,22 @@ describe('load-land-sales.js', () => {
       sql,
       /values \('https:\/\/content2\.energy\.alberta\.ca\/[^']+', '2026-11-04', '2026-12-02', -117, 53, -115, 55, 2, 3, '\{\}'::jsonb\);/,
     );
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
+    // The shape as whole numbers, one ring needing no counts (F-310).
+    assert.ok(
+      sql.includes(
+        '"(-115.975,54.0145),(-116,54)","{-11600000,5400000,-11597500,5400000,-11597500,5401450,-11600000,5401450}","{}"',
+      ),
+    );
+    // The old copy's size is taken before it is emptied and left out of the guard: its files
+    // are freed only at the commit (F-310).
+    assert.match(
+      sql,
+      /set_config\('petro\.load_freed', pg_total_relation_size\('petro\.land_sale_parcels'\)::text, true\);\ntruncate petro\.land_sale_parcels;/,
+    );
+    assert.match(
+      sql,
+      /pg_database_size\(current_database\(\)\) - current_setting\('petro\.load_freed'\)::bigint \+ 1000 > 471859200/,
+    );
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
     assert.match(
       out.stderr,

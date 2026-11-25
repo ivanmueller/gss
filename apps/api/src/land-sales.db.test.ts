@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { type LandShape, packLandShape } from '@grain/domain';
 import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 
@@ -23,7 +24,7 @@ const member = () => ({
   requestId: crypto.randomUUID(),
 });
 
-const square = (west: number, south: number) => ({
+const square = (west: number, south: number): { shape: LandShape; bounds: string } => ({
   shape: [
     [
       [
@@ -66,19 +67,20 @@ describe('land sales as petro_api', () => {
       await admin`
         insert into petro.land_sale_parcels
           (sale_date, contract_no, contract_type, region, hectares, zone, land, status, bonus,
-           dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, shape)
+           dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, shape,
+           path)
         values
           ('1990-02-07', 'A0001', 'LEASE', 'PLAINS', 256, ${zone}, '61212624', 'ACCEPTED',
            25600.10, 100.00, 'EXAMPLE LAND LTD. 100%', 'SHA010301 SHA010401', 'D00004',
-           ${admin.json(TRACTS)}, ${a.bounds}::box, ${admin.json(a.shape)}),
+           ${admin.json(TRACTS)}, ${a.bounds}::box, ${admin.json(a.shape)}, null),
           ('1990-05-09', 'A0002', 'LEASE', 'PLAINS', 64, ${zone}, '61212625SW', 'ACCEPTED',
            19200.20, 300.00, 'SAMPLE RESOURCES INC. 100%', null, null, null, ${b.bounds}::box,
-           ${admin.json(b.shape)}),
+           null, ${packLandShape(b.shape)?.path ?? []}),
           ('1990-05-09', 'A0003', 'LICENCE', 'NORTHERN', 128, ${zone}, '61212626', 'NO OFFERS',
-           null, null, null, null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}),
+           null, null, null, null, null, null, ${far.bounds}::box, ${admin.json(far.shape)}, null),
           ('1990-05-09', 'A0004', 'LEASE', 'PLAINS', 64, 'PETROLEUM AND NATURAL GAS IN THE OTHER FM',
            '61212627', 'ACCEPTED', 1, 1, null, null, null, null, ${a.bounds}::box,
-           ${admin.json(a.shape)})`;
+           ${admin.json(a.shape)}, null)`;
       // Land held today (F-276): the lease issued from A0001 of the February sale, in two
       // tracts, its term starting the day after the sale. Beside it, agreements that are not
       // it: a licence with the same number's end, a lease from the month's other sale, a lease
@@ -119,8 +121,16 @@ describe('land sales as petro_api', () => {
         reversionZones: 'D00004',
         shape: a.shape,
       });
-      // A parcel with no codes has none (F-265).
+      // A parcel with no codes has none (F-265). Kept as whole numbers (F-310), its shape comes
+      // back to five decimals, its ring closed.
       expect(inView.parcels[0]).toMatchObject({ restrictions: null, reversionZones: null });
+      expect(inView.parcels[0]?.shape).toEqual(
+        b.shape.map((polygon) =>
+          polygon.map((ring) =>
+            ring.map(([x, y]) => [Math.round(x * 1e5) / 1e5, Math.round(y * 1e5) / 1e5]),
+          ),
+        ),
+      );
       // Its rights tract by tract, and the agreement issued from it with its holder (F-276):
       // found by the database, once, whatever land the page has loaded.
       expect(inView.parcels[1]).toMatchObject({

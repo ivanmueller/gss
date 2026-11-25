@@ -1,4 +1,4 @@
-import type { LandLayerKey, LandShape } from '@grain/domain';
+import { type LandLayerKey, type LandShape, storedLandShape } from '@grain/domain';
 import type postgres from 'postgres';
 
 import type { PetroleumContext } from './petroleum-db';
@@ -165,13 +165,17 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                   term_date: string | null;
                   continuation_date: string | null;
                   expiry_text: string | null;
-                  shape: LandShape;
+                  shape: LandShape | null;
+                  path: number[] | null;
+                  rings: number[] | null;
                 }[]
               >`
                 select id::text as id, rights, agreement_type, agreement_number, tract,
                        agreement_group, status, vintage, holder, parties, zone, area_ha,
                        term_date::text as term_date,
-                       continuation_date::text as continuation_date, expiry_text, shape
+                       continuation_date::text as continuation_date, expiry_text, shape,
+                       -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
+                       to_jsonb(path) as path, to_jsonb(rings) as rings
                 from petro.land_agreements
                 where bounds && ${view}
                   and (${zones === null}::boolean
@@ -190,11 +194,15 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                   holder: string | null;
                   expiry_date: string | null;
                   zone: string | null;
-                  shape: LandShape;
+                  shape: LandShape | null;
+                  path: number[] | null;
+                  rings: number[] | null;
                 }[]
               >`
                 select id::text as id, offset_type, offset_number, tract, holder,
-                       expiry_date::text as expiry_date, zone, shape
+                       expiry_date::text as expiry_date, zone, shape,
+                       -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
+                       to_jsonb(path) as path, to_jsonb(rings) as rings
                 from petro.land_offsets
                 where bounds && ${view}
                 order by id
@@ -209,11 +217,15 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
                   national_park: string | null;
                   reserve_number: string | null;
                   reserve_name: string | null;
-                  shape: LandShape;
+                  shape: LandShape | null;
+                  path: number[] | null;
+                  rings: number[] | null;
                 }[]
               >`
                 select id::text as id, substances, national_park, reserve_number, reserve_name,
-                       shape
+                       shape,
+                       -- As JSON: without fetch_types (the Worker's connection) an array comes as text.
+                       to_jsonb(path) as path, to_jsonb(rings) as rings
                 from petro.land_freehold
                 where bounds && ${view}
                 order by id
@@ -247,7 +259,7 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
             termDate: a.term_date,
             continuationDate: a.continuation_date,
             expiryText: a.expiry_text,
-            shape: a.shape,
+            shape: storedLandShape(a),
           })),
           offsets: offsets.map((o) => ({
             id: o.id,
@@ -257,7 +269,7 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
             holder: o.holder,
             expiryDate: o.expiry_date,
             zone: o.zone,
-            shape: o.shape,
+            shape: storedLandShape(o),
           })),
           freehold: freehold.map((f) => ({
             id: f.id,
@@ -265,7 +277,7 @@ export function landQueries(sql: postgres.Sql): LandDatabase {
             nationalPark: f.national_park,
             reserveNumber: f.reserve_number,
             reserveName: f.reserve_name,
-            shape: f.shape,
+            shape: storedLandShape(f),
           })),
         };
       });

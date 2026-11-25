@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { landAgreement, landDate, landFreehold, landOffset, landRows, landShape } from './land';
+import {
+  landAgreement,
+  landDate,
+  landFreehold,
+  landOffset,
+  landRows,
+  landShape,
+  packLandShape,
+  storedLandShape,
+  unpackLandShape,
+} from './land';
 
 // Made-up land only.
 const square = (west: number, south: number) => [
@@ -151,5 +161,78 @@ describe('landRows', () => {
     ]);
     expect(read.rows).toHaveLength(1);
     expect(read.skipped).toBe(1);
+  });
+});
+
+describe('packLandShape and unpackLandShape (F-310)', () => {
+  const one = landShape(polygon)?.shape ?? [];
+  const many =
+    landShape({
+      type: 'MultiPolygon',
+      coordinates: [[square(-116.12345, 54), square(-116.12, 54.002)], [square(-115, 53.00001)]],
+    })?.shape ?? [];
+
+  it('keeps one ring as its points only, without the closing point and with no counts', () => {
+    expect(packLandShape(one)).toEqual({
+      path: [-11612346, 5410000, -11611346, 5410000, -11611346, 5411000, -11612346, 5411000],
+      rings: [],
+    });
+  });
+
+  it('gives back every shape exactly, each ring closed again', () => {
+    for (const shape of [one, many]) {
+      const packed = packLandShape(shape);
+      expect(packed).not.toBeNull();
+      expect(unpackLandShape(packed?.path ?? [], packed?.rings ?? [])).toEqual(shape);
+    }
+    expect(packLandShape(many)?.rings).toEqual([2, 4, 4, 1, 4]);
+  });
+
+  it('closes a ring that came open', () => {
+    const open: [number, number][][][] = [
+      [
+        [
+          [-116, 54],
+          [-115.9, 54],
+          [-115.9, 54.1],
+        ],
+      ],
+    ];
+    expect(unpackLandShape(packLandShape(open)?.path ?? [], [])).toEqual([
+      [
+        [
+          [-116, 54],
+          [-115.9, 54],
+          [-115.9, 54.1],
+          [-116, 54],
+        ],
+      ],
+    ]);
+  });
+
+  it('refuses a ring of fewer than three points, and counts that do not match the points', () => {
+    expect(
+      packLandShape([
+        [
+          [
+            [-116, 54],
+            [-115.9, 54],
+            [-116, 54],
+          ],
+        ],
+      ]),
+    ).toBeNull();
+    expect(packLandShape([])).toBeNull();
+    expect(unpackLandShape([1, 2, 3], [])).toBeNull();
+    expect(unpackLandShape([1, 2, 3, 4, 5, 6], [1, 4])).toBeNull();
+    expect(unpackLandShape([1, 2, 3, 4, 5, 6, 7, 8], [1, 3])).toBeNull();
+    expect(unpackLandShape([1, 2, 3, 4, 5, 6], [0])).toBeNull();
+    expect(unpackLandShape([], [])).toBeNull();
+  });
+
+  it('reads a row in either form', () => {
+    const packed = packLandShape(one);
+    expect(storedLandShape({ shape: null, path: packed?.path ?? null, rings: [] })).toEqual(one);
+    expect(storedLandShape({ shape: one, path: null, rings: [] })).toEqual(one);
   });
 });
