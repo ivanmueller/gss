@@ -282,7 +282,8 @@ Phase 6 (trade lifecycle, contracts, shipments, invoices; GT-060 to GT-067) wait
 
 Built and deployed, not yet checked by the owner. Details and click paths are in `docs/HANDOFF.md`, "Next exact task".
 
-- **F-302 part 3, land by operator** (oil and gas map, once merged): the Operator box → a company that holds land; **Land today** and **Land sales** show only its land and sales (their Holder and Buyer boxes filled); with **Colour by → Operator** and Land today on, its agreements in its colour.
+- **F-305, menu and legend at the page's edges, Ask the map in the menu** (oil and gas map, once merged): the menu runs from the page's left edge top to bottom; the legend sits in the bottom-right corner; no bar over the map: **Ask the map** beside **Layers** opens the box in the menu.
+- **F-302 part 3, land by operator** (oil and gas map, live since #370): the Operator box → a company that holds land; **Land today** and **Land sales** show only its land and sales (their Holder and Buyer boxes filled); with **Colour by → Operator** and Land today on, its agreements in its colour.
 - **F-302 part 2, colour by operator** (oil and gas map, live since #369): the side card → **Colour by** → **Operator**; zoom in on the Duvernay with wells (and facilities or pipelines) on: the ten largest operators in view in their own colours, the rest grey, the ten in the legend; **Status** brings the usual colours back.
 - **F-302 part 1, one Operator box** (oil and gas map, live since #368): `map.torvenco.com` → the side card → **Operator** → type "kingston" and pick from the list; the wells, facilities and pipelines of that operator only, in what is loaded (switch Facilities and Pipelines on to see theirs); × shows every operator again.
 - **F-303, land sales by year or dates** (oil and gas map, live since #367): **Land sales** → under When, pick a **Year**, or type **From** and **To** dates; the parcels and the counts follow.

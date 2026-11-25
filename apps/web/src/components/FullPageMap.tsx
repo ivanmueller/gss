@@ -5,7 +5,7 @@ import {
   type MapAskAnswer,
   type MapSettings,
 } from '@grain/domain';
-import { CircleCheck, Minus, Plus, Settings, TriangleAlert, Waves } from 'lucide-react';
+import { CircleCheck, Minus, Plus, Settings, Sparkles, TriangleAlert, Waves } from 'lucide-react';
 import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 
 import { sendJson } from '../lib/api';
@@ -203,6 +203,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
   // Colour by operator (F-302 part 2, the owner, 2026-11-24): the ten operators with the most
   // wells, facilities and pipeline segments in view, a colour each on every layer, the rest grey.
   const [colourBy, setColourBy] = useState<'status' | 'operator'>('status');
+  // The Ask the map box, shown in the card when its button is pressed (F-305).
+  const [asking, setAsking] = useState(false);
   const byOperator = useMemo(
     () =>
       colourBy === 'operator'
@@ -329,7 +331,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                       : wells.legend(tone),
     }));
   // Beside the card, or at the map's edge while the card is folded.
-  const beside = folded ? 'left-3' : 'left-3 md:left-[24rem]';
+  const beside = folded ? 'left-3' : 'left-3 md:left-[23.25rem]';
   // A clicked feature's panel open on the right (St37Panel, LandPanel, GridPanel and the rest).
   const rightPanel = [kept, landPick, grid.pick, facilityPicked, pipelineOpen, rigPicked].some(
     (open) => open !== null,
@@ -340,7 +342,7 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
       className={cn(
         'relative h-full overflow-hidden bg-muted',
         // The map's bottom-left corner (the attribution "i") clear of the open card (F-301).
-        !folded && 'md:[--map-left-inset:24rem]',
+        !folded && 'md:[--map-left-inset:22.5rem]',
       )}
     >
       <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Loading map…</p>}>
@@ -427,7 +429,8 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         ) : (
           <aside
             aria-label="Map menu"
-            className="absolute top-3 bottom-3 left-3 z-20 flex w-[22.5rem] max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 shadow-md"
+            // Flush with the page's left edge, top and bottom (the owner, 2026-11-24, F-305).
+            className="absolute inset-y-0 left-0 z-20 flex w-[22.5rem] max-w-full flex-col overflow-y-auto border-r bg-card/95 shadow-md"
           >
             <div className="flex flex-col gap-3 px-4 pt-4 pb-4">
               <div className="flex items-center gap-2">
@@ -488,6 +491,19 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <MapLayersButton state={layers} />
+                {/* Ask the map (F-254) in the card, behind its button, so it is not front and
+                    centre on the map (the owner, 2026-11-24, F-305). */}
+                <Button
+                  variant={asking ? 'secondary' : 'outline'}
+                  size="sm"
+                  aria-expanded={asking}
+                  onClick={() => {
+                    setAsking((open) => !open);
+                  }}
+                >
+                  <Sparkles aria-hidden="true" />
+                  Ask the map
+                </Button>
                 <SegmentedControl
                   label="Map style"
                   options={(Object.keys(BASEMAPS) as Basemap[]).map((key) => ({
@@ -498,6 +514,29 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
                   onChange={setBasemap}
                 />
               </div>
+              {asking && (
+                <AskMapBar
+                  autoFocus
+                  askClaude={(text) =>
+                    sendJson<MapAskAnswer>(
+                      `/petroleum/ask?organization_id=${encodeURIComponent(session.organization.id)}`,
+                      session.token,
+                      'POST',
+                      { text },
+                    )
+                  }
+                  onApply={(settings, place) => {
+                    setBefore(snapshot());
+                    // A place named moves the map last, over a play's area.
+                    applyAll(place ? { ...settings, camera: place.bounds } : settings);
+                  }}
+                  canUndo={before !== null}
+                  onUndo={() => {
+                    if (before) applyAll(before);
+                    setBefore(null);
+                  }}
+                />
+              )}
               <div className="flex flex-col gap-2">
                 <p className={SIDE_LABEL}>Jump to</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -601,32 +640,6 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
           </aside>
         )}
       </Suspense>
-      {/* Ask the map (F-254): at the top (the owner, 2026-11-24), beside the card and clear of
-          the zoom buttons; below the folded card's title on a narrow screen. */}
-      <AskMapBar
-        askClaude={(text) =>
-          sendJson<MapAskAnswer>(
-            `/petroleum/ask?organization_id=${encodeURIComponent(session.organization.id)}`,
-            session.token,
-            'POST',
-            { text },
-          )
-        }
-        className={cn(
-          'absolute right-14 z-10 mx-auto max-w-2xl',
-          folded ? 'top-16 left-3 md:top-3 md:left-[17rem]' : 'top-3 left-3 md:left-[24rem]',
-        )}
-        onApply={(settings, place) => {
-          setBefore(snapshot());
-          // A place named moves the map last, over a play's area.
-          applyAll(place ? { ...settings, camera: place.bounds } : settings);
-        }}
-        canUndo={before !== null}
-        onUndo={() => {
-          if (before) applyAll(before);
-          setBefore(null);
-        }}
-      />
       {/* Below the zoom buttons and the distance bar, top right (F-139, F-301). */}
       <MapLayersPanel state={layers} side="right" className="md:top-28" />
       <LandPanel
@@ -690,12 +703,14 @@ function OilAndGasMap({ session, mapbox }: { session: DirectorySession; mapbox: 
         role="group"
         aria-label="Legend"
         className={cn(
-          'absolute bottom-3 z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto rounded-card border bg-card/95 text-xs shadow-xs',
+          'absolute z-10 flex max-h-[calc(100%-9rem)] w-64 max-w-[calc(100%-1.5rem)] flex-col overflow-y-auto border bg-card/95 text-xs shadow-xs',
+          // Flush in the bottom-right corner (the owner, 2026-11-24, F-305); beside a panel on
+          // the right, it moves left of it rather than sit under it.
           rightPanel
-            ? 'right-3 md:right-[27.75rem]'
+            ? 'right-3 bottom-3 rounded-card md:right-[27.75rem]'
             : layers.panelOpen
-              ? 'right-3 md:right-[19.5rem]'
-              : 'right-3',
+              ? 'right-3 bottom-3 rounded-card md:right-[19.5rem]'
+              : 'right-0 bottom-0 rounded-tl-card border-r-0 border-b-0',
           !folded && 'hidden md:flex',
           // On a phone a clicked shape's details take the bottom of the map (F-247-2-R3-02).
           layers.picked !== null && 'max-md:hidden',
