@@ -52,14 +52,7 @@ describe('productionAnswer', () => {
     const answer = productionAnswer(LOAD, []);
     expect(answer.source.name).toMatch(/Petrinex.*Government of Alberta/);
     expect(answer.source).toMatchObject({ firstMonth: '2022-01', lastMonth: '2026-09' });
-    expect(answer.units).toEqual({
-      oil: 'm3',
-      gas: 'e3m3',
-      water: 'm3',
-      condensate: 'm3',
-      waterInjected: 'm3',
-      gasInjected: 'e3m3',
-    });
+    expect(answer.units).toEqual({ oil: 'm3', gas: 'e3m3', water: 'm3', condensate: 'm3' });
     expect(productionAnswer(null, []).source.loadedAt).toBeNull();
   });
 });
@@ -102,27 +95,7 @@ describe('GET /api/v1/petroleum/production', () => {
   it("gives a viewer a well's months, asked as that member", async () => {
     viewer();
     const months = [
-      {
-        month: '2026-08',
-        oil: 310.5,
-        gas: 120.25,
-        water: null,
-        condensate: null,
-        waterInjected: null,
-        gasInjected: null,
-        hours: 744,
-      },
-      // An injector's month (F-300): water injected, nothing produced.
-      {
-        month: '2026-09',
-        oil: null,
-        gas: null,
-        water: null,
-        condensate: null,
-        waterInjected: 812.5,
-        gasInjected: null,
-        hours: 720,
-      },
+      { month: '2026-08', oil: 310.5, gas: 120.25, water: null, condensate: null, hours: 744 },
     ];
     petroleum.wellProduction.mockResolvedValue({ load: LOAD, months });
     const res = await app.request(WELL, { headers: AUTH }, env);
@@ -130,7 +103,6 @@ describe('GET /api/v1/petroleum/production', () => {
     expect(res.headers.get('Cache-Control')).toBe('private, no-cache');
     const body = await res.json<ReturnType<typeof productionAnswer>>();
     expect(body.months).toEqual(months);
-    expect(body.units).toMatchObject({ waterInjected: 'm3', gasInjected: 'e3m3' });
     expect(body.source.lastMonth).toBe('2026-09');
     expect(petroleum.wellProduction).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-a', role: 'viewer' }),
@@ -141,17 +113,7 @@ describe('GET /api/v1/petroleum/production', () => {
   it("gives the formation's total by month", async () => {
     viewer();
     const months = [
-      {
-        month: '2026-08',
-        oil: 1000,
-        gas: 5000,
-        water: 300,
-        condensate: 50,
-        waterInjected: 4046,
-        gasInjected: null,
-        wells: 12,
-        injectors: 5,
-      },
+      { month: '2026-08', oil: 1000, gas: 5000, water: 300, condensate: 50, wells: 12 },
     ];
     petroleum.formationProduction.mockResolvedValue({ load: LOAD, months });
     const res = await app.request(FORMATION, { headers: AUTH }, env);

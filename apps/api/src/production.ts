@@ -8,23 +8,16 @@ import type { ProductionLoad } from './production-db';
  */
 
 /**
- * The oil and gas schema version production needs: the injection beside it (F-300,
- * 20261212010000_petro_well_injection.sql).
+ * The oil and gas schema version production needs: a play's total reads each well's play
+ * (20261125010000_petro_plays_fields_pools.sql).
  */
-export const PRODUCTION_SCHEMA_VERSION = 25;
+export const PRODUCTION_SCHEMA_VERSION = 8;
 
 export const PRODUCTION_SOURCE_NAME =
   'Petrinex public data, Conventional Volumetric Data, © Government of Alberta';
 
 /** The units of the volumes, as Petrinex's description of its file gives them. */
-export const PRODUCTION_UNITS = {
-  oil: 'm3',
-  gas: 'e3m3',
-  water: 'm3',
-  condensate: 'm3',
-  waterInjected: 'm3',
-  gasInjected: 'e3m3',
-} as const;
+export const PRODUCTION_UNITS = { oil: 'm3', gas: 'e3m3', water: 'm3', condensate: 'm3' } as const;
 
 const UWI = /^[0-9A-Z]{2}\/[0-9]{2}-[0-9]{2}-[0-9]{3}-[0-9]{2}W[4-6]\/[0-9A-Z]$/;
 

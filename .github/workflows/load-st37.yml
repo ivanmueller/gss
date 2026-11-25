@@ -17,11 +17,10 @@ on:
   workflow_dispatch:
     inputs:
       formation:
-        description: Load one formation or waterflood pool whole, or "area" for the rectangle below
+        description: Load one formation whole, or "area" for the rectangle below
         type: choice
         options:
           - duvernay
-          - stettler_nisku_a
           - area
         default: duvernay
       west:
@@ -148,8 +147,6 @@ jobs:
           case "$FORMATION" in
             # The AER's formation codes 7280 to 7288 (ST37_FORMATIONS, packages/domain/src/st37.ts).
             duvernay) pools="Pool_Code >= 728000 AND Pool_Code <= 728899" ;;
-            # F-300's waterflood test: Stettler's D-2 A pool (field 866, pool 696001, ST103).
-            stettler_nisku_a) pools="Field_Code = 866 AND Pool_Code = 696001" ;;
             *) echo "::error::Unknown formation."; exit 1 ;;
           esac
           gdal() {

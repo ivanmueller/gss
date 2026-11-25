@@ -5,8 +5,7 @@ name: Load Petrinex production
 # (about 8 MB zipped) for the years it gives free (the current production year and the four
 # before it), keeps the monthly oil, gas, water and condensate volumes and hours of the wells
 # already in the oil and gas database (petroleum-staging), and loads them there, replacing the
-# copy in one transaction (F-252 step 3, docs/FEATURES_OIL_GAS.md). For the wells of a waterflood
-# pool (F-300), it also keeps the water and gas injected into them each month.
+# copy in one transaction (F-252 step 3, docs/FEATURES_OIL_GAS.md).
 #
 # Petrinex's data is used on the owner's decision (docs/DECISIONS.md, 2026-11-20: non-commercial,
 # members only, never exported, Crown copyright acknowledged): it stays on the runner and in
@@ -51,8 +50,8 @@ jobs:
             exit 1
           fi
           version=$(psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select petro.schema_version()")
-          if [ "$version" -lt 25 ]; then
-            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 25)."
+          if [ "$version" -lt 7 ]; then
+            echo "::error::The oil and gas database is at schema version $version; run Deploy staging first (it needs 7)."
             exit 1
           fi
           grain=$(psql "$SUPABASE_STAGING_DB_URL" -tA -c "select pg_database_size(current_database())")
@@ -74,20 +73,6 @@ jobs:
           [[ "$formation" =~ ^(-|[a-z][a-z_]{1,39})$ ]] || { echo "::error::Unexpected formation name."; exit 1; }
           echo "FORMATION=$formation" >> "$GITHUB_ENV"
           echo "$wells wells to look for (formation: $formation)."
-          # The waterflood pools' wells, whose injection is kept too (F-300). The keys are the
-          # loader's own (lower case letters and underscores), checked before they reach SQL.
-          keys=$(node --experimental-strip-types "$GITHUB_WORKSPACE/scripts/load-petrinex.js" waterfloods)
-          list=""
-          for key in $keys; do
-            [[ "$key" =~ ^[a-z][a-z_]{1,39}$ ]] || { echo "::error::Unexpected pool key."; exit 1; }
-            list="$list${list:+,}'$key'"
-          done
-          if [ -n "$list" ]; then
-            psql "$PETROLEUM_STAGING_DB_URL" -tA -c "select uwi from petro.st37_wells where formation in ($list) order by uwi" > inject-uwis.txt
-          else
-            : > inject-uwis.txt
-          fi
-          echo "$(wc -l < inject-uwis.txt) waterflood wells whose injection is kept."
       - name: Read each month's file
         run: |
           cd "$RUNNER_TEMP/petrinex"
@@ -97,7 +82,6 @@ jobs:
           first="$(( $(date -u +%Y) - 4 ))-01"
           now=$(date -u +%Y-%m)
           : > rows.csv
-          : > inject-rows.csv
           files=0
           last=""
           missing=""
@@ -114,7 +98,7 @@ jobs:
                 exit 1
               fi
               node --experimental-strip-types "$GITHUB_WORKSPACE/scripts/load-petrinex.js" \
-                month "$csv" "$month" uwis.txt inject-uwis.txt inject-rows.csv >> rows.csv
+                month "$csv" "$month" uwis.txt >> rows.csv
               files=$((files + 1))
               last=$month
             else
@@ -142,7 +126,7 @@ jobs:
         run: |
           node --experimental-strip-types scripts/load-petrinex.js sql \
             "$RUNNER_TEMP/petrinex/rows.csv" "$FORMATION" "$FIRST_MONTH" "$LAST_MONTH" "$FILES" \
-            "$GRAIN_BYTES" "$RUNNER_TEMP/petrinex/inject-rows.csv" > "$RUNNER_TEMP/petrinex/load.sql"
+            "$GRAIN_BYTES" > "$RUNNER_TEMP/petrinex/load.sql"
           psql "$PETROLEUM_STAGING_DB_URL" -q -f "$RUNNER_TEMP/petrinex/load.sql"
       - name: Remove Petrinex's files from the runner
         if: always()
