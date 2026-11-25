@@ -36,6 +36,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { URLSearchParams } from 'node:url';
 
+import { packLandShape } from '../packages/domain/src/land.ts';
 import {
   parseSaleNotice,
   parseSaleResults,
@@ -306,7 +307,9 @@ function mainSql(argv) {
       if (seen.has(parcel.contractNo) || parcel.lands.length === 0) continue;
       seen.add(parcel.contractNo);
       const placed = placeParcel(parcel.lands, sections);
-      if (!placed) {
+      // The shape as whole numbers (F-310).
+      const packed = placed ? packLandShape(placed.shape) : null;
+      if (!placed || !packed) {
         outside += 1;
         continue;
       }
@@ -330,7 +333,8 @@ function mainSql(argv) {
           parcel.reversionZones.slice(0, 120).join(' ') || null,
           parcel.tractRights.length > 0 ? JSON.stringify(parcel.tractRights) : null,
           `(${String(e)},${String(n)}),(${String(w)},${String(s)})`,
-          JSON.stringify(placed.shape),
+          `{${packed.path.join(',')}}`,
+          `{${packed.rings.join(',')}}`,
         ]
           .map(csv)
           .join(','),
@@ -345,14 +349,17 @@ function mainSql(argv) {
   );
 
   const columns =
-    'sale_date, contract_no, contract_type, region, hectares, zone, land, inexact, status, bonus, dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, shape';
+    'sale_date, contract_no, contract_type, region, hectares, zone, land, inexact, status, bonus, dollars_per_hectare, buyers, restrictions, reversion_zones, tract_rights, bounds, path, rings';
   const documents = readDocuments(dir, sales);
   const out = [
     '\\set ON_ERROR_STOP on',
     'begin;',
     "select set_config('statement_timeout', '15min', true);",
     // Emptied at once (and put back if the load fails): a delete would leave the old rows
-    // as dead weight that the size guard counts.
+    // as dead weight that the size guard counts. The old copy's files stay on disk until the
+    // commit and are counted by pg_database_size until then: its size, taken first, is left
+    // out of the guard below (F-310), or a load that makes the table smaller could be refused.
+    "select set_config('petro.load_freed', pg_total_relation_size('petro.land_sale_parcels')::text, true);",
     'truncate petro.land_sale_parcels;',
     `copy petro.land_sale_parcels (${columns}) from stdin with (format csv);`,
   ];
@@ -370,10 +377,11 @@ function mainSql(argv) {
     'insert into petro.land_sale_loads (source_url, first_sale, last_sale, west, south, east, north, sales, parcels, documents)',
     // Only dates and paths of the department's own form are in it: no quote can be.
     `values ('${PAGE_URL}', '${sales[0]}', '${sales[sales.length - 1]}', ${String(area.west)}, ${String(area.south)}, ${String(area.east)}, ${String(area.north)}, ${String(sales.length)}, ${String(rows.length)}, '${JSON.stringify(documents).replaceAll("'", "''")}'::jsonb);`,
-    // Measured inside the transaction, with the new rows written: over the guard, nothing stays.
+    // Measured inside the transaction, with the new rows written and the old copy's files, freed
+    // at the commit, left out: over the guard, nothing stays.
     'do $$',
     'begin',
-    `  if pg_database_size(current_database()) + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
+    `  if pg_database_size(current_database()) - current_setting('petro.load_freed')::bigint + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
     "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',

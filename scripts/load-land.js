@@ -30,7 +30,12 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { URLSearchParams } from 'node:url';
 
-import { LAND_LAYER_KEYS, LAND_LAYERS, landRows } from '../packages/domain/src/land.ts';
+import {
+  LAND_LAYER_KEYS,
+  LAND_LAYERS,
+  landRows,
+  packLandShape,
+} from '../packages/domain/src/land.ts';
 
 const BUDGET_BYTES = 450 * 1024 * 1024;
 const ALBERTA = { west: -120.1, south: 48.9, east: -109.9, north: 60.1 };
@@ -140,7 +145,10 @@ const isText = (v) => v === null || typeof v === 'string';
 const isAmount = (v) => v === null || (typeof v === 'number' && Number.isFinite(v) && v >= 0);
 const isDate = (v) => v === null || (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v));
 
-/** The box and the shape as COPY takes them; null when the row's place is not what fetch writes. */
+/**
+ * The box and the shape as COPY takes them, the shape as whole numbers (F-310); null when the
+ * row's place is not what fetch writes.
+ */
 function placed(row) {
   const b = row.bounds;
   if (!Array.isArray(b) || b.length !== 4 || !b.every((n) => Number.isFinite(n))) return null;
@@ -156,9 +164,12 @@ function placed(row) {
   if (!Array.isArray(row.shape) || row.shape.length === 0) return null;
   const numbers = (v) => (Array.isArray(v) ? v.every(numbers) : Number.isFinite(v));
   if (!numbers(row.shape)) return null;
+  const packed = packLandShape(row.shape);
+  if (!packed) return null;
   return [
     `(${String(east)},${String(north)}),(${String(west)},${String(south)})`,
-    JSON.stringify(row.shape),
+    `{${packed.path.join(',')}}`,
+    `{${packed.rings.join(',')}}`,
   ];
 }
 
@@ -166,7 +177,7 @@ const TABLES = {
   agreements: {
     table: 'petro.land_agreements',
     columns:
-      'rights, agreement_type, agreement_number, tract, mineral_type, agreement_group, status, vintage, holder, parties, zone, original_area_ha, area_ha, term_date, continuation_date, expiry_text, bounds, shape',
+      'rights, agreement_type, agreement_number, tract, mineral_type, agreement_group, status, vintage, holder, parties, zone, original_area_ha, area_ha, term_date, continuation_date, expiry_text, bounds, path, rings',
     values(r) {
       const ok =
         (r.rights === 'png' || r.rights === 'oil_sands') &&
@@ -210,7 +221,7 @@ const TABLES = {
   },
   offsets: {
     table: 'petro.land_offsets',
-    columns: 'offset_type, offset_number, tract, holder, expiry_date, zone, bounds, shape',
+    columns: 'offset_type, offset_number, tract, holder, expiry_date, zone, bounds, path, rings',
     values(r) {
       const ok =
         /^[0-9A-Z]{1,20}$/.test(r.offsetNumber ?? '') &&
@@ -222,7 +233,8 @@ const TABLES = {
   },
   freehold: {
     table: 'petro.land_freehold',
-    columns: 'land_key, substances, national_park, reserve_number, reserve_name, bounds, shape',
+    columns:
+      'land_key, substances, national_park, reserve_number, reserve_name, bounds, path, rings',
     values(r) {
       const ok =
         (r.landKey === null || Number.isSafeInteger(r.landKey)) &&
@@ -295,8 +307,14 @@ function mainSql(argv) {
     if (layers.every((key) => kept.has(key))) continue;
     const { table, columns } = TABLES[kind];
     // Emptied at once (and put back if the load fails): a delete would leave the old rows as
-    // dead weight that the size guard counts.
-    out.push(`truncate ${table};`, `copy ${table} (${columns}) from stdin with (format csv);`);
+    // dead weight that the size guard counts. The old copy's files stay on disk until the
+    // commit and are counted by pg_database_size until then: its size, taken first, is left
+    // out of the guard below (F-310), or a load that makes a table smaller could be refused.
+    out.push(
+      `select set_config('petro.load_freed', (coalesce(nullif(current_setting('petro.load_freed', true), ''), '0')::bigint + pg_total_relation_size('${table}'))::text, true);`,
+      `truncate ${table};`,
+      `copy ${table} (${columns}) from stdin with (format csv);`,
+    );
     flush();
     for (let i = 0; i < lines[kind].length; i += 2000) {
       out.push(...lines[kind].slice(i, i + 2000));
@@ -312,10 +330,11 @@ function mainSql(argv) {
     );
   }
   out.push(
-    // Measured inside the transaction, with the new rows written: over the guard, nothing stays.
+    // Measured inside the transaction, with the new rows written and the old copy's files, freed
+    // at the commit, left out: over the guard, nothing stays.
     'do $$',
     'begin',
-    `  if pg_database_size(current_database()) + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
+    `  if pg_database_size(current_database()) - coalesce(nullif(current_setting('petro.load_freed', true), ''), '0')::bigint + ${String(bytes)} > ${String(BUDGET_BYTES)} then`,
     "    raise exception 'Size guard: grain''s and the oil and gas databases together would pass 450 MB; nothing was loaded.';",
     '  end if;',
     'end',

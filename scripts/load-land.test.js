@@ -92,18 +92,33 @@ describe('load-land.js', () => {
     assert.ok(
       sql.includes('"EXAMPLE ""ENERGY"" LTD.","EXAMPLE ENERGY LTD. 100%\'); drop table x; --"'),
     );
-    // The box is written as the database reads it: the north-east corner, then the south-west.
+    // The box is written as the database reads it: the north-east corner, then the south-west;
+    // the shape as whole numbers, without the closing point, one ring needing no counts (F-310).
     assert.ok(
       sql.includes(
-        '"(-116,54.1),(-116.1,54)","[[[[-116.1,54],[-116,54],[-116,54.1],[-116.1,54]]]]"',
+        '"(-116,54.1),(-116.1,54)","{-11610000,5400000,-11600000,5400000,-11600000,5410000}","{}"',
       ),
     );
+    assert.doesNotMatch(sql, /, shape\)/);
     assert.match(
       sql,
       /values \('png_agreements', 'https:\/\/geospatial\.alberta\.ca\/titan\/rest\/services\/energy\/mineral_agreement\/MapServer\/8', -117, 53, -115, 55, 1\);/,
     );
     assert.match(sql, /values \('oil_sands_agreements', [^\n]+, 0\);/);
-    assert.match(sql, /pg_database_size\(current_database\(\)\) \+ 1000 > 471859200/);
+    // The old copies' size is taken before each is emptied and left out of the guard: their
+    // files are freed only at the commit (F-310).
+    for (const table of ['land_agreements', 'land_offsets', 'land_freehold']) {
+      assert.ok(
+        sql.includes(
+          `pg_total_relation_size('petro.${table}'))::text, true);\ntruncate petro.${table};`,
+        ),
+        table,
+      );
+    }
+    assert.match(
+      sql,
+      /pg_database_size\(current_database\(\)\) - coalesce\(nullif\(current_setting\('petro\.load_freed', true\), ''\), '0'\)::bigint \+ 1000 > 471859200/,
+    );
     assert.ok(sql.indexOf('Size guard') < sql.indexOf('commit;'));
   });
 

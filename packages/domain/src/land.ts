@@ -57,6 +57,89 @@ export type LandBounds = [number, number, number, number];
 /** A GeoJSON MultiPolygon's coordinates. */
 export type LandShape = [number, number][][][];
 
+/**
+ * A shape as the database keeps it (F-310), whole numbers, as the pipelines are (F-249): JSON
+ * took about three times the room. `path` is every point, longitude then latitude, in
+ * hundred-thousandths of a degree (the five decimals shapes are rounded to), each ring without
+ * the point that closes it. `rings` is, for each polygon, its count of rings and then each
+ * ring's count of points; empty for one polygon of one ring, the most common shape.
+ */
+export interface PackedLandShape {
+  path: number[];
+  rings: number[];
+}
+
+const LAND_UNITS = 1e5;
+
+/** A shape packed for the database; null when it holds no ring of three points or more. */
+export function packLandShape(shape: LandShape): PackedLandShape | null {
+  const path: number[] = [];
+  const layout: number[] = [];
+  for (const polygon of shape) {
+    layout.push(polygon.length);
+    for (const ring of polygon) {
+      const first = ring[0];
+      const last = ring[ring.length - 1];
+      const closed =
+        ring.length > 1 && first !== undefined && last?.[0] === first[0] && last[1] === first[1];
+      const points = closed ? ring.slice(0, -1) : ring;
+      if (points.length < 3) return null;
+      layout.push(points.length);
+      for (const [lon, lat] of points) {
+        path.push(Math.round(lon * LAND_UNITS), Math.round(lat * LAND_UNITS));
+      }
+    }
+  }
+  if (path.length === 0) return null;
+  const single = shape.length === 1 && layout[0] === 1;
+  return { path, rings: single ? [] : layout };
+}
+
+/**
+ * A packed shape as a GeoJSON MultiPolygon's coordinates, each ring closed again; null when the
+ * counts do not match the points.
+ */
+export function unpackLandShape(
+  path: readonly number[],
+  rings: readonly number[],
+): LandShape | null {
+  if (path.length % 2 !== 0) return null;
+  const layout = rings.length === 0 ? [1, path.length / 2] : rings;
+  const shape: LandShape = [];
+  let at = 0;
+  let i = 0;
+  while (i < layout.length) {
+    const count = layout[i++] ?? 0;
+    if (!Number.isInteger(count) || count < 1) return null;
+    const polygon: [number, number][][] = [];
+    for (let r = 0; r < count; r += 1) {
+      const points = layout[i++];
+      if (points === undefined || !Number.isInteger(points) || points < 3) return null;
+      if (at + points * 2 > path.length) return null;
+      const ring: [number, number][] = [];
+      for (let p = 0; p < points; p += 1) {
+        ring.push([(path[at] ?? 0) / LAND_UNITS, (path[at + 1] ?? 0) / LAND_UNITS]);
+        at += 2;
+      }
+      const first = ring[0];
+      if (first) ring.push([first[0], first[1]]);
+      polygon.push(ring);
+    }
+    shape.push(polygon);
+  }
+  return at === path.length && shape.length > 0 ? shape : null;
+}
+
+/** A row's shape, in whichever form it is kept: packed (F-310), or as JSON by an older load. */
+export function storedLandShape(row: {
+  shape: LandShape | null;
+  path: readonly number[] | null;
+  rings: readonly number[] | null;
+}): LandShape {
+  if (row.path !== null) return unpackLandShape(row.path, row.rings ?? []) ?? [];
+  return row.shape ?? [];
+}
+
 export interface LandAgreement {
   rights: 'png' | 'oil_sands';
   agreementType: string;

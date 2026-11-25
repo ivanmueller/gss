@@ -1,3 +1,4 @@
+import { type LandShape, packLandShape } from '@grain/domain';
 import postgres from 'postgres';
 import { describe, expect, it } from 'vitest';
 
@@ -21,7 +22,7 @@ const member = () => ({
 });
 
 /** A small square whose south-west corner is given, as a shape and as its box. */
-const square = (west: number, south: number) => ({
+const square = (west: number, south: number): { shape: LandShape; bounds: string } => ({
   shape: [
     [
       [
@@ -35,6 +36,22 @@ const square = (west: number, south: number) => ({
   ],
   bounds: `(${String(west + 0.01)},${String(south + 0.01)}),(${String(west)},${String(south)})`,
 });
+/** A shape as it comes back from whole numbers (F-310): five decimals, every ring closed. */
+const rounded = (shape: LandShape): LandShape =>
+  shape.map((polygon) =>
+    polygon.map((ring) =>
+      ring.map(([x, y]): [number, number] => [
+        Math.round(x * 1e5) / 1e5,
+        Math.round(y * 1e5) / 1e5,
+      ]),
+    ),
+  );
+/** The path and counts the loads write (F-310). */
+const packed = (shape: LandShape) => {
+  const p = packLandShape(shape);
+  if (!p) throw new Error('not a shape');
+  return p;
+};
 const VIEW = { west: -120.05, south: 59.9, east: -119.9, north: 60.05 };
 const ALL = { agreements: 10, offsets: 10, freehold: 10 };
 
@@ -52,6 +69,7 @@ describe('land held today as petro_api', () => {
       const inView = square(-120, 59.95);
       const next = square(-119.98, 59.95);
       const elsewhere = square(-119.5, 59.5);
+      const twoParts: LandShape = [...inView.shape, ...square(-119.99, 59.96).shape];
       await admin`
         insert into petro.land_agreements
           (rights, agreement_type, agreement_number, tract, agreement_group, status, holder,
@@ -65,14 +83,15 @@ describe('land held today as petro_api', () => {
           ('png', 'ZZ9', '3', null, null, null, null, null, null, null, null, null,
            ${elsewhere.bounds}::box, ${admin.json(elsewhere.shape)})`;
       await admin`
-        insert into petro.land_offsets (offset_type, offset_number, holder, expiry_date, bounds, shape)
-        values ('AAY', 'ZZTEST1', 'EXAMPLE ENERGY LTD.', '2027-05-08',
-                ${inView.bounds}::box, ${admin.json(inView.shape)})`;
+        insert into petro.land_offsets (offset_type, offset_number, holder, expiry_date, bounds, path, rings)
+        values ('AAY', 'ZZTEST1', 'EXAMPLE ENERGY LTD.', '2027-05-08', ${inView.bounds}::box,
+                ${packed(twoParts).path}, ${packed(twoParts).rings})`;
+      // Land loaded since F-310 is kept as whole numbers; land loaded before, as JSON.
       await admin`
-        insert into petro.land_freehold (land_key, substances, bounds, shape)
-        values (-9001, 'ALL MINERALS', ${inView.bounds}::box, ${admin.json(inView.shape)}),
-               (-9002, 'ALL MINERALS', ${next.bounds}::box, ${admin.json(next.shape)}),
-               (-9003, 'ALL MINERALS', ${elsewhere.bounds}::box, ${admin.json(elsewhere.shape)})`;
+        insert into petro.land_freehold (land_key, substances, bounds, path, rings)
+        values (-9001, 'ALL MINERALS', ${inView.bounds}::box, ${packed(inView.shape).path}, '{}'),
+               (-9002, 'ALL MINERALS', ${next.bounds}::box, ${packed(next.shape).path}, '{}'),
+               (-9003, 'ALL MINERALS', ${elsewhere.bounds}::box, ${packed(elsewhere.shape).path}, '{}')`;
 
       const all = await db.land(member(), VIEW, ALL);
       expect(all.agreements.map((a) => [a.rights, a.agreementNumber])).toEqual([
@@ -91,8 +110,13 @@ describe('land held today as petro_api', () => {
         expiryText: 'INDEFINITE',
         shape: inView.shape,
       });
-      expect(all.offsets).toMatchObject([{ offsetNumber: 'ZZTEST1', expiryDate: '2027-05-08' }]);
-      expect(all.freehold).toHaveLength(2);
+      expect(all.offsets).toMatchObject([
+        { offsetNumber: 'ZZTEST1', expiryDate: '2027-05-08', shape: rounded(twoParts) },
+      ]);
+      expect(all.freehold.map((f) => f.shape)).toEqual([
+        rounded(inView.shape),
+        rounded(next.shape),
+      ]);
 
       // Only the agreements with one of the zones given, when a play's rights are asked for.
       expect((await db.land(member(), VIEW, ALL, [])).agreements).toEqual([]);
