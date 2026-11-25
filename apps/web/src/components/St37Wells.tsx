@@ -207,8 +207,10 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     [hidden],
   );
   const formations = useMemo(() => answer?.formations ?? [], [answer]);
-  // The play the section is about: the one chosen, or the first (the latest loaded).
-  const formation = formations.find((f) => f.key === chosen) ?? formations[0] ?? null;
+  // The play the section is about: the one chosen; null for every formation loaded, the start
+  // (the owner, 2026-11-25).
+  const formation = formations.find((f) => f.key === chosen) ?? null;
+  const allTotal = formations.reduce((sum, f) => sum + formationTotal(f.totals), 0);
   // The same zones come with every answer: kept as one object while they do not change.
   const zonesKey = JSON.stringify(formations.flatMap((f) => f.zones ?? []));
   const zones = useMemo(() => {
@@ -323,11 +325,15 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
               value={formation?.key ?? ''}
               onChange={(event) => {
                 const f = formations.find((one) => one.key === event.target.value);
-                if (!f) return;
+                if (!f) {
+                  setChosen(null);
+                  return;
+                }
                 setChosen(f.key);
                 goTo([f.area.west, f.area.south, f.area.east, f.area.north]);
               }}
             >
+              <option value="">All formations</option>
               {formations.map((f) => (
                 <option key={f.key} value={f.key}>
                   {f.name}
@@ -389,9 +395,11 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
           ))}
         </div>
       </div>
-      {formation && (
+      {formations.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          {formationTotal(formation.totals).toLocaleString('en-CA')} wells in the {formation.name},
+          {formation
+            ? `${formationTotal(formation.totals).toLocaleString('en-CA')} wells in the ${formation.name},`
+            : `${allTotal.toLocaleString('en-CA')} wells in every formation loaded,`}{' '}
           every status; {listed.length.toLocaleString('en-CA')} in view
           {operator.trim() ? ' for this operator' : ''}
           {spudFrom !== null || spudTo !== null
@@ -476,7 +484,7 @@ export function useSt37Wells(organizationId: string, token: string): St37State {
     <>
       <p>
         <strong className="font-medium text-foreground">Wells &amp; licences.</strong>{' '}
-        {formation
+        {formations.length > 0
           ? 'Every well of a formation, whatever its status. Shaded zones: where its drilled wells cluster. '
           : ''}
         Zoomed out: how dense the wells are. Zoom in for each well and its drilled path; point at

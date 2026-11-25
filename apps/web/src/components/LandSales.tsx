@@ -293,7 +293,7 @@ export type LandSalesSnapshot = NonNullable<MapSettings['sales']> & {
 export function useLandSales(organizationId: string, token: string): LandSalesState {
   // Off when the map opens (F-284); Jump to and its section's switch turn it on.
   const [on, setOn] = useState(false);
-  const [rights, setRights] = useState<string | null>('duvernay');
+  const [rights, setRights] = useState<string | null>(null);
   const [when, setWhen] = useState<SaleWhen>('2');
   const [buyer, setBuyer] = useState('');
   const [states, setStates] = useState<ReadonlySet<LandSaleState>>(
@@ -671,12 +671,12 @@ export function useLandSales(organizationId: string, token: string): LandSalesSt
               setRights(event.target.value === '' ? null : event.target.value);
             }}
           >
+            <option value="">All rights</option>
             {Object.values(LAND_RIGHTS).map((r) => (
               <option key={r.key} value={r.key}>
                 {r.name}
               </option>
             ))}
-            <option value="">All rights</option>
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
