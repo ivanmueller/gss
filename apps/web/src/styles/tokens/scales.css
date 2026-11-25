@@ -251,30 +251,41 @@
   }
 }
 
-/* The Ask the map button's sparkle: a slow, small twinkle now and then (F-307). */
+/* The Ask the map button's outline, traced in the accent colour every few seconds, then faded
+   (F-308). The traced shape sets pathLength="100", so a dash of 100 is the whole outline. */
 @theme {
-  --animate-twinkle: twinkle 3.2s ease-in-out infinite;
+  --animate-trace: trace 7s ease-in-out infinite;
 
-  @keyframes twinkle {
-    0%,
-    70%,
+  @keyframes trace {
+    0% {
+      stroke-dasharray: 100 100;
+      stroke-dashoffset: 100;
+      opacity: 1;
+    }
+    22% {
+      stroke-dashoffset: 0;
+      opacity: 1;
+    }
+    32% {
+      stroke-dashoffset: 0;
+      opacity: 0;
+    }
     100% {
-      transform: none;
-      opacity: 1;
-    }
-    80% {
-      transform: rotate(18deg) scale(1.18);
-      opacity: 0.75;
-    }
-    90% {
-      transform: rotate(-8deg) scale(0.95);
-      opacity: 1;
+      stroke-dasharray: 100 100;
+      stroke-dashoffset: 0;
+      opacity: 0;
     }
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-twinkle,
+  .animate-trace {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
   .animate-dialog-in,
   .animate-drawer-in,
   .animate-panel-in {
