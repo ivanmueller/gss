@@ -10,10 +10,11 @@ import { apiJson } from '../lib/api';
  * here offers a download. Every number is a volume as published; nothing is estimated.
  *
  * One small chart per product, each on its own scale: oil, condensate and water are in m³, gas
- * in 10³ m³, so they never share an axis.
+ * in 10³ m³, so they never share an axis. The water and gas injected into a waterflood pool's
+ * wells (F-300) are charted the same way, after what was produced.
  */
 
-export type Product = 'oil' | 'gas' | 'condensate' | 'water';
+export type Product = 'oil' | 'gas' | 'condensate' | 'water' | 'waterInjected' | 'gasInjected';
 
 export interface ProductionMonth {
   month: string;
@@ -21,8 +22,14 @@ export interface ProductionMonth {
   gas: number | null;
   water: number | null;
   condensate: number | null;
+  /** Water injected, m³ (F-300); absent from an answer before injection was kept. */
+  waterInjected?: number | null;
+  /** Gas injected, 10³ m³ (F-300). */
+  gasInjected?: number | null;
   hours?: number | null;
   wells?: number;
+  /** How many of the play's wells took injection that month (F-300). */
+  injectors?: number;
 }
 
 export interface ProductionAnswer {
@@ -40,6 +47,8 @@ export const PRODUCTS: readonly { key: Product; label: string; unit: string }[] 
   { key: 'gas', label: 'Gas', unit: '10³ m³' },
   { key: 'condensate', label: 'Condensate', unit: 'm³' },
   { key: 'water', label: 'Water', unit: 'm³' },
+  { key: 'waterInjected', label: 'Water injected', unit: 'm³' },
+  { key: 'gasInjected', label: 'Gas injected', unit: '10³ m³' },
 ];
 
 const MONTH_NAMES = [
@@ -77,7 +86,7 @@ export function productSeries(
   product: Product,
 ): { months: string[]; values: (number | null)[]; total: number; any: boolean } {
   const { firstMonth, lastMonth } = answer.source;
-  const byMonth = new Map(answer.months.map((m) => [m.month, m[product]]));
+  const byMonth = new Map(answer.months.map((m) => [m.month, m[product] ?? null]));
   const months =
     firstMonth && lastMonth
       ? petrinexMonths(firstMonth, lastMonth)
@@ -335,8 +344,18 @@ export function productionTotal(answers: readonly ProductionAnswer[]): {
               gas: add(sum.gas, m.gas),
               water: add(sum.water, m.water),
               condensate: add(sum.condensate, m.condensate),
+              waterInjected: add(sum.waterInjected ?? null, m.waterInjected ?? null),
+              gasInjected: add(sum.gasInjected ?? null, m.gasInjected ?? null),
             }
-          : { month: m.month, oil: m.oil, gas: m.gas, water: m.water, condensate: m.condensate },
+          : {
+              month: m.month,
+              oil: m.oil,
+              gas: m.gas,
+              water: m.water,
+              condensate: m.condensate,
+              waterInjected: m.waterInjected ?? null,
+              gasInjected: m.gasInjected ?? null,
+            },
       );
     }
   }
@@ -458,11 +477,22 @@ export function FormationProductionAbout({
   if (state !== 'ok' || !answer.source.loadedAt || answer.months.length === 0) return null;
   const { firstMonth, lastMonth } = answer.source;
   const wells = answer.months.at(-1)?.wells;
+  const injectors = answer.months.at(-1)?.injectors;
+  const injected = answer.months.some(
+    (m) => (m.waterInjected ?? 0) > 0 || (m.gasInjected ?? 0) > 0,
+  );
   return (
     <p>
       Production: the total of the formation's wells, by month
       {firstMonth && lastMonth ? `, ${monthLabel(firstMonth)} to ${monthLabel(lastMonth)}` : ''}
       {wells !== undefined ? `; ${wells.toLocaleString('en-CA')} wells in the last month` : ''}.
+      {injected
+        ? ` Water and gas injected: the total put into its wells, by month${
+            injectors !== undefined && injectors > 0
+              ? `; ${injectors.toLocaleString('en-CA')} wells injecting in the last month`
+              : ''
+          }.`
+        : ''}{' '}
       Point at a chart for a month.
       {firstMonth
         ? ` A well drilled before ${monthLabel(firstMonth)} shows only its production since then.`
