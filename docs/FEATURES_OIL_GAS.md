@@ -1,5 +1,7 @@
 # Oil and gas: features to build
 
+> **Frozen since 2026-11-26 (the owner: features "will stop until we finish the migration").** The oil and gas side is moving to a private repository of its own (`docs/PETROLEUM_SPLIT_PLAN.md`, F-313). Nothing new on this list is built here; fixes to what runs today are still made here and listed in `docs/HANDOFF.md`. The copy was taken from `main` at `6a4f371`.
+
 The oil and gas side of the platform, on its own map page (`map.torvenco.com`, F-238). Asked by the owner on 2026-11-18: as the platform expands beyond grain, this page tracks oil and gas production across Canada. Built from the owner's study of the public data behind such a map (2026-11-18, kept by the owner); that study covers **Alberta only**, from free government sources.
 
 **Direction (the owner, 2026-11-19):** the oil and gas side is a **map and data tool, not a CRM**. Its purpose is to show the oil and gas picture: the township grid, formation areas, wells (multi-leg wells among them), pipelines, Crown land, sales and the like. The aim is first to show what Offset Signal (offsetsignal.ca) shows, from the same public sources its own pages name (the owner's "Offset Signal — Data Source Breakdown", 2026-11-18), then to go further with new features. Built from the government sources only: never Offset Signal's data, wording or look. Oil and gas companies are a reference list of their own (F-244), never grain counterparties.
