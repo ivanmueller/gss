@@ -2,17 +2,17 @@
 
 **Status:** a proposal for the owner's decision. Nothing here is built or decided. Written by Claude on 2026-11-25 against `main` at `1e1d1bf` (ivanmueller/gss#380). Asked by the owner on 2026-11-25: separate the two sides completely; the oil and gas side becomes its own repository, built and reviewed under the strict Claude + Codex process again; grain stays here as its own thing.
 
-**Revision 3 (2026-11-25), after Codex's full review: "sound with changes", nine findings.** All nine are accepted; Claude checked a sample of each in the repository and found none wrong. Section 7 lists them with where each changed this plan. Revision 2 (merged as ivanmueller/gss#381) had answered only the four points of Codex's summary.
+**Revision 4 (2026-11-26), after Codex's second review of revision 3: three findings resolved, six partly.** Its three "minimum changes before approval" are made: one permission rule for every use of a feed (3.1); which side writes what through cutover and going back, and a load shown only after it has passed its checks (3.5, 4.2, 4.4); how the strict gate is started and enforced, here and in the new repository (3.2, 4.1, 4.7). The slice order is corrected again (4.4). Section 7 has both rounds. Earlier: revision 3 took in the nine findings of the first review; revision 2 was merged as ivanmueller/gss#381.
 
 ## 1. The recommendation in short
 
 1. **Split, and do it now.** The longer it waits, the more unreviewed code and shared wiring there is to untangle.
-2. **A new private repository, started from a clean copy of the foundation.** Its main branch starts fresh; this repository's whole history is kept beside it as a read-only archive (4.8).
+2. **A new private repository, started from a clean copy of the foundation.** Its main branch starts fresh; this repository stays, tagged, as the record every moved file is compared with (4.8).
 3. **The oil and gas code moves over in slices, each slice one pull request that Codex reviews.** The move is the audit: nothing enters the new repository unreviewed. A small first release is proved from end to end before the rest follows.
 4. **Its own sign-in and database in one new Supabase project, in its own Supabase organization, on a paid plan;** its own Cloudflare Worker, its own secrets and keys. No grain credential ever enters the new repository.
 5. **No shared code between the two repositories.** What both need is copied once; after that each goes its own way.
 6. **Look and layout: the page's frame is agreed early, the panels move as they are, the redesign comes after** as separate reviewed work.
-7. **Settled before any licensed data moves or anyone outside GSS signs in:** a short product specification, what each data feed's publisher allows, who may sign in and how, and which stored records must survive.
+7. **Settled first:** a short product specification, who may sign in and how, and which stored records must survive. **No restricted feed enters the new project, for anyone, until its publisher's written answer for the stated use is recorded** (3.1); the code moves meanwhile with made-up records.
 8. **Grain:** the oil and gas code is removed from this repository only after the new platform has taken over `map.torvenco.com` and a stated waiting period has passed. Until then the old page stays whole, so the move can be undone.
 
 ## 2. Where things stand (checked in the repository)
@@ -29,12 +29,12 @@
 | Shared thing | Where | What it means for a split |
 |---|---|---|
 | Sign-in and membership | `gss-staging`'s Supabase Auth and `app.organization_members`; the Worker checks them, then sets the person, organization and role for the oil and gas database by `set_config` (F-247, `docs/DECISIONS.md`) | The new platform needs its own users. Today the oil and gas database trusts the Worker for who is asking |
-| One Worker and one web app | `grain-trading-api-staging`; `apps/api/src/index.ts` mounts `/petroleum`, its public readiness route and Ask beside grain's routes; `apps/web/src/lib/router.tsx` shows the map at a host starting with `map.` **and at `/map` on any address**, the Worker's own `workers.dev` address included | A second Worker and web app. Moving the domain alone leaves the old map and its routes reachable |
+| One Worker and one web app | `grain-trading-api-staging`; `apps/api/src/index.ts` mounts `/petroleum`, its public readiness route and Ask beside grain's routes; `apps/web/src/lib/router.tsx` shows the map at a host starting with `map.` **and at `/map` on any address**, the Worker's own `workers.dev` address included | A second Worker and web app. Moving the domain alone leaves the old map and its routes reachable. The map page also runs grain's follow-up count and incoming-call box (`App.tsx`); those stay behind |
 | The map itself | `apps/web/src/components/FacilityMap.tsx` draws grain's five maps and the oil and gas page, and imports the oil and gas drawing code (land, wells, facilities, pipelines, rigs, geology, the grid) | Separated on both sides: a renderer without grain's pins there, without oil and gas here (4.7) |
 | One domain package | `packages/domain/src/`, about 18,800 lines of code and 12,500 of tests, both sides mixed in one `@grain/domain` | Sorted file by file |
 | The map-layer machinery | `apps/api/src/map-layers.ts`, `packages/domain/src/mapLayers.ts`, `apps/web/src/lib/mapLayers.ts` and `layerApi.ts`, the Settings screens | Copied; the two copies then differ |
 | The database size limit | Both projects are in one Supabase organization on the free plan; loaders stop at 450 MB combined, and **sign in to grain's database to measure it** (`SUPABASE_STAGING_DB_URL` in every `load-*.yml`) | Grain's login must not follow the loaders; the new guard measures its own project only |
-| CI, the Merge policy, deploys, data loads, the schedule | `.github/workflows/` (eleven `load-*.yml` workflows are oil and gas only); the Worker fetches the AER's lists on the schedule of grain's exchange rate (`apps/api/src/index.ts`, `scheduled`) | Copied and cut down on each side |
+| CI, the Merge policy, deploys, data loads, the schedule | `.github/workflows/` (eleven `load-*.yml` workflows are oil and gas only); the Worker fetches the AER's lists on the schedule of grain's exchange rate (`apps/api/src/index.ts`, `scheduled`); three loads run by themselves: licence transfers daily, frac monthly, prices twice a month (`cron` in `load-licences.yml`, `load-frac.yml`, `load-prices.yml`) | Copied and cut down on each side; at cutover each scheduled job has one stated owner (4.4) |
 | Keys and accounts | `MAPBOX_PUBLIC_TOKEN`, `ANTHROPIC_API_KEY`, `GEOCODIO_API_KEY` (Ask's place names), the Supabase address, publishable key and admin secret, `CLOUDFLARE_API_TOKEN` | New ones for the new platform, the Cloudflare token limited to the new Worker |
 | One routes file, one database opener, one map page | `apps/api/src/petroleum.ts` imports every module; `petroleum-db.ts` opens every module's queries; `FullPageMap.tsx` holds every panel; `lib/gridMap.ts` names the wells', sales', facilities' and pipelines' layers | None can move whole in a first slice: each is rebuilt as a small frame that every slice adds its part to |
 
@@ -42,10 +42,10 @@
 
 **Records that cannot be fetched again:**
 
-- the AER's daily licence and rig files, kept as published since 2026-11-19, with every reading of them (`petro.aer_list_files` and the tables read from them);
-- licence transfers, which are worked out by comparing each load with the one before (`load-licences.yml`): the history exists only as loads followed one another;
+- the AER's daily licence and rig files **as they were captured** since 2026-11-19: when each was seen, and each versioned reading (`petro.aer_list_files` and the tables read from them). Part of their contents can be read again from the AER's ST1 and ST49 archives; the record of what was seen when cannot;
+- licence transfers, worked out by comparing each day's three licence lists (wells, facilities, pipelines) with the day before (`load-licences.yml`, `packages/domain/src/licenceHolders.ts`). Carrying the history on needs the last holdings and the chain of loads too, not only the transfers found;
 - the layers admins added, their sources, terms and defaults, and every change and removal with who made it (`petro.map_layers`, `petro.map_layer_history`);
-- production months older than the window Petrinex gives free: each load deletes all rows and reads from January of the fourth year back (`load-petrinex.yml`, `scripts/load-petrinex.js`), so a month that has left the window is gone at the next load;
+- production months that leave the window Petrinex gives free: each load deletes all rows and reads from January of the fourth year back (`load-petrinex.yml`, `scripts/load-petrinex.js`). Nothing older is stored today as far as the repository shows; from January 2027 the months of 2022 would be deleted at the next load. If the owner wants months kept once loaded, the new loader must replace only the months it fetched;
 - the land held on a past day: each load replaces the copy;
 - the record of every load (the `*_loads` tables).
 
@@ -79,29 +79,43 @@ A platform built as an alternative to Enverus, AccuMap or geoSCOUT, with people 
 | Monthly reference price calculations | `open.alberta.ca` | Open Government Licence – Alberta (2026-11-23) | Allowed, with attribution |
 | Gas reference price archive, oil par prices, information letters | `alberta.ca`, `inform.energy.gov.ab.ca` | "non-commercial use", unmodified, source named, not shown as official; commercial reproduction needs written permission (2026-11-23) | **Permission needed** |
 | Geological Framework (depths), Table of Formations, shale outlines, formation tops, Rock-Eval samples | Alberta Geological Survey | Open Government Licence – Alberta, the Survey acknowledged, its caveats kept (2026-11-22, 2026-11-24) | Allowed, with acknowledgement |
-| ST37 wells; ST103 fields and pools; ST1 daily licences; ST49 rigs and the monthly rig archives; ST102 facilities; pipelines; frac summary data; the licence list behind transfers | Alberta Energy Regulator | The AER's terms above (2026-11-19, 2026-11-23) | **Permission needed, named file by file** |
-| Well Licence file (read by the wells' loader); Conventional Volumetric Data (monthly production) | Petrinex | Non-commercial; consent first for use in a company's business (2026-11-20) | **Permission needed, named file by file** |
+| ST37 wells; ST103 fields and pools; ST1 daily licences and their archives; ST49 rigs and the monthly rig archives; the list of every licence used to place rigs; the three licence lists behind transfers (wells, facilities, pipelines); ST102 facilities; pipelines; frac summary data | Alberta Energy Regulator | The AER's terms above (2026-11-19, 2026-11-23) | **Permission needed, named file by file** |
+| Well Licence file (read by the wells' loader); Conventional Volumetric Data (monthly production) | Petrinex | Non-commercial; consent first for use in a company's business; shown as "Petrinex public data, © Government of Alberta" (2026-11-20) | **Permission needed, named file by file** |
 | Layers admins added | each layer's own publisher | each layer's recorded terms | Checked layer by layer before it is copied |
 
-Each row is re-read from the publisher's page when the request is written, and each answer is recorded against the feed. Where a publisher refuses or does not answer, the feed is left out for outside users.
+Each row is re-read from the publisher's page when the request is written, and each answer is recorded against the feed.
+
+**One rule, for every feed and every use** (revision 4; the earlier drafts said two different things). The owner's decisions of 2026-11-19 and 2026-11-20 covered a personal side project in today's project. The new platform is built for another purpose, so they do not carry over to it, not even for GSS's own staff.
+
+1. **Open-licence feeds** may be loaded, kept, backed up and shown in the new project, with their attribution.
+2. **A restricted feed** (the rows marked "Permission needed", and the offset notices and land-sale files until their terms are verified) stays where it is today, under today's conditions, until its publisher's written answer for the stated use is recorded. Until then it is not copied, loaded, restored, backed up, archived or shown in the new project, in trials either.
+3. **On permission:** used within what the answer allows, each allowed use recorded.
+4. **On refusal, or no answer by a date the owner sets:** the feed is left out of the new platform. Its slice is not moved, or stays switched off. What the old project holds of it is not carried over; when the old project is retired the owner decides whether that copy is kept privately or deleted.
+
+The owner can decide otherwise for a feed, as he did before; that is then a new recorded decision naming the feed and the use, not something this plan assumes.
 
 **What this means for the build:**
 
-- Moving the code and loading the data for GSS's own staff is the use the owner already decided on; it does not wait for the answers.
-- **The platform enforces the audience per feed.** One list in the code names every feed, its publisher, its attribution line and who may see it: "GSS staff only" until its permission is recorded. The Worker checks it on every route that returns that feed's data, tiles and kept answers included; tests prove a member outside the audience is refused. High risk, built with the foundation.
-- **A private repository hides the code, not the data.** The same rules cover logs, test fixtures and what CI keeps: restricted data never goes into Git, and tests use made-up records.
-- **The wells gate most of the product.** Production, geology, operators, frac and the royalty estimate hang on the AER's wells. If the AER says no, people outside GSS see land, land sales, the grid, geology grids and the open prices, and little else.
+- **The code does not wait.** Slices for restricted feeds are moved and reviewed with made-up records; only their real load and their reconciliation (3.5) wait for the answer.
+- **The platform enforces the audience per feed.** One list in the code names every feed, its publisher, its attribution line and who may see it. The Worker checks it on every route that returns that feed's data, tiles and kept answers included, **and on answers that combine or are worked out from several feeds** (operators, the royalty estimate, totals and dates in an answer's heading). High risk, built with the foundation.
+- **Nothing restricted is shipped as a file with the app.** Files under `public/` are served without sign-in (`apps/api/wrangler.jsonc` sends only `/api/*` through the Worker); today they hold open data only (the township outlines, formation outlines).
+- **A private repository hides the code, not the data.** Restricted data never goes into Git, logs, test fixtures or what CI keeps.
+- **The wells gate most of the product,** and more than the last revision said. The land, land sales, facilities and pipelines loads all take their area from the wells' load (4.4). A release without the AER's wells needs changes that are not a plain move: an area stated on its own, offset notices left out, the price load and its answer split into open and restricted parts. Until those are designed, no release without wells is promised.
+
+Decision 4 in section 6 is therefore a real choice: wait for the AER and Petrinex, or design the smaller open-data release.
 
 This is the owner's decision and, I think, a question for a lawyer or for the publishers themselves, not for an AI model.
 
 ### 3.2 Going back to the strict process as it was will stall again
 
-The strict loop failed on F-247 part 2 because one large pull request reshaped shared code, and every round re-read all of it. F-251 recorded the fixes: small pull requests, focused re-reviews, five rounds at most. The new repository starts with those rules, and with four tiers (Codex's finding 6 corrected my first three):
+The strict loop failed on F-247 part 2 because one large pull request reshaped shared code, and every round re-read all of it. F-251 recorded the fixes: small pull requests, focused re-reviews, five rounds run by themselves and more only with the owner's approval, with an earlier stop when a finding comes back or Claude and Codex disagree. The new repository starts with those rules, and with four tiers (Codex's finding 6 corrected my first three):
 
 - **Governance** (workflows, the review scripts, `AGENTS.md`, the rules documents): a Codex review and the owner's approval of the exact commit, as today.
 - **High risk** (design review before code, final review of the commit to be merged): the database, sign-in and permissions, **every Worker route, read-only ones too** (a route decides who sees data; this is today's policy, `scripts/review-register.js`), the loaders, every calculation, anything sent to another company's service.
 - **Normal** (one final review): a screen that uses a data contract already reviewed.
 - **Cosmetic** (CI and a look on staging, no Codex round): spacing and purely decorative styling. **Never cosmetic:** who may see something; what a page keeps or drops after sign-out; network or data loading; routes; source names and warnings; status colours and legend thresholds; units, rounding, money; export; keyboard access; a test that loosens a safeguard; deployment and policy.
+
+**What the gate enforces and what stays a rule.** Setting `PROCESS = 'strict'` is not enough: by its path rules today a loader script or a calculation in the domain package counts as normal, and style sheets and tests as low (`scripts/review-register.js`). The first commit of the new repository changes those rules so that the gate itself treats as high risk: the database, the whole Worker, the loaders and their workflow, the calculation modules of the domain package, and the feed list; and as at least normal: tests changed on their own, and the token files that carry status and legend colours. The "never cosmetic" list above is checked by Codex's final review, which names the tier it found.
 
 Two more rules from the review. In a moving pull request the copied code is new to the new repository, so nothing in it can be set aside as "already there"; a security finding is never deferred. And loader workflows are governance: one reviewed, reusable loader workflow is built first, so that each data slice does not need the owner's approval of a new workflow file.
 
@@ -119,11 +133,12 @@ Codex can tell whether a loader's code is sound, not whether a well's production
 
 - **What is compared:** a fixed sample chosen to cover the awkward cases, plus totals and rules over the whole load. Wells: each status, wells with several legs, their paths. Production: several months, revised months, totals, missing told apart from zero, units. Land sales: sold, no offers, withdrawn, several tracts, exact money, rights. Pipelines: substance, status, lines crossing map squares. Everywhere: dates, duplicates, rows that matched nothing, rows refused, sudden changes in counts.
 - **Against what:** the publisher's own file is the truth, followed from the file to the database to the API to the screen. Identifiers, dates and money must match exactly; a tolerance is allowed only for a stated conversion.
-- **Pinned for every run:** the publisher's edition or month, the day fetched, the area and filters, the loader's commit.
-- **If it fails:** the slice is not released and the last good load stays. The result, the version and who approved are recorded; restricted files stay out of Git.
+- **Written before the run:** the exact input files (with a digest where the terms allow keeping one), the publisher's edition or month, the day fetched, the area and filters, the loader's commit, the sample's identifiers, and the units, precision and any tolerance.
+- **A load is shown only after it has passed** (revision 4). Today a loader commits its rows and the checks would come after; the wells and their field and pool names are even committed in two steps (`load-st37.yml`). In the new platform a load is written as a candidate that no screen shows, checked from the file through the API, then put in place in one step; a candidate that fails is dropped and the last good load stays. The same rule covers the Worker's own scheduled job and records copied from the old project. This is a change to how the loaders work, not a plain move: it is designed once, with the reusable loader workflow (3.2), and reviewed as high risk.
+- **Recorded:** pass or fail, the version, and who approved; restricted files stay out of Git.
 - **The analyst's comparison with another tool is a second opinion, not the truth:** other products define areas and corrections differently (the land-sale gap in `docs/DECISIONS.md`, 2026-11-21, is such a case). Known gaps go on the screen or in the release conditions.
 
-Two loads, or a load and a deploy, must not overlap and publish a half-updated picture; today each workflow guards only itself.
+Two loads, or a load and a deploy, must not overlap; today each workflow guards only itself. Keeping them apart is needed but does not replace the candidate rule above.
 
 ### 3.6 The documents have outgrown their purpose
 
@@ -144,7 +159,15 @@ Private (recommended; to weigh against it: GitHub's included Actions minutes for
 
 Each copied file's origin (this repository and the commit) is recorded in the slice's pull request.
 
-**Before any application code:** the owner sets branch protection, both required checks and the protected `staging` environment; then a test pull request with its review evidence missing is shown to be blocked. A gate that has not been seen to refuse is not relied on. Also settled then: who provides each credential, who approves workflow changes, who runs each manual load, and that Claude and Codex can both read the archive and the new repository.
+**Starting the gate** (revision 4). The first commit cannot be checked by a gate that does not exist yet, so it is handled by hand, once:
+
+1. Claude prepares the seed on a branch: the skeleton, the review machinery with its tier rules changed as 3.2 says, `review-withdraw-auto.sh`, the hook and its wiring in `.claude/settings.json`, the two policy workflows, and their tests.
+2. Codex reviews the seed against this repository's files at the tagged commit; the review is recorded in the seed's own register.
+3. **The owner** approves that exact commit and puts it on the default branch himself. Nobody else can: the gate reads its rules from the default branch.
+4. The owner turns on branch protection, both required checks, the approval labels and the protected `staging` environment.
+5. A test pull request with its review evidence missing is shown to be blocked, and one with a changed migration. A gate that has not been seen to refuse is not relied on.
+
+Only then does application code arrive. Also settled then: who provides each credential, who approves workflow changes, who runs each manual load, and that Claude and Codex can both read this repository at the tagged commit and the new one.
 
 ### 4.2 Infrastructure
 
@@ -156,18 +179,18 @@ Each copied file's origin (this repository and the commit) is recorded in the sl
 | Mapbox, Anthropic, Geocodio, Supabase keys | grain's | Its own, so cost, limits and access are separate |
 | GitHub | repository and `staging` environment secrets here | Its own, in a `staging` environment limited to `main` from day one; no grain secret among them |
 | Data that can be fetched again | in `petroleum-staging` | Loaded again by the reviewed loaders, each load's coverage and version recorded |
-| Records that cannot be fetched again (section 2) | only in `petroleum-staging` | For each, the owner decides: carried over, kept in a closed archive, or let go. What is carried is copied by a reviewed script, tried first on a local database (row counts and a checksum per table must match). Old organization and person IDs are mapped to the new accounts, or the original identity is kept in the record |
+| Records that cannot be fetched again (section 2) | only in `petroleum-staging` | For each, the owner decides: carried over, kept in a closed archive, or let go. What is carried (and, for a restricted feed, permitted: 3.1) is copied by a reviewed script. Rows copied unchanged are compared one for one; rows whose organization or person IDs change are compared against the approved mapping of old IDs to new, since a plain checksum cannot match them. If months of production are carried or kept, the new production load replaces only the months it fetched |
 | People | GSS's accounts in `gss-staging` | Approved people are invited again and set up their authenticator again; choices a browser remembered start over |
 
-The old `petroleum-staging`, the `PETROLEUM` binding and the oil and gas code here stay as they are until the waiting period after cutover has passed (4.4). The old project is deleted only after a last export has been restored once, as a test.
+The old `petroleum-staging`, the `PETROLEUM` binding and the oil and gas code here stay as they are until the waiting period after cutover has passed (4.4). The old project is deleted only after a last export has been restored once, as a test, and after the owner's decision on its restricted feeds (3.1, point 4).
 
 ### 4.3 The database and sign-in
 
-- **One project for sign-in and data, and the database checks membership itself** (Codex's finding 3). The Worker verifies the session and the authenticator step and passes the person's ID for the transaction; **SQL then checks active membership, role and feed entitlement in that same transaction.** Copying grain's pattern unchanged would still leave the database trusting the Worker for everything but the ID. Supabase's own Data API is kept away from the private schemas; the Worker, the loaders, migrations and account administration each get their own, narrower login.
+- **One project for sign-in and data, and the database checks membership itself** (Codex's finding 3). The Worker verifies the session and the authenticator step and passes the person's ID for the transaction; **SQL then checks active membership, role and feed entitlement in that same transaction.** This is grain's pattern, which already checks membership in SQL and trusts the Worker only for the ID (`app.is_active_member`), with the feed entitlement added. It replaces today's oil and gas arrangement, where the database trusts the Worker for the ID, the organization and the role (`apps/api/src/petroleum-db.ts`). Supabase's own Data API is kept away from the private schemas; the Worker, the loaders, migrations and account administration each get their own, narrower login.
 - **Written down before sign-in is built:** invited, suspended and removed accounts; who may invite and administer; what happens when a check cannot be made (refused). The app today takes a person's first organization (`App.tsx`); if a person may belong to several, a chooser is designed now.
 - **What belongs to whom:** reference data is the same for everyone where its terms allow, gated by active membership and feed entitlement; settings, saved analyses and the audit record belong to an organization from the first migration.
 - **Denial tests required:** signed out; a session from another project; no authenticator step; suspended; another company; a non-admin writing. Also after access is removed or the account changes: pooled connections, the Data API directly, map tiles, kept answers.
-- **What the browser keeps.** Production, frac, well geology and prices each keep answers by address or organization (`Production.tsx`, `WellFrac.tsx`, `WellGeology.tsx`, `WellRoyalty.tsx`); only the general store is cleared at sign-out. In the new platform every kept answer is tied to the person and their access, dropped at sign-out, account change or refusal, and a late answer cannot put it back.
+- **What the browser keeps.** Production, frac, well geology, prices and the 3D wells each keep answers by address or organization (`Production.tsx`, `WellFrac.tsx`, `WellGeology.tsx`, `WellRoyalty.tsx`, `Well3d.tsx`); only the general store is cleared at sign-out. In the new platform every kept answer is tied to the person and their access, dropped at sign-out, account change or refusal, and a late answer cannot put it back.
 - **Ask the map** sends the typed words to Anthropic and place names to Geocodio. Before it ships: what is sent, how long each keeps it, and ceilings on rate and cost, reviewed on their own.
 - **A new first migration, derived from the end state** (Codex's finding 5). All 26 old migrations are replayed in a throwaway database; each slice's schema is written from that result and compared with it: tables, roles, grants and default grants, policies, triggers, functions, indexes. The pgTAP and API database tests that apply are carried over; deliberate sign-in changes are listed. Kept from the end state: the compact land shapes (`path`, `rings`) and their checks, layer history and versions, the narrow grants. Left out: injection and Stettler data. **The new first migration is never run against the old database.** Each slice states what "ready" means for it, and the Worker and its loader check the same version; one green readiness light for everything is not enough for cutover.
 
@@ -177,38 +200,40 @@ The old `petroleum-staging`, the `PETROLEUM` binding and the oil and gas code he
 
 - Freeze new oil and gas features here at a tagged commit, with a date to look at the freeze again. Fixes to the old page continue, each recorded so it is carried across.
 - The feed list and the requests to the publishers (3.1); the specification with its smallest first release (3.3); the owner's decisions (section 6).
-- Three trials on throwaway copies: the archive of this repository's history (4.8); the copy of the records that cannot be fetched again (4.2); the replay of the 26 migrations (4.3).
+- Trials, with made-up records only: reading moved files' history at the tagged commit (4.8); the copy script for the records that cannot be fetched again (4.2); the replay of the 26 migrations (4.3). A copy of real restricted records is rehearsed later, against a separate instance of the new schema, after its permission and its design review, and before anything is loaded into the real project.
 
-**Phase 1: the foundation.** One reviewed pull request each: (a) the skeleton, CI, Merge policy and review machinery, then the gate shown to block (4.1); (b) the database baseline: organizations, members, roles, audit, their tests; (c) sign-in, the session, the Team screen (4.3); (d) the feed list and its audience check (3.1); (e) the reusable loader workflow (3.2); (f) deploy to the new Worker and project. End state: a person signs in and sees an empty map.
+**Phase 1: the foundation.** One reviewed pull request each: (a) the skeleton, CI, Merge policy and review machinery, then the gate shown to block (4.1); (b) the database baseline: organizations, members, roles, audit, their tests; (c) sign-in, the session, the Team screen (4.3); (d) the feed list and its audience check (3.1); (e) the reusable loader workflow (3.2); (f) deploy to the new Worker and project. End state: a person signs in and sees a plain page that says so; the map arrives in phase 2.
 
-**Phase 2: the map base.** The page's frame, agreed with the owner (4.6); a renderer that works with any set of overlays missing; map styles; the township grid; the layer system with F-248's two open findings fixed and tested, and the admins' layers copied. Routes, queries and version checks exist only for what has landed.
+**Phase 2: the map base.** The page's frame, agreed with the owner (4.6); a renderer that works with any set of overlays missing; map styles; the township grid; the layer system with F-248's two open findings fixed and tested, and the admins' layers copied. Routes, queries and version checks exist only for what has landed. End state: an empty map with the grid and the layers.
 
-**Phase 3: the data, in the order the code depends on it.** Each slice is its tables, loader, routes, panel, tests and reconciliation (3.5), moved as it is unless the review finds a fault. A panel section or Ask action whose data has not landed stays switched off.
+**Phase 3: the data, in the order the code depends on it.** Each slice is its tables, loader, routes, panel, tests and reconciliation (3.5), moved as it is unless the review finds a fault, apart from the one change every loader gets (a load is shown only after it has passed, 3.5). A panel section or Ask action whose data has not landed stays switched off.
 
 | # | Slice | Needs first | Publisher |
 |---|---|---|---|
 | 1 | Wells (ST37) **with** Petrinex's licence inputs and the AER's fields and pools; the well set and its bounds become stated, versioned inputs for later loads | Phases 1 and 2 | AER, Petrinex |
 | 2 | Production by month | 1 | Petrinex |
-| 3 | Land held and land sales: one slice, or storage in two and the shared screens held until both are in | Phase 2 | Province |
-| 4 | Facilities (ST102) | Phase 2 | AER |
-| 5 | Pipelines | Phase 2 | AER |
+| 3 | Land held and land sales: one slice, or storage in two and the shared screens held until both are in | **1**: both loads take their area from the wells' load and stop without it (`load-land.yml`, `load-land-sales.yml`) | Province |
+| 4 | Facilities (ST102) | **1**, for the same reason (`load-facilities.yml`) | AER |
+| 5 | Pipelines | **1**, for the same reason (`load-pipelines.yml`) | AER |
 | 6 | Operators: search and colour across sources | 1, 3, 4, 5 | none of its own |
-| 7 | The AER's daily lists and rigs, kept together where they share lookups; licence transfers and their history as a job of their own | 1 | AER |
-| 8 | Formation outlines (can go earlier, alone); then formation grids, geology in wells, the wells in 3D | 1 | Geological Survey |
+| 7 | The AER's daily lists and rigs, kept together where they share lookups; licence transfers and their history as a job of their own | Phase 2: they load from the AER's own lists without the wells | AER |
+| 8 | Formation outlines and the Survey's grids as files (can go earlier, alone); then the grids loaded around the wells, geology in wells, the wells in 3D | the files: Phase 2; the rest: 1 | Geological Survey |
 | 9 | Prices (can land alone) | Phase 2 | Province |
-| 10 | Frac data | 1 | AER |
+| 10 | Frac data: its load stands alone; its section of the well panel needs the wells | Phase 2 for the load, 1 for the panel | AER |
 | 11 | The royalty estimate | 2, 9, 10 | none of its own |
 | 12 | Ask the map | every panel | Anthropic, Geocodio (4.3) |
 
-**The first release** is the smallest set the specification names (for example wells, production and land), proved from end to end with real sign-in, real loads and a passed reconciliation, before the remaining slices move. It tests the whole method while a change of course is still cheap.
+To move land, sales, facilities or pipelines before the wells, their area would have to be stated on its own instead of read from the wells' load, with the resulting coverage reconciled: a change, not a plain move.
+
+**The first release** is the smallest set the specification names, proved from end to end with real sign-in, real loads and a passed reconciliation, before the remaining slices move. It tests the whole method while a change of course is still cheap. It can only contain feeds that may be loaded under 3.1: with the AER's and Petrinex's answers, wells, production and land; without them, the smaller open-data release, once designed (3.1).
 
 **Phase 4: cutover, with a way back.**
 
 1. A restore from backup is tried on the new project; records, freshness and access are compared with the old page.
 2. **The way back is tried before it is needed:** on a spare address, pointed at the new Worker, then back at the old one.
-3. The final copy: builds pinned, old loads and writes paused, the last good load of each feed recorded; sign-in, the certificate, Mapbox and the main paths checked on the new side.
+3. The final copy: builds pinned; the old side's loads and its twice-daily job paused **only while the copy runs**, so that it is consistent, then started again; the last good load of each feed recorded; sign-in, the certificate, Mapbox and the main paths checked on the new side.
 4. `map.torvenco.com` moves. One named person decides; the conditions for going back and the date the old side is kept until are written down beforehand, with what happens to anything saved on the new side if we go back.
-5. **A waiting period** (proposed: 14 days) with the old Worker, binding, database and twice-daily AER job untouched, open only to today's GSS members.
+5. **A waiting period** (proposed: 14 days). **Who writes what** (revision 4): each side keeps capturing for itself and nothing is synchronized between them. The old side runs as before: its twice-daily AER job and its three scheduled loads (licences, frac, prices) keep the old database current, so going back loses no day. The new side runs its own jobs from the copied state. The old page is open only to today's GSS members. **If we go back:** the old side is already current; what exists only on the new side (layers admins changed, settings, anything saved) is listed during the period and entered again by hand on the old side, or let go, as the owner decided beforehand.
 6. After it, on the owner's word: the old `/map`, the old `/petroleum` routes on grain's addresses and the old credentials are retired (4.7). Going back is then no longer possible without rebuilding.
 
 **New features (waterflood, type curves, other formations) wait until phase 3 is done,** or are added as their own slices under the strict process, never in the old place.
@@ -231,16 +256,18 @@ As `docs/AI_WORKFLOW.md` §11.5 and §11.6 describe it, with the tiers and rules
 
 Two pull requests (Codex's finding 9), because grain's own maps run through the shared renderer:
 
-1. **Before cutover: separate the renderer.** `FacilityMap.tsx` stops importing the oil and gas drawing code, with grain's Workspace, Counterparties, company, lanes and freight maps tested unchanged (pins, styles, layer files, ArcGIS imports, overviews). Small, reviewed, and safe to merge while the old map page still works through its own entry.
+1. **Before cutover: separate the renderer.** `FacilityMap.tsx` stops importing the oil and gas drawing code, with grain's Workspace, Counterparties, company, lanes and freight maps tested unchanged (pins, styles, layer files, ArcGIS imports, overviews). Small, reviewed, and safe to merge while the old map page still works through its own entry: the old page's tests stay and keep running until the retirement, and grain's layer access and its "still a member?" re-check are tested after the split (`apps/web/src/lib/layerApi.ts`).
 2. **After the waiting period: the retirement.** Removed: the `/petroleum` routes, the oil and gas components, `lib` files, domain exports, generated files and build scripts, tests and fixtures; the eleven `load-*.yml` workflows; the `PETROLEUM` binding and the Hyperdrive setup's `petroleum` choice with its tests; CI's second database and its jobs; the deploy's migration step and readiness call; the routing tests that expect both sides; **only** the AER call from the shared schedule (the exchange rate, calls and email keep theirs); only the oil and gas secrets. Decided with the owner: where an old `/map` bookmark leads; `/map/coordinates` is kept. README and rules updated. Tested after: sign-in, the Workspace, every grain map, Team, the exchange rate, calls and email schedules.
 
 **The oil and gas migrations are not deleted.** The Merge policy refuses any pull request that removes a migration under either database's folder (`scripts/review-gate.js`, `DATABASE_ROOTS` in `scripts/review-register.js`), under the light process too. `petroleum/supabase/` stays as a closed record with a note that nothing applies it. The alternative, an owner-approved rule that lets that one database be retired, is possible but not worth it for 26 files.
 
-The retirement changes workflows, so it is governance with a Codex review, whatever process grain is on. Whether grain returns to the strict process is a separate decision; it holds the business's real data, calls and email, so I would use the same tiers there.
+**How the retirement is held** (revision 4). It changes workflows, so it should have a Codex review and the owner's approval of the exact commit. Under grain's light process the gate does not hold a governance change for that approval (`mergeDecision` in `scripts/review-gate.js`). So one of two, the owner's choice: grain is back on the strict process before the retirement, and the gate holds it; or the pull request stays a draft, which GitHub will not merge, until Codex's approval is in its register, and the owner then marks it ready and merges it himself. Claude does not start an automatic merge for it either way.
+
+Whether grain returns to the strict process is a separate decision; it holds the business's real data, calls and email, so I would use the same tiers there.
 
 ### 4.8 Keeping the history
 
-- **The code's history.** The new main branch starts fresh. This repository's history holds why each thing was built and 40 review registers; it is kept twice: here, with the freeze commit tagged, and pushed into the new repository as a read-only tag no branch builds on. **Tried in phase 0** on a throwaway copy: push the tag and read two moved files' history through it.
+- **The code's history.** The new main branch starts fresh. This repository's history holds why each thing was built and 40 review registers. **It is kept here:** this repository stays, with the freeze commit tagged, and every moving pull request names the files and the commit it took them from. That is enough for a reviewer to compare. A second copy inside the new repository is the owner's option, not part of the plan: it would put grain's code and history into the new repository, a tag can be moved or deleted unless it is protected, and the review guarantee would still cover only the branch that deploys.
 - **The records:** section 4.2.
 - **The decisions.** Every oil and gas entry of `docs/DECISIONS.md` is copied whole, with its date; the licence conditions are in those words.
 
@@ -257,13 +284,13 @@ The retirement changes workflows, so it is governance with a Codex review, whate
 
 1. Who may use the first release: GSS staff only, the analyst, other companies? For their company's work? Paid or free? May they download or share anything?
 2. One company or several on the platform, now and in a year?
-3. Ask the AER, Petrinex and the province in writing now, naming each file (3.1)? Until each answers, that feed stays GSS staff only: agreed?
-4. If a permission is late or refused, which sources and screens can wait? What is the smallest set of tools and history that makes a first release worth having?
+3. Ask the AER, Petrinex and the province in writing now, naming each file and the use (3.1)? Until each answers, that feed does not enter the new project at all, for GSS staff either, and stays as it is in the old one: agreed, or do you decide otherwise for some feed? By what date does a feed without an answer count as refused?
+4. The first release: wait for the AER's and Petrinex's answers (wells, production, land), or have the smaller open-data release designed now (land, sales, grid, formation files, open prices; extra design work, 3.1)?
 
 **What must survive, and the switch**
 
-5. Which stored records matter (section 2: the AER's daily files, transfer history, old production months, admins' layers and their history)? For each: carry over, archive, or let go.
-6. How long must going back stay possible (proposed: 14 days), and how much interruption can the team accept on the day?
+5. Which stored records matter (section 2: the AER's daily files, transfer history, admins' layers and their history)? For each: carry over, archive, or let go; for the AER's, only if it permits. Should production months be kept once loaded, beyond Petrinex's free window? When the old project is retired, are its restricted feeds kept privately or deleted?
+6. How long must going back stay possible (proposed: 14 days), and how much interruption can the team accept on the day? If we go back, is what was saved only on the new side entered again by hand, or let go?
 7. Who checks the first release against their daily work, and who makes the call to switch or to go back?
 8. Keep `map.torvenco.com`, or a name of its own?
 
@@ -278,7 +305,8 @@ The retirement changes workflows, so it is governance with a Codex review, whate
 12. The four review tiers of 3.2, or a Codex review on every pull request as before?
 13. Is the new layout settled enough to agree the page's frame now (4.6)?
 14. The old oil and gas migrations stay here as a closed record (4.7): agreed?
-15. Grain's process after the split: light as now, or the same tiers?
+15. Grain's process after the split: light as now, or the same tiers? For the retirement itself: strict again beforehand, or a draft the owner merges by hand (4.7)?
+16. You put the first commit of the new repository in place and switch on its protections yourself (4.1), with exact click paths from Claude: agreed?
 
 ## 7. Codex's review
 
@@ -298,4 +326,19 @@ The retirement changes workflows, so it is governance with a Codex review, whate
 
 **Facts Codex corrected, now fixed in section 2:** the oil and gas database is not "public reference data only"; the township outlines ship with the app; the domain package's 31,000 lines include about 12,500 of tests; `/map` works on any address; the loaders sign in to grain's database; Geocodio, the Supabase keys and the sign-in admin secret are shared too; the royalty estimate needs frac data; the price data is only partly open.
 
-**Next:** a second Codex round on this revision, then the owner's decisions. Codex's own file (`docs/reviews/F-313-plan-review.md`) is on the owner's computer and was pasted into the chat; it is not committed here.
+**Round 2 (2026-11-26, on revision 3 at `dc0dce4`): sound with changes, approval pending.** Findings 3, 5 and 8 resolved; six partly. Each point was checked in the code and was as Codex said.
+
+| # | What was still open | Checked | Changed in revision 4 |
+|---|---|---|---|
+| 1 | 3.1 let GSS load restricted feeds into the new project while 1.7 forbade it; three AER feeds not named | seen: `licenceHolders.ts` (three lists) | One rule in 3.1; the inventory; decisions 3 to 5 |
+| 2 | A plain checksum cannot match rows whose IDs change; no word on which side writes after the final copy; "paused" against "untouched" | seen: `cron` in three load workflows | 2, 4.2, 4.4 phase 4 |
+| 3 | Resolved; grain's pattern described wrongly; 3D wells missing from the kept answers | seen: `app.is_active_member`, `Well3d.tsx` | 4.3 |
+| 4 | Land, sales, facilities and pipelines need the wells' load; daily lists, rigs, transfers and frac do not; phase 1 promised a map it does not build | seen: `st37_loads` read in all four workflows, none in licences or frac | 4.4, 3.1 |
+| 6 | Who starts the gate; strict mode alone leaves loaders and calculations "normal"; "five rounds at most" misread F-251 | seen: `fileTier` rules, `docs/AI_WORKFLOW.md` §11.5 | 3.2, 4.1 |
+| 7 | Loads commit before they are checked; inputs and tolerances fixed beforehand | seen: `load-st37.yml` (two commits), `load-petrinex.js` | 3.5 |
+| 9 | The old page tested until retirement; the retirement not held under the light process | seen: `mergeDecision` | 4.7, decision 15 |
+| — | A release without wells promised too much; the history copy an extra choice; trials with real records | seen: `load-prices.js` (needs the gas archive), `wrangler.jsonc` | 3.1, 4.8, 4.4 phase 0 |
+
+**Not taken as Codex wrote it:** nothing was rejected. One point is the owner's to settle, not the plan's: Codex reads the first review as requiring permission before GSS's own staff use a feed in the new project; this plan now adopts that as its rule and says the owner may decide otherwise, feed by feed, in writing (3.1).
+
+**Next:** the owner's answers to section 6; a third Codex round only on what those answers change. Codex's own file (`docs/reviews/F-313-plan-review.md`) is on the owner's computer and was pasted into the chat; it is not committed here.
