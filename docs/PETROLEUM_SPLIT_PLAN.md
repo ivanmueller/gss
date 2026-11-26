@@ -2,7 +2,7 @@
 
 **Status:** a proposal for the owner's decision. Nothing here is built or decided. Written by Claude on 2026-11-25 against `main` at `1e1d1bf` (ivanmueller/gss#380). Asked by the owner on 2026-11-25: separate the two sides completely; the oil and gas side becomes its own repository, built and reviewed under the strict Claude + Codex process again; grain stays here as its own thing.
 
-**Revision 5 (2026-11-26), after the owner's first answers.** The owner holds permission for the data, so permission is no longer a gate or a decision here (3.1); the first release is therefore wells, production and land (4.4); people get in through a new sign-in and an approved list that the owner sets up once the platform has moved (4.3). Section 6 now separates what is answered from what is open. Earlier: revisions 3 and 4 took in Codex's two reviews (section 7); revision 2 was merged as ivanmueller/gss#381.
+**Revision 6 (2026-11-26), after the owner's further answers.** The new platform has no connection to GSS; the permission covers people outside GSS, downloads and exports (3.1); people will most likely have their own organizations, later (4.3). The owner's own order is "migrate all the code over, get it running, and then … disconnect the old version": that is simpler than the piece-by-piece move of section 4.4, so **how the code moves is now the first open decision** (section 6), with Claude's recommendation. Earlier: revision 5 recorded that the owner holds permission; revisions 3 and 4 took in Codex's two reviews (section 7); revision 2 was merged as ivanmueller/gss#381.
 
 ## 1. The recommendation in short
 
@@ -65,7 +65,7 @@
 
 **What the record said before,** so the change is clear: the AER's and Petrinex's data and part of the price data were used on the owner's own reading, for a non-commercial side project shown to GSS staff, with the note "If the tool is ever sold or used in a company's business, consent is asked of Petrinex first" (`docs/DECISIONS.md`, 2026-11-19, 2026-11-20, 2026-11-23).
 
-**One thing still to write down, without holding anything up:** for each publisher, who gave the permission, when, and what it covers: people outside GSS, a company's own work, downloads and exports. Not as proof (nothing of the permission itself goes into Git) but because the answer shapes the screens: whether an export button may exist, and what each source line must say. Until it is written down, the new platform shows the data as today's does: the source named with its date, "preliminary, not an official version" on the AER's data, "Petrinex public data, © Government of Alberta", the open licence's attribution line, and no export.
+**What the permission covers (the owner, 2026-11-26):** people outside GSS, and downloading and exporting. So the new platform is not limited to GSS staff, and an export may be built; it does not exist today, so it is a new feature after the move, not part of it. Who gave the permission and when is not recorded here, and nothing of the permission itself goes into Git. Each screen keeps naming its source as today's does, which the publishers' pages ask for in any case: the source with its date, "preliminary, not an official version" on the AER's data, "Petrinex public data, © Government of Alberta", the open licence's attribution line.
 
 **The feeds and what each is shown with** (from `docs/DECISIONS.md` and `docs/FEATURES_OIL_GAS.md`):
 
@@ -261,23 +261,31 @@ Whether grain returns to the strict process is a separate decision; it holds the
 
 **Answered by the owner (2026-11-26)**
 
-- **Data permission:** held; not a gate and not a decision (3.1).
-- **First release:** follows from that: wells, production and land (4.4).
+- **Data permission:** held; not a gate and not a decision. It covers people outside GSS, downloads and exports (3.1).
+- **No connection to GSS.** The new platform is its own thing: its own name, sign-in, database and keys, and nothing shared once the old version is disconnected. The rule "the platform only ever serves GSS staff" (`AGENTS.md`) is not carried over.
 - **Who may use it:** people on an approved list, through a new sign-in the owner sets up once the platform has moved (4.3).
+- **Organizations:** people will most likely have their own, "but this isn't a big priority for now". So the organization boundary is kept in the database from the first day, because the foundation already has it and adding it later is costly; everyone starts in one organization; choosing between organizations and companies managing their own people are designed when wanted.
+- **The order:** "migrate all the code over, get it running, and then we will disconnect the old version which is in GSS."
 
 **Still open.** Where Claude has a recommendation it is given; costs and business choices are the owner's alone.
+
+*How the code moves: the one that shapes the rest*
+
+0. Both ways end the same: the code in its own repository, reviewed by Codex, running, the old version disconnected. They differ in when it runs and when it is reviewed.
+   - **A. Piece by piece** (section 4.4 as written): each part is reviewed before it enters the new repository. Nothing unreviewed is ever there. The map is complete only at the end, after about 25 pull requests, and the map page and the routes file have to be rebuilt as frames that each piece is added to.
+   - **B. All at once, then reviewed in place** (the owner's order): the reviewed foundation first (sign-in, the approved list, the review gate), then all the oil and gas code copied across in one step and got running, **with the owner as the only person signed in.** Codex then reviews it module by module where it stands, and the faults are fixed. Two locks hold until every module is marked reviewed: nobody else is added to the approved list, and the old version is not disconnected.
+   - **Claude's recommendation: B.** Section 5 rejected copying everything at once because unreviewed code could serve other people and "we will audit it later" is how the present state arose. The owner's answers change the first: he is the only user until he adds others. The two locks answer the second: the audit cannot be skipped without the platform staying a one-person tool. B reaches a running platform sooner, needs no rebuilding of the frames, and lets the old database be copied as it is. Its cost: until the audit is done, the new repository holds code no one has reviewed, as this one does today.
+   - If B is chosen, sections 4.3 to 4.5 are rewritten for it and Codex reviews that rewrite.
 
 *The switch (explained in 4.4, phase 4)*
 
 1. Who says "switch now", and who says "go back"? (Proposed: the owner, both.)
 2. How long is the old map kept running after the switch, so that going back stays possible? (Proposed: 14 days.) If we do go back, is what was saved only on the new side entered again by hand, or let go?
-3. Keep `map.torvenco.com`, or a name of its own for the new platform?
+3. With no connection to GSS: what is the new platform called, and at which address? Does it get accounts of its own (GitHub, Cloudflare, Supabase, Mapbox), or stay under the ones that hold GSS today?
 
 *People and use*
 
-4. Are the approved people all part of one organization on the platform (yours), or do they belong to their own companies, each with its own settings and saved work? It decides how the database is laid out from the first day (4.3).
-5. May approved people download or export data, or only look at it?
-6. What the permission covers, in a few words per publisher, so the source lines and the export question follow it (3.1).
+4. Who gave the permission and when, in a line per publisher, for the record (nothing of it is committed)?
 
 *What is kept*
 
