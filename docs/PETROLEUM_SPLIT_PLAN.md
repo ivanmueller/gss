@@ -2,13 +2,13 @@
 
 **Status:** a proposal for the owner's decision. Nothing here is built or decided. Written by Claude on 2026-11-25 against `main` at `1e1d1bf` (ivanmueller/gss#380). Asked by the owner on 2026-11-25: separate the two sides completely; the oil and gas side becomes its own repository, built and reviewed under the strict Claude + Codex process again; grain stays here as its own thing.
 
-**Revision 6 (2026-11-26), after the owner's further answers.** The new platform has no connection to GSS; the permission covers people outside GSS, downloads and exports (3.1); people will most likely have their own organizations, later (4.3). The owner's own order is "migrate all the code over, get it running, and then … disconnect the old version": that is simpler than the piece-by-piece move of section 4.4, so **how the code moves is now the first open decision** (section 6), with Claude's recommendation. Earlier: revision 5 recorded that the owner holds permission; revisions 3 and 4 took in Codex's two reviews (section 7); revision 2 was merged as ivanmueller/gss#381.
+**Revision 7 (2026-11-26), after the owner's choices.** The code moves piece by piece, "but just not too many pieces": eight sections, one at a time (4.4). The first section is the working setup the owner wants in place from the start: the rules and commands, the way Claude and Codex work together, and the design system (4.1). No name or address yet; the same accounts as today (4.2). Earlier: revisions 5 and 6 recorded that the owner holds permission for the data and that the platform has no connection to GSS; revisions 3 and 4 took in Codex's two reviews (section 7); revision 2 was merged as ivanmueller/gss#381.
 
 ## 1. The recommendation in short
 
 1. **Split, and do it now.** The longer it waits, the more unreviewed code and shared wiring there is to untangle.
 2. **A new private repository, started from a clean copy of the foundation.** Its main branch starts fresh; this repository stays, tagged, as the record every moved file is compared with (4.8).
-3. **The oil and gas code moves over in slices, each slice one pull request that Codex reviews.** The move is the audit: nothing enters the new repository unreviewed. A small first release is proved from end to end before the rest follows.
+3. **The oil and gas code moves over in eight sections, one at a time, each reviewed by Codex before it enters** (the owner, 2026-11-26: piece by piece, "but just not too many pieces"). The first section is the working setup: rules, commands, the Claude and Codex loop, the design system. A first release (wells, production, land) is proved from end to end before the rest follows.
 4. **Its own sign-in and database in one new Supabase project, in its own Supabase organization, on a paid plan;** its own Cloudflare Worker, its own secrets and keys. No grain credential ever enters the new repository.
 5. **No shared code between the two repositories.** What both need is copied once; after that each goes its own way.
 6. **Look and layout: the page's frame is agreed early, the panels move as they are, the redesign comes after** as separate reviewed work.
@@ -137,7 +137,18 @@ Private (recommended; to weigh against it: GitHub's included Actions minutes for
 
 Each copied file's origin (this repository and the commit) is recorded in the slice's pull request.
 
-**Starting the gate** (revision 4). The first commit cannot be checked by a gate that does not exist yet, so it is handled by hand, once:
+**The move's first section, the working setup: what is carried, so it works from the first day** (the owner, 2026-11-26: "the direction files for the structure of our repository like the CSS design stuff, the rules and commands, the way claude and codex work together").
+
+| What | Files here | In the new repository |
+|---|---|---|
+| The rules | `AGENTS.md`, `CLAUDE.md`, `.gemini/settings.json` | Same structure and the same working rules (plain language for the owner, migrations only added, tests with every change, no secrets in chat). Rewritten: the mission, the standing facts (no GSS, no grain), the data rules of 3.1, the strict process as the default |
+| The commands | `.claude/commands/start.md`, `.claude/settings.json`, `.claude/hooks/guard-merge.js` | Carried, pointed at the new documents |
+| Claude and Codex together | `.claude/skills/codex-review/` (the procedure, the runner, the prompt, the answer's format); `scripts/review-gate.js`, `review-register.js`, `review-approval.js`, `review-withdraw-auto.sh` and their tests; `.github/workflows/merge-policy.yml`, `policy-refresh.yml`; `docs/AI_WORKFLOW.md`; `docs/reviews/README.md` and an empty `ACCEPTED.md`; the pull request and issue templates | Carried as one unit, with `PROCESS = 'strict'` and the tier rules of 3.2 |
+| The design system | `docs/DESIGN_SYSTEM.md`; `apps/web/src/styles/` (`base.css`, `index.css`, `tokens/palette.css`, `themes.css`, `scales.css`, `tokens.test.ts`); `apps/web/src/components/ui/` (15 components); `lib/theme.ts`, `lib/colour.ts`; the fonts | Carried; grain's roles (`bid`, `offer`, `grain-*`) taken out; the document rewritten to match. A redesign later changes values in these files (4.6) |
+| The skeleton | `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js`, `.prettierrc.json`, `.prettierignore`, `.gitignore`, `.env.example`, `.github/workflows/ci.yml`, `.github/dependabot.yml` | Carried, cut down to what exists; the packages renamed from `@grain/…` |
+| The documents | `docs/FEATURES.md`, `docs/HANDOFF.md`, `docs/DECISIONS.md`, `README.md` | Fresh and short; the oil and gas decisions copied whole (4.8); a short specification (3.3) |
+
+**Starting the gate.** The first commit cannot be checked by a gate that does not exist yet, so it is handled by hand, once:
 
 1. Claude prepares the seed on a branch: the skeleton, the review machinery with its tier rules changed as 3.2 says, `review-withdraw-auto.sh`, the hook and its wiring in `.claude/settings.json`, the two policy workflows, and their tests.
 2. Codex reviews the seed against this repository's files at the tagged commit; the review is recorded in the seed's own register.
@@ -151,9 +162,9 @@ Only then does application code arrive. Also settled then: who provides each cre
 
 | Thing | Today | New platform |
 |---|---|---|
-| Supabase | `petroleum-staging`, no users, same organization as grain, free plan | A new project in a **new Supabase organization**, holding sign-in and data; paid plan recommended, with backups (price read from Supabase's page first) |
-| Worker | `grain-trading-api-staging` serves both | Its own Worker and Hyperdrive configuration. The same Cloudflare account shares the bill, limits and administrators; **its deploy token must not be able to change grain's Worker or connection**, settled before the first deploy |
-| Address | `map.torvenco.com` is a custom domain of grain's Worker | Moved at cutover, or a new name (owner's choice) |
+| Supabase | `petroleum-staging`, no users, same organization as grain, free plan | A new project holding sign-in and data, under the owner's same Supabase login but in a **new organization** there (an organization is how Supabase separates plans and size limits, not a new account); paid plan recommended, with backups (price read from Supabase's page first) |
+| Hosting | `grain-trading-api-staging`, one Worker serving the app and the API | **The same kind: one Worker of its own, in the same Cloudflare account,** with its own Hyperdrive configuration. The owner thought of Cloudflare Pages to start (2026-11-26); Claude recommends the Worker, because the code is built for it (the API, the twice-daily job, the database connection, the sign-in checks all run in it) and Pages would mean rewiring those. What Pages can and cannot do is read from Cloudflare's own page before this is settled. The deploy token must not be able to change grain's Worker |
+| Address | `map.torvenco.com` is a custom domain of grain's Worker | No name or address yet (the owner, 2026-11-26). Until there is one, the Worker's free `workers.dev` address, as grain's staging has; a domain is added later with two clicks and no code change |
 | Mapbox, Anthropic, Geocodio, Supabase keys | grain's | Its own, so cost, limits and access are separate |
 | GitHub | repository and `staging` environment secrets here | Its own, in a `staging` environment limited to `main` from day one; no grain secret among them |
 | Data that can be fetched again | in `petroleum-staging` | Loaded again by the reviewed loaders, each load's coverage and version recorded |
@@ -175,38 +186,30 @@ The old `petroleum-staging`, the `PETROLEUM` binding and the oil and gas code he
 
 ### 4.4 Order of work
 
-**Phase 0: before any code (owner and Claude).**
+**Before any code (owner and Claude).**
 
 - Freeze new oil and gas features here at a tagged commit, with a date to look at the freeze again. Fixes to the old page continue, each recorded so it is carried across.
 - What the owner's permission covers, written down (3.1); the specification with its smallest first release (3.3); the owner's decisions (section 6).
 - Trials, with made-up records only: reading moved files' history at the tagged commit (4.8); the copy script for the records that cannot be fetched again (4.2); the replay of the 26 migrations (4.3). The copy of the real records is rehearsed later, against a separate instance of the new schema, after its design review and before anything is loaded into the real project.
 
-**Phase 1: the foundation.** One reviewed pull request each: (a) the skeleton, CI, Merge policy and review machinery, then the gate shown to block (4.1); (b) the database baseline: organizations, members, roles, audit, their tests; (c) sign-in, the session, the Team screen (4.3); (d) the list of feeds with their source lines (3.1); (e) the reusable loader workflow (3.2); (f) deploy to the new Worker and project. End state: a person signs in and sees a plain page that says so; the map arrives in phase 2.
+**The move, in eight sections** (the owner, 2026-11-26: piece by piece, "but just not too many pieces"; "sections or parts one at a time"). The twelve slices of the earlier revisions are grouped by what belongs together and by what reads what (the dependencies listed in part 2 of this document). Inside a section the work is still split into two or three pull requests where that keeps a review readable (the database and loader, then the routes and screens): one very large pull request is what stalled F-247 part 2. About 17 pull requests in all, instead of about 25.
 
-**Phase 2: the map base.** The page's frame, agreed with the owner (4.6); a renderer that works with any set of overlays missing; map styles; the township grid; the layer system with F-248's two open findings fixed and tested, and the admins' layers copied. Routes, queries and version checks exist only for what has landed. End state: an empty map with the grid and the layers.
+| # | Section | What moves | Needs first | Ends when |
+|---|---|---|---|---|
+| 1 | **The working setup** (the owner's priority: "working right away from the start") | The rules and commands, the Claude and Codex loop and its gate, the design system, the repository's skeleton and CI: listed in 4.1 | The owner creates the repository | `/start` opens a session under the new rules; Codex reviews run; the gate is seen to refuse an unreviewed pull request; a plain page shows the design system |
+| 2 | **Sign-in and the base** | Sign-in with the authenticator step, the approved list and the Team screen, organizations and members in the database, the deploy to the new Worker | 1 | The owner signs in at the new address and sees a plain page; nobody else can |
+| 3 | **The map** | The page's frame (4.6), map styles, the township grid, the layer system with F-248's two findings fixed and the admins' layers copied, formation outlines, the list of feeds with their source lines | 2 | An empty map with the grid, layers and outlines |
+| 4 | **Wells and production** | The wells (ST37) with fields and pools and Petrinex's licence inputs; production by month; with them, built once: the reusable loader workflow and the rule that a load is shown only after it has passed (3.5) | 3 | Wells and their production charts on the map, reconciled |
+| 5 | **Land** | Land held and land sales, together | 4 (their loads take their area from the wells' load) | **The first release:** wells, production and land, proved from end to end |
+| 6 | **Facilities, pipelines and operators** | ST102 facilities, pipelines, the Operator box and colour by operator | 4, 5 | Each on the map, reconciled |
+| 7 | **The AER's daily lists** | Daily licences, rigs, licence locations and targets, licence transfers, with their stored history copied (4.2) | 3 (they load without the wells) | Rigs and new licences on the map; the history carried on without a gap |
+| 8 | **Geology, prices and Ask** | Formation grids, geology in wells, the wells in 3D; prices, frac data, the royalty estimate; Ask the map last | 4 | The new platform shows everything the old page does |
 
-**Phase 3: the data, in the order the code depends on it.** Each slice is its tables, loader, routes, panel, tests and reconciliation (3.5), moved as it is unless the review finds a fault, apart from the one change every loader gets (a load is shown only after it has passed, 3.5). A panel section or Ask action whose data has not landed stays switched off.
+Sections 6, 7 and 8 do not depend on one another and can go in the order the owner wants once section 5 is in. Each section's data is moved as it is unless the review finds a fault, apart from the one loader change of 3.5. A panel section or Ask action whose data has not landed stays switched off.
 
-| # | Slice | Needs first | Publisher |
-|---|---|---|---|
-| 1 | Wells (ST37) **with** Petrinex's licence inputs and the AER's fields and pools; the well set and its bounds become stated, versioned inputs for later loads | Phases 1 and 2 | AER, Petrinex |
-| 2 | Production by month | 1 | Petrinex |
-| 3 | Land held and land sales: one slice, or storage in two and the shared screens held until both are in | **1**: both loads take their area from the wells' load and stop without it (`load-land.yml`, `load-land-sales.yml`) | Province |
-| 4 | Facilities (ST102) | **1**, for the same reason (`load-facilities.yml`) | AER |
-| 5 | Pipelines | **1**, for the same reason (`load-pipelines.yml`) | AER |
-| 6 | Operators: search and colour across sources | 1, 3, 4, 5 | none of its own |
-| 7 | The AER's daily lists and rigs, kept together where they share lookups; licence transfers and their history as a job of their own | Phase 2: they load from the AER's own lists without the wells | AER |
-| 8 | Formation outlines and the Survey's grids as files (can go earlier, alone); then the grids loaded around the wells, geology in wells, the wells in 3D | the files: Phase 2; the rest: 1 | Geological Survey |
-| 9 | Prices (can land alone) | Phase 2 | Province |
-| 10 | Frac data: its load stands alone; its section of the well panel needs the wells | Phase 2 for the load, 1 for the panel | AER |
-| 11 | The royalty estimate | 2, 9, 10 | none of its own |
-| 12 | Ask the map | every panel | Anthropic, Geocodio (4.3) |
+**A section is done when** Codex has approved each of its pull requests, its data has passed reconciliation (3.5), and the owner has looked at it on the new address. Only then does the next one start.
 
-To move land, sales, facilities or pipelines before the wells, their area would have to be stated on its own instead of read from the wells' load, with the resulting coverage reconciled: a change, not a plain move.
-
-**The first release** is the smallest set the specification names, proved from end to end with real sign-in, real loads and a passed reconciliation, before the remaining slices move. It tests the whole method while a change of course is still cheap. **With the owner's permission in hand it is wells, production and land** (slices 1 to 3), unless the specification names something else.
-
-**Phase 4: the switch, with a way back.** In plain words: today `map.torvenco.com` opens the old map, served from this repository. On one chosen day that address is pointed at the new platform instead: **the switch.** If the new platform then turns out to have a fault, the address is pointed at the old map again: **going back.** That only works while the old map is still running, so the old one is kept alive, untouched, for a set time after the switch, and removed only when the owner says so. Until the switch, the new platform lives at an address of its own and nobody's daily work depends on it.
+**After the eight sections: the switch, with a way back.** In plain words: today `map.torvenco.com` opens the old map, served from this repository. On one chosen day that address is pointed at the new platform instead: **the switch.** If the new platform then turns out to have a fault, the address is pointed at the old map again: **going back.** That only works while the old map is still running, so the old one is kept alive, untouched, for a set time after the switch, and removed only when the owner says so. Until the switch, the new platform lives at an address of its own and nobody's daily work depends on it.
 
 1. A restore from backup is tried on the new project; records, freshness and access are compared with the old page.
 2. **The way back is tried before it is needed:** on a spare address, pointed at the new Worker, then back at the old one.
@@ -215,9 +218,9 @@ To move land, sales, facilities or pipelines before the wells, their area would 
 5. **A waiting period** (proposed: 14 days). **Who writes what** (revision 4): each side keeps capturing for itself and nothing is synchronized between them. The old side runs as before: its twice-daily AER job and its three scheduled loads (licences, frac, prices) keep the old database current, so going back loses no day. The new side runs its own jobs from the copied state. The old page is open only to today's GSS members. **If we go back:** the old side is already current; what exists only on the new side (layers admins changed, settings, anything saved) is listed during the period and entered again by hand on the old side, or let go, as the owner decided beforehand.
 6. After it, on the owner's word: the old `/map`, the old `/petroleum` routes on grain's addresses and the old credentials are retired (4.7). Going back is then no longer possible without rebuilding.
 
-**New features (waterflood, type curves, other formations) wait until phase 3 is done,** or are added as their own slices under the strict process, never in the old place.
+**New features (waterflood, type curves, other formations) wait until the eight sections are in,** or are added as a section of their own under the strict process, never in the old place.
 
-How long this takes depends mostly on Codex's usage limit: about 25 reviewed pull requests, most of them high risk.
+How long this takes depends mostly on Codex's usage limit: about 17 reviewed pull requests, most of them high risk.
 
 ### 4.5 The review process in the new repository
 
@@ -265,23 +268,17 @@ Whether grain returns to the strict process is a separate decision; it holds the
 - **No connection to GSS.** The new platform is its own thing: its own name, sign-in, database and keys, and nothing shared once the old version is disconnected. The rule "the platform only ever serves GSS staff" (`AGENTS.md`) is not carried over.
 - **Who may use it:** people on an approved list, through a new sign-in the owner sets up once the platform has moved (4.3).
 - **Organizations:** people will most likely have their own, "but this isn't a big priority for now". So the organization boundary is kept in the database from the first day, because the foundation already has it and adding it later is costly; everyone starts in one organization; choosing between organizations and companies managing their own people are designed when wanted.
-- **The order:** "migrate all the code over, get it running, and then we will disconnect the old version which is in GSS."
+- **How the code moves:** piece by piece, "but just not too many pieces … sections or parts one at a time": the eight sections of 4.4. (Claude had recommended copying everything at once and reviewing it in place; the owner chose piece by piece.)
+- **First, the working setup:** the rules and commands, the way Claude and Codex work together and the design system are carried over before anything else, "so that I can get that working right away from the start" (4.1, section 1).
+- **Name, address, accounts:** no name and no address yet; the same accounts as today (GitHub, Cloudflare, Supabase, Mapbox). Hosting: the owner thought of Cloudflare Pages to start; Claude recommends a Worker like today's, at its free address until there is a name (4.2).
 
 **Still open.** Where Claude has a recommendation it is given; costs and business choices are the owner's alone.
 
-*How the code moves: the one that shapes the rest*
-
-0. Both ways end the same: the code in its own repository, reviewed by Codex, running, the old version disconnected. They differ in when it runs and when it is reviewed.
-   - **A. Piece by piece** (section 4.4 as written): each part is reviewed before it enters the new repository. Nothing unreviewed is ever there. The map is complete only at the end, after about 25 pull requests, and the map page and the routes file have to be rebuilt as frames that each piece is added to.
-   - **B. All at once, then reviewed in place** (the owner's order): the reviewed foundation first (sign-in, the approved list, the review gate), then all the oil and gas code copied across in one step and got running, **with the owner as the only person signed in.** Codex then reviews it module by module where it stands, and the faults are fixed. Two locks hold until every module is marked reviewed: nobody else is added to the approved list, and the old version is not disconnected.
-   - **Claude's recommendation: B.** Section 5 rejected copying everything at once because unreviewed code could serve other people and "we will audit it later" is how the present state arose. The owner's answers change the first: he is the only user until he adds others. The two locks answer the second: the audit cannot be skipped without the platform staying a one-person tool. B reaches a running platform sooner, needs no rebuilding of the frames, and lets the old database be copied as it is. Its cost: until the audit is done, the new repository holds code no one has reviewed, as this one does today.
-   - If B is chosen, sections 4.3 to 4.5 are rewritten for it and Codex reviews that rewrite.
-
-*The switch (explained in 4.4, phase 4)*
+*The switch (explained in 4.4)*
 
 1. Who says "switch now", and who says "go back"? (Proposed: the owner, both.)
 2. How long is the old map kept running after the switch, so that going back stays possible? (Proposed: 14 days.) If we do go back, is what was saved only on the new side entered again by hand, or let go?
-3. With no connection to GSS: what is the new platform called, and at which address? Does it get accounts of its own (GitHub, Cloudflare, Supabase, Mapbox), or stay under the ones that hold GSS today?
+3. A working name for the repository, the Worker and the database project, since all three need one on the first day (proposed: `petroleum`; the repository's and the project's names can be changed later, the Worker's free address changes with its name). Hosting: a Worker as today (recommended), or Cloudflare Pages?
 
 *People and use*
 
