@@ -25,46 +25,11 @@ test('other unknown paths load the web app', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'GSS' })).toBeVisible();
 });
 
-// F-247 part 1b: the Worker reaches the oil and gas database through its PETROLEUM binding (the
-// local "petroleum" database, as petro_api), on the public readiness route and signed in.
-// Always run in CI, which creates that database; on a developer's machine only with
-// E2E_PETROLEUM=1, once the local "petroleum" database exists (README, "The oil and gas
-// database"), so the usual local run does not need a second database (F-247-1b-R1-01).
-test('the oil and gas database answers through the Worker', async ({ page, request }) => {
-  test.skip(
-    !process.env.CI && process.env.E2E_PETROLEUM !== '1',
-    'needs the local petroleum database: set E2E_PETROLEUM=1 once it exists',
-  );
-  const ready = await request.get('/api/v1/petroleum/ready');
-  expect(ready.status()).toBe(200);
-  expect(await ready.json()).toEqual({ status: 'ok', service: 'petroleum' });
-
-  await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Account' })).toBeVisible();
-  const token = await page.evaluate(() => {
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
-        const session = JSON.parse(localStorage.getItem(key) ?? '{}') as { access_token?: string };
-        if (session.access_token) return session.access_token;
-      }
-    }
-    throw new Error('no Supabase session in local storage');
-  });
-  const health = await request.get('/api/v1/petroleum/health', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  expect(health.status()).toBe(200);
-  expect(await health.json()).toEqual({ status: 'ok' });
-
-  // F-247 part 2: the oil and gas map's layers come from that database, through the Worker and
-  // its migrated table, as the signed-in member. Without a Mapbox token the suite never draws
-  // the map (T-03), so the list is read from the API. Nothing is added here: adding needs a
-  // live map service.
-  const layers = await request.get('/api/v1/petroleum/layers', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  expect(layers.status()).toBe(200);
-  expect(await layers.json()).toEqual({ layers: [] });
-  const signedOut = await request.get('/api/v1/petroleum/layers');
-  expect(signedOut.status()).toBe(401);
+// Switch-over step d: the oil and gas routes are gone from this Worker. Nothing under /petroleum
+// answers any more, not even the old public readiness route: the sign-in wall takes them all.
+test('the oil and gas routes are gone from the Worker', async ({ request }) => {
+  for (const path of ['/api/v1/petroleum/ready', '/api/v1/petroleum/layers']) {
+    const response = await request.get(path);
+    expect(response.status()).toBe(401);
+  }
 });
