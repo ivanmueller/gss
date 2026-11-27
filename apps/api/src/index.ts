@@ -20,14 +20,10 @@ import { forwardingRoutes } from './forwarding';
 import { handleEmail, replayPendingMail } from './receive-mail';
 import { facilityRoutes } from './facilities';
 import { freightRoutes } from './freight';
-import { refreshAerLists } from './aer-lists';
 import { fxQuoteRoutes, refreshFxRates } from './fx';
 import { LoginServiceError, secretKey, setOwnPassword } from './logins';
 import { mapLayerRoutes } from './map-layers';
 import { memberRoutes } from './members';
-import { mapAskRoutes } from './map-ask';
-import { petroleumReadyRoute, petroleumRoutes } from './petroleum';
-import { postgresPetroleum, type PetroleumFactory } from './petroleum-db';
 import { commodityRoutes, quoteRoutes } from './quotes';
 import { callReadingRoutes, readNewTranscripts } from './readings';
 import { readNewEmails } from './email-readings';
@@ -44,19 +40,11 @@ export function createApp(
     telnyx?: TelnyxFactory;
     mailer?: MailerFactory;
     claude?: ClaudeFactory;
-    petroleum?: PetroleumFactory;
-    /** How long /petroleum/ready reuses its answer (tests set 0). */
-    petroleumReadyCacheMs?: number;
-    /** How long /petroleum/ready waits for the database (tests set it short). */
-    petroleumReadyDeadlineMs?: number;
-    /** How long each oil and gas layer query may take (tests set it short). */
-    petroleumLayersDeadlineMs?: number;
   } = {},
 ) {
   const telnyx = options.telnyx ?? telnyxClient;
   const mailer = options.mailer ?? cloudflareMailer;
   const claude = options.claude ?? claudeClient;
-  const openPetroleum = options.petroleum ?? postgresPetroleum;
   const app = new Hono<ApiEnv>().basePath('/api/v1');
 
   // Every response carries a request id; writes record it in the audit trail.
@@ -80,17 +68,6 @@ export function createApp(
     c.header('Cache-Control', 'no-store');
     return c.json({ status: 'ok', service: 'api' });
   });
-
-  // Public readiness of the oil and gas database (F-247), for the deploy's smoke test: reachable
-  // and migrated, or not. It reads no data and returns no tenant or environment data.
-  app.get(
-    '/petroleum/ready',
-    petroleumReadyRoute(
-      openPetroleum,
-      options.petroleumReadyCacheMs,
-      options.petroleumReadyDeadlineMs,
-    ),
-  );
 
   // Telnyx's call events carry no signed-in user; each is checked by its Ed25519 signature.
   app.route('/telnyx', telnyxWebhookRoutes(openDatabase, telnyx));
@@ -179,12 +156,6 @@ export function createApp(
   app.route('/map-layers', mapLayerRoutes(openDatabase));
   app.route('/emails', emailRoutes(openDatabase, mailer, claude));
   app.route('/email-auto-drafts', emailAutoDraftRoutes(openDatabase));
-  // Ask the map (F-254 part 2): before /petroleum, whose routes do not answer it.
-  app.route('/petroleum/ask', mapAskRoutes(openDatabase, openPetroleum, claude));
-  app.route(
-    '/petroleum',
-    petroleumRoutes(openDatabase, openPetroleum, options.petroleumLayersDeadlineMs),
-  );
 
   return app;
 }
@@ -210,11 +181,6 @@ export default {
       return;
     }
     ctx.waitUntil(refreshFxRates(env, postgresDatabase, new Date()));
-    // The AER's daily licence and rig lists (F-243 part 1): its own waitUntil, catching its own
-    // failures, so neither job stops the other.
-    ctx.waitUntil(refreshAerLists(env, postgresPetroleum));
-    // The province-service wells job (F-243 part 3, refreshWells) is switched off: the AER's ST37
-    // list replaces it (the owner, 2026-11-19), and on the free plan its space is needed for ST37.
   },
   // Cloudflare Email Routing: the business domain's mail (F-114 step 4a). Awaited, not
   // waitUntil: whether the message is rejected must be decided before the handler returns.
